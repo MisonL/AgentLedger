@@ -1,6 +1,6 @@
 # AgentLedger
 
-Enterprise-grade AI usage governance platform for collecting, auditing, budgeting, and analyzing AI CLI/IDE sessions across teams.
+面向企业的 AI 使用治理平台，用于统一采集、审计、预算与分析团队的 AI CLI/IDE 会话数据。
 
 ## 定位
 
@@ -15,7 +15,7 @@ AgentLedger 面向企业研发与平台团队，目标是把分散在 AI CLI 与
 
 | 能力域 | 当前可用能力 |
 | --- | --- |
-| 会话与使用量 | usage heatmap、daily/monthly/models/sessions 聚合、会话详情与事件列表 |
+| 会话与使用量 | 使用热力图（usage heatmap）、daily/monthly/models/sessions 聚合、会话详情与事件列表 |
 | Source 管理 | source 新增/查询/删除、连通性测试、同步任务管理 |
 | 预算治理 | budgets 读写、阈值分级、告警与状态流转 |
 | 集成分发 | 支持 `alert/weekly` 双事件；`webhook` 原样转发，`wecom/dingtalk/feishu` 使用 `text` 模板消息 |
@@ -26,16 +26,16 @@ AgentLedger 面向企业研发与平台团队，目标是把分散在 AI CLI 与
 ## 架构
 
 ```text
-Clients (CLI / IDE / Agent)
+客户端（CLI / IDE / Agent）
         |
         v
-Ingestion Gateway (Go) -> NATS JetStream -> Normalizer / Analytics / Governance / Integration (Go)
+接入网关（Ingestion Gateway, Go） -> NATS JetStream -> 标准化/分析/治理/集成服务（Go）
                                                                  |
                                                                  v
-                                                       Control Plane API (Bun + Hono)
+                                                       控制面 API（Bun + Hono）
                                                                  |
                                                                  v
-                                                       Web Console (React + Vite)
+                                                       Web 控制台（React + Vite）
 ```
 
 ## 清理后的目录
