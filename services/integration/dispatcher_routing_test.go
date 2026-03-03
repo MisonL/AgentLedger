@@ -143,9 +143,9 @@ func TestDispatchToChannelPayloadAdaptation(t *testing.T) {
 	t.Parallel()
 
 	alertPayload := []byte("{\n  \"id\": \"alert-1\",\n  \"severity\": \"critical\"\n}")
-	weeklyPayload := []byte("{\n  \"report_id\": \"weekly-1\",\n  \"tenant_id\": \"tenant-a\"\n}")
+	weeklyPayload := []byte("{\n  \"report_id\": \"weekly-1\",\n  \"tenant_id\": \"tenant-a\",\n  \"week_start\": \"2026-03-02T00:00:00Z\",\n  \"week_end\": \"2026-03-09T00:00:00Z\",\n  \"tokens\": 3100,\n  \"cost\": 6.35,\n  \"peak_day_date\": \"2026-03-04\",\n  \"peak_day_tokens\": 1900,\n  \"peak_day_cost\": 4.245\n}")
 	alertText := "[agentledger][alert]\n{\"id\":\"alert-1\",\"severity\":\"critical\"}"
-	weeklyText := "[agentledger][weekly_report]\n{\"report_id\":\"weekly-1\",\"tenant_id\":\"tenant-a\"}"
+	weeklyText := "[agentledger][weekly_report]\nreport_id=weekly-1 tenant_id=tenant-a week_start=2026-03-02T00:00:00Z week_end=2026-03-09T00:00:00Z tokens=3100 cost=6.35 peak_day_date=2026-03-04 peak_day_tokens=1900 peak_day_cost=4.245"
 
 	testCases := []struct {
 		name      string

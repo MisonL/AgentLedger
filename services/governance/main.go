@@ -148,15 +148,18 @@ type weeklyReportSchedule struct {
 }
 
 type weeklyReportEvent struct {
-	TenantID    string                 `json:"tenant_id"`
-	WeekStart   time.Time              `json:"week_start"`
-	WeekEnd     time.Time              `json:"week_end"`
-	Tokens      int64                  `json:"tokens"`
-	Cost        float64                `json:"cost"`
-	Sessions    int64                  `json:"sessions"`
-	TopModels   []weeklyReportModelUse `json:"top_models"`
-	GeneratedAt time.Time              `json:"generated_at"`
-	ReportID    string                 `json:"report_id"`
+	TenantID      string                 `json:"tenant_id"`
+	WeekStart     time.Time              `json:"week_start"`
+	WeekEnd       time.Time              `json:"week_end"`
+	Tokens        int64                  `json:"tokens"`
+	Cost          float64                `json:"cost"`
+	PeakDayDate   string                 `json:"peak_day_date"`
+	PeakDayTokens int64                  `json:"peak_day_tokens"`
+	PeakDayCost   float64                `json:"peak_day_cost"`
+	Sessions      int64                  `json:"sessions"`
+	TopModels     []weeklyReportModelUse `json:"top_models"`
+	GeneratedAt   time.Time              `json:"generated_at"`
+	ReportID      string                 `json:"report_id"`
 }
 
 type weeklyReportModelUse struct {
@@ -168,16 +171,20 @@ type weeklyReportModelUse struct {
 
 type weeklyModelAggregate struct {
 	Model    string
+	DayDate  string
 	Tokens   int64
 	Cost     float64
 	Sessions int64
 }
 
 type weeklyUsageSummary struct {
-	Tokens    int64
-	Cost      float64
-	Sessions  int64
-	TopModels []weeklyReportModelUse
+	Tokens        int64
+	Cost          float64
+	PeakDayDate   string
+	PeakDayTokens int64
+	PeakDayCost   float64
+	Sessions      int64
+	TopModels     []weeklyReportModelUse
 }
 
 type auditLogEntry struct {
@@ -1478,15 +1485,18 @@ func (s *governanceService) publishWeeklyReportForTenant(
 	}
 
 	report := weeklyReportEvent{
-		TenantID:    tenantID,
-		WeekStart:   weekStart,
-		WeekEnd:     weekEnd,
-		Tokens:      usage.Tokens,
-		Cost:        usage.Cost,
-		Sessions:    usage.Sessions,
-		TopModels:   usage.TopModels,
-		GeneratedAt: generatedAt,
-		ReportID:    reportID,
+		TenantID:      tenantID,
+		WeekStart:     weekStart,
+		WeekEnd:       weekEnd,
+		Tokens:        usage.Tokens,
+		Cost:          usage.Cost,
+		PeakDayDate:   usage.PeakDayDate,
+		PeakDayTokens: usage.PeakDayTokens,
+		PeakDayCost:   usage.PeakDayCost,
+		Sessions:      usage.Sessions,
+		TopModels:     usage.TopModels,
+		GeneratedAt:   generatedAt,
+		ReportID:      reportID,
 	}
 
 	ack, err := s.publishWeeklyReport(ctx, report)
@@ -1544,6 +1554,7 @@ func (s *governanceService) aggregateWeeklyUsage(
 	rows, err := s.pool.Query(ctx, `
 SELECT
   COALESCE(NULLIF(TRIM(sess.model), ''), 'unknown') AS model,
+  TO_CHAR((COALESCE(sess.started_at, sess.created_at) AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS day_date,
   COALESCE(SUM(sess.tokens), 0)::bigint AS tokens,
   COALESCE(SUM(sess.cost), 0)::double precision AS cost,
   COUNT(*)::bigint AS sessions
@@ -1552,7 +1563,9 @@ JOIN sources AS src ON src.id = sess.source_id
 WHERE COALESCE(NULLIF(src.tenant_id, ''), 'default') = $1
   AND COALESCE(sess.started_at, sess.created_at) >= $2
   AND COALESCE(sess.started_at, sess.created_at) < $3
-GROUP BY COALESCE(NULLIF(TRIM(sess.model), ''), 'unknown')
+GROUP BY
+  COALESCE(NULLIF(TRIM(sess.model), ''), 'unknown'),
+  (COALESCE(sess.started_at, sess.created_at) AT TIME ZONE 'UTC')::date
 `, tenantID, weekStart, weekEnd)
 	if err != nil {
 		return weeklyUsageSummary{}, err
@@ -1562,7 +1575,7 @@ GROUP BY COALESCE(NULLIF(TRIM(sess.model), ''), 'unknown')
 	aggregates := make([]weeklyModelAggregate, 0)
 	for rows.Next() {
 		var item weeklyModelAggregate
-		if err := rows.Scan(&item.Model, &item.Tokens, &item.Cost, &item.Sessions); err != nil {
+		if err := rows.Scan(&item.Model, &item.DayDate, &item.Tokens, &item.Cost, &item.Sessions); err != nil {
 			return weeklyUsageSummary{}, fmt.Errorf("scan weekly usage row failed: %w", err)
 		}
 		item.Cost = roundCost(item.Cost)
@@ -1581,6 +1594,11 @@ func summarizeWeeklyModelUsage(rows []weeklyModelAggregate, topLimit int) weekly
 	}
 
 	models := make(map[string]weeklyReportModelUse, len(rows))
+	type dailyUsage struct {
+		Tokens int64
+		Cost   float64
+	}
+	dayUsage := make(map[string]dailyUsage, len(rows))
 	summary := weeklyUsageSummary{
 		TopModels: make([]weeklyReportModelUse, 0),
 	}
@@ -1601,6 +1619,24 @@ func summarizeWeeklyModelUsage(rows []weeklyModelAggregate, topLimit int) weekly
 		summary.Tokens += row.Tokens
 		summary.Cost = roundCost(summary.Cost + row.Cost)
 		summary.Sessions += row.Sessions
+
+		dayDate := strings.TrimSpace(row.DayDate)
+		if dayDate != "" {
+			day := dayUsage[dayDate]
+			day.Tokens += row.Tokens
+			day.Cost = roundCost(day.Cost + row.Cost)
+			dayUsage[dayDate] = day
+		}
+	}
+
+	for dayDate, day := range dayUsage {
+		if summary.PeakDayDate == "" ||
+			day.Tokens > summary.PeakDayTokens ||
+			(day.Tokens == summary.PeakDayTokens && (day.Cost > summary.PeakDayCost || (day.Cost == summary.PeakDayCost && dayDate < summary.PeakDayDate))) {
+			summary.PeakDayDate = dayDate
+			summary.PeakDayTokens = day.Tokens
+			summary.PeakDayCost = roundCost(day.Cost)
+		}
 	}
 
 	for _, model := range models {
@@ -1627,6 +1663,7 @@ func summarizeWeeklyModelUsage(rows []weeklyModelAggregate, topLimit int) weekly
 		summary.TopModels = summary.TopModels[:topLimit]
 	}
 	summary.Cost = roundCost(summary.Cost)
+	summary.PeakDayCost = roundCost(summary.PeakDayCost)
 	return summary
 }
 
@@ -1682,17 +1719,20 @@ SELECT EXISTS (
 	}
 
 	metadata, err := json.Marshal(map[string]any{
-		"report_id":    report.ReportID,
-		"tenant_id":    report.TenantID,
-		"week_start":   report.WeekStart,
-		"week_end":     report.WeekEnd,
-		"tokens":       report.Tokens,
-		"cost":         report.Cost,
-		"sessions":     report.Sessions,
-		"top_models":   report.TopModels,
-		"generated_at": report.GeneratedAt,
-		"duplicate":    duplicate,
-		"subject":      weeklyReportsSubject,
+		"report_id":       report.ReportID,
+		"tenant_id":       report.TenantID,
+		"week_start":      report.WeekStart,
+		"week_end":        report.WeekEnd,
+		"tokens":          report.Tokens,
+		"cost":            report.Cost,
+		"peak_day_date":   report.PeakDayDate,
+		"peak_day_tokens": report.PeakDayTokens,
+		"peak_day_cost":   report.PeakDayCost,
+		"sessions":        report.Sessions,
+		"top_models":      report.TopModels,
+		"generated_at":    report.GeneratedAt,
+		"duplicate":       duplicate,
+		"subject":         weeklyReportsSubject,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal weekly report audit metadata failed: %w", err)

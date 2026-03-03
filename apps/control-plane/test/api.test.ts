@@ -5801,9 +5801,32 @@ describe("Control Plane API", () => {
 
   test("PUT/GET /api/v1/budgets 支持 thresholds 三段和 org/user/model 范围查询", async () => {
     const authHeaders = await resolveAuthHeaders();
+    const authContext = await getDefaultAuthContext();
+    const scopedUserId =
+      authContext.userId ?? resolveUserIdFromAccessToken(authContext.accessToken);
+    if (!scopedUserId) {
+      throw new Error("无法解析当前登录用户 userId，无法执行 scope=user 预算测试。");
+    }
     const nonce = createNonce("budget-thresholds-scope");
-    const organizationId = `org-${nonce}`;
-    const scopedUserId = `user-${nonce}`;
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const createOrgResult = await createOrganizationByAuth(
+      authContext.accessToken,
+      {
+        tenantId,
+        name: `预算组织-${nonce}`,
+        slug: `budget-org-${nonce}`,
+      },
+      scopedUserId
+    );
+    assertApiStatus(createOrgResult, [201]);
+    const organizationId = extractEntityId(createOrgResult.payload);
+    if (!organizationId) {
+      throw new Error(
+        `预算组织创建响应缺少 organizationId，path=${createOrgResult.path}，payload=${JSON.stringify(
+          createOrgResult.payload
+        )}`
+      );
+    }
     const model = `gpt-5-${nonce}`;
 
     const putOrgResponse = await app.request("/api/v1/budgets", {
@@ -5938,6 +5961,195 @@ describe("Control Plane API", () => {
 
     expect(response.status).toBe(400);
     expect(body.message).toContain("scope=model");
+  });
+
+  test("PUT /api/v1/budgets 绑定校验（scope=org 组织需存在且属于当前租户）", async () => {
+    const nonce = createNonce("budget-org-binding");
+    const ownerA = await registerAndLoginUser(`${nonce}-owner-a`);
+    const ownerB = await registerAndLoginUser(`${nonce}-owner-b`);
+    if (!ownerA.userId || !ownerB.userId) {
+      throw new Error("无法解析 owner userId，无法执行 scope=org 绑定校验测试。");
+    }
+
+    const tenantAResult = await createTenantByAuth(
+      ownerA.accessToken,
+      {
+        name: `预算租户A-${nonce}`,
+        slug: `budget-tenant-a-${nonce}`,
+      },
+      ownerA.userId
+    );
+    assertApiStatus(tenantAResult, [201]);
+    const tenantAId = extractEntityId(tenantAResult.payload);
+    if (!tenantAId) {
+      throw new Error(
+        `预算租户A创建响应缺少 tenantId，path=${tenantAResult.path}，payload=${JSON.stringify(
+          tenantAResult.payload
+        )}`
+      );
+    }
+
+    const tenantBResult = await createTenantByAuth(
+      ownerB.accessToken,
+      {
+        name: `预算租户B-${nonce}`,
+        slug: `budget-tenant-b-${nonce}`,
+      },
+      ownerB.userId
+    );
+    assertApiStatus(tenantBResult, [201]);
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error(
+        `预算租户B创建响应缺少 tenantId，path=${tenantBResult.path}，payload=${JSON.stringify(
+          tenantBResult.payload
+        )}`
+      );
+    }
+
+    const createOrgResult = await createOrganizationByAuth(
+      ownerB.accessToken,
+      {
+        tenantId: tenantBId,
+        name: `预算组织B-${nonce}`,
+        slug: `budget-org-b-${nonce}`,
+      },
+      ownerB.userId
+    );
+    assertApiStatus(createOrgResult, [201]);
+    const crossTenantOrganizationId = extractEntityId(createOrgResult.payload);
+    if (!crossTenantOrganizationId) {
+      throw new Error(
+        `预算组织B创建响应缺少 organizationId，path=${createOrgResult.path}，payload=${JSON.stringify(
+          createOrgResult.payload
+        )}`
+      );
+    }
+
+    const tenantAHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      ownerA.accessToken,
+      ownerA.userId
+    );
+
+    const crossTenantOrgResponse = await app.request("/api/v1/budgets", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        scope: "org",
+        organizationId: crossTenantOrganizationId,
+        period: "monthly",
+        tokenLimit: 500,
+        costLimit: 0,
+        alertThreshold: 0.8,
+      }),
+    });
+    const crossTenantOrgBody = (await crossTenantOrgResponse.json()) as {
+      message: string;
+    };
+    expect(crossTenantOrgResponse.status).toBe(400);
+    expect(crossTenantOrgBody.message).toContain("organizationId");
+
+    const missingOrgResponse = await app.request("/api/v1/budgets", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        scope: "org",
+        organizationId: `missing-org-${nonce}`,
+        period: "monthly",
+        tokenLimit: 500,
+        costLimit: 0,
+        alertThreshold: 0.8,
+      }),
+    });
+    const missingOrgBody = (await missingOrgResponse.json()) as {
+      message: string;
+    };
+    expect(missingOrgResponse.status).toBe(400);
+    expect(missingOrgBody.message).toContain("organizationId");
+  });
+
+  test("PUT /api/v1/budgets 绑定校验（scope=user 用户需存在且属于当前租户）", async () => {
+    const nonce = createNonce("budget-user-binding");
+    const owner = await registerAndLoginUser(`${nonce}-owner`);
+    const outsider = await registerAndLoginUser(`${nonce}-outsider`);
+    const ownerUserId = owner.userId ?? resolveUserIdFromAccessToken(owner.accessToken);
+    const outsiderUserId = outsider.userId ?? resolveUserIdFromAccessToken(outsider.accessToken);
+    if (!ownerUserId || !outsiderUserId) {
+      throw new Error("无法解析用户 userId，无法执行 scope=user 绑定校验测试。");
+    }
+
+    const tenantResult = await createTenantByAuth(
+      owner.accessToken,
+      {
+        name: `预算用户租户-${nonce}`,
+        slug: `budget-user-tenant-${nonce}`,
+      },
+      ownerUserId
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error(
+        `预算用户租户创建响应缺少 tenantId，path=${tenantResult.path}，payload=${JSON.stringify(
+          tenantResult.payload
+        )}`
+      );
+    }
+
+    const tenantHeaders = await issueTenantScopedAuthHeaders(
+      tenantId,
+      owner.accessToken,
+      ownerUserId
+    );
+
+    const crossTenantUserResponse = await app.request("/api/v1/budgets", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...tenantHeaders,
+      },
+      body: JSON.stringify({
+        scope: "user",
+        userId: outsiderUserId,
+        period: "monthly",
+        tokenLimit: 500,
+        costLimit: 0,
+        alertThreshold: 0.8,
+      }),
+    });
+    const crossTenantUserBody = (await crossTenantUserResponse.json()) as {
+      message: string;
+    };
+    expect(crossTenantUserResponse.status).toBe(400);
+    expect(crossTenantUserBody.message).toContain("userId");
+
+    const missingUserResponse = await app.request("/api/v1/budgets", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...tenantHeaders,
+      },
+      body: JSON.stringify({
+        scope: "user",
+        userId: `missing-user-${nonce}`,
+        period: "monthly",
+        tokenLimit: 500,
+        costLimit: 0,
+        alertThreshold: 0.8,
+      }),
+    });
+    const missingUserBody = (await missingUserResponse.json()) as {
+      message: string;
+    };
+    expect(missingUserResponse.status).toBe(400);
+    expect(missingUserBody.message).toContain("userId");
   });
 
   test("POST /api/v1/budgets/:id/release-requests 双人审批通过后执行解冻", async () => {

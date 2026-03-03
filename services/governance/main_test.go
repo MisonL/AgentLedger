@@ -9,10 +9,10 @@ import (
 
 func TestSummarizeWeeklyModelUsage(t *testing.T) {
 	rows := []weeklyModelAggregate{
-		{Model: "gpt-4o", Tokens: 1200, Cost: 2.105, Sessions: 4},
-		{Model: "claude-3.7", Tokens: 1500, Cost: 3.2, Sessions: 3},
-		{Model: "", Tokens: 300, Cost: 0.8, Sessions: 2},
-		{Model: "gpt-4o", Tokens: 100, Cost: 0.245, Sessions: 1},
+		{Model: "gpt-4o", DayDate: "2026-03-03", Tokens: 1200, Cost: 2.105, Sessions: 4},
+		{Model: "claude-3.7", DayDate: "2026-03-04", Tokens: 1500, Cost: 3.2, Sessions: 3},
+		{Model: "", DayDate: "2026-03-04", Tokens: 300, Cost: 0.8, Sessions: 2},
+		{Model: "gpt-4o", DayDate: "2026-03-04", Tokens: 100, Cost: 0.245, Sessions: 1},
 	}
 
 	summary := summarizeWeeklyModelUsage(rows, 2)
@@ -24,6 +24,15 @@ func TestSummarizeWeeklyModelUsage(t *testing.T) {
 	}
 	if math.Abs(summary.Cost-6.35) > 1e-9 {
 		t.Fatalf("cost mismatch: got %.8f want %.8f", summary.Cost, 6.35)
+	}
+	if summary.PeakDayDate != "2026-03-04" {
+		t.Fatalf("peak day date mismatch: got %q want %q", summary.PeakDayDate, "2026-03-04")
+	}
+	if summary.PeakDayTokens != 1900 {
+		t.Fatalf("peak day tokens mismatch: got %d want %d", summary.PeakDayTokens, 1900)
+	}
+	if math.Abs(summary.PeakDayCost-4.245) > 1e-9 {
+		t.Fatalf("peak day cost mismatch: got %.8f want %.8f", summary.PeakDayCost, 4.245)
 	}
 	if len(summary.TopModels) != 2 {
 		t.Fatalf("top models count mismatch: got %d want %d", len(summary.TopModels), 2)

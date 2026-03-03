@@ -409,6 +409,11 @@ export interface AddTenantMemberInput {
   orgRole?: OrgRole;
 }
 
+export interface BudgetScopeBindingValidationError {
+  field: "organizationId" | "userId";
+  message: string;
+}
+
 export interface AuthSession {
   id: string;
   userId: string;
@@ -3477,6 +3482,54 @@ class ControlPlaneRepository {
     }
   }
 
+  async validateBudgetScopeBinding(
+    tenantId: string,
+    input: Pick<BudgetUpsertInput, "scope" | "organizationId" | "userId">
+  ): Promise<BudgetScopeBindingValidationError | null> {
+    const normalizedTenantId = firstNonEmptyString(tenantId) ?? DEFAULT_TENANT_ID;
+
+    if (input.scope === "org") {
+      const organizationId = firstNonEmptyString(input.organizationId);
+      if (!organizationId) {
+        return {
+          field: "organizationId",
+          message: "organizationId 必须为非空字符串。",
+        };
+      }
+
+      const organization = await this.getOrganizationById(normalizedTenantId, organizationId);
+      if (!organization) {
+        return {
+          field: "organizationId",
+          message: "organizationId 不存在或不属于当前租户。",
+        };
+      }
+    }
+
+    if (input.scope === "user") {
+      const userId = firstNonEmptyString(input.userId);
+      if (!userId) {
+        return {
+          field: "userId",
+          message: "userId 必须为非空字符串。",
+        };
+      }
+
+      const [user, membership] = await Promise.all([
+        this.getUserById(userId),
+        this.getTenantMemberByUser(normalizedTenantId, userId),
+      ]);
+      if (!user || !membership) {
+        return {
+          field: "userId",
+          message: "userId 不存在或不属于当前租户。",
+        };
+      }
+    }
+
+    return null;
+  }
+
   async upsertBudget(tenantId: string, input: BudgetUpsertInput): Promise<Budget> {
     const sourceId = input.scope === "source" ? firstNonEmptyString(input.sourceId) ?? "" : "";
     const organizationId =
@@ -5528,6 +5581,48 @@ class ControlPlaneRepository {
     } catch (error) {
       this.disableDb(error, "查询 organizations 失败");
       return this.listOrganizationsFromMemory(normalizedTenantId);
+    }
+  }
+
+  async getOrganizationById(
+    tenantId: string,
+    organizationId: string
+  ): Promise<Organization | null> {
+    const normalizedTenantId = firstNonEmptyString(tenantId) ?? DEFAULT_TENANT_ID;
+    const normalizedOrganizationId = firstNonEmptyString(organizationId);
+    if (!normalizedOrganizationId) {
+      return null;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getOrganizationByIdFromMemory(
+        normalizedTenantId,
+        normalizedOrganizationId
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                name,
+                created_at,
+                updated_at
+         FROM organizations
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedOrganizationId]
+      );
+      const row = result.rows[0];
+      return row ? mapOrganizationRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询 organizations 失败");
+      return this.getOrganizationByIdFromMemory(
+        normalizedTenantId,
+        normalizedOrganizationId
+      );
     }
   }
 
@@ -9037,6 +9132,17 @@ class ControlPlaneRepository {
       .filter((organization) => organization.tenantId === tenantId)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
       .map((organization) => ({ ...organization }));
+  }
+
+  private getOrganizationByIdFromMemory(
+    tenantId: string,
+    organizationId: string
+  ): Organization | null {
+    const matched = this.memoryOrganizations.find(
+      (organization) =>
+        organization.tenantId === tenantId && organization.id === organizationId
+    );
+    return matched ? { ...matched } : null;
   }
 
   private createOrganizationInMemory(organization: Organization): Organization {

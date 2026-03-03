@@ -147,6 +147,10 @@ budgetRoutes.put("/budgets", async (c) => {
   }
 
   const tenantId = auth.tenantId;
+  const bindingError = await repository.validateBudgetScopeBinding(tenantId, result.data);
+  if (bindingError) {
+    return c.json({ message: bindingError.message }, 400);
+  }
   const budget = await repository.upsertBudget(tenantId, result.data);
   const requestId = c.get("requestId");
   await appendAuditLogSafely({

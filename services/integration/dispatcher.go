@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -607,6 +608,18 @@ type feishuTextPayload struct {
 	} `json:"content"`
 }
 
+type weeklyReportTextPayload struct {
+	ReportID      string  `json:"report_id"`
+	TenantID      string  `json:"tenant_id"`
+	WeekStart     string  `json:"week_start"`
+	WeekEnd       string  `json:"week_end"`
+	Tokens        int64   `json:"tokens"`
+	Cost          float64 `json:"cost"`
+	PeakDayDate   string  `json:"peak_day_date"`
+	PeakDayTokens int64   `json:"peak_day_tokens"`
+	PeakDayCost   float64 `json:"peak_day_cost"`
+}
+
 func buildChannelPayload(channel integrationChannel, payload []byte, eventType string) ([]byte, error) {
 	if channel == channelWebhook {
 		return append([]byte(nil), payload...), nil
@@ -640,7 +653,50 @@ func formatEventTextPayload(payload []byte, eventType string) string {
 	if normalizedEventType == "" {
 		normalizedEventType = "unknown"
 	}
+	if normalizedEventType == eventTypeWeeklyReport {
+		if weeklyText, ok := formatWeeklyReportTextPayload(payload); ok {
+			return weeklyText
+		}
+	}
 	return fmt.Sprintf("[agentledger][%s]\n%s", normalizedEventType, compactJSONPayload(payload))
+}
+
+func formatWeeklyReportTextPayload(payload []byte) (string, bool) {
+	trimmed := bytes.TrimSpace(payload)
+	if len(trimmed) == 0 {
+		return "", false
+	}
+
+	var report weeklyReportTextPayload
+	if err := json.Unmarshal(trimmed, &report); err != nil {
+		return "", false
+	}
+
+	text := fmt.Sprintf(
+		"[agentledger][weekly_report]\nreport_id=%s tenant_id=%s week_start=%s week_end=%s tokens=%d cost=%s peak_day_date=%s peak_day_tokens=%d peak_day_cost=%s",
+		normalizeTextField(report.ReportID),
+		normalizeTextField(report.TenantID),
+		normalizeTextField(report.WeekStart),
+		normalizeTextField(report.WeekEnd),
+		report.Tokens,
+		formatMetricValue(report.Cost),
+		normalizeTextField(report.PeakDayDate),
+		report.PeakDayTokens,
+		formatMetricValue(report.PeakDayCost),
+	)
+	return text, true
+}
+
+func normalizeTextField(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "-"
+	}
+	return trimmed
+}
+
+func formatMetricValue(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 func compactJSONPayload(payload []byte) string {
