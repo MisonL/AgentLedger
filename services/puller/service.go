@@ -34,6 +34,90 @@ type pullerService struct {
 	runtime    pullerRuntimeConfig
 	hostname   string
 	connectors *connectorRegistry
+	deps       *pullerServiceDeps
+}
+
+type pullerServiceDeps struct {
+	syncCron                 func(context.Context, time.Time) error
+	claimNextPendingJob      func(context.Context) (*syncJob, error)
+	executeJob               func(context.Context, syncJob) error
+	isCancelRequested        func(context.Context, string) (bool, error)
+	loadSource               func(context.Context, string) (sourceRecord, error)
+	pullSSHFile              func(context.Context, sshLocation) ([]byte, error)
+	fetchLocalSourceContents func(context.Context, sourceRecord) ([]sourceContent, error)
+	getWatermark             func(context.Context, string, string, string) (int64, error)
+	upsertWatermark          func(context.Context, string, string, string, int64) error
+	finishJobStatus          func(context.Context, syncJob, string, string, string) error
+}
+
+func (s *pullerService) depSyncCron(ctx context.Context, now time.Time) error {
+	if s != nil && s.deps != nil && s.deps.syncCron != nil {
+		return s.deps.syncCron(ctx, now)
+	}
+	return s.syncCron(ctx, now)
+}
+
+func (s *pullerService) depClaimNextPendingJob(ctx context.Context) (*syncJob, error) {
+	if s != nil && s.deps != nil && s.deps.claimNextPendingJob != nil {
+		return s.deps.claimNextPendingJob(ctx)
+	}
+	return s.claimNextPendingJob(ctx)
+}
+
+func (s *pullerService) depExecuteJob(ctx context.Context, job syncJob) error {
+	if s != nil && s.deps != nil && s.deps.executeJob != nil {
+		return s.deps.executeJob(ctx, job)
+	}
+	return s.executeJob(ctx, job)
+}
+
+func (s *pullerService) depIsCancelRequested(ctx context.Context, jobID string) (bool, error) {
+	if s != nil && s.deps != nil && s.deps.isCancelRequested != nil {
+		return s.deps.isCancelRequested(ctx, jobID)
+	}
+	return s.isCancelRequested(ctx, jobID)
+}
+
+func (s *pullerService) depLoadSource(ctx context.Context, sourceID string) (sourceRecord, error) {
+	if s != nil && s.deps != nil && s.deps.loadSource != nil {
+		return s.deps.loadSource(ctx, sourceID)
+	}
+	return s.loadSource(ctx, sourceID)
+}
+
+func (s *pullerService) depPullSSHFile(ctx context.Context, location sshLocation) ([]byte, error) {
+	if s != nil && s.deps != nil && s.deps.pullSSHFile != nil {
+		return s.deps.pullSSHFile(ctx, location)
+	}
+	return s.pullSSHFile(ctx, location)
+}
+
+func (s *pullerService) depFetchLocalSourceContents(ctx context.Context, source sourceRecord) ([]sourceContent, error) {
+	if s != nil && s.deps != nil && s.deps.fetchLocalSourceContents != nil {
+		return s.deps.fetchLocalSourceContents(ctx, source)
+	}
+	return s.fetchLocalSourceContents(ctx, source)
+}
+
+func (s *pullerService) depGetWatermark(ctx context.Context, sourceID, parserKey, hostKey string) (int64, error) {
+	if s != nil && s.deps != nil && s.deps.getWatermark != nil {
+		return s.deps.getWatermark(ctx, sourceID, parserKey, hostKey)
+	}
+	return s.getWatermark(ctx, sourceID, parserKey, hostKey)
+}
+
+func (s *pullerService) depUpsertWatermark(ctx context.Context, sourceID, parserKey, hostKey string, line int64) error {
+	if s != nil && s.deps != nil && s.deps.upsertWatermark != nil {
+		return s.deps.upsertWatermark(ctx, sourceID, parserKey, hostKey, line)
+	}
+	return s.upsertWatermark(ctx, sourceID, parserKey, hostKey, line)
+}
+
+func (s *pullerService) depFinishJobStatus(ctx context.Context, job syncJob, status, errorCode, errorDetail string) error {
+	if s != nil && s.deps != nil && s.deps.finishJobStatus != nil {
+		return s.deps.finishJobStatus(ctx, job, status, errorCode, errorDetail)
+	}
+	return s.finishJobStatus(ctx, job, status, errorCode, errorDetail)
 }
 
 type httpClient struct {
@@ -50,12 +134,12 @@ func (c *httpClient) Do(req *http.Request) (*http.Response, error) {
 }
 
 func (s *pullerService) pollOnce(ctx context.Context) error {
-	if err := s.syncCron(ctx, time.Now().UTC()); err != nil {
+	if err := s.depSyncCron(ctx, time.Now().UTC()); err != nil {
 		return fmt.Errorf("sync cron failed: %w", err)
 	}
 
 	for {
-		job, err := s.claimNextPendingJob(ctx)
+		job, err := s.depClaimNextPendingJob(ctx)
 		if err != nil {
 			return err
 		}
@@ -63,7 +147,7 @@ func (s *pullerService) pollOnce(ctx context.Context) error {
 			return nil
 		}
 
-		if err := s.executeJob(ctx, *job); err != nil {
+		if err := s.depExecuteJob(ctx, *job); err != nil {
 			if errors.Is(err, errJobCancelled) {
 				s.log.Info("sync job cancelled", "job_id", job.ID, "source_id", job.SourceID)
 				continue
@@ -77,13 +161,13 @@ func (s *pullerService) executeJob(ctx context.Context, job syncJob) error {
 	jobCtx, cancel := context.WithTimeout(ctx, s.runtime.JobTimeout)
 	defer cancel()
 
-	if canceled, err := s.isCancelRequested(jobCtx, job.ID); err != nil {
+	if canceled, err := s.depIsCancelRequested(jobCtx, job.ID); err != nil {
 		return s.failJob(job, errCodeCancelled, fmt.Errorf("pre-check cancel failed: %w", err))
 	} else if canceled || job.CancelRequested {
 		return s.cancelJob(job, "job cancelled before execution")
 	}
 
-	source, err := s.loadSource(jobCtx, job.SourceID)
+	source, err := s.depLoadSource(jobCtx, job.SourceID)
 	if err != nil {
 		return s.failJob(job, errCodeSourceNotFound, err)
 	}
@@ -106,13 +190,13 @@ func (s *pullerService) executeJob(ctx context.Context, job syncJob) error {
 		return s.failJob(job, errCodeSSHLocationInvalid, err)
 	}
 
-	if canceled, err := s.isCancelRequested(jobCtx, job.ID); err != nil {
+	if canceled, err := s.depIsCancelRequested(jobCtx, job.ID); err != nil {
 		return s.failJob(job, errCodeCancelled, fmt.Errorf("cancel check before ssh failed: %w", err))
 	} else if canceled {
 		return s.cancelJob(job, "job cancelled before ssh pull")
 	}
 
-	content, err := s.pullSSHFile(jobCtx, location)
+	content, err := s.depPullSSHFile(jobCtx, location)
 	if err != nil {
 		if errors.Is(jobCtx.Err(), context.Canceled) || errors.Is(jobCtx.Err(), context.DeadlineExceeded) {
 			return s.cancelJob(job, "job cancelled during ssh pull")
@@ -126,11 +210,11 @@ func (s *pullerService) executeJob(ctx context.Context, job syncJob) error {
 	}
 
 	hostKey := location.HostKey()
-	jsonLineWatermark, err := s.getWatermark(jobCtx, source.ID, parserKeyJSONL, hostKey)
+	jsonLineWatermark, err := s.depGetWatermark(jobCtx, source.ID, parserKeyJSONL, hostKey)
 	if err != nil {
 		return s.failJob(job, errCodeWatermarkFailed, err)
 	}
-	nativeLineWatermark, err := s.getWatermark(jobCtx, source.ID, parserKeyNative, hostKey)
+	nativeLineWatermark, err := s.depGetWatermark(jobCtx, source.ID, parserKeyNative, hostKey)
 	if err != nil {
 		return s.failJob(job, errCodeWatermarkFailed, err)
 	}
@@ -142,7 +226,7 @@ func (s *pullerService) executeJob(ctx context.Context, job syncJob) error {
 		JSONLStart:  jsonLineWatermark,
 		NativeStart: nativeLineWatermark,
 		CheckCancel: func(ctx context.Context) (bool, error) {
-			return s.isCancelRequested(ctx, job.ID)
+			return s.depIsCancelRequested(ctx, job.ID)
 		},
 	}
 	connector := s.effectiveConnectorRegistry().Select(source, location.Path)
@@ -156,7 +240,7 @@ func (s *pullerService) executeJob(ctx context.Context, job syncJob) error {
 
 	events := collectAndSortEvents(outputs)
 	if len(events) > 0 {
-		if canceled, err := s.isCancelRequested(jobCtx, job.ID); err != nil {
+		if canceled, err := s.depIsCancelRequested(jobCtx, job.ID); err != nil {
 			return s.failJob(job, errCodeCancelled, fmt.Errorf("cancel check before ingest failed: %w", err))
 		} else if canceled {
 			return s.cancelJob(job, "job cancelled before ingestion")
@@ -171,19 +255,19 @@ func (s *pullerService) executeJob(ctx context.Context, job syncJob) error {
 	}
 
 	if jsonOutput, ok := outputs[parserKeyJSONL]; ok && jsonOutput.MaxLine > jsonLineWatermark {
-		if err := s.upsertWatermark(jobCtx, source.ID, parserKeyJSONL, hostKey, jsonOutput.MaxLine); err != nil {
+		if err := s.depUpsertWatermark(jobCtx, source.ID, parserKeyJSONL, hostKey, jsonOutput.MaxLine); err != nil {
 			return s.failJob(job, errCodeWatermarkFailed, err)
 		}
 	}
 	if nativeOutput, ok := outputs[parserKeyNative]; ok && nativeOutput.MaxLine > nativeLineWatermark {
-		if err := s.upsertWatermark(jobCtx, source.ID, parserKeyNative, hostKey, nativeOutput.MaxLine); err != nil {
+		if err := s.depUpsertWatermark(jobCtx, source.ID, parserKeyNative, hostKey, nativeOutput.MaxLine); err != nil {
 			return s.failJob(job, errCodeWatermarkFailed, err)
 		}
 	}
 
 	finalize, finalizeCancel := finalizeCtx()
 	defer finalizeCancel()
-	if err := s.finishJobStatus(finalize, job, "success", "", ""); err != nil {
+	if err := s.depFinishJobStatus(finalize, job, "success", "", ""); err != nil {
 		return fmt.Errorf("mark sync job success failed: %w", err)
 	}
 
@@ -201,7 +285,7 @@ func (s *pullerService) executeJob(ctx context.Context, job syncJob) error {
 }
 
 func (s *pullerService) executeLocalSourceJob(jobCtx context.Context, job syncJob, source sourceRecord) error {
-	contents, err := s.fetchLocalSourceContents(jobCtx, source)
+	contents, err := s.depFetchLocalSourceContents(jobCtx, source)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return s.cancelJob(job, "job cancelled while reading local source")
@@ -211,7 +295,7 @@ func (s *pullerService) executeLocalSourceJob(jobCtx context.Context, job syncJo
 
 	totalEvents := 0
 	for _, content := range contents {
-		if canceled, err := s.isCancelRequested(jobCtx, job.ID); err != nil {
+		if canceled, err := s.depIsCancelRequested(jobCtx, job.ID); err != nil {
 			return s.failJob(job, errCodeCancelled, fmt.Errorf("cancel check before local read failed: %w", err))
 		} else if canceled {
 			return s.cancelJob(job, "job cancelled before local parse")
@@ -222,11 +306,11 @@ func (s *pullerService) executeLocalSourceJob(jobCtx context.Context, job syncJo
 			return s.failJob(job, errCodeReadLocalFailed, fmt.Errorf("split local file failed (%s): %w", content.SourcePath, err))
 		}
 
-		jsonLineWatermark, err := s.getWatermark(jobCtx, source.ID, parserKeyJSONL, content.HostKey)
+		jsonLineWatermark, err := s.depGetWatermark(jobCtx, source.ID, parserKeyJSONL, content.HostKey)
 		if err != nil {
 			return s.failJob(job, errCodeWatermarkFailed, err)
 		}
-		nativeLineWatermark, err := s.getWatermark(jobCtx, source.ID, parserKeyNative, content.HostKey)
+		nativeLineWatermark, err := s.depGetWatermark(jobCtx, source.ID, parserKeyNative, content.HostKey)
 		if err != nil {
 			return s.failJob(job, errCodeWatermarkFailed, err)
 		}
@@ -238,7 +322,7 @@ func (s *pullerService) executeLocalSourceJob(jobCtx context.Context, job syncJo
 			JSONLStart:  jsonLineWatermark,
 			NativeStart: nativeLineWatermark,
 			CheckCancel: func(ctx context.Context) (bool, error) {
-				return s.isCancelRequested(ctx, job.ID)
+				return s.depIsCancelRequested(ctx, job.ID)
 			},
 		}
 		connector := s.effectiveConnectorRegistry().Select(source, content.SourcePath)
@@ -252,7 +336,7 @@ func (s *pullerService) executeLocalSourceJob(jobCtx context.Context, job syncJo
 
 		events := collectAndSortEvents(outputs)
 		if len(events) > 0 {
-			if canceled, err := s.isCancelRequested(jobCtx, job.ID); err != nil {
+			if canceled, err := s.depIsCancelRequested(jobCtx, job.ID); err != nil {
 				return s.failJob(job, errCodeCancelled, fmt.Errorf("cancel check before local ingest failed: %w", err))
 			} else if canceled {
 				return s.cancelJob(job, "job cancelled before local ingestion")
@@ -268,12 +352,12 @@ func (s *pullerService) executeLocalSourceJob(jobCtx context.Context, job syncJo
 		}
 
 		if jsonOutput, ok := outputs[parserKeyJSONL]; ok && jsonOutput.MaxLine > jsonLineWatermark {
-			if err := s.upsertWatermark(jobCtx, source.ID, parserKeyJSONL, content.HostKey, jsonOutput.MaxLine); err != nil {
+			if err := s.depUpsertWatermark(jobCtx, source.ID, parserKeyJSONL, content.HostKey, jsonOutput.MaxLine); err != nil {
 				return s.failJob(job, errCodeWatermarkFailed, err)
 			}
 		}
 		if nativeOutput, ok := outputs[parserKeyNative]; ok && nativeOutput.MaxLine > nativeLineWatermark {
-			if err := s.upsertWatermark(jobCtx, source.ID, parserKeyNative, content.HostKey, nativeOutput.MaxLine); err != nil {
+			if err := s.depUpsertWatermark(jobCtx, source.ID, parserKeyNative, content.HostKey, nativeOutput.MaxLine); err != nil {
 				return s.failJob(job, errCodeWatermarkFailed, err)
 			}
 		}
@@ -281,7 +365,7 @@ func (s *pullerService) executeLocalSourceJob(jobCtx context.Context, job syncJo
 
 	finalize, finalizeCancel := finalizeCtx()
 	defer finalizeCancel()
-	if err := s.finishJobStatus(finalize, job, "success", "", ""); err != nil {
+	if err := s.depFinishJobStatus(finalize, job, "success", "", ""); err != nil {
 		return fmt.Errorf("mark sync job success failed: %w", err)
 	}
 
@@ -315,7 +399,7 @@ func (s *pullerService) failJob(job syncJob, code string, err error) error {
 
 	finalize, finalizeCancel := finalizeCtx()
 	defer finalizeCancel()
-	if updateErr := s.finishJobStatus(finalize, job, "failed", code, detail); updateErr != nil {
+	if updateErr := s.depFinishJobStatus(finalize, job, "failed", code, detail); updateErr != nil {
 		return fmt.Errorf("%s (status update failed: %v)", detail, updateErr)
 	}
 	return err
@@ -324,7 +408,7 @@ func (s *pullerService) failJob(job syncJob, code string, err error) error {
 func (s *pullerService) cancelJob(job syncJob, detail string) error {
 	finalize, finalizeCancel := finalizeCtx()
 	defer finalizeCancel()
-	if err := s.finishJobStatus(finalize, job, "cancelled", errCodeCancelled, detail); err != nil {
+	if err := s.depFinishJobStatus(finalize, job, "cancelled", errCodeCancelled, detail); err != nil {
 		return fmt.Errorf("%s (status update failed: %v)", detail, err)
 	}
 	return errJobCancelled
