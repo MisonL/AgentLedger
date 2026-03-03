@@ -9,10 +9,11 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "[text-normalization] 检查已跟踪文本文件中的 CRLF 与 UTF-8 BOM..."
+echo "[text-normalization] 检查 Git 索引中的文本内容（CRLF / UTF-8 BOM）..."
 
-CRLF_MATCHES="$(git grep -nI $'\r' -- . || true)"
-BOM_MATCHES="$(git grep -nI $'\xEF\xBB\xBF' -- . || true)"
+# 使用 --cached 读取索引内容，避免 Windows 工作区换行符转换导致误报。
+CRLF_MATCHES="$(git grep --cached -nI $'\r' -- . || true)"
+BOM_MATCHES="$(git grep --cached -nI $'\xEF\xBB\xBF' -- . || true)"
 
 FAILED=0
 
