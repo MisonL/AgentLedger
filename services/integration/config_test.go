@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseChannels(t *testing.T) {
@@ -158,6 +159,9 @@ func TestLoadIntegrationConfigCallbackDefaults(t *testing.T) {
 	if cfg.ControlPlaneCallbackURL != "https://control.example.com/api/v1/integrations/callbacks/alerts" {
 		t.Fatalf("control plane callback url mismatch: got %q", cfg.ControlPlaneCallbackURL)
 	}
+	if cfg.CallbackSignatureTTL != defaultCallbackSignatureTTL {
+		t.Fatalf("callback signature ttl mismatch: got %s want %s", cfg.CallbackSignatureTTL, defaultCallbackSignatureTTL)
+	}
 }
 
 func TestLoadIntegrationConfigCallbackTopicAliasCompatibility(t *testing.T) {
@@ -224,6 +228,55 @@ func TestLoadIntegrationConfigCallbackPathNormalization(t *testing.T) {
 	}
 	if cfg.ControlPlaneCallbackURL != "https://control.example.com/callbacks/custom-alert" {
 		t.Fatalf("control plane callback url mismatch: got %q", cfg.ControlPlaneCallbackURL)
+	}
+}
+
+func TestLoadIntegrationConfigCallbackSignatureTTLOverride(t *testing.T) {
+	setBaseIntegrationEnvs(t)
+	t.Setenv("INTEGRATION_CHANNELS", "webhook")
+	t.Setenv("INTEGRATION_WEBHOOK_URL", "https://example.com/webhook")
+	t.Setenv("INTEGRATION_CALLBACK_SIGNATURE_TTL", "90s")
+
+	cfg, err := loadIntegrationConfig()
+	if err != nil {
+		t.Fatalf("loadIntegrationConfig returned error: %v", err)
+	}
+	if cfg.CallbackSignatureTTL != 90*time.Second {
+		t.Fatalf("callback signature ttl mismatch: got %s want %s", cfg.CallbackSignatureTTL, 90*time.Second)
+	}
+}
+
+func TestLoadIntegrationConfigCallbackSignatureTTLValidation(t *testing.T) {
+	testCases := []struct {
+		name  string
+		value string
+	}{
+		{
+			name:  "zero ttl",
+			value: "0s",
+		},
+		{
+			name:  "negative ttl",
+			value: "-1s",
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			setBaseIntegrationEnvs(t)
+			t.Setenv("INTEGRATION_CHANNELS", "webhook")
+			t.Setenv("INTEGRATION_WEBHOOK_URL", "https://example.com/webhook")
+			t.Setenv("INTEGRATION_CALLBACK_SIGNATURE_TTL", tc.value)
+
+			_, err := loadIntegrationConfig()
+			if err == nil {
+				t.Fatalf("expected callback signature ttl validation to fail for %q", tc.value)
+			}
+			if !strings.Contains(err.Error(), "INTEGRATION_CALLBACK_SIGNATURE_TTL") {
+				t.Fatalf("error mismatch: %v", err)
+			}
+		})
 	}
 }
 

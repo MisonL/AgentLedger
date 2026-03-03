@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -312,11 +316,17 @@ func TestHandleCallbackMessageAckOnSuccess(t *testing.T) {
 	var receivedSecret string
 	var receivedSource string
 	var receivedPath string
+	var receivedTimestamp string
+	var receivedNonce string
+	var receivedSignature string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedSecret = r.Header.Get(callbackSecretHeader)
 		receivedSource = r.Header.Get(callbackSourceHeader)
 		receivedPath = r.URL.Path
+		receivedTimestamp = r.Header.Get(callbackTimestampHeader)
+		receivedNonce = r.Header.Get(callbackNonceHeader)
+		receivedSignature = r.Header.Get(callbackSignatureHeader)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
@@ -360,6 +370,28 @@ func TestHandleCallbackMessageAckOnSuccess(t *testing.T) {
 	}
 	if receivedPath != defaultCallbackPath {
 		t.Fatalf("callback path mismatch: got %q want %q", receivedPath, defaultCallbackPath)
+	}
+	if receivedTimestamp == "" {
+		t.Fatal("callback timestamp header should not be empty")
+	}
+	if _, err := strconv.ParseInt(receivedTimestamp, 10, 64); err != nil {
+		t.Fatalf("callback timestamp format invalid: %v", err)
+	}
+	if len(receivedNonce) != callbackNonceBytes*2 {
+		t.Fatalf("callback nonce length mismatch: got %d want %d", len(receivedNonce), callbackNonceBytes*2)
+	}
+	if _, err := hex.DecodeString(receivedNonce); err != nil {
+		t.Fatalf("callback nonce format invalid: %v", err)
+	}
+	if len(receivedSignature) != sha256.Size*2 {
+		t.Fatalf("callback signature length mismatch: got %d want %d", len(receivedSignature), sha256.Size*2)
+	}
+	if _, err := hex.DecodeString(receivedSignature); err != nil {
+		t.Fatalf("callback signature format invalid: %v", err)
+	}
+	expectedSignature := signCallbackPayloadForTest("callback-secret", receivedTimestamp, receivedNonce, []byte(`{"id":"callback-1"}`))
+	if receivedSignature != expectedSignature {
+		t.Fatalf("callback signature mismatch: got %q want %q", receivedSignature, expectedSignature)
 	}
 
 	rendered := metrics.renderPrometheus()
@@ -417,7 +449,7 @@ func TestHandleCallbackMessageRetryOnServerError(t *testing.T) {
 	assertContains(t, rendered, "integration_dispatch_events_total{outcome=\"retry\",channel=\"control_plane\",event_type=\"callback_alert\"} 1")
 }
 
-func TestHandleCallbackMessageTooManyRequestsNoRetry(t *testing.T) {
+func TestHandleCallbackMessageTooManyRequestsRetry(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -449,18 +481,24 @@ func TestHandleCallbackMessageTooManyRequestsNoRetry(t *testing.T) {
 
 	dispatcher.handleCallbackMessage(msg)
 
-	if msg.nakWithDelayCalls != 0 {
-		t.Fatalf("callback should not retry on 4xx, got nakWithDelay=%d", msg.nakWithDelayCalls)
+	if msg.ackCalls != 0 {
+		t.Fatalf("callback ack should not be called on retry path, got %d", msg.ackCalls)
 	}
-	if msg.termCalls != 1 {
-		t.Fatalf("callback should term when not retryable, got %d", msg.termCalls)
+	if msg.termCalls != 0 {
+		t.Fatalf("callback term should not be called on retry path, got %d", msg.termCalls)
 	}
-	if publisher.publishCalls != 1 {
-		t.Fatalf("callback dlq publish calls mismatch: got %d want %d", publisher.publishCalls, 1)
+	if msg.nakWithDelayCalls != 1 {
+		t.Fatalf("callback should retry on 429, got nakWithDelay=%d", msg.nakWithDelayCalls)
+	}
+	if msg.lastNakDelay <= 0 {
+		t.Fatalf("callback retry delay should be positive, got %s", msg.lastNakDelay)
+	}
+	if publisher.publishCalls != 0 {
+		t.Fatalf("callback dlq should not be called on retryable 429, got %d", publisher.publishCalls)
 	}
 
 	rendered := metrics.renderPrometheus()
-	assertContains(t, rendered, "integration_dispatch_events_total{outcome=\"dlq\",channel=\"control_plane\",event_type=\"callback_alert\"} 1")
+	assertContains(t, rendered, "integration_dispatch_events_total{outcome=\"retry\",channel=\"control_plane\",event_type=\"callback_alert\"} 1")
 }
 
 func TestCallbackHTTPHandlerForwardAndRetry(t *testing.T) {
@@ -577,6 +615,20 @@ func TestCallbackHTTPHandlerNoRetryOnClientError(t *testing.T) {
 
 	rendered := metrics.renderPrometheus()
 	assertContains(t, rendered, "integration_dispatch_events_total{outcome=\"dlq\",channel=\"control_plane\",event_type=\"callback_alert\"} 1")
+}
+
+func TestResolveCallbackRequestTimeout(t *testing.T) {
+	t.Parallel()
+
+	if got := resolveCallbackRequestTimeout(10*time.Second, 0); got != 10*time.Second {
+		t.Fatalf("timeout mismatch without signature ttl: got %s want %s", got, 10*time.Second)
+	}
+	if got := resolveCallbackRequestTimeout(10*time.Second, 2*time.Second); got != 2*time.Second {
+		t.Fatalf("timeout mismatch when signature ttl is lower: got %s want %s", got, 2*time.Second)
+	}
+	if got := resolveCallbackRequestTimeout(2*time.Second, 10*time.Second); got != 2*time.Second {
+		t.Fatalf("timeout mismatch when signature ttl is higher: got %s want %s", got, 2*time.Second)
+	}
 }
 
 func testHandleMessageConfig(channels []integrationChannel) integrationConfig {
@@ -704,4 +756,14 @@ func (m *fakeJetStreamMsg) Term() error {
 
 func (m *fakeJetStreamMsg) TermWithReason(_ string) error {
 	return m.Term()
+}
+
+func signCallbackPayloadForTest(secret, timestamp, nonce string, payload []byte) string {
+	h := hmac.New(sha256.New, []byte(secret))
+	_, _ = io.WriteString(h, timestamp)
+	_, _ = h.Write([]byte{'\n'})
+	_, _ = io.WriteString(h, nonce)
+	_, _ = h.Write([]byte{'\n'})
+	_, _ = h.Write(payload)
+	return hex.EncodeToString(h.Sum(nil))
 }

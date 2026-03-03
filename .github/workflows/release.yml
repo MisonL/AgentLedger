@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pre-release-gate:
+    name: 发布前强门禁
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: "**/go.sum"
+
+      - name: 安装 Buf CLI
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          version: 1.50.0
+          github_token: ${{ github.token }}
+
+      - name: 安装依赖
+        run: bun install --frozen-lockfile
+
+      - name: 发布前严格门禁（失败即中止）
+        run: |
+          set -euo pipefail
+          bun run lint
+          bun run test
+          bun run build
+          bun run check:support-matrix
+          bun run check:callback-stream-binding
+
+  build-and-publish:
+    name: 发布客户端构建产物
+    needs: pre-release-gate
+    if: ${{ needs.pre-release-gate.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: "**/go.sum"
+
+      - name: 安装 Buf CLI
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          version: 1.50.0
+          github_token: ${{ github.token }}
+
+      - name: 安装依赖
+        run: bun install --frozen-lockfile
+
+      - name: 生成 Proto 代码
+        run: bun run proto:gen
+
+      - name: 跨平台构建与产物校验门禁
+        run: |
+          set -euo pipefail
+          bun run build:agent-cross
+          bun run verify:agent-cross
+
+      - name: 生成 SHA256 校验文件
+        run: |
+          cd dist/agent
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-release-${{ github.ref_name }}
+          path: dist/agent/
+          if-no-files-found: error
+
+      - name: 发布 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/agent/*
+          generate_release_notes: true

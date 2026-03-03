@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { validateIntegrationAlertCallbackInput } from "../contracts";
 import type { AppendAuditLogInput } from "../data/repository";
 import { getControlPlaneRepository } from "../data/repository";
@@ -8,6 +8,11 @@ import type { AppEnv } from "../types";
 export const integrationCallbackRoutes = new Hono<AppEnv>();
 const repository = getControlPlaneRepository();
 const CALLBACK_SECRET_HEADER = "x-integration-callback-secret";
+const CALLBACK_TIMESTAMP_HEADER = "x-integration-callback-timestamp";
+const CALLBACK_NONCE_HEADER = "x-integration-callback-nonce";
+const CALLBACK_SIGNATURE_HEADER = "x-integration-callback-signature";
+const DEFAULT_CALLBACK_TIMESTAMP_WINDOW_MS = 5 * 60 * 1000;
+const CALLBACK_NONCE_REPLAY_PREFIX = "__nonce_replay__:";
 type CallbackResponseStatus = 200 | 400 | 401 | 404 | 409 | 500;
 
 async function appendAuditLogSafely(input: AppendAuditLogInput): Promise<void> {
@@ -37,6 +42,106 @@ function isIntegrationCallbackSecretValid(expected: string, received: string | u
   return timingSafeEqual(toSecretDigest(expected), toSecretDigest(provided));
 }
 
+function parseCallbackTimestampMs(rawValue: string | undefined): number | null {
+  const value = rawValue?.trim();
+  if (!value) {
+    return null;
+  }
+  if (/^\d+$/.test(value)) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return null;
+    }
+    return numeric >= 1e12 ? numeric : numeric * 1000;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseGoDurationMs(rawValue: string): number | null {
+  const input = rawValue.trim();
+  if (!input) {
+    return null;
+  }
+
+  let cursor = input;
+  if (cursor.startsWith("+")) {
+    cursor = cursor.slice(1);
+  } else if (cursor.startsWith("-")) {
+    return null;
+  }
+  if (!cursor) {
+    return null;
+  }
+
+  const unitToMs: Record<string, number> = {
+    ns: 1e-6,
+    us: 1e-3,
+    "µs": 1e-3,
+    "μs": 1e-3,
+    ms: 1,
+    s: 1_000,
+    m: 60_000,
+    h: 3_600_000,
+  };
+  const tokenRegex = /(\d+(?:\.\d+)?)(ns|us|µs|μs|ms|s|m|h)/g;
+  let totalMs = 0;
+  let consumed = 0;
+
+  for (const match of cursor.matchAll(tokenRegex)) {
+    if (match.index !== consumed) {
+      return null;
+    }
+    const value = Number(match[1]);
+    const unit = match[2];
+    const factor = unitToMs[unit];
+    if (!Number.isFinite(value) || value <= 0 || !factor) {
+      return null;
+    }
+    totalMs += value * factor;
+    consumed += match[0].length;
+  }
+
+  if (consumed !== cursor.length || totalMs <= 0 || !Number.isFinite(totalMs)) {
+    return null;
+  }
+  return Math.floor(totalMs);
+}
+
+function resolveCallbackSignatureWindowMs(): number {
+  const raw = Bun.env.INTEGRATION_CALLBACK_SIGNATURE_TTL?.trim();
+  if (!raw) {
+    return DEFAULT_CALLBACK_TIMESTAMP_WINDOW_MS;
+  }
+
+  const parsed = parseGoDurationMs(raw);
+  if (parsed === null) {
+    return DEFAULT_CALLBACK_TIMESTAMP_WINDOW_MS;
+  }
+  return parsed;
+}
+
+function isCallbackTimestampWithinWindow(
+  timestampMs: number,
+  nowMs: number,
+  windowMs: number
+): boolean {
+  return Math.abs(nowMs - timestampMs) <= windowMs;
+}
+
+function toNonceReplayClaimId(nonce: string): string {
+  return `${CALLBACK_NONCE_REPLAY_PREFIX}${nonce}`;
+}
+
+function computeIntegrationCallbackSignature(
+  secret: string,
+  timestamp: string,
+  nonce: string,
+  body: string
+): string {
+  return createHmac("sha256", secret).update(`${timestamp}\n${nonce}\n${body}`).digest("hex");
+}
+
 integrationCallbackRoutes.post("/integrations/callbacks/alerts", async (c) => {
   const configuredSecret = resolveIntegrationCallbackSecret();
   if (!configuredSecret) {
@@ -53,7 +158,44 @@ integrationCallbackRoutes.post("/integrations/callbacks/alerts", async (c) => {
     return c.json({ message: "未授权：callback secret 无效。" }, 401);
   }
 
-  const body = await c.req.json().catch(() => undefined);
+  const timestampHeader = c.req.header(CALLBACK_TIMESTAMP_HEADER)?.trim();
+  const nonceHeader = c.req.header(CALLBACK_NONCE_HEADER)?.trim();
+  const signatureHeader = c.req.header(CALLBACK_SIGNATURE_HEADER)?.trim();
+  const timestampMs = parseCallbackTimestampMs(timestampHeader);
+  const nowMs = Date.now();
+  const signatureWindowMs = resolveCallbackSignatureWindowMs();
+
+  if (
+    !timestampHeader ||
+    timestampMs === null ||
+    !isCallbackTimestampWithinWindow(timestampMs, nowMs, signatureWindowMs)
+  ) {
+    return c.json({ message: "未授权：callback timestamp 无效或已过期。" }, 401);
+  }
+  if (!nonceHeader) {
+    return c.json({ message: "未授权：callback nonce 无效。" }, 401);
+  }
+  if (!signatureHeader) {
+    return c.json({ message: "未授权：callback signature 无效。" }, 401);
+  }
+
+  const rawBody = await c.req.text().catch(() => "");
+  const expectedSignature = computeIntegrationCallbackSignature(
+    configuredSecret,
+    timestampHeader,
+    nonceHeader,
+    rawBody
+  );
+  if (!isIntegrationCallbackSecretValid(expectedSignature, signatureHeader)) {
+    return c.json({ message: "未授权：callback signature 无效。" }, 401);
+  }
+
+  let body: unknown;
+  try {
+    body = rawBody.length > 0 ? JSON.parse(rawBody) : undefined;
+  } catch {
+    body = undefined;
+  }
   const result = validateIntegrationAlertCallbackInput(body);
   if (!result.success) {
     return c.json({ message: result.error }, 400);
@@ -62,6 +204,16 @@ integrationCallbackRoutes.post("/integrations/callbacks/alerts", async (c) => {
   const tenantId = resolveTenantId(result.data.tenantId);
   const callbackId = result.data.callbackId;
   const action = result.data.action;
+  const nonceClaim = await repository.claimIntegrationAlertCallback({
+    callbackId: toNonceReplayClaimId(nonceHeader),
+    tenantId,
+    action: "ack",
+    staleAfterMs: signatureWindowMs,
+    processedAt: new Date(nowMs).toISOString(),
+  });
+  if (!nonceClaim.claimed) {
+    return c.json({ message: "未授权：callback nonce 重放。" }, 401);
+  }
 
   const claimResult = await repository.claimIntegrationAlertCallback({
     callbackId,

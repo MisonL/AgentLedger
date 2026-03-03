@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,10 +36,14 @@ const (
 	labelChannelNone      = "none"
 	labelChannelControl   = "control_plane"
 
-	callbackSecretHeader = "X-Integration-Callback-Secret"
-	callbackSourceHeader = "X-Integration-Callback-Source"
-	callbackSourceAPI    = "api"
-	callbackSourceNATS   = "nats"
+	callbackSecretHeader    = "X-Integration-Callback-Secret"
+	callbackSourceHeader    = "X-Integration-Callback-Source"
+	callbackTimestampHeader = "X-Integration-Callback-Timestamp"
+	callbackNonceHeader     = "X-Integration-Callback-Nonce"
+	callbackSignatureHeader = "X-Integration-Callback-Signature"
+	callbackSourceAPI       = "api"
+	callbackSourceNATS      = "nats"
+	callbackNonceBytes      = 16
 
 	defaultDispatchProgressTTL       = 6 * time.Hour
 	defaultDispatchProgressMaxEntrys = 20000
@@ -739,7 +746,11 @@ func (d *alertDispatcher) dispatchToChannel(channel integrationChannel, payload 
 		baseCtx = context.Background()
 	}
 
-	reqCtx, cancel := context.WithTimeout(baseCtx, d.cfg.WebhookTimeout)
+	requestTimeout := d.cfg.WebhookTimeout
+	if d.cfg.CallbackSignatureTTL > 0 && d.cfg.CallbackSignatureTTL < requestTimeout {
+		requestTimeout = d.cfg.CallbackSignatureTTL
+	}
+	reqCtx, cancel := context.WithTimeout(baseCtx, requestTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(channelPayload))
@@ -830,7 +841,8 @@ func (d *alertDispatcher) forwardCallback(ctx context.Context, payload []byte, s
 		baseCtx = context.Background()
 	}
 
-	reqCtx, cancel := context.WithTimeout(baseCtx, d.cfg.WebhookTimeout)
+	requestTimeout := resolveCallbackRequestTimeout(d.cfg.WebhookTimeout, d.cfg.CallbackSignatureTTL)
+	reqCtx, cancel := context.WithTimeout(baseCtx, requestTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
@@ -842,9 +854,22 @@ func (d *alertDispatcher) forwardCallback(ctx context.Context, payload []byte, s
 		}
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if secret := strings.TrimSpace(d.cfg.CallbackSecret); secret != "" {
+	secret := strings.TrimSpace(d.cfg.CallbackSecret)
+	if secret != "" {
 		req.Header.Set(callbackSecretHeader, secret)
 	}
+	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+	nonce, err := generateCallbackNonce()
+	if err != nil {
+		return &dispatchError{
+			retryable: false,
+			message:   "generate callback signature nonce failed",
+			err:       err,
+		}
+	}
+	req.Header.Set(callbackTimestampHeader, timestamp)
+	req.Header.Set(callbackNonceHeader, nonce)
+	req.Header.Set(callbackSignatureHeader, signCallbackPayload(secret, timestamp, nonce, payload))
 	if source = strings.TrimSpace(source); source != "" {
 		req.Header.Set(callbackSourceHeader, source)
 	}
@@ -870,10 +895,35 @@ func (d *alertDispatcher) forwardCallback(ctx context.Context, payload []byte, s
 	}
 
 	return &dispatchError{
-		retryable:  resp.StatusCode >= 500,
+		retryable:  resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests,
 		statusCode: resp.StatusCode,
 		message:    message,
 	}
+}
+
+func resolveCallbackRequestTimeout(webhookTimeout time.Duration, signatureTTL time.Duration) time.Duration {
+	if signatureTTL > 0 && signatureTTL < webhookTimeout {
+		return signatureTTL
+	}
+	return webhookTimeout
+}
+
+func generateCallbackNonce() (string, error) {
+	nonce := make([]byte, callbackNonceBytes)
+	if _, err := rand.Read(nonce); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(nonce), nil
+}
+
+func signCallbackPayload(secret, timestamp, nonce string, payload []byte) string {
+	h := hmac.New(sha256.New, []byte(secret))
+	_, _ = io.WriteString(h, timestamp)
+	_, _ = h.Write([]byte{'\n'})
+	_, _ = io.WriteString(h, nonce)
+	_, _ = h.Write([]byte{'\n'})
+	_, _ = h.Write(payload)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (d *alertDispatcher) verifyIncomingCallbackSecret(provided string) bool {

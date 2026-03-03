@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createHmac } from "node:crypto";
 import {
   validateAuthLoginInput,
   validateAuthLogoutInput,
@@ -37,15 +38,16 @@ import {
 
 describe("Control Plane API", () => {
   const app = createApp();
-  let defaultAuthContextPromise:
-    | Promise<{
-        accessToken: string;
-        userId?: string;
-      }>
-    | null = null;
+  let defaultAuthContextPromise: Promise<{
+    accessToken: string;
+    userId?: string;
+  }> | null = null;
   const repository = getControlPlaneRepository() as unknown as {
     getPool?: () => Promise<{
-      query: (text: string, values?: readonly unknown[]) => Promise<{ rows: unknown[] }>;
+      query: (
+        text: string,
+        values?: readonly unknown[],
+      ) => Promise<{ rows: unknown[] }>;
     } | null>;
     memorySessions?: Session[];
     memorySyncJobs?: Array<{
@@ -74,7 +76,12 @@ describe("Control Plane API", () => {
     claimIntegrationAlertCallback?: (input: {
       callbackId: string;
       tenantId: string;
-      action: "ack" | "resolve" | "request_release" | "approve_release" | "reject_release";
+      action:
+        | "ack"
+        | "resolve"
+        | "request_release"
+        | "approve_release"
+        | "reject_release";
       processedAt?: string;
       staleAfterMs?: number;
     }) => Promise<{
@@ -147,7 +154,7 @@ describe("Control Plane API", () => {
       input: {
         sessionToken: string;
         expiresAt: string;
-      }
+      },
     ) => Promise<{
       id: string;
       userId: string;
@@ -176,7 +183,7 @@ describe("Control Plane API", () => {
         errorCode?: string;
         errorDetail?: string;
         cancelRequested?: boolean;
-      }
+      },
     ) => Promise<{
       id: string;
       sourceId: string;
@@ -190,15 +197,22 @@ describe("Control Plane API", () => {
       updatedAt: string;
     }>;
     listTenants?: () => Promise<Array<{ id: string; name: string }>>;
-    listOrganizations?: (tenantId: string) => Promise<Array<{ id: string; tenantId: string; name: string }>>;
-    getSourceHealth?: (tenantId: string, sourceId: string) => Promise<SourceHealth | null>;
+    listOrganizations?: (
+      tenantId: string,
+    ) => Promise<Array<{ id: string; tenantId: string; name: string }>>;
+    getSourceHealth?: (
+      tenantId: string,
+      sourceId: string,
+    ) => Promise<SourceHealth | null>;
     listUsageDaily?: (input?: {
       tenantId?: string;
       from?: string;
       to?: string;
       limit?: number;
     }) => Promise<UsageDailyItem[]>;
-    listUsageHeatmap?: (input?: UsageHeatmapQueryInput) => Promise<HeatmapCell[]>;
+    listUsageHeatmap?: (
+      input?: UsageHeatmapQueryInput,
+    ) => Promise<HeatmapCell[]>;
   };
 
   function isRecord(value: unknown): value is Record<string, unknown> {
@@ -305,7 +319,11 @@ describe("Control Plane API", () => {
     }
 
     for (const candidate of candidates) {
-      const statusPath = pickString(candidate, ["statusUrl", "statusPath", "jobUrl"]);
+      const statusPath = pickString(candidate, [
+        "statusUrl",
+        "statusPath",
+        "jobUrl",
+      ]);
       if (statusPath) {
         return normalizePath(statusPath);
       }
@@ -314,7 +332,9 @@ describe("Control Plane API", () => {
     return undefined;
   }
 
-  async function ensureSourceReferencedBySession(sourceId: string): Promise<() => Promise<void>> {
+  async function ensureSourceReferencedBySession(
+    sourceId: string,
+  ): Promise<() => Promise<void>> {
     const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const sessionId = `test-source-conflict-${nonce}`;
     const now = new Date().toISOString();
@@ -354,7 +374,7 @@ describe("Control Plane API", () => {
             42,
             0.01,
             now,
-          ]
+          ],
         );
 
         return async () => {
@@ -382,7 +402,9 @@ describe("Control Plane API", () => {
       if (!Array.isArray(repository.memorySessions)) {
         return;
       }
-      const index = repository.memorySessions.findIndex((item) => item.id === sessionId);
+      const index = repository.memorySessions.findIndex(
+        (item) => item.id === sessionId,
+      );
       if (index >= 0) {
         repository.memorySessions.splice(index, 1);
       }
@@ -402,7 +424,7 @@ describe("Control Plane API", () => {
       tokens?: number;
       cost?: number;
       eventTexts?: string[];
-    }
+    },
   ): Promise<{ id: string; cleanup: () => Promise<void> }> {
     const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const sessionId = `search-session-${nonce}`;
@@ -448,7 +470,7 @@ describe("Control Plane API", () => {
             tokens,
             cost,
             startedAt,
-          ]
+          ],
         );
 
         if (Array.isArray(input.eventTexts) && input.eventTexts.length > 0) {
@@ -457,7 +479,9 @@ describe("Control Plane API", () => {
             if (!text) {
               continue;
             }
-            const timestamp = new Date(Date.parse(startedAt) + index * 1000).toISOString();
+            const timestamp = new Date(
+              Date.parse(startedAt) + index * 1000,
+            ).toISOString();
             await pool.query(
               `INSERT INTO events (
                  id,
@@ -489,7 +513,7 @@ describe("Control Plane API", () => {
                 text,
                 timestamp,
                 input.sourcePath ?? null,
-              ]
+              ],
             );
           }
         }
@@ -522,7 +546,10 @@ describe("Control Plane API", () => {
       provider?: string;
       workspace?: string;
     });
-    if (Array.isArray(repository.memorySessionEvents) && Array.isArray(input.eventTexts)) {
+    if (
+      Array.isArray(repository.memorySessionEvents) &&
+      Array.isArray(input.eventTexts)
+    ) {
       for (const eventText of input.eventTexts) {
         const text = eventText.trim();
         if (!text) {
@@ -543,12 +570,18 @@ describe("Control Plane API", () => {
         if (!Array.isArray(repository.memorySessions)) {
           return;
         }
-        const index = repository.memorySessions.findIndex((item) => item.id === sessionId);
+        const index = repository.memorySessions.findIndex(
+          (item) => item.id === sessionId,
+        );
         if (index >= 0) {
           repository.memorySessions.splice(index, 1);
         }
         if (Array.isArray(repository.memorySessionEvents)) {
-          for (let i = repository.memorySessionEvents.length - 1; i >= 0; i -= 1) {
+          for (
+            let i = repository.memorySessionEvents.length - 1;
+            i >= 0;
+            i -= 1
+          ) {
             if (repository.memorySessionEvents[i]?.sessionId === sessionId) {
               repository.memorySessionEvents.splice(i, 1);
             }
@@ -565,7 +598,7 @@ describe("Control Plane API", () => {
       budgetId?: string;
       sourceId?: string;
       severity?: Alert["severity"];
-    }
+    },
   ): Promise<{ alert: Alert; cleanup: () => Promise<void> }> {
     const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const now = new Date().toISOString();
@@ -631,9 +664,11 @@ describe("Control Plane API", () => {
             severity,
             dedupeKey,
             now,
-          ]
+          ],
         );
-        const insertedId = String((result.rows[0] as { id?: unknown } | undefined)?.id ?? "");
+        const insertedId = String(
+          (result.rows[0] as { id?: unknown } | undefined)?.id ?? "",
+        );
         const insertedAlert: Alert = {
           id: insertedId,
           tenantId,
@@ -660,7 +695,7 @@ describe("Control Plane API", () => {
               `DELETE FROM governance_alerts
                WHERE tenant_id = $1
                  AND id::text = $2`,
-              [tenantId, insertedId]
+              [tenantId, insertedId],
             );
           },
         };
@@ -697,7 +732,9 @@ describe("Control Plane API", () => {
         if (!Array.isArray(repository.memoryAlerts)) {
           return;
         }
-        const index = repository.memoryAlerts.findIndex((item) => item.id === alert.id);
+        const index = repository.memoryAlerts.findIndex(
+          (item) => item.id === alert.id,
+        );
         if (index >= 0) {
           repository.memoryAlerts.splice(index, 1);
         }
@@ -709,7 +746,7 @@ describe("Control Plane API", () => {
     format: "json" | "csv",
     keyword: string,
     accessToken?: string,
-    userId?: string
+    userId?: string,
   ): Promise<{
     createPath: string;
     jobId: string;
@@ -772,7 +809,10 @@ describe("Control Plane API", () => {
       },
       {
         path: `/api/v1/exports/sessions?async=true&format=${format}&keyword=${encodedKeyword}&limit=20`,
-        init: Object.keys(authHeaders).length > 0 ? { headers: authHeaders } : undefined,
+        init:
+          Object.keys(authHeaders).length > 0
+            ? { headers: authHeaders }
+            : undefined,
       },
     ];
 
@@ -785,14 +825,14 @@ describe("Control Plane API", () => {
       const payload = await readResponseAsUnknown(response);
       if (response.status < 200 || response.status >= 300) {
         throw new Error(
-          `创建导出任务失败(${candidate.path})，status=${response.status}，payload=${JSON.stringify(payload)}`
+          `创建导出任务失败(${candidate.path})，status=${response.status}，payload=${JSON.stringify(payload)}`,
         );
       }
 
       const jobId = extractJobId(payload);
       if (!jobId) {
         throw new Error(
-          `创建导出任务返回缺少 jobId(${candidate.path})，payload=${JSON.stringify(payload)}`
+          `创建导出任务返回缺少 jobId(${candidate.path})，payload=${JSON.stringify(payload)}`,
         );
       }
 
@@ -800,7 +840,9 @@ describe("Control Plane API", () => {
       return {
         createPath: candidate.path,
         jobId,
-        statusPath: statusHeader ? normalizePath(statusHeader) : extractStatusPath(payload),
+        statusPath: statusHeader
+          ? normalizePath(statusHeader)
+          : extractStatusPath(payload),
         downloadPath: extractDownloadPath(payload),
       };
     }
@@ -812,7 +854,7 @@ describe("Control Plane API", () => {
     jobId: string,
     statusPath?: string,
     accessToken?: string,
-    userId?: string
+    userId?: string,
   ): Promise<{ payload: unknown; downloadPath?: string }> {
     const authHeaders = await resolveAuthHeaders(accessToken, userId);
     const statusCandidates = new Set<string>();
@@ -822,14 +864,23 @@ describe("Control Plane API", () => {
     statusCandidates.add(`/api/v1/exports/sessions/jobs/${jobId}`);
     statusCandidates.add(`/api/v1/exports/jobs/${jobId}`);
 
-    const doneStatus = new Set(["completed", "succeeded", "success", "done", "finished", "ready"]);
+    const doneStatus = new Set([
+      "completed",
+      "succeeded",
+      "success",
+      "done",
+      "finished",
+      "ready",
+    ]);
     const failedStatus = new Set(["failed", "error", "cancelled", "canceled"]);
 
     for (let attempt = 0; attempt < 30; attempt += 1) {
       for (const candidate of statusCandidates) {
         const response = await app.request(
           candidate,
-          Object.keys(authHeaders).length > 0 ? { headers: authHeaders } : undefined
+          Object.keys(authHeaders).length > 0
+            ? { headers: authHeaders }
+            : undefined,
         );
         if (response.status === 404 || response.status === 405) {
           continue;
@@ -838,7 +889,7 @@ describe("Control Plane API", () => {
         const payload = await readResponseAsUnknown(response);
         if (response.status < 200 || response.status >= 300) {
           throw new Error(
-            `查询导出任务失败(${candidate})，status=${response.status}，payload=${JSON.stringify(payload)}`
+            `查询导出任务失败(${candidate})，status=${response.status}，payload=${JSON.stringify(payload)}`,
           );
         }
 
@@ -858,7 +909,7 @@ describe("Control Plane API", () => {
         }
         if (status && failedStatus.has(status)) {
           throw new Error(
-            `导出任务进入失败状态(${candidate})，jobId=${jobId}，payload=${JSON.stringify(payload)}`
+            `导出任务进入失败状态(${candidate})，jobId=${jobId}，payload=${JSON.stringify(payload)}`,
           );
         }
       }
@@ -873,7 +924,7 @@ describe("Control Plane API", () => {
     jobId: string,
     downloadPath?: string,
     accessToken?: string,
-    userId?: string
+    userId?: string,
   ): Promise<Response> {
     const authHeaders = await resolveAuthHeaders(accessToken, userId);
     const downloadCandidates = new Set<string>();
@@ -887,7 +938,9 @@ describe("Control Plane API", () => {
     for (const candidate of downloadCandidates) {
       const response = await app.request(
         candidate,
-        Object.keys(authHeaders).length > 0 ? { headers: authHeaders } : undefined
+        Object.keys(authHeaders).length > 0
+          ? { headers: authHeaders }
+          : undefined,
       );
       if (response.status === 404 || response.status === 405) {
         continue;
@@ -898,7 +951,7 @@ describe("Control Plane API", () => {
 
       const payload = await readResponseAsUnknown(response);
       throw new Error(
-        `下载导出文件失败(${candidate})，status=${response.status}，payload=${JSON.stringify(payload)}`
+        `下载导出文件失败(${candidate})，status=${response.status}，payload=${JSON.stringify(payload)}`,
       );
     }
 
@@ -909,7 +962,7 @@ describe("Control Plane API", () => {
     action: string,
     keyword: string,
     accessToken?: string,
-    userId?: string
+    userId?: string,
   ): Promise<{
     items: Array<{
       action: string;
@@ -932,7 +985,9 @@ describe("Control Plane API", () => {
     const authHeaders = await resolveAuthHeaders(accessToken, userId);
     const auditResponse = await app.request(
       `/api/v1/audits?${query.toString()}`,
-      Object.keys(authHeaders).length > 0 ? { headers: authHeaders } : undefined
+      Object.keys(authHeaders).length > 0
+        ? { headers: authHeaders }
+        : undefined,
     );
     const audits = (await auditResponse.json()) as {
       items: Array<{
@@ -964,14 +1019,16 @@ describe("Control Plane API", () => {
       metadata: Record<string, unknown>;
     },
     action: string,
-    keyword: string
+    keyword: string,
   ): boolean {
     if (item.action !== action) {
       return false;
     }
     const normalizedKeyword = keyword.toLowerCase();
     const detailMatched = item.detail.toLowerCase().includes(normalizedKeyword);
-    const metadataMatched = JSON.stringify(item.metadata).toLowerCase().includes(normalizedKeyword);
+    const metadataMatched = JSON.stringify(item.metadata)
+      .toLowerCase()
+      .includes(normalizedKeyword);
     return detailMatched || metadataMatched;
   }
 
@@ -990,10 +1047,64 @@ describe("Control Plane API", () => {
     return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
+  function buildIntegrationCallbackSignedRequest(
+    secret: string,
+    payload: Record<string, unknown>,
+    options: {
+      timestamp?: string;
+      nonce?: string;
+      signature?: string;
+    } = {},
+  ): {
+    init: RequestInit;
+    timestamp: string;
+    nonce: string;
+    signature: string;
+  } {
+    const timestamp = options.timestamp ?? String(Date.now());
+    const nonce = options.nonce ?? createNonce("cb-signature-nonce");
+    const body = JSON.stringify(payload);
+    const signature =
+      options.signature ??
+      createHmac("sha256", secret)
+        .update(`${timestamp}\n${nonce}\n${body}`)
+        .digest("hex");
+
+    return {
+      init: {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-integration-callback-secret": secret,
+          "x-integration-callback-timestamp": timestamp,
+          "x-integration-callback-nonce": nonce,
+          "x-integration-callback-signature": signature,
+        },
+        body,
+      },
+      timestamp,
+      nonce,
+      signature,
+    };
+  }
+
+  async function postIntegrationAlertCallback(
+    secret: string,
+    payload: Record<string, unknown>,
+    options: {
+      timestamp?: string;
+      nonce?: string;
+      signature?: string;
+    } = {},
+  ): Promise<Response> {
+    const request = buildIntegrationCallbackSignedRequest(secret, payload, options);
+    return app.request("/api/v1/integrations/callbacks/alerts", request.init);
+  }
+
   function jsonRequest(
     method: "POST" | "PUT" | "PATCH" | "DELETE",
     body: unknown,
-    headers: Record<string, string> = {}
+    headers: Record<string, string> = {},
   ): RequestInit {
     return {
       method,
@@ -1005,7 +1116,10 @@ describe("Control Plane API", () => {
     };
   }
 
-  function buildAuthHeaders(accessToken?: string, userId?: string): Record<string, string> {
+  function buildAuthHeaders(
+    accessToken?: string,
+    userId?: string,
+  ): Record<string, string> {
     const headers: Record<string, string> = {};
     if (accessToken && accessToken.trim().length > 0) {
       headers.authorization = `Bearer ${accessToken}`;
@@ -1016,7 +1130,9 @@ describe("Control Plane API", () => {
     return headers;
   }
 
-  function resolveTenantIdFromAuthHeaders(headers: Record<string, string>): string {
+  function resolveTenantIdFromAuthHeaders(
+    headers: Record<string, string>,
+  ): string {
     const authorization = headers.authorization ?? headers.Authorization;
     if (!authorization) {
       return "default";
@@ -1037,19 +1153,19 @@ describe("Control Plane API", () => {
     userId?: string;
   }> {
     if (!defaultAuthContextPromise) {
-      defaultAuthContextPromise = registerAndLoginUser(createNonce("default-auth-context")).then(
-        (ctx) => ({
-          accessToken: ctx.accessToken,
-          userId: ctx.userId,
-        })
-      );
+      defaultAuthContextPromise = registerAndLoginUser(
+        createNonce("default-auth-context"),
+      ).then((ctx) => ({
+        accessToken: ctx.accessToken,
+        userId: ctx.userId,
+      }));
     }
     return defaultAuthContextPromise;
   }
 
   async function resolveAuthHeaders(
     accessToken?: string,
-    userId?: string
+    userId?: string,
   ): Promise<Record<string, string>> {
     if (accessToken) {
       return buildAuthHeaders(accessToken, userId);
@@ -1058,7 +1174,9 @@ describe("Control Plane API", () => {
     return buildAuthHeaders(auth.accessToken, auth.userId);
   }
 
-  function resolveUserIdFromAccessToken(accessToken: string): string | undefined {
+  function resolveUserIdFromAccessToken(
+    accessToken: string,
+  ): string | undefined {
     const verified = verifyAccessToken(accessToken);
     if (!verified.success) {
       return undefined;
@@ -1069,7 +1187,7 @@ describe("Control Plane API", () => {
   async function issueTenantScopedAuthHeaders(
     tenantId: string,
     accessToken?: string,
-    userId?: string
+    userId?: string,
   ): Promise<Record<string, string>> {
     const baseAccessToken =
       accessToken && accessToken.trim().length > 0
@@ -1083,7 +1201,9 @@ describe("Control Plane API", () => {
       throw new Error("无法解析用户身份，无法签发租户作用域 token。");
     }
     if (typeof repository.createAuthSession !== "function") {
-      throw new Error("repository.createAuthSession 不可用，无法签发租户作用域 token。");
+      throw new Error(
+        "repository.createAuthSession 不可用，无法签发租户作用域 token。",
+      );
     }
 
     const session = await repository.createAuthSession({
@@ -1104,7 +1224,7 @@ describe("Control Plane API", () => {
   function createSyntheticApiCallResult(
     path: string,
     status: number,
-    payload: unknown
+    payload: unknown,
   ): ApiCallResult {
     const hasBody = status !== 204;
     return {
@@ -1113,22 +1233,27 @@ describe("Control Plane API", () => {
         status,
         headers: hasBody ? { "content-type": "application/json" } : undefined,
       }),
-      payload: hasBody ? payload ?? {} : {},
+      payload: hasBody ? (payload ?? {}) : {},
     };
   }
 
-  function assertApiStatus(result: ApiCallResult, expectedStatuses: number[]): void {
+  function assertApiStatus(
+    result: ApiCallResult,
+    expectedStatuses: number[],
+  ): void {
     if (expectedStatuses.includes(result.response.status)) {
       return;
     }
     throw new Error(
       `状态码不符合预期，path=${result.path}，status=${result.response.status}，payload=${JSON.stringify(
-        result.payload
-      )}`
+        result.payload,
+      )}`,
     );
   }
 
-  async function requestFirstAvailableOrNull(candidates: ApiCandidate[]): Promise<ApiCallResult | null> {
+  async function requestFirstAvailableOrNull(
+    candidates: ApiCandidate[],
+  ): Promise<ApiCallResult | null> {
     for (const candidate of candidates) {
       const response = await app.request(candidate.path, candidate.init);
       if (response.status === 404 || response.status === 405) {
@@ -1144,7 +1269,9 @@ describe("Control Plane API", () => {
     return null;
   }
 
-  async function requestFirstAvailable(candidates: ApiCandidate[]): Promise<ApiCallResult> {
+  async function requestFirstAvailable(
+    candidates: ApiCandidate[],
+  ): Promise<ApiCallResult> {
     const result = await requestFirstAvailableOrNull(candidates);
     if (result) {
       return result;
@@ -1152,12 +1279,16 @@ describe("Control Plane API", () => {
 
     throw new Error(
       `未发现可用接口：${candidates
-        .map((candidate) => `${candidate.init?.method ?? "GET"} ${candidate.path}`)
-        .join(", ")}`
+        .map(
+          (candidate) => `${candidate.init?.method ?? "GET"} ${candidate.path}`,
+        )
+        .join(", ")}`,
     );
   }
 
-  async function requestFirstSuccessful(candidates: ApiCandidate[]): Promise<ApiCallResult> {
+  async function requestFirstSuccessful(
+    candidates: ApiCandidate[],
+  ): Promise<ApiCallResult> {
     let firstAvailable: ApiCallResult | null = null;
 
     for (const candidate of candidates) {
@@ -1187,8 +1318,10 @@ describe("Control Plane API", () => {
 
     throw new Error(
       `未发现可用接口：${candidates
-        .map((candidate) => `${candidate.init?.method ?? "GET"} ${candidate.path}`)
-        .join(", ")}`
+        .map(
+          (candidate) => `${candidate.init?.method ?? "GET"} ${candidate.path}`,
+        )
+        .join(", ")}`,
     );
   }
 
@@ -1244,10 +1377,21 @@ describe("Control Plane API", () => {
     for (const candidate of candidates) {
       accessToken =
         accessToken ??
-        pickString(candidate, ["accessToken", "access_token", "token", "idToken", "id_token"]);
+        pickString(candidate, [
+          "accessToken",
+          "access_token",
+          "token",
+          "idToken",
+          "id_token",
+        ]);
       refreshToken =
         refreshToken ??
-        pickString(candidate, ["refreshToken", "refresh_token", "sessionToken", "session_token"]);
+        pickString(candidate, [
+          "refreshToken",
+          "refresh_token",
+          "sessionToken",
+          "session_token",
+        ]);
 
       if (accessToken && refreshToken) {
         break;
@@ -1262,7 +1406,12 @@ describe("Control Plane API", () => {
 
   function extractEntityId(payload: unknown): string | undefined {
     for (const candidate of collectPayloadCandidates(payload)) {
-      const id = pickString(candidate, ["id", "tenantId", "organizationId", "memberId"]);
+      const id = pickString(candidate, [
+        "id",
+        "tenantId",
+        "organizationId",
+        "memberId",
+      ]);
       if (id) {
         return id;
       }
@@ -1368,7 +1517,9 @@ describe("Control Plane API", () => {
     return undefined;
   }
 
-  function normalizeSourceAccessMode(value: unknown): "realtime" | "sync" | "hybrid" | undefined {
+  function normalizeSourceAccessMode(
+    value: unknown,
+  ): "realtime" | "sync" | "hybrid" | undefined {
     if (typeof value !== "string") {
       return undefined;
     }
@@ -1389,9 +1540,15 @@ describe("Control Plane API", () => {
     return undefined;
   }
 
-  function extractSourceAccessMode(payload: unknown): "realtime" | "sync" | "hybrid" | undefined {
+  function extractSourceAccessMode(
+    payload: unknown,
+  ): "realtime" | "sync" | "hybrid" | undefined {
     for (const candidate of collectPayloadCandidates(payload)) {
-      const accessMode = pickString(candidate, ["accessMode", "access_mode", "mode"]);
+      const accessMode = pickString(candidate, [
+        "accessMode",
+        "access_mode",
+        "mode",
+      ]);
       const normalized = normalizeSourceAccessMode(accessMode);
       if (normalized) {
         return normalized;
@@ -1406,13 +1563,18 @@ describe("Control Plane API", () => {
         continue;
       }
 
-      const syncValue = candidate.sync ?? candidate.syncConfig ?? candidate.sync_config ?? candidate.syncStatus;
+      const syncValue =
+        candidate.sync ??
+        candidate.syncConfig ??
+        candidate.sync_config ??
+        candidate.syncStatus;
       if (syncValue !== undefined) {
         return syncValue;
       }
 
       const syncCron = pickString(candidate, ["syncCron", "sync_cron"]);
-      const syncRetentionDaysCandidate = candidate.syncRetentionDays ?? candidate.sync_retention_days;
+      const syncRetentionDaysCandidate =
+        candidate.syncRetentionDays ?? candidate.sync_retention_days;
       const syncRetentionDays =
         typeof syncRetentionDaysCandidate === "number"
           ? syncRetentionDaysCandidate
@@ -1423,7 +1585,8 @@ describe("Control Plane API", () => {
 
       if (
         syncCron !== undefined ||
-        (typeof syncRetentionDays === "number" && Number.isFinite(syncRetentionDays))
+        (typeof syncRetentionDays === "number" &&
+          Number.isFinite(syncRetentionDays))
       ) {
         return {
           cron: syncCron,
@@ -1513,7 +1676,9 @@ describe("Control Plane API", () => {
     }
 
     if (typeof repository.createLocalUser !== "function") {
-      throw new Error("repository.createLocalUser 不可用，无法执行 auth register fallback。");
+      throw new Error(
+        "repository.createLocalUser 不可用，无法执行 auth register fallback。",
+      );
     }
     const created = await repository.createLocalUser({
       email: validation.data.email,
@@ -1555,7 +1720,9 @@ describe("Control Plane API", () => {
     }
 
     if (typeof repository.getLocalUserByEmail !== "function") {
-      throw new Error("repository.getLocalUserByEmail 不可用，无法执行 auth login fallback。");
+      throw new Error(
+        "repository.getLocalUserByEmail 不可用，无法执行 auth login fallback。",
+      );
     }
     const user = await repository.getLocalUserByEmail(validation.data.email);
     if (!user || user.passwordHash !== validation.data.password) {
@@ -1565,7 +1732,9 @@ describe("Control Plane API", () => {
     }
 
     if (typeof repository.createAuthSession !== "function") {
-      throw new Error("repository.createAuthSession 不可用，无法执行 auth login fallback。");
+      throw new Error(
+        "repository.createAuthSession 不可用，无法执行 auth login fallback。",
+      );
     }
 
     const sessionToken = createAuthSessionToken();
@@ -1606,7 +1775,10 @@ describe("Control Plane API", () => {
     });
   }
 
-  async function getAuthMe(accessToken?: string, userId?: string): Promise<ApiCallResult> {
+  async function getAuthMe(
+    accessToken?: string,
+    userId?: string,
+  ): Promise<ApiCallResult> {
     const headers = buildAuthHeaders(accessToken, userId);
     const result = await requestFirstAvailableOrNull([
       {
@@ -1636,7 +1808,9 @@ describe("Control Plane API", () => {
     }
 
     if (typeof repository.getUserById !== "function") {
-      throw new Error("repository.getUserById 不可用，无法执行 auth me fallback。");
+      throw new Error(
+        "repository.getUserById 不可用，无法执行 auth me fallback。",
+      );
     }
     const user = await repository.getUserById(verified.payload.sub);
     if (!user) {
@@ -1661,7 +1835,9 @@ describe("Control Plane API", () => {
     });
   }
 
-  async function refreshAuthToken(refreshToken: string): Promise<ApiCallResult> {
+  async function refreshAuthToken(
+    refreshToken: string,
+  ): Promise<ApiCallResult> {
     const result = await requestFirstAvailableOrNull([
       {
         path: "/api/v1/auth/refresh",
@@ -1699,10 +1875,14 @@ describe("Control Plane API", () => {
       typeof repository.getAuthSessionById !== "function" ||
       typeof repository.rotateAuthSession !== "function"
     ) {
-      throw new Error("repository auth session 方法不可用，无法执行 auth refresh fallback。");
+      throw new Error(
+        "repository auth session 方法不可用，无法执行 auth refresh fallback。",
+      );
     }
 
-    const currentSession = await repository.getAuthSessionById(verified.payload.sid);
+    const currentSession = await repository.getAuthSessionById(
+      verified.payload.sid,
+    );
     if (
       !currentSession ||
       currentSession.revokedAt !== null ||
@@ -1777,7 +1957,9 @@ describe("Control Plane API", () => {
     }
 
     if (typeof repository.revokeAuthSession !== "function") {
-      throw new Error("repository.revokeAuthSession 不可用，无法执行 auth logout fallback。");
+      throw new Error(
+        "repository.revokeAuthSession 不可用，无法执行 auth logout fallback。",
+      );
     }
     await repository.revokeAuthSession(verified.payload.sid);
 
@@ -1789,7 +1971,7 @@ describe("Control Plane API", () => {
   async function createTenantByAuth(
     accessToken: string | undefined,
     input: { name: string; slug: string },
-    userId?: string
+    userId?: string,
   ): Promise<ApiCallResult> {
     const headers = buildAuthHeaders(accessToken, userId);
     return requestFirstAvailable([
@@ -1806,7 +1988,7 @@ describe("Control Plane API", () => {
 
   async function listTenantsByAuth(
     accessToken: string | undefined,
-    userId?: string
+    userId?: string,
   ): Promise<ApiCallResult> {
     const headers = buildAuthHeaders(accessToken, userId);
     return requestFirstAvailable([
@@ -1832,7 +2014,7 @@ describe("Control Plane API", () => {
       name: string;
       slug: string;
     },
-    userId?: string
+    userId?: string,
   ): Promise<ApiCallResult> {
     const tenantIdSegment = encodeURIComponent(input.tenantId);
     const headers = buildAuthHeaders(accessToken, userId);
@@ -1859,7 +2041,7 @@ describe("Control Plane API", () => {
   async function listOrganizationsByAuth(
     accessToken: string | undefined,
     tenantId: string,
-    userId?: string
+    userId?: string,
   ): Promise<ApiCallResult> {
     const tenantIdSegment = encodeURIComponent(tenantId);
     const query = new URLSearchParams({
@@ -1904,7 +2086,7 @@ describe("Control Plane API", () => {
       organizationId?: string;
       orgRole?: "owner" | "maintainer" | "member" | "readonly";
     },
-    userId?: string
+    userId?: string,
   ): Promise<ApiCallResult> {
     const tenantIdSegment = encodeURIComponent(input.tenantId);
     const headers = buildAuthHeaders(accessToken, userId);
@@ -1927,7 +2109,7 @@ describe("Control Plane API", () => {
   async function listTenantMembersByAuth(
     accessToken: string | undefined,
     tenantId: string,
-    userId?: string
+    userId?: string,
   ): Promise<ApiCallResult> {
     const tenantIdSegment = encodeURIComponent(tenantId);
     const query = new URLSearchParams({
@@ -1982,14 +2164,18 @@ describe("Control Plane API", () => {
     const tokens = extractAuthTokens(loginResult.payload);
     if (!tokens.accessToken || !tokens.refreshToken) {
       throw new Error(
-        `登录响应缺少令牌，path=${loginResult.path}，payload=${JSON.stringify(loginResult.payload)}`
+        `登录响应缺少令牌，path=${loginResult.path}，payload=${JSON.stringify(loginResult.payload)}`,
       );
     }
 
     const verifiedAccessToken = verifyAccessToken(tokens.accessToken);
-    const userIdFromToken = verifiedAccessToken.success ? verifiedAccessToken.payload.sub : undefined;
+    const userIdFromToken = verifiedAccessToken.success
+      ? verifiedAccessToken.payload.sub
+      : undefined;
     const userId =
-      extractUserId(loginResult.payload) ?? extractUserId(registerResult.payload) ?? userIdFromToken;
+      extractUserId(loginResult.payload) ??
+      extractUserId(registerResult.payload) ??
+      userIdFromToken;
 
     return {
       email,
@@ -2021,11 +2207,13 @@ describe("Control Plane API", () => {
     const loginTokens = extractAuthTokens(loginResult.payload);
     if (!loginTokens.accessToken || !loginTokens.refreshToken) {
       throw new Error(
-        `登录响应缺少令牌，path=${loginResult.path}，payload=${JSON.stringify(loginResult.payload)}`
+        `登录响应缺少令牌，path=${loginResult.path}，payload=${JSON.stringify(loginResult.payload)}`,
       );
     }
 
-    const actorUserId = extractUserId(loginResult.payload) ?? extractUserId(registerResult.payload);
+    const actorUserId =
+      extractUserId(loginResult.payload) ??
+      extractUserId(registerResult.payload);
     const meResult = await getAuthMe(loginTokens.accessToken, actorUserId);
     assertApiStatus(meResult, [200]);
     const meEmail = extractUserEmail(meResult.payload);
@@ -2039,12 +2227,13 @@ describe("Control Plane API", () => {
     if (!refreshedTokens.accessToken) {
       throw new Error(
         `refresh 响应缺少 accessToken，path=${refreshResult.path}，payload=${JSON.stringify(
-          refreshResult.payload
-        )}`
+          refreshResult.payload,
+        )}`,
       );
     }
 
-    const refreshTokenForLogout = refreshedTokens.refreshToken ?? loginTokens.refreshToken;
+    const refreshTokenForLogout =
+      refreshedTokens.refreshToken ?? loginTokens.refreshToken;
     const logoutResult = await logoutAuthToken(refreshTokenForLogout);
     assertApiStatus(logoutResult, [200, 204]);
   });
@@ -2089,7 +2278,9 @@ describe("Control Plane API", () => {
 
   test("Auth 异常：refresh 失败会写入 auth.refresh_failed 审计", async () => {
     const nonce = createNonce("auth-refresh-failed");
-    const refreshResult = await refreshAuthToken(`invalid-refresh-token-${nonce}`);
+    const refreshResult = await refreshAuthToken(
+      `invalid-refresh-token-${nonce}`,
+    );
     expect(refreshResult.response.status).toBe(401);
 
     const auth = await getDefaultAuthContext();
@@ -2097,7 +2288,7 @@ describe("Control Plane API", () => {
       "auth.refresh_failed",
       "/api/v1/auth/refresh",
       auth.accessToken,
-      auth.userId
+      auth.userId,
     );
     const targetAudit = audits.items.find((item) => {
       const metadataRoute = item.metadata.route;
@@ -2122,7 +2313,7 @@ describe("Control Plane API", () => {
         name: `租户-${nonce}`,
         slug: `tenant-${nonce}`,
       },
-      owner.userId
+      owner.userId,
     );
     assertApiStatus(createTenantResult, [201]);
 
@@ -2130,19 +2321,22 @@ describe("Control Plane API", () => {
     if (!tenantId) {
       throw new Error(
         `租户创建响应缺少 tenantId，path=${createTenantResult.path}，payload=${JSON.stringify(
-          createTenantResult.payload
-        )}`
+          createTenantResult.payload,
+        )}`,
       );
     }
 
-    const ownerTenantListResult = await listTenantsByAuth(owner.accessToken, owner.userId);
+    const ownerTenantListResult = await listTenantsByAuth(
+      owner.accessToken,
+      owner.userId,
+    );
     assertApiStatus(ownerTenantListResult, [200]);
     const ownerTenants = extractListItems(ownerTenantListResult.payload);
     expect(
       ownerTenants.some((item) => {
         const id = pickString(item, ["id", "tenantId"]);
         return id === tenantId;
-      })
+      }),
     ).toBe(true);
 
     const createOrgResult = await createOrganizationByAuth(
@@ -2152,7 +2346,7 @@ describe("Control Plane API", () => {
         name: `组织-${nonce}`,
         slug: `org-${nonce}`,
       },
-      owner.userId
+      owner.userId,
     );
     assertApiStatus(createOrgResult, [201]);
 
@@ -2160,19 +2354,23 @@ describe("Control Plane API", () => {
     if (!organizationId) {
       throw new Error(
         `组织创建响应缺少 organizationId，path=${createOrgResult.path}，payload=${JSON.stringify(
-          createOrgResult.payload
-        )}`
+          createOrgResult.payload,
+        )}`,
       );
     }
 
-    const ownerOrgListResult = await listOrganizationsByAuth(owner.accessToken, tenantId, owner.userId);
+    const ownerOrgListResult = await listOrganizationsByAuth(
+      owner.accessToken,
+      tenantId,
+      owner.userId,
+    );
     assertApiStatus(ownerOrgListResult, [200]);
     const organizations = extractListItems(ownerOrgListResult.payload);
     expect(
       organizations.some((item) => {
         const id = pickString(item, ["id", "organizationId"]);
         return id === organizationId;
-      })
+      }),
     ).toBe(true);
 
     const member = await registerAndLoginUser(`${nonce}-member`);
@@ -2180,12 +2378,14 @@ describe("Control Plane API", () => {
       owner.accessToken,
       {
         tenantId,
-        ...(member.userId ? { userId: member.userId } : { email: member.email }),
+        ...(member.userId
+          ? { userId: member.userId }
+          : { email: member.email }),
         tenantRole: "member",
         organizationId,
         orgRole: "maintainer",
       },
-      owner.userId
+      owner.userId,
     );
     assertApiStatus(addMemberResult, [201]);
     if (isRecord(addMemberResult.payload)) {
@@ -2194,7 +2394,11 @@ describe("Control Plane API", () => {
       expect(addMemberResult.payload.orgRole).toBe("maintainer");
     }
 
-    const memberListResult = await listTenantMembersByAuth(owner.accessToken, tenantId, owner.userId);
+    const memberListResult = await listTenantMembersByAuth(
+      owner.accessToken,
+      tenantId,
+      owner.userId,
+    );
     assertApiStatus(memberListResult, [200]);
     const members = extractListItems(memberListResult.payload);
     const addedMember = members.find((item) => {
@@ -2224,7 +2428,7 @@ describe("Control Plane API", () => {
         name: `租户A-${nonce}`,
         slug: `tenant-a-${nonce}`,
       },
-      tenantAOwner.userId
+      tenantAOwner.userId,
     );
     assertApiStatus(tenantAResult, [201]);
 
@@ -2234,7 +2438,7 @@ describe("Control Plane API", () => {
         name: `租户B-${nonce}`,
         slug: `tenant-b-${nonce}`,
       },
-      tenantBOwner.userId
+      tenantBOwner.userId,
     );
     assertApiStatus(tenantBResult, [201]);
 
@@ -2242,15 +2446,15 @@ describe("Control Plane API", () => {
     if (!tenantBId) {
       throw new Error(
         `租户B创建响应缺少 tenantId，path=${tenantBResult.path}，payload=${JSON.stringify(
-          tenantBResult.payload
-        )}`
+          tenantBResult.payload,
+        )}`,
       );
     }
 
     const crossTenantAccessResult = await listOrganizationsByAuth(
       tenantAOwner.accessToken,
       tenantBId,
-      tenantAOwner.userId
+      tenantAOwner.userId,
     );
     expect(crossTenantAccessResult.response.status).toBe(403);
   });
@@ -2270,7 +2474,7 @@ describe("Control Plane API", () => {
         name: `租户重复测试A-${nonce}`,
         slug,
       },
-      ownerA.userId
+      ownerA.userId,
     );
     assertApiStatus(firstCreate, [201]);
 
@@ -2280,7 +2484,7 @@ describe("Control Plane API", () => {
         name: `租户重复测试B-${nonce}`,
         slug,
       },
-      ownerB.userId
+      ownerB.userId,
     );
     expect(secondCreate.response.status).toBe(409);
     if (isRecord(secondCreate.payload)) {
@@ -2302,7 +2506,7 @@ describe("Control Plane API", () => {
         name: `写权限租户-${nonce}`,
         slug: `tenant-write-${nonce}`,
       },
-      owner.userId
+      owner.userId,
     );
     assertApiStatus(createTenantResult, [201]);
 
@@ -2310,8 +2514,8 @@ describe("Control Plane API", () => {
     if (!tenantId) {
       throw new Error(
         `租户创建响应缺少 tenantId，path=${createTenantResult.path}，payload=${JSON.stringify(
-          createTenantResult.payload
-        )}`
+          createTenantResult.payload,
+        )}`,
       );
     }
 
@@ -2319,10 +2523,12 @@ describe("Control Plane API", () => {
       owner.accessToken,
       {
         tenantId,
-        ...(plainMember.userId ? { userId: plainMember.userId } : { email: plainMember.email }),
+        ...(plainMember.userId
+          ? { userId: plainMember.userId }
+          : { email: plainMember.email }),
         tenantRole: "member",
       },
-      owner.userId
+      owner.userId,
     );
     assertApiStatus(addMemberResult, [201]);
 
@@ -2333,7 +2539,7 @@ describe("Control Plane API", () => {
         name: `成员写入组织-${nonce}`,
         slug: `member-org-${nonce}`,
       },
-      plainMember.userId
+      plainMember.userId,
     );
     expect(memberWriteResult.response.status).toBe(403);
   });
@@ -2378,8 +2584,18 @@ describe("Control Plane API", () => {
     const originalFetch = globalThis.fetch;
     const proxyBaseUrl = "http://127.0.0.1:19083";
     const proxyCells: HeatmapCell[] = [
-      { date: "2026-03-01T00:00:00.000Z", tokens: 2100, cost: 0.7, sessions: 3 },
-      { date: "2026-03-02T00:00:00.000Z", tokens: 3200, cost: 0.9, sessions: 4 },
+      {
+        date: "2026-03-01T00:00:00.000Z",
+        tokens: 2100,
+        cost: 0.7,
+        sessions: 3,
+      },
+      {
+        date: "2026-03-02T00:00:00.000Z",
+        tokens: 3200,
+        cost: 0.9,
+        sessions: 4,
+      },
     ];
     const queryString =
       "?tenantId=tenant-proxy&from=2026-03-01T00%3A00%3A00.000Z&to=2026-03-31T23%3A59%3A59.999Z&timezone=Asia%2FShanghai&metric=tokens";
@@ -2397,19 +2613,28 @@ describe("Control Plane API", () => {
         });
       }) as typeof fetch;
 
-      const response = await app.request(`/api/v1/usage/heatmap${queryString}`, {
-        headers: authHeaders,
-      });
+      const response = await app.request(
+        `/api/v1/usage/heatmap${queryString}`,
+        {
+          headers: authHeaders,
+        },
+      );
       const body = (await response.json()) as UsageHeatmapResponse;
 
       expect(response.status).toBe(200);
       expect(fetchCalls.length).toBe(1);
       const forwardedUrl = new URL(fetchCalls[0]);
-      expect(`${forwardedUrl.origin}${forwardedUrl.pathname}`).toBe(`${proxyBaseUrl}/v1/usage/heatmap`);
+      expect(`${forwardedUrl.origin}${forwardedUrl.pathname}`).toBe(
+        `${proxyBaseUrl}/v1/usage/heatmap`,
+      );
       expect(forwardedUrl.searchParams.get("tenant_id")).toBe(authTenantId);
       expect(forwardedUrl.searchParams.has("tenantId")).toBe(false);
-      expect(forwardedUrl.searchParams.get("from")).toBe("2026-03-01T00:00:00.000Z");
-      expect(forwardedUrl.searchParams.get("to")).toBe("2026-03-31T23:59:59.999Z");
+      expect(forwardedUrl.searchParams.get("from")).toBe(
+        "2026-03-01T00:00:00.000Z",
+      );
+      expect(forwardedUrl.searchParams.get("to")).toBe(
+        "2026-03-31T23:59:59.999Z",
+      );
       expect(forwardedUrl.searchParams.get("tz")).toBe("Asia/Shanghai");
       expect(forwardedUrl.searchParams.has("timezone")).toBe(false);
       expect(forwardedUrl.searchParams.get("metric")).toBe("tokens");
@@ -2462,7 +2687,9 @@ describe("Control Plane API", () => {
       });
       const body = (await response.json()) as UsageHeatmapResponse;
       expect(response.status).toBe(200);
-      expect(fetchCalls).toEqual([`${proxyBaseUrl}/v1/usage/heatmap?tenant_id=${encodeURIComponent(authTenantId)}`]);
+      expect(fetchCalls).toEqual([
+        `${proxyBaseUrl}/v1/usage/heatmap?tenant_id=${encodeURIComponent(authTenantId)}`,
+      ]);
       expect(body).toEqual({
         cells: [],
         summary: {
@@ -2512,7 +2739,9 @@ describe("Control Plane API", () => {
 
     try {
       if (typeof originalListUsageHeatmap !== "function") {
-        throw new Error("repository.listUsageHeatmap 不可用，无法验证 usage fallback。");
+        throw new Error(
+          "repository.listUsageHeatmap 不可用，无法验证 usage fallback。",
+        );
       }
 
       repository.listUsageHeatmap = async (input) => {
@@ -2524,23 +2753,36 @@ describe("Control Plane API", () => {
       globalThis.fetch = (async (input) => {
         const url = input instanceof Request ? input.url : String(input);
         fetchCalls.push(url);
-        return new Response(JSON.stringify({ message: "upstream unavailable" }), {
-          status: 502,
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({ message: "upstream unavailable" }),
+          {
+            status: 502,
+            headers: { "content-type": "application/json" },
+          },
+        );
       }) as typeof fetch;
 
-      const fallbackResponse = await app.request(`/api/v1/usage/heatmap${queryString}`, {
-        headers: authHeaders,
-      });
-      const fallbackBody = (await fallbackResponse.json()) as UsageHeatmapResponse;
+      const fallbackResponse = await app.request(
+        `/api/v1/usage/heatmap${queryString}`,
+        {
+          headers: authHeaders,
+        },
+      );
+      const fallbackBody =
+        (await fallbackResponse.json()) as UsageHeatmapResponse;
       expect(fallbackResponse.status).toBe(200);
       expect(fetchCalls.length).toBe(1);
       const forwardedUrl = new URL(fetchCalls[0]);
-      expect(`${forwardedUrl.origin}${forwardedUrl.pathname}`).toBe(`${proxyBaseUrl}/v1/usage/heatmap`);
+      expect(`${forwardedUrl.origin}${forwardedUrl.pathname}`).toBe(
+        `${proxyBaseUrl}/v1/usage/heatmap`,
+      );
       expect(forwardedUrl.searchParams.get("tenant_id")).toBe(authTenantId);
-      expect(forwardedUrl.searchParams.get("from")).toBe("2026-03-01T00:00:00.000Z");
-      expect(forwardedUrl.searchParams.get("to")).toBe("2026-03-09T23:59:59.999Z");
+      expect(forwardedUrl.searchParams.get("from")).toBe(
+        "2026-03-01T00:00:00.000Z",
+      );
+      expect(forwardedUrl.searchParams.get("to")).toBe(
+        "2026-03-09T23:59:59.999Z",
+      );
       expect(forwardedUrl.searchParams.get("tz")).toBe("Asia/Shanghai");
       expect(forwardedUrl.searchParams.get("metric")).toBe("sessions");
       expect(repoQueryCalls).toEqual([expectedQuery]);
@@ -2558,10 +2800,14 @@ describe("Control Plane API", () => {
         throw new Error("代理关闭时不应调用 fetch");
       }) as unknown as typeof fetch;
 
-      const directRepoResponse = await app.request(`/api/v1/usage/heatmap${queryString}`, {
-        headers: authHeaders,
-      });
-      const directRepoBody = (await directRepoResponse.json()) as UsageHeatmapResponse;
+      const directRepoResponse = await app.request(
+        `/api/v1/usage/heatmap${queryString}`,
+        {
+          headers: authHeaders,
+        },
+      );
+      const directRepoBody =
+        (await directRepoResponse.json()) as UsageHeatmapResponse;
       expect(directRepoResponse.status).toBe(200);
       expect(repoQueryCalls).toEqual([expectedQuery, expectedQuery]);
       expect(fallbackBody).toEqual(directRepoBody);
@@ -2594,7 +2840,9 @@ describe("Control Plane API", () => {
 
     try {
       if (typeof originalListUsageHeatmap !== "function") {
-        throw new Error("repository.listUsageHeatmap 不可用，无法验证 4xx 透传。");
+        throw new Error(
+          "repository.listUsageHeatmap 不可用，无法验证 4xx 透传。",
+        );
       }
 
       repository.listUsageHeatmap = async () => {
@@ -2612,10 +2860,16 @@ describe("Control Plane API", () => {
         });
       }) as typeof fetch;
 
-      const response = await app.request("/api/v1/usage/heatmap?tenant_id=tenant-4xx&from=bad-date", {
-        headers: authHeaders,
-      });
-      const body = (await response.json()) as { error?: string; status?: number };
+      const response = await app.request(
+        "/api/v1/usage/heatmap?tenant_id=tenant-4xx&from=bad-date",
+        {
+          headers: authHeaders,
+        },
+      );
+      const body = (await response.json()) as {
+        error?: string;
+        status?: number;
+      };
 
       expect(fetchCalls).toEqual([
         `${proxyBaseUrl}/v1/usage/heatmap?tenant_id=${encodeURIComponent(authTenantId)}&from=bad-date`,
@@ -2656,7 +2910,9 @@ describe("Control Plane API", () => {
 
     try {
       if (typeof originalListUsageHeatmap !== "function") {
-        throw new Error("repository.listUsageHeatmap 不可用，无法验证 usage timeout fallback。");
+        throw new Error(
+          "repository.listUsageHeatmap 不可用，无法验证 usage timeout fallback。",
+        );
       }
 
       repository.listUsageHeatmap = async () => [];
@@ -2693,7 +2949,9 @@ describe("Control Plane API", () => {
       });
       const body = (await response.json()) as UsageHeatmapResponse;
       expect(response.status).toBe(200);
-      expect(fetchCalls).toEqual([`${proxyBaseUrl}/v1/usage/heatmap?tenant_id=${encodeURIComponent(authTenantId)}`]);
+      expect(fetchCalls).toEqual([
+        `${proxyBaseUrl}/v1/usage/heatmap?tenant_id=${encodeURIComponent(authTenantId)}`,
+      ]);
       expect(abortTriggered).toBe(true);
       expect(body).toEqual({
         cells: [],
@@ -2724,7 +2982,7 @@ describe("Control Plane API", () => {
     }
   });
 
-  test("GET /api/v1/usage/heatmap ANALYTICS_PROXY_TIMEOUT_MS=\"1e3\" 走默认逻辑，不会在 <100ms 被 abort", async () => {
+  test('GET /api/v1/usage/heatmap ANALYTICS_PROXY_TIMEOUT_MS="1e3" 走默认逻辑，不会在 <100ms 被 abort', async () => {
     const authHeaders = await resolveAuthHeaders();
     const authTenantId = resolveTenantIdFromAuthHeaders(authHeaders);
     const originalProxyEnabled = Bun.env.ANALYTICS_PROXY_ENABLED;
@@ -2735,13 +2993,20 @@ describe("Control Plane API", () => {
     const proxyBaseUrl = "http://127.0.0.1:19090";
     const fetchCalls: string[] = [];
     const proxyCells: HeatmapCell[] = [
-      { date: "2026-03-05T00:00:00.000Z", tokens: 900, cost: 0.45, sessions: 2 },
+      {
+        date: "2026-03-05T00:00:00.000Z",
+        tokens: 900,
+        cost: 0.45,
+        sessions: 2,
+      },
     ];
     let abortElapsedMs: number | null = null;
 
     try {
       if (typeof originalListUsageHeatmap !== "function") {
-        throw new Error("repository.listUsageHeatmap 不可用，无法验证 timeout env 解析。");
+        throw new Error(
+          "repository.listUsageHeatmap 不可用，无法验证 timeout env 解析。",
+        );
       }
 
       repository.listUsageHeatmap = async () => [];
@@ -2773,7 +3038,7 @@ describe("Control Plane API", () => {
               new Response(JSON.stringify({ cells: proxyCells }), {
                 status: 200,
                 headers: { "content-type": "application/json" },
-              })
+              }),
             );
           }, 130);
         });
@@ -2784,7 +3049,9 @@ describe("Control Plane API", () => {
       });
       const body = (await response.json()) as UsageHeatmapResponse;
       expect(response.status).toBe(200);
-      expect(fetchCalls).toEqual([`${proxyBaseUrl}/v1/usage/heatmap?tenant_id=${encodeURIComponent(authTenantId)}`]);
+      expect(fetchCalls).toEqual([
+        `${proxyBaseUrl}/v1/usage/heatmap?tenant_id=${encodeURIComponent(authTenantId)}`,
+      ]);
       expect(abortElapsedMs === null || abortElapsedMs >= 100).toBe(true);
       expect(body).toEqual({
         cells: proxyCells,
@@ -2828,7 +3095,9 @@ describe("Control Plane API", () => {
 
     try {
       if (typeof originalListUsageHeatmap !== "function") {
-        throw new Error("repository.listUsageHeatmap 不可用，无法验证 payload fallback。");
+        throw new Error(
+          "repository.listUsageHeatmap 不可用，无法验证 payload fallback。",
+        );
       }
 
       repository.listUsageHeatmap = async () => {
@@ -2840,16 +3109,34 @@ describe("Control Plane API", () => {
       globalThis.fetch = (async (input) => {
         const url = input instanceof Request ? input.url : String(input);
         fetchCalls.push(url);
-        return new Response(JSON.stringify({
-          cells: [
-            { date: "2026-03-06T00:00:00.000Z", tokens: -1, cost: 0.2, sessions: 1 },
-            { date: "2026-03-07T00:00:00.000Z", tokens: 10, cost: -0.1, sessions: 2 },
-            { date: "2026-03-08T00:00:00.000Z", tokens: 12, cost: 0.3, sessions: 1.5 },
-          ],
-        }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({
+            cells: [
+              {
+                date: "2026-03-06T00:00:00.000Z",
+                tokens: -1,
+                cost: 0.2,
+                sessions: 1,
+              },
+              {
+                date: "2026-03-07T00:00:00.000Z",
+                tokens: 10,
+                cost: -0.1,
+                sessions: 2,
+              },
+              {
+                date: "2026-03-08T00:00:00.000Z",
+                tokens: 12,
+                cost: 0.3,
+                sessions: 1.5,
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
       }) as typeof fetch;
 
       const response = await app.request("/api/v1/usage/heatmap", {
@@ -2857,7 +3144,9 @@ describe("Control Plane API", () => {
       });
       const body = (await response.json()) as UsageHeatmapResponse;
       expect(response.status).toBe(200);
-      expect(fetchCalls).toEqual([`${proxyBaseUrl}/v1/usage/heatmap?tenant_id=${encodeURIComponent(authTenantId)}`]);
+      expect(fetchCalls).toEqual([
+        `${proxyBaseUrl}/v1/usage/heatmap?tenant_id=${encodeURIComponent(authTenantId)}`,
+      ]);
       expect(repoCalls).toBe(1);
       expect(body).toEqual({
         cells: [],
@@ -2966,7 +3255,9 @@ describe("Control Plane API", () => {
 
     try {
       if (typeof originalListUsageHeatmap !== "function") {
-        throw new Error("repository.listUsageHeatmap 不可用，无法验证代理关闭分支。");
+        throw new Error(
+          "repository.listUsageHeatmap 不可用，无法验证代理关闭分支。",
+        );
       }
 
       repository.listUsageHeatmap = async (input) => {
@@ -2983,9 +3274,12 @@ describe("Control Plane API", () => {
         });
       }) as unknown as typeof fetch;
 
-      const response = await app.request(`/api/v1/usage/heatmap${queryString}`, {
-        headers: authHeaders,
-      });
+      const response = await app.request(
+        `/api/v1/usage/heatmap${queryString}`,
+        {
+          headers: authHeaders,
+        },
+      );
       const body = (await response.json()) as UsageHeatmapResponse;
 
       expect(response.status).toBe(200);
@@ -3076,7 +3370,7 @@ describe("Control Plane API", () => {
         expect(typeof first.costRaw).toBe("number");
         expect(typeof first.costEstimated).toBe("number");
         expect(["raw", "estimated", "reported", "mixed", "none"]).toContain(
-          String(first.costMode)
+          String(first.costMode),
         );
         expect(typeof first.sessions).toBe("number");
         expect(isRecord(first.change)).toBe(true);
@@ -3084,9 +3378,15 @@ describe("Control Plane API", () => {
           const changeTokens = first.change.tokens;
           const changeCost = first.change.cost;
           const changeSessions = first.change.sessions;
-          expect(changeTokens === null || typeof changeTokens === "number").toBe(true);
-          expect(changeCost === null || typeof changeCost === "number").toBe(true);
-          expect(changeSessions === null || typeof changeSessions === "number").toBe(true);
+          expect(
+            changeTokens === null || typeof changeTokens === "number",
+          ).toBe(true);
+          expect(changeCost === null || typeof changeCost === "number").toBe(
+            true,
+          );
+          expect(
+            changeSessions === null || typeof changeSessions === "number",
+          ).toBe(true);
         }
       }
 
@@ -3111,7 +3411,7 @@ describe("Control Plane API", () => {
         expect(typeof first.costRaw).toBe("number");
         expect(typeof first.costEstimated).toBe("number");
         expect(["raw", "estimated", "reported", "mixed", "none"]).toContain(
-          String(first.costMode)
+          String(first.costMode),
         );
         expect(typeof first.sessions).toBe("number");
       }
@@ -3141,7 +3441,7 @@ describe("Control Plane API", () => {
         expect(typeof first.costRaw).toBe("number");
         expect(typeof first.costEstimated).toBe("number");
         expect(["raw", "estimated", "reported", "mixed", "none"]).toContain(
-          String(first.costMode)
+          String(first.costMode),
         );
         expect(typeof first.sessions).toBe("number");
       }
@@ -3165,17 +3465,23 @@ describe("Control Plane API", () => {
       expect(Array.isArray(breakdownItems)).toBe(true);
       if (breakdownItems.length > 0) {
         const first = breakdownItems[0];
-        expect(typeof pickString(first, ["sessionId", "session_id"])).toBe("string");
-        expect(typeof pickString(first, ["sourceId", "source_id"])).toBe("string");
+        expect(typeof pickString(first, ["sessionId", "session_id"])).toBe(
+          "string",
+        );
+        expect(typeof pickString(first, ["sourceId", "source_id"])).toBe(
+          "string",
+        );
         expect(typeof pickString(first, ["tool"])).toBe("string");
         expect(typeof pickString(first, ["model"])).toBe("string");
-        expect(typeof pickString(first, ["startedAt", "started_at"])).toBe("string");
+        expect(typeof pickString(first, ["startedAt", "started_at"])).toBe(
+          "string",
+        );
         expect(typeof first.totalTokens).toBe("number");
         expect(typeof first.cost).toBe("number");
         expect(typeof first.costRaw).toBe("number");
         expect(typeof first.costEstimated).toBe("number");
         expect(["raw", "estimated", "reported", "mixed", "none"]).toContain(
-          String(first.costMode)
+          String(first.costMode),
         );
       }
     } finally {
@@ -3198,7 +3504,9 @@ describe("Control Plane API", () => {
     try {
       repository.getPool = async () => null;
       if (!Array.isArray(repository.memorySessions)) {
-        throw new Error("repository.memorySessions 不可用，无法注入 usage 双轨数据。");
+        throw new Error(
+          "repository.memorySessions 不可用，无法注入 usage 双轨数据。",
+        );
       }
 
       const createSourceResponse = await app.request("/api/v1/sources", {
@@ -3276,14 +3584,17 @@ describe("Control Plane API", () => {
         limit: "20",
       }).toString();
 
-      const dailyResponse = await app.request(`/api/v1/usage/daily?${baseQuery}`, {
-        headers: authHeaders,
-      });
+      const dailyResponse = await app.request(
+        `/api/v1/usage/daily?${baseQuery}`,
+        {
+          headers: authHeaders,
+        },
+      );
       const dailyPayload = await readResponseAsUnknown(dailyResponse);
       const dailyItems = extractListItems(dailyPayload);
       expect(dailyResponse.status).toBe(200);
       const dailyTarget = dailyItems.find((item) =>
-        (pickString(item, ["date"]) ?? "").startsWith("2026-02-10")
+        (pickString(item, ["date"]) ?? "").startsWith("2026-02-10"),
       );
       expect(dailyTarget).toBeDefined();
       if (dailyTarget) {
@@ -3293,14 +3604,17 @@ describe("Control Plane API", () => {
         expect(String(dailyTarget.costMode)).toBe("mixed");
       }
 
-      const monthlyResponse = await app.request(`/api/v1/usage/monthly?${baseQuery}`, {
-        headers: authHeaders,
-      });
+      const monthlyResponse = await app.request(
+        `/api/v1/usage/monthly?${baseQuery}`,
+        {
+          headers: authHeaders,
+        },
+      );
       const monthlyPayload = await readResponseAsUnknown(monthlyResponse);
       const monthlyItems = extractListItems(monthlyPayload);
       expect(monthlyResponse.status).toBe(200);
       const monthlyTarget = monthlyItems.find((item) =>
-        (pickString(item, ["month"]) ?? "").startsWith("2026-02-01")
+        (pickString(item, ["month"]) ?? "").startsWith("2026-02-01"),
       );
       expect(monthlyTarget).toBeDefined();
       if (monthlyTarget) {
@@ -3310,23 +3624,26 @@ describe("Control Plane API", () => {
         expect(String(monthlyTarget.costMode)).toBe("mixed");
       }
 
-      const modelResponse = await app.request(`/api/v1/usage/models?${baseQuery}`, {
-        headers: authHeaders,
-      });
+      const modelResponse = await app.request(
+        `/api/v1/usage/models?${baseQuery}`,
+        {
+          headers: authHeaders,
+        },
+      );
       const modelPayload = await readResponseAsUnknown(modelResponse);
       const modelItems = extractListItems(modelPayload);
       expect(modelResponse.status).toBe(200);
       const rawModel = modelItems.find(
-        (item) => pickString(item, ["model"]) === `usage-raw-${nonce}`
+        (item) => pickString(item, ["model"]) === `usage-raw-${nonce}`,
       );
       const estimatedModel = modelItems.find(
-        (item) => pickString(item, ["model"]) === `usage-estimated-${nonce}`
+        (item) => pickString(item, ["model"]) === `usage-estimated-${nonce}`,
       );
       const reportedModel = modelItems.find(
-        (item) => pickString(item, ["model"]) === `usage-reported-${nonce}`
+        (item) => pickString(item, ["model"]) === `usage-reported-${nonce}`,
       );
       const mixedModel = modelItems.find(
-        (item) => pickString(item, ["model"]) === `usage-mixed-${nonce}`
+        (item) => pickString(item, ["model"]) === `usage-mixed-${nonce}`,
       );
       expect(rawModel).toBeDefined();
       expect(estimatedModel).toBeDefined();
@@ -3353,9 +3670,12 @@ describe("Control Plane API", () => {
         expect(String(mixedModel.costMode)).toBe("mixed");
       }
 
-      const sessionResponse = await app.request(`/api/v1/usage/sessions?${baseQuery}`, {
-        headers: authHeaders,
-      });
+      const sessionResponse = await app.request(
+        `/api/v1/usage/sessions?${baseQuery}`,
+        {
+          headers: authHeaders,
+        },
+      );
       const sessionPayload = await readResponseAsUnknown(sessionResponse);
       const sessionItems = extractListItems(sessionPayload);
       expect(sessionResponse.status).toBe(200);
@@ -3368,13 +3688,26 @@ describe("Control Plane API", () => {
         sessionModeByModel.set(model, String(item.costMode));
       }
       expect(sessionModeByModel.get(`usage-raw-${nonce}`)).toBe("raw");
-      expect(sessionModeByModel.get(`usage-estimated-${nonce}`)).toBe("estimated");
-      expect(sessionModeByModel.get(`usage-reported-${nonce}`)).toBe("reported");
+      expect(sessionModeByModel.get(`usage-estimated-${nonce}`)).toBe(
+        "estimated",
+      );
+      expect(sessionModeByModel.get(`usage-reported-${nonce}`)).toBe(
+        "reported",
+      );
       expect(sessionModeByModel.get(`usage-mixed-${nonce}`)).toBe("mixed");
     } finally {
-      if (Array.isArray(repository.memorySessions) && insertedSessionIds.length > 0) {
-        for (let index = repository.memorySessions.length - 1; index >= 0; index -= 1) {
-          if (insertedSessionIds.includes(repository.memorySessions[index]?.id)) {
+      if (
+        Array.isArray(repository.memorySessions) &&
+        insertedSessionIds.length > 0
+      ) {
+        for (
+          let index = repository.memorySessions.length - 1;
+          index >= 0;
+          index -= 1
+        ) {
+          if (
+            insertedSessionIds.includes(repository.memorySessions[index]?.id)
+          ) {
             repository.memorySessions.splice(index, 1);
           }
         }
@@ -3402,7 +3735,9 @@ describe("Control Plane API", () => {
 
     try {
       if (typeof originalListUsageDaily !== "function") {
-        throw new Error("repository.listUsageDaily 不可用，无法验证 tenant 隔离。");
+        throw new Error(
+          "repository.listUsageDaily 不可用，无法验证 tenant 隔离。",
+        );
       }
 
       repository.listUsageDaily = async (input) => {
@@ -3420,7 +3755,7 @@ describe("Control Plane API", () => {
         `/api/v1/usage/daily?${query.toString()}&tenant_id=tenant-from-query-2`,
         {
           headers: authHeaders,
-        }
+        },
       );
 
       expect(response.status).toBe(200);
@@ -3538,20 +3873,28 @@ describe("Control Plane API", () => {
     expect(createResponse.status).toBe(201);
     expect(typeof created.id).toBe("string");
 
-    const testConnectionResponse = await app.request(`/api/v1/sources/${created.id}/test-connection`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...authHeaders,
+    const testConnectionResponse = await app.request(
+      `/api/v1/sources/${created.id}/test-connection`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({}),
       },
-      body: JSON.stringify({}),
-    });
-    const testConnectionPayload = await readResponseAsUnknown(testConnectionResponse);
+    );
+    const testConnectionPayload = await readResponseAsUnknown(
+      testConnectionResponse,
+    );
 
     expect(testConnectionResponse.status).toBe(200);
     expect(hasSourceConnectionTestShape(testConnectionPayload)).toBe(true);
 
-    const audits = await queryAuditByAction("control_plane.source_connection_tested", created.id);
+    const audits = await queryAuditByAction(
+      "control_plane.source_connection_tested",
+      created.id,
+    );
     const targetAudit = audits.items.find((item) => {
       const resourceId = item.metadata.resourceId;
       return (
@@ -3598,10 +3941,15 @@ describe("Control Plane API", () => {
         },
       ]);
       assertApiStatus(testConnectionResult, [200]);
-      expect(hasSourceConnectionTestShape(testConnectionResult.payload)).toBe(true);
+      expect(hasSourceConnectionTestShape(testConnectionResult.payload)).toBe(
+        true,
+      );
 
-      const payloadHasSourceId = collectPayloadCandidates(testConnectionResult.payload).some(
-        (candidate) => pickString(candidate, ["sourceId", "source_id", "id"]) === source.id
+      const payloadHasSourceId = collectPayloadCandidates(
+        testConnectionResult.payload,
+      ).some(
+        (candidate) =>
+          pickString(candidate, ["sourceId", "source_id", "id"]) === source.id,
       );
       expect(payloadHasSourceId).toBe(true);
     } finally {
@@ -3628,7 +3976,7 @@ describe("Control Plane API", () => {
               location: "ssh://tester@127.0.0.1:22/tmp/repo",
             },
           },
-          authHeaders
+          authHeaders,
         ),
       },
       {
@@ -3640,7 +3988,7 @@ describe("Control Plane API", () => {
             type: "ssh",
             location: "ssh://tester@127.0.0.1:22/tmp/repo",
           },
-          authHeaders
+          authHeaders,
         ),
       },
       {
@@ -3654,12 +4002,14 @@ describe("Control Plane API", () => {
               location: "ssh://tester@127.0.0.1:22/tmp/repo",
             },
           },
-          authHeaders
+          authHeaders,
         ),
       },
     ]);
     assertApiStatus(testConnectionResult, [200]);
-    expect(hasSourceConnectionTestShape(testConnectionResult.payload)).toBe(true);
+    expect(hasSourceConnectionTestShape(testConnectionResult.payload)).toBe(
+      true,
+    );
   });
 
   test("POST /api/v1/sources/:id/sync-jobs 创建成功，GET /api/v1/sources/:id/sync-jobs 可查询到", async () => {
@@ -3683,28 +4033,39 @@ describe("Control Plane API", () => {
     expect(createResponse.status).toBe(201);
     expect(typeof created.id).toBe("string");
 
-    const createSyncJobResponse = await app.request(`/api/v1/sources/${created.id}/sync-jobs`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...authHeaders,
+    const createSyncJobResponse = await app.request(
+      `/api/v1/sources/${created.id}/sync-jobs`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          nextRunAt: expectedNextRunAt,
+        }),
       },
-      body: JSON.stringify({
-        nextRunAt: expectedNextRunAt,
-      }),
-    });
-    const createSyncJobPayload = await readResponseAsUnknown(createSyncJobResponse);
+    );
+    const createSyncJobPayload = await readResponseAsUnknown(
+      createSyncJobResponse,
+    );
     const syncJobId = extractSourceSyncJobId(createSyncJobPayload);
 
     expect(createSyncJobResponse.status).toBe(202);
     expect(typeof syncJobId).toBe("string");
     expect(extractJobStatus(createSyncJobPayload)).toBe("pending");
-    expect(extractSyncJobNextRunAt(createSyncJobPayload)).toBe(expectedNextRunAt);
+    expect(extractSyncJobNextRunAt(createSyncJobPayload)).toBe(
+      expectedNextRunAt,
+    );
 
-    const listSyncJobsResponse = await app.request(`/api/v1/sources/${created.id}/sync-jobs`, {
-      headers: authHeaders,
-    });
-    const listSyncJobsPayload = await readResponseAsUnknown(listSyncJobsResponse);
+    const listSyncJobsResponse = await app.request(
+      `/api/v1/sources/${created.id}/sync-jobs`,
+      {
+        headers: authHeaders,
+      },
+    );
+    const listSyncJobsPayload =
+      await readResponseAsUnknown(listSyncJobsResponse);
     const items = extractListItems(listSyncJobsPayload);
 
     expect(listSyncJobsResponse.status).toBe(200);
@@ -3739,27 +4100,37 @@ describe("Control Plane API", () => {
     expect(createResponse.status).toBe(201);
     expect(typeof created.id).toBe("string");
 
-    const createSyncJobResponse = await app.request(`/api/v1/sources/${created.id}/sync-jobs`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...authHeaders,
+    const createSyncJobResponse = await app.request(
+      `/api/v1/sources/${created.id}/sync-jobs`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          nextRunAt: expectedNextRunAt,
+        }),
       },
-      body: JSON.stringify({
-        nextRunAt: expectedNextRunAt,
-      }),
-    });
-    const createSyncJobPayload = await readResponseAsUnknown(createSyncJobResponse);
+    );
+    const createSyncJobPayload = await readResponseAsUnknown(
+      createSyncJobResponse,
+    );
     const syncJobId = extractSourceSyncJobId(createSyncJobPayload);
 
     expect(createSyncJobResponse.status).toBe(202);
     expect(typeof syncJobId).toBe("string");
-    expect(extractSyncJobNextRunAt(createSyncJobPayload)).toBe(expectedNextRunAt);
+    expect(extractSyncJobNextRunAt(createSyncJobPayload)).toBe(
+      expectedNextRunAt,
+    );
 
-    const cancelResponse = await app.request(`/api/v1/sync-jobs/${syncJobId}/cancel`, {
-      method: "PATCH",
-      headers: authHeaders,
-    });
+    const cancelResponse = await app.request(
+      `/api/v1/sync-jobs/${syncJobId}/cancel`,
+      {
+        method: "PATCH",
+        headers: authHeaders,
+      },
+    );
     const cancelPayload = await readResponseAsUnknown(cancelResponse);
 
     expect(cancelResponse.status).toBe(202);
@@ -3768,7 +4139,10 @@ describe("Control Plane API", () => {
 
     let cancelRequested: boolean | undefined;
     for (const candidate of collectPayloadCandidates(cancelPayload)) {
-      cancelRequested = pickBoolean(candidate, ["cancelRequested", "cancel_requested"]);
+      cancelRequested = pickBoolean(candidate, [
+        "cancelRequested",
+        "cancel_requested",
+      ]);
       if (cancelRequested !== undefined) {
         break;
       }
@@ -3798,7 +4172,9 @@ describe("Control Plane API", () => {
 
     try {
       if (typeof repository.createSyncJob !== "function") {
-        throw new Error("repository.createSyncJob 不可用，无法注入 health 测试数据。");
+        throw new Error(
+          "repository.createSyncJob 不可用，无法注入 health 测试数据。",
+        );
       }
 
       const now = Date.now();
@@ -3813,7 +4189,7 @@ describe("Control Plane API", () => {
           endedAt: new Date(now - 3 * 60_000).toISOString(),
           durationMs: 60000,
           errorDetail: "network timeout",
-        }
+        },
       );
       await repository.createSyncJob(
         authTenantId,
@@ -3825,12 +4201,15 @@ describe("Control Plane API", () => {
           startedAt: new Date(now - 2 * 60_000).toISOString(),
           endedAt: new Date(now - 60_000).toISOString(),
           durationMs: 60000,
-        }
+        },
       );
 
-      const healthResponse = await app.request(`/api/v1/sources/${source.id}/health`, {
-        headers: authHeaders,
-      });
+      const healthResponse = await app.request(
+        `/api/v1/sources/${source.id}/health`,
+        {
+          headers: authHeaders,
+        },
+      );
       const payload = await readResponseAsUnknown(healthResponse);
 
       expect(healthResponse.status).toBe(200);
@@ -3838,13 +4217,21 @@ describe("Control Plane API", () => {
       if (isRecord(payload)) {
         expect(pickString(payload, ["sourceId", "source_id"])).toBe(source.id);
         expect(pickString(payload, ["accessMode", "access_mode"])).toBe("sync");
-        expect(typeof pickString(payload, ["lastSuccessAt", "last_success_at"])).toBe("string");
-        expect(typeof pickString(payload, ["lastFailureAt", "last_failure_at"])).toBe("string");
+        expect(
+          typeof pickString(payload, ["lastSuccessAt", "last_success_at"]),
+        ).toBe("string");
+        expect(
+          typeof pickString(payload, ["lastFailureAt", "last_failure_at"]),
+        ).toBe("string");
         expect(typeof payload.failureCount).toBe("number");
         expect((payload.failureCount as number) >= 1).toBe(true);
-        expect(payload.avgLatencyMs === null || typeof payload.avgLatencyMs === "number").toBe(true);
         expect(
-          payload.freshnessMinutes === null || typeof payload.freshnessMinutes === "number"
+          payload.avgLatencyMs === null ||
+            typeof payload.avgLatencyMs === "number",
+        ).toBe(true);
+        expect(
+          payload.freshnessMinutes === null ||
+            typeof payload.freshnessMinutes === "number",
         ).toBe(true);
       }
     } finally {
@@ -3875,9 +4262,12 @@ describe("Control Plane API", () => {
     expect(createResponse.status).toBe(201);
     expect(typeof created.id).toBe("string");
 
-    const watermarksResponse = await app.request(`/api/v1/sources/${created.id}/watermarks`, {
-      headers: authHeaders,
-    });
+    const watermarksResponse = await app.request(
+      `/api/v1/sources/${created.id}/watermarks`,
+      {
+        headers: authHeaders,
+      },
+    );
     const watermarksPayload = await readResponseAsUnknown(watermarksResponse);
     const items = extractListItems(watermarksPayload);
 
@@ -3977,7 +4367,7 @@ describe("Control Plane API", () => {
                 `hash-${row.id}`,
                 JSON.stringify({ parser: row.parserKey }),
                 row.failedAt,
-              ]
+              ],
             );
             insertedIds.push(row.id);
           }
@@ -4031,7 +4421,7 @@ describe("Control Plane API", () => {
         `/api/v1/sources/${source.id}/parse-failures?${query.toString()}`,
         {
           headers: authHeaders,
-        }
+        },
       );
       const body = (await response.json()) as {
         items: Array<{
@@ -4066,7 +4456,7 @@ describe("Control Plane API", () => {
         `/api/v1/sources/${source.id}/parse-failures?limit=0`,
         {
           headers: authHeaders,
-        }
+        },
       );
       const invalidLimitBody = (await invalidLimitResponse.json()) as {
         message: string;
@@ -4081,12 +4471,19 @@ describe("Control Plane API", () => {
             `DELETE FROM parse_failures
              WHERE source_id = $1
                AND id = ANY($2::text[])`,
-            [source.id, insertedIds]
+            [source.id, insertedIds],
           );
         }
       }
-      if (insertedMemoryIds.length > 0 && Array.isArray(repository.memorySourceParseFailures)) {
-        for (let i = repository.memorySourceParseFailures.length - 1; i >= 0; i -= 1) {
+      if (
+        insertedMemoryIds.length > 0 &&
+        Array.isArray(repository.memorySourceParseFailures)
+      ) {
+        for (
+          let i = repository.memorySourceParseFailures.length - 1;
+          i >= 0;
+          i -= 1
+        ) {
           const current = repository.memorySourceParseFailures[i];
           if (current && insertedMemoryIds.includes(current.failure.id)) {
             repository.memorySourceParseFailures.splice(i, 1);
@@ -4127,9 +4524,12 @@ describe("Control Plane API", () => {
       keyword: created.id,
       limit: "200",
     });
-    const auditResponse = await app.request(`/api/v1/audits?${query.toString()}`, {
-      headers: authHeaders,
-    });
+    const auditResponse = await app.request(
+      `/api/v1/audits?${query.toString()}`,
+      {
+        headers: authHeaders,
+      },
+    );
     const audits = (await auditResponse.json()) as {
       items: Array<{
         action: string;
@@ -4151,7 +4551,10 @@ describe("Control Plane API", () => {
 
     const targetAudit = audits.items.find((item) => {
       const resourceId = item.metadata.resourceId;
-      return item.action === "control_plane.source_created" && resourceId === created.id;
+      return (
+        item.action === "control_plane.source_created" &&
+        resourceId === created.id
+      );
     });
     expect(targetAudit).toBeDefined();
   });
@@ -4210,9 +4613,12 @@ describe("Control Plane API", () => {
       keyword: created.id,
       limit: "200",
     });
-    const auditResponse = await app.request(`/api/v1/audits?${query.toString()}`, {
-      headers: authHeaders,
-    });
+    const auditResponse = await app.request(
+      `/api/v1/audits?${query.toString()}`,
+      {
+        headers: authHeaders,
+      },
+    );
     const audits = (await auditResponse.json()) as {
       items: Array<{
         action: string;
@@ -4234,7 +4640,10 @@ describe("Control Plane API", () => {
 
     const targetAudit = audits.items.find((item) => {
       const resourceId = item.metadata.resourceId;
-      return item.action === "control_plane.source_deleted" && resourceId === created.id;
+      return (
+        item.action === "control_plane.source_deleted" &&
+        resourceId === created.id
+      );
     });
     expect(targetAudit).toBeDefined();
   });
@@ -4259,13 +4668,18 @@ describe("Control Plane API", () => {
     expect(createResponse.status).toBe(201);
     expect(typeof created.id).toBe("string");
 
-    const cleanupSessionReference = await ensureSourceReferencedBySession(created.id);
+    const cleanupSessionReference = await ensureSourceReferencedBySession(
+      created.id,
+    );
 
     try {
-      const deleteResponse = await app.request(`/api/v1/sources/${created.id}`, {
-        method: "DELETE",
-        headers: authHeaders,
-      });
+      const deleteResponse = await app.request(
+        `/api/v1/sources/${created.id}`,
+        {
+          method: "DELETE",
+          headers: authHeaders,
+        },
+      );
       const body = (await deleteResponse.json()) as {
         message: string;
       };
@@ -4273,7 +4687,10 @@ describe("Control Plane API", () => {
       expect(deleteResponse.status).toBe(409);
       expect(body.message).toContain(created.id);
 
-      const audits = await queryAuditByAction("control_plane.source_delete_blocked", created.id);
+      const audits = await queryAuditByAction(
+        "control_plane.source_delete_blocked",
+        created.id,
+      );
       const targetAudit = audits.items.find((item) => {
         const resourceId = item.metadata.resourceId;
         return (
@@ -4303,7 +4720,7 @@ describe("Control Plane API", () => {
         name: `数据源租户A-${nonce}`,
         slug: `source-tenant-a-${nonce}`,
       },
-      ownerA.userId
+      ownerA.userId,
     );
     assertApiStatus(tenantAResult, [201]);
     const tenantAId = extractEntityId(tenantAResult.payload);
@@ -4317,7 +4734,7 @@ describe("Control Plane API", () => {
         name: `数据源租户B-${nonce}`,
         slug: `source-tenant-b-${nonce}`,
       },
-      ownerB.userId
+      ownerB.userId,
     );
     assertApiStatus(tenantBResult, [201]);
     const tenantBId = extractEntityId(tenantBResult.payload);
@@ -4328,12 +4745,12 @@ describe("Control Plane API", () => {
     const authHeadersA = await issueTenantScopedAuthHeaders(
       tenantAId,
       ownerA.accessToken,
-      ownerA.userId
+      ownerA.userId,
     );
     const authHeadersB = await issueTenantScopedAuthHeaders(
       tenantBId,
       ownerB.accessToken,
-      ownerB.userId
+      ownerB.userId,
     );
 
     const createResponse = await app.request("/api/v1/sources", {
@@ -4366,10 +4783,13 @@ describe("Control Plane API", () => {
     expect(listBResponse.status).toBe(200);
     expect(listB.items.some((item) => item.id === created.id)).toBe(false);
 
-    const crossDeleteResponse = await app.request(`/api/v1/sources/${created.id}`, {
-      method: "DELETE",
-      headers: authHeadersB,
-    });
+    const crossDeleteResponse = await app.request(
+      `/api/v1/sources/${created.id}`,
+      {
+        method: "DELETE",
+        headers: authHeadersB,
+      },
+    );
     expect(crossDeleteResponse.status).toBe(404);
 
     const auditQuery = new URLSearchParams({
@@ -4377,9 +4797,12 @@ describe("Control Plane API", () => {
       keyword: created.id,
       limit: "200",
     });
-    const auditAResponse = await app.request(`/api/v1/audits?${auditQuery.toString()}`, {
-      headers: authHeadersA,
-    });
+    const auditAResponse = await app.request(
+      `/api/v1/audits?${auditQuery.toString()}`,
+      {
+        headers: authHeadersA,
+      },
+    );
     const auditsA = (await auditAResponse.json()) as {
       items: Array<{
         action: string;
@@ -4390,18 +4813,22 @@ describe("Control Plane API", () => {
     expect(
       auditsA.items.some((item) => {
         const resourceId = item.metadata.resourceId;
-        const metadataTenantId = item.metadata.tenantId ?? item.metadata.tenant_id;
+        const metadataTenantId =
+          item.metadata.tenantId ?? item.metadata.tenant_id;
         return (
           item.action === "control_plane.source_created" &&
           resourceId === created.id &&
           metadataTenantId === tenantAId
         );
-      })
+      }),
     ).toBe(true);
 
-    const auditBResponse = await app.request(`/api/v1/audits?${auditQuery.toString()}`, {
-      headers: authHeadersB,
-    });
+    const auditBResponse = await app.request(
+      `/api/v1/audits?${auditQuery.toString()}`,
+      {
+        headers: authHeadersB,
+      },
+    );
     const auditsB = (await auditBResponse.json()) as {
       items: Array<{
         action: string;
@@ -4412,8 +4839,11 @@ describe("Control Plane API", () => {
     expect(
       auditsB.items.some((item) => {
         const resourceId = item.metadata.resourceId;
-        return item.action === "control_plane.source_created" && resourceId === created.id;
-      })
+        return (
+          item.action === "control_plane.source_created" &&
+          resourceId === created.id
+        );
+      }),
     ).toBe(false);
   });
 
@@ -4431,7 +4861,7 @@ describe("Control Plane API", () => {
         name: `同步租户A-${nonce}`,
         slug: `sync-tenant-a-${nonce}`,
       },
-      ownerA.userId
+      ownerA.userId,
     );
     assertApiStatus(tenantAResult, [201]);
     const tenantAId = extractEntityId(tenantAResult.payload);
@@ -4445,7 +4875,7 @@ describe("Control Plane API", () => {
         name: `同步租户B-${nonce}`,
         slug: `sync-tenant-b-${nonce}`,
       },
-      ownerB.userId
+      ownerB.userId,
     );
     assertApiStatus(tenantBResult, [201]);
     const tenantBId = extractEntityId(tenantBResult.payload);
@@ -4456,12 +4886,12 @@ describe("Control Plane API", () => {
     const authHeadersA = await issueTenantScopedAuthHeaders(
       tenantAId,
       ownerA.accessToken,
-      ownerA.userId
+      ownerA.userId,
     );
     const authHeadersB = await issueTenantScopedAuthHeaders(
       tenantBId,
       ownerB.accessToken,
-      ownerB.userId
+      ownerB.userId,
     );
 
     const createSourceResponse = await app.request("/api/v1/sources", {
@@ -4479,30 +4909,39 @@ describe("Control Plane API", () => {
     const source = (await createSourceResponse.json()) as Source;
     expect(createSourceResponse.status).toBe(201);
 
-    const createSyncJobResponse = await app.request(`/api/v1/sources/${source.id}/sync-jobs`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...authHeadersA,
+    const createSyncJobResponse = await app.request(
+      `/api/v1/sources/${source.id}/sync-jobs`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeadersA,
+        },
+        body: JSON.stringify({
+          mode: "sync",
+        }),
       },
-      body: JSON.stringify({
-        mode: "sync",
-      }),
-    });
+    );
     const syncJobPayload = await readResponseAsUnknown(createSyncJobResponse);
     const syncJobId = extractSourceSyncJobId(syncJobPayload);
     expect(createSyncJobResponse.status).toBe(202);
     expect(typeof syncJobId).toBe("string");
 
-    const cancelByBResponse = await app.request(`/api/v1/sync-jobs/${syncJobId}/cancel`, {
-      method: "PATCH",
-      headers: authHeadersB,
-    });
+    const cancelByBResponse = await app.request(
+      `/api/v1/sync-jobs/${syncJobId}/cancel`,
+      {
+        method: "PATCH",
+        headers: authHeadersB,
+      },
+    );
     expect(cancelByBResponse.status).toBe(404);
 
-    const listAResponse = await app.request(`/api/v1/sources/${source.id}/sync-jobs`, {
-      headers: authHeadersA,
-    });
+    const listAResponse = await app.request(
+      `/api/v1/sources/${source.id}/sync-jobs`,
+      {
+        headers: authHeadersA,
+      },
+    );
     const listAPayload = await readResponseAsUnknown(listAResponse);
     const listAItems = extractListItems(listAPayload);
     expect(listAResponse.status).toBe(200);
@@ -4510,9 +4949,16 @@ describe("Control Plane API", () => {
       listAItems.some((item) => {
         const jobId = pickString(item, ["id", "jobId", "syncJobId"]);
         const status = pickString(item, ["status"]);
-        const cancelRequested = pickBoolean(item, ["cancelRequested", "cancel_requested"]);
-        return jobId === syncJobId && status === "pending" && cancelRequested !== true;
-      })
+        const cancelRequested = pickBoolean(item, [
+          "cancelRequested",
+          "cancel_requested",
+        ]);
+        return (
+          jobId === syncJobId &&
+          status === "pending" &&
+          cancelRequested !== true
+        );
+      }),
     ).toBe(true);
   });
 
@@ -4561,7 +5007,9 @@ describe("Control Plane API", () => {
       assertApiStatus(detailResult, [200]);
 
       const detail = collectPayloadCandidates(detailResult.payload).find(
-        (candidate) => pickString(candidate, ["id", "sessionId", "session_id"]) === inserted.id
+        (candidate) =>
+          pickString(candidate, ["id", "sessionId", "session_id"]) ===
+          inserted.id,
       );
       expect(detail).toBeDefined();
       if (detail) {
@@ -4585,17 +5033,25 @@ describe("Control Plane API", () => {
 
           expect(isRecord(sourceTrace)).toBe(true);
           if (isRecord(sourceTrace)) {
-            expect(pickString(sourceTrace, ["sourceId", "source_id"])).toBe(source.id);
-            expect(pickString(sourceTrace, ["provider"])).toBe("session-detail-test");
-            expect(pickString(sourceTrace, ["path"])).toBe(`/workspace/${nonce}/src/main.ts`);
+            expect(pickString(sourceTrace, ["sourceId", "source_id"])).toBe(
+              source.id,
+            );
+            expect(pickString(sourceTrace, ["provider"])).toBe(
+              "session-detail-test",
+            );
+            expect(pickString(sourceTrace, ["path"])).toBe(
+              `/workspace/${nonce}/src/main.ts`,
+            );
           }
 
           expect(isRecord(sessionPayload)).toBe(true);
           if (isRecord(sessionPayload)) {
-            expect(pickString(sessionPayload, ["id", "sessionId", "session_id"])).toBe(
-              inserted.id
+            expect(
+              pickString(sessionPayload, ["id", "sessionId", "session_id"]),
+            ).toBe(inserted.id);
+            expect(pickString(sessionPayload, ["provider"])).toBe(
+              "session-detail-test",
             );
-            expect(pickString(sessionPayload, ["provider"])).toBe("session-detail-test");
           }
         }
       }
@@ -4615,8 +5071,12 @@ describe("Control Plane API", () => {
       expect(Array.isArray(eventItems)).toBe(true);
       if (eventItems.length > 0) {
         const first = eventItems[0];
-        expect(typeof pickString(first, ["sessionId", "session_id"])).toBe("string");
-        expect(typeof pickString(first, ["eventType", "event_type"])).toBe("string");
+        expect(typeof pickString(first, ["sessionId", "session_id"])).toBe(
+          "string",
+        );
+        expect(typeof pickString(first, ["eventType", "event_type"])).toBe(
+          "string",
+        );
       }
 
       const invalidLimitResult = await requestFirstAvailable([
@@ -4631,7 +5091,10 @@ describe("Control Plane API", () => {
       ]);
       expect(invalidLimitResult.response.status).toBe(400);
       if (isRecord(invalidLimitResult.payload)) {
-        const message = pickString(invalidLimitResult.payload, ["message", "error"]);
+        const message = pickString(invalidLimitResult.payload, [
+          "message",
+          "error",
+        ]);
         expect(typeof message).toBe("string");
         expect(message?.toLowerCase()).toContain("limit");
       }
@@ -4645,10 +5108,14 @@ describe("Control Plane API", () => {
   });
 
   test("GET /api/v1/sessions/:id 与 /events 缺少认证时返回 401", async () => {
-    const detailResponse = await app.request("/api/v1/sessions/session-without-auth");
+    const detailResponse = await app.request(
+      "/api/v1/sessions/session-without-auth",
+    );
     expect(detailResponse.status).toBe(401);
 
-    const eventsResponse = await app.request("/api/v1/sessions/session-without-auth/events");
+    const eventsResponse = await app.request(
+      "/api/v1/sessions/session-without-auth/events",
+    );
     expect(eventsResponse.status).toBe(401);
   });
 
@@ -4660,21 +5127,27 @@ describe("Control Plane API", () => {
     });
     expect(invalidDetailResponse.status).toBe(400);
 
-    const missingDetailResponse = await app.request("/api/v1/sessions/session-not-found", {
-      headers: authHeaders,
-    });
+    const missingDetailResponse = await app.request(
+      "/api/v1/sessions/session-not-found",
+      {
+        headers: authHeaders,
+      },
+    );
     expect(missingDetailResponse.status).toBe(404);
 
-    const invalidEventsResponse = await app.request("/api/v1/sessions/%20/events", {
-      headers: authHeaders,
-    });
+    const invalidEventsResponse = await app.request(
+      "/api/v1/sessions/%20/events",
+      {
+        headers: authHeaders,
+      },
+    );
     expect(invalidEventsResponse.status).toBe(400);
 
     const missingEventsResponse = await app.request(
       "/api/v1/sessions/session-not-found/events",
       {
         headers: authHeaders,
-      }
+      },
     );
     expect(missingEventsResponse.status).toBe(404);
   });
@@ -4759,6 +5232,7 @@ describe("Control Plane API", () => {
     expect(body.filters.from).toBe("2026-01-01T00:00:00.000Z");
     expect(body.filters.to).toBe("2026-12-31T23:59:59.999Z");
     expect(body.filters.limit).toBe(10);
+    expect(Array.isArray(body.sourceFreshness)).toBe(true);
   });
 
   test("POST /api/v1/sessions/search 对 ssh realtime source 走 puller realtime 并返回 sourceFreshness", async () => {
@@ -4829,24 +5303,28 @@ describe("Control Plane API", () => {
         }),
       });
       const body = (await response.json()) as SessionSearchResponse & {
-        sourceFreshness?: {
+        sourceFreshness?: Array<{
           fetchPath?: string;
           freshnessMinutes?: number | null;
           fallbackReason?: string | null;
           accessMode?: string | null;
-        };
+          sourceId?: string;
+        }>;
       };
+      const sourceFreshness = body.sourceFreshness?.[0];
 
       expect(response.status).toBe(200);
       expect(pullerCalls).toBe(1);
       expect(body.total).toBe(1);
       expect(body.items.map((item) => item.id)).toEqual([inserted.id]);
-      expect(body.sourceFreshness?.fetchPath).toBe("realtime");
-      expect(body.sourceFreshness?.fallbackReason).toBeNull();
-      expect(body.sourceFreshness?.accessMode).toBe("realtime");
+      expect(Array.isArray(body.sourceFreshness)).toBe(true);
+      expect(sourceFreshness?.sourceId).toBe(source.id);
+      expect(sourceFreshness?.fetchPath).toBe("realtime");
+      expect(sourceFreshness?.fallbackReason).toBeNull();
+      expect(sourceFreshness?.accessMode).toBe("realtime");
       expect(
-        body.sourceFreshness?.freshnessMinutes === null ||
-          typeof body.sourceFreshness?.freshnessMinutes === "number"
+        sourceFreshness?.freshnessMinutes === null ||
+          typeof sourceFreshness?.freshnessMinutes === "number",
       ).toBe(true);
     } finally {
       await inserted.cleanup();
@@ -4874,7 +5352,8 @@ describe("Control Plane API", () => {
     const originalFetch = globalThis.fetch;
     const originalPullerBaseUrl = Bun.env.PULLER_BASE_URL;
     const originalRetryMaxAttempts = Bun.env.PULLER_SYNC_RETRY_MAX_ATTEMPTS;
-    const originalRetryBaseBackoffMs = Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS;
+    const originalRetryBaseBackoffMs =
+      Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS;
     const originalRetryMaxBackoffMs = Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS;
 
     const createSourceResponse = await app.request("/api/v1/sources", {
@@ -4908,12 +5387,15 @@ describe("Control Plane API", () => {
       Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS = "1";
       globalThis.fetch = (async () => {
         pullerCalls += 1;
-        return new Response(JSON.stringify({ message: "upstream unavailable" }), {
-          status: 503,
-          headers: {
-            "content-type": "application/json",
+        return new Response(
+          JSON.stringify({ message: "upstream unavailable" }),
+          {
+            status: 503,
+            headers: {
+              "content-type": "application/json",
+            },
           },
-        });
+        );
       }) as unknown as typeof fetch;
 
       const response = await app.request("/api/v1/sessions/search", {
@@ -4928,20 +5410,22 @@ describe("Control Plane API", () => {
         }),
       });
       const body = (await response.json()) as SessionSearchResponse & {
-        sourceFreshness?: {
+        sourceFreshness?: Array<{
           fetchPath?: string;
           freshnessMinutes?: number | null;
           fallbackReason?: string | null;
           accessMode?: string | null;
-        };
+        }>;
       };
+      const sourceFreshness = body.sourceFreshness?.[0];
 
       expect(response.status).toBe(200);
       expect(body.total).toBe(1);
       expect(body.items.map((item) => item.id)).toEqual([inserted.id]);
-      expect(body.sourceFreshness?.fetchPath).toBe("fallback-cache");
-      expect(body.sourceFreshness?.fallbackReason).toBe("puller_http_503");
-      expect(body.sourceFreshness?.accessMode).toBe("hybrid");
+      expect(Array.isArray(body.sourceFreshness)).toBe(true);
+      expect(sourceFreshness?.fetchPath).toBe("fallback-cache");
+      expect(sourceFreshness?.fallbackReason).toBe("puller_http_503");
+      expect(sourceFreshness?.accessMode).toBe("hybrid");
       expect(pullerCalls).toBe(2);
     } finally {
       await inserted.cleanup();
@@ -4979,7 +5463,8 @@ describe("Control Plane API", () => {
     const originalFetch = globalThis.fetch;
     const originalPullerBaseUrl = Bun.env.PULLER_BASE_URL;
     const originalRetryMaxAttempts = Bun.env.PULLER_SYNC_RETRY_MAX_ATTEMPTS;
-    const originalRetryBaseBackoffMs = Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS;
+    const originalRetryBaseBackoffMs =
+      Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS;
     const originalRetryMaxBackoffMs = Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS;
 
     const createSourceResponse = await app.request("/api/v1/sources", {
@@ -5014,12 +5499,15 @@ describe("Control Plane API", () => {
       globalThis.fetch = (async () => {
         pullerCalls += 1;
         if (pullerCalls < 3) {
-          return new Response(JSON.stringify({ message: "temporary unavailable" }), {
-            status: 503,
-            headers: {
-              "content-type": "application/json",
+          return new Response(
+            JSON.stringify({ message: "temporary unavailable" }),
+            {
+              status: 503,
+              headers: {
+                "content-type": "application/json",
+              },
             },
-          });
+          );
         }
         return new Response(JSON.stringify({ accepted: true }), {
           status: 202,
@@ -5041,21 +5529,23 @@ describe("Control Plane API", () => {
         }),
       });
       const body = (await response.json()) as SessionSearchResponse & {
-        sourceFreshness?: {
+        sourceFreshness?: Array<{
           fetchPath?: string;
           freshnessMinutes?: number | null;
           fallbackReason?: string | null;
           accessMode?: string | null;
-        };
+        }>;
       };
+      const sourceFreshness = body.sourceFreshness?.[0];
 
       expect(response.status).toBe(200);
       expect(pullerCalls).toBe(3);
       expect(body.total).toBe(1);
       expect(body.items.map((item) => item.id)).toEqual([inserted.id]);
-      expect(body.sourceFreshness?.fetchPath).toBe("realtime");
-      expect(body.sourceFreshness?.fallbackReason).toBeNull();
-      expect(body.sourceFreshness?.accessMode).toBe("realtime");
+      expect(Array.isArray(body.sourceFreshness)).toBe(true);
+      expect(sourceFreshness?.fetchPath).toBe("realtime");
+      expect(sourceFreshness?.fallbackReason).toBeNull();
+      expect(sourceFreshness?.accessMode).toBe("realtime");
     } finally {
       await inserted.cleanup();
       await app.request(`/api/v1/sources/${source.id}`, {
@@ -5093,7 +5583,8 @@ describe("Control Plane API", () => {
     const originalPullerBaseUrl = Bun.env.PULLER_BASE_URL;
     const originalPullerSyncTimeout = Bun.env.PULLER_SYNC_TIMEOUT_MS;
     const originalRetryMaxAttempts = Bun.env.PULLER_SYNC_RETRY_MAX_ATTEMPTS;
-    const originalRetryBaseBackoffMs = Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS;
+    const originalRetryBaseBackoffMs =
+      Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS;
     const originalRetryMaxBackoffMs = Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS;
 
     const createSourceResponse = await app.request("/api/v1/sources", {
@@ -5148,18 +5639,20 @@ describe("Control Plane API", () => {
         }),
       });
       const body = (await response.json()) as SessionSearchResponse & {
-        sourceFreshness?: {
+        sourceFreshness?: Array<{
           fetchPath?: string;
           fallbackReason?: string | null;
-        };
+        }>;
       };
+      const sourceFreshness = body.sourceFreshness?.[0];
 
       expect(response.status).toBe(200);
       expect(pullerCalls).toBe(1);
       expect(body.total).toBe(1);
       expect(body.items.map((item) => item.id)).toEqual([inserted.id]);
-      expect(body.sourceFreshness?.fetchPath).toBe("fallback-cache");
-      expect(body.sourceFreshness?.fallbackReason).toBe("puller_http_400");
+      expect(Array.isArray(body.sourceFreshness)).toBe(true);
+      expect(sourceFreshness?.fetchPath).toBe("fallback-cache");
+      expect(sourceFreshness?.fallbackReason).toBe("puller_http_400");
     } finally {
       await inserted.cleanup();
       await app.request(`/api/v1/sources/${source.id}`, {
@@ -5268,9 +5761,12 @@ describe("Control Plane API", () => {
         project,
         limit: "20",
       });
-      const exportResponse = await app.request(`/api/v1/exports/sessions?${exportQuery.toString()}`, {
-        headers: authHeaders,
-      });
+      const exportResponse = await app.request(
+        `/api/v1/exports/sessions?${exportQuery.toString()}`,
+        {
+          headers: authHeaders,
+        },
+      );
       const exportBody = (await exportResponse.json()) as SessionSearchResponse;
 
       expect(exportResponse.status).toBe(200);
@@ -5366,7 +5862,7 @@ describe("Control Plane API", () => {
       `/api/v1/exports/sessions?format=json&keyword=${encodeURIComponent(jsonKeyword)}`,
       {
         headers: authHeaders,
-      }
+      },
     );
     const jsonBody = (await jsonResponse.json()) as SessionSearchResponse;
 
@@ -5380,17 +5876,17 @@ describe("Control Plane API", () => {
       `/api/v1/exports/sessions?format=csv&keyword=${encodeURIComponent(csvKeyword)}`,
       {
         headers: authHeaders,
-      }
+      },
     );
     const csvBody = await csvResponse.text();
 
     expect(csvResponse.status).toBe(200);
     expect(csvResponse.headers.get("content-type")).toContain("text/csv");
     expect(csvResponse.headers.get("content-disposition")).toContain(
-      'attachment; filename="sessions-'
+      'attachment; filename="sessions-',
     );
     expect(csvBody.split("\n")[0]).toBe(
-      "id,sourceId,tool,model,startedAt,endedAt,tokens,cost"
+      "id,sourceId,tool,model,startedAt,endedAt,tokens,cost",
     );
 
     const jsonAuditQuery = new URLSearchParams({
@@ -5398,9 +5894,12 @@ describe("Control Plane API", () => {
       keyword: jsonKeyword,
       limit: "200",
     });
-    const jsonAuditResponse = await app.request(`/api/v1/audits?${jsonAuditQuery.toString()}`, {
-      headers: authHeaders,
-    });
+    const jsonAuditResponse = await app.request(
+      `/api/v1/audits?${jsonAuditQuery.toString()}`,
+      {
+        headers: authHeaders,
+      },
+    );
     const jsonAudits = (await jsonAuditResponse.json()) as {
       items: Array<{
         action: string;
@@ -5422,8 +5921,10 @@ describe("Control Plane API", () => {
     expect(
       jsonAudits.items.some((item) => {
         const format = item.metadata.format;
-        return item.action === "control_plane.export_requested" && format === "json";
-      })
+        return (
+          item.action === "control_plane.export_requested" && format === "json"
+        );
+      }),
     ).toBe(true);
 
     const csvAuditQuery = new URLSearchParams({
@@ -5431,9 +5932,12 @@ describe("Control Plane API", () => {
       keyword: csvKeyword,
       limit: "200",
     });
-    const csvAuditResponse = await app.request(`/api/v1/audits?${csvAuditQuery.toString()}`, {
-      headers: authHeaders,
-    });
+    const csvAuditResponse = await app.request(
+      `/api/v1/audits?${csvAuditQuery.toString()}`,
+      {
+        headers: authHeaders,
+      },
+    );
     const csvAudits = (await csvAuditResponse.json()) as {
       items: Array<{
         action: string;
@@ -5455,67 +5959,70 @@ describe("Control Plane API", () => {
     expect(
       csvAudits.items.some((item) => {
         const format = item.metadata.format;
-        return item.action === "control_plane.export_requested" && format === "csv";
-      })
+        return (
+          item.action === "control_plane.export_requested" && format === "csv"
+        );
+      }),
     ).toBe(true);
   });
 
-  test(
-    "异步导出 job 支持 创建->完成->下载链路（json）并写入 export_requested/export_completed 审计",
-    async () => {
-      const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      const keyword = `async-export-${nonce}`;
+  test("异步导出 job 支持 创建->完成->下载链路（json）并写入 export_requested/export_completed 审计", async () => {
+    const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const keyword = `async-export-${nonce}`;
 
-      const createdJob = await createAsyncExportJob("json", keyword);
-      expect(typeof createdJob.jobId).toBe("string");
-      expect(createdJob.jobId.length).toBeGreaterThan(0);
+    const createdJob = await createAsyncExportJob("json", keyword);
+    expect(typeof createdJob.jobId).toBe("string");
+    expect(createdJob.jobId.length).toBeGreaterThan(0);
 
-      const completed = await pollExportJobUntilDone(createdJob.jobId, createdJob.statusPath);
-      const downloadResponse = await downloadExportResult(
-        createdJob.jobId,
-        completed.downloadPath ?? createdJob.downloadPath
-      );
-      expect(downloadResponse.status).toBe(200);
+    const completed = await pollExportJobUntilDone(
+      createdJob.jobId,
+      createdJob.statusPath,
+    );
+    const downloadResponse = await downloadExportResult(
+      createdJob.jobId,
+      completed.downloadPath ?? createdJob.downloadPath,
+    );
+    expect(downloadResponse.status).toBe(200);
 
-      const contentType = (downloadResponse.headers.get("content-type") ?? "").toLowerCase();
-      if (contentType.includes("application/json")) {
-        const payload = (await downloadResponse.json()) as
-          | SessionSearchResponse
-          | {
-              items?: unknown[];
-            };
-        if ("items" in payload) {
-          expect(Array.isArray(payload.items)).toBe(true);
-        } else {
-          expect(payload).toBeDefined();
-        }
+    const contentType = (
+      downloadResponse.headers.get("content-type") ?? ""
+    ).toLowerCase();
+    if (contentType.includes("application/json")) {
+      const payload = (await downloadResponse.json()) as
+        | SessionSearchResponse
+        | {
+            items?: unknown[];
+          };
+      if ("items" in payload) {
+        expect(Array.isArray(payload.items)).toBe(true);
       } else {
-        const text = await downloadResponse.text();
-        expect(text.length).toBeGreaterThan(0);
+        expect(payload).toBeDefined();
       }
+    } else {
+      const text = await downloadResponse.text();
+      expect(text.length).toBeGreaterThan(0);
+    }
 
-      const requestedAudits = await queryAuditByAction(
-        "control_plane.export_requested",
-        keyword
-      );
-      expect(
-        requestedAudits.items.some((item) =>
-          auditMatchesKeyword(item, "control_plane.export_requested", keyword)
-        )
-      ).toBe(true);
+    const requestedAudits = await queryAuditByAction(
+      "control_plane.export_requested",
+      keyword,
+    );
+    expect(
+      requestedAudits.items.some((item) =>
+        auditMatchesKeyword(item, "control_plane.export_requested", keyword),
+      ),
+    ).toBe(true);
 
-      const completedAudits = await queryAuditByAction(
-        "control_plane.export_completed",
-        keyword
-      );
-      expect(
-        completedAudits.items.some((item) =>
-          auditMatchesKeyword(item, "control_plane.export_completed", keyword)
-        )
-      ).toBe(true);
-    },
-    15_000
-  );
+    const completedAudits = await queryAuditByAction(
+      "control_plane.export_completed",
+      keyword,
+    );
+    expect(
+      completedAudits.items.some((item) =>
+        auditMatchesKeyword(item, "control_plane.export_completed", keyword),
+      ),
+    ).toBe(true);
+  }, 15_000);
 
   test("Pricing catalog 读写与 versions 列表返回结构正确", async () => {
     const authHeaders = await resolveAuthHeaders();
@@ -5561,10 +6068,14 @@ describe("Control Plane API", () => {
     ]);
     assertApiStatus(upsertResult, [200, 201]);
 
-    const upsertedCatalog = extractPricingCatalogFromPayload(upsertResult.payload);
+    const upsertedCatalog = extractPricingCatalogFromPayload(
+      upsertResult.payload,
+    );
     expect(upsertedCatalog).not.toBeNull();
     if (!upsertedCatalog) {
-      throw new Error(`pricing upsert 返回结构缺少 version/entries: ${JSON.stringify(upsertResult.payload)}`);
+      throw new Error(
+        `pricing upsert 返回结构缺少 version/entries: ${JSON.stringify(upsertResult.payload)}`,
+      );
     }
     expect(Array.isArray(upsertedCatalog.entries)).toBe(true);
     expect(upsertedCatalog.entries.length).toBeGreaterThanOrEqual(1);
@@ -5584,7 +6095,9 @@ describe("Control Plane API", () => {
     const currentCatalog = extractPricingCatalogFromPayload(readResult.payload);
     expect(currentCatalog).not.toBeNull();
     if (!currentCatalog) {
-      throw new Error(`pricing get 返回结构缺少 version/entries: ${JSON.stringify(readResult.payload)}`);
+      throw new Error(
+        `pricing get 返回结构缺少 version/entries: ${JSON.stringify(readResult.payload)}`,
+      );
     }
     expect(Array.isArray(currentCatalog.entries)).toBe(true);
     expect(currentCatalog.entries.length).toBeGreaterThanOrEqual(1);
@@ -5592,7 +6105,7 @@ describe("Control Plane API", () => {
     const readModels = new Set(
       currentCatalog.entries
         .map((entry) => pickString(entry, ["model"]))
-        .filter((model): model is string => typeof model === "string")
+        .filter((model): model is string => typeof model === "string"),
     );
     expect(readModels.has(pricingInput.entries[0].model)).toBe(true);
 
@@ -5617,9 +6130,13 @@ describe("Control Plane API", () => {
     expect(versions.length).toBeGreaterThanOrEqual(1);
     if (versions.length > 0) {
       const first = versions[0];
-      expect(typeof pickString(first, ["id", "versionId", "version_id"])).toBe("string");
+      expect(typeof pickString(first, ["id", "versionId", "version_id"])).toBe(
+        "string",
+      );
       expect(typeof first.version).toBe("number");
-      expect(typeof pickString(first, ["createdAt", "created_at"])).toBe("string");
+      expect(typeof pickString(first, ["createdAt", "created_at"])).toBe(
+        "string",
+      );
     }
   });
 
@@ -5671,9 +6188,12 @@ describe("Control Plane API", () => {
       keyword: budget.id,
       limit: "200",
     });
-    const auditResponse = await app.request(`/api/v1/audits?${query.toString()}`, {
-      headers: authHeaders,
-    });
+    const auditResponse = await app.request(
+      `/api/v1/audits?${query.toString()}`,
+      {
+        headers: authHeaders,
+      },
+    );
     const audits = (await auditResponse.json()) as {
       items: Array<{
         action: string;
@@ -5683,9 +6203,13 @@ describe("Control Plane API", () => {
     expect(auditResponse.status).toBe(200);
     expect(
       audits.items.some((item) => {
-        const metadataTenantId = item.metadata.tenantId ?? item.metadata.tenant_id;
-        return item.action === "control_plane.budget_upserted" && metadataTenantId === authTenantId;
-      })
+        const metadataTenantId =
+          item.metadata.tenantId ?? item.metadata.tenant_id;
+        return (
+          item.action === "control_plane.budget_upserted" &&
+          metadataTenantId === authTenantId
+        );
+      }),
     ).toBe(true);
   });
 
@@ -5717,9 +6241,12 @@ describe("Control Plane API", () => {
       keyword: budget.id,
       limit: "200",
     });
-    const auditResponse = await app.request(`/api/v1/audits?${query.toString()}`, {
-      headers: authHeaders,
-    });
+    const auditResponse = await app.request(
+      `/api/v1/audits?${query.toString()}`,
+      {
+        headers: authHeaders,
+      },
+    );
     const audits = (await auditResponse.json()) as {
       items: Array<{
         action: string;
@@ -5803,9 +6330,12 @@ describe("Control Plane API", () => {
     const authHeaders = await resolveAuthHeaders();
     const authContext = await getDefaultAuthContext();
     const scopedUserId =
-      authContext.userId ?? resolveUserIdFromAccessToken(authContext.accessToken);
+      authContext.userId ??
+      resolveUserIdFromAccessToken(authContext.accessToken);
     if (!scopedUserId) {
-      throw new Error("无法解析当前登录用户 userId，无法执行 scope=user 预算测试。");
+      throw new Error(
+        "无法解析当前登录用户 userId，无法执行 scope=user 预算测试。",
+      );
     }
     const nonce = createNonce("budget-thresholds-scope");
     const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
@@ -5816,15 +6346,15 @@ describe("Control Plane API", () => {
         name: `预算组织-${nonce}`,
         slug: `budget-org-${nonce}`,
       },
-      scopedUserId
+      scopedUserId,
     );
     assertApiStatus(createOrgResult, [201]);
     const organizationId = extractEntityId(createOrgResult.payload);
     if (!organizationId) {
       throw new Error(
         `预算组织创建响应缺少 organizationId，path=${createOrgResult.path}，payload=${JSON.stringify(
-          createOrgResult.payload
-        )}`
+          createOrgResult.payload,
+        )}`,
       );
     }
     const model = `gpt-5-${nonce}`;
@@ -5906,7 +6436,7 @@ describe("Control Plane API", () => {
 
     const orgListResponse = await app.request(
       `/api/v1/budgets?scope=org&organizationId=${encodeURIComponent(organizationId)}`,
-      { headers: authHeaders }
+      { headers: authHeaders },
     );
     const orgList = (await orgListResponse.json()) as {
       items: Budget[];
@@ -5916,7 +6446,7 @@ describe("Control Plane API", () => {
 
     const userListResponse = await app.request(
       `/api/v1/budgets?scope=user&userId=${encodeURIComponent(scopedUserId)}`,
-      { headers: authHeaders }
+      { headers: authHeaders },
     );
     const userList = (await userListResponse.json()) as {
       items: Budget[];
@@ -5926,13 +6456,15 @@ describe("Control Plane API", () => {
 
     const modelListResponse = await app.request(
       `/api/v1/budgets?scope=model&model=${encodeURIComponent(model)}`,
-      { headers: authHeaders }
+      { headers: authHeaders },
     );
     const modelList = (await modelListResponse.json()) as {
       items: Budget[];
     };
     expect(modelListResponse.status).toBe(200);
-    expect(modelList.items.some((item) => item.id === modelBudget.id)).toBe(true);
+    expect(modelList.items.some((item) => item.id === modelBudget.id)).toBe(
+      true,
+    );
   });
 
   test("PUT /api/v1/budgets 严格校验（scope=model 必须 model）", async () => {
@@ -5968,7 +6500,9 @@ describe("Control Plane API", () => {
     const ownerA = await registerAndLoginUser(`${nonce}-owner-a`);
     const ownerB = await registerAndLoginUser(`${nonce}-owner-b`);
     if (!ownerA.userId || !ownerB.userId) {
-      throw new Error("无法解析 owner userId，无法执行 scope=org 绑定校验测试。");
+      throw new Error(
+        "无法解析 owner userId，无法执行 scope=org 绑定校验测试。",
+      );
     }
 
     const tenantAResult = await createTenantByAuth(
@@ -5977,15 +6511,15 @@ describe("Control Plane API", () => {
         name: `预算租户A-${nonce}`,
         slug: `budget-tenant-a-${nonce}`,
       },
-      ownerA.userId
+      ownerA.userId,
     );
     assertApiStatus(tenantAResult, [201]);
     const tenantAId = extractEntityId(tenantAResult.payload);
     if (!tenantAId) {
       throw new Error(
         `预算租户A创建响应缺少 tenantId，path=${tenantAResult.path}，payload=${JSON.stringify(
-          tenantAResult.payload
-        )}`
+          tenantAResult.payload,
+        )}`,
       );
     }
 
@@ -5995,15 +6529,15 @@ describe("Control Plane API", () => {
         name: `预算租户B-${nonce}`,
         slug: `budget-tenant-b-${nonce}`,
       },
-      ownerB.userId
+      ownerB.userId,
     );
     assertApiStatus(tenantBResult, [201]);
     const tenantBId = extractEntityId(tenantBResult.payload);
     if (!tenantBId) {
       throw new Error(
         `预算租户B创建响应缺少 tenantId，path=${tenantBResult.path}，payload=${JSON.stringify(
-          tenantBResult.payload
-        )}`
+          tenantBResult.payload,
+        )}`,
       );
     }
 
@@ -6014,22 +6548,22 @@ describe("Control Plane API", () => {
         name: `预算组织B-${nonce}`,
         slug: `budget-org-b-${nonce}`,
       },
-      ownerB.userId
+      ownerB.userId,
     );
     assertApiStatus(createOrgResult, [201]);
     const crossTenantOrganizationId = extractEntityId(createOrgResult.payload);
     if (!crossTenantOrganizationId) {
       throw new Error(
         `预算组织B创建响应缺少 organizationId，path=${createOrgResult.path}，payload=${JSON.stringify(
-          createOrgResult.payload
-        )}`
+          createOrgResult.payload,
+        )}`,
       );
     }
 
     const tenantAHeaders = await issueTenantScopedAuthHeaders(
       tenantAId,
       ownerA.accessToken,
-      ownerA.userId
+      ownerA.userId,
     );
 
     const crossTenantOrgResponse = await app.request("/api/v1/budgets", {
@@ -6079,10 +6613,14 @@ describe("Control Plane API", () => {
     const nonce = createNonce("budget-user-binding");
     const owner = await registerAndLoginUser(`${nonce}-owner`);
     const outsider = await registerAndLoginUser(`${nonce}-outsider`);
-    const ownerUserId = owner.userId ?? resolveUserIdFromAccessToken(owner.accessToken);
-    const outsiderUserId = outsider.userId ?? resolveUserIdFromAccessToken(outsider.accessToken);
+    const ownerUserId =
+      owner.userId ?? resolveUserIdFromAccessToken(owner.accessToken);
+    const outsiderUserId =
+      outsider.userId ?? resolveUserIdFromAccessToken(outsider.accessToken);
     if (!ownerUserId || !outsiderUserId) {
-      throw new Error("无法解析用户 userId，无法执行 scope=user 绑定校验测试。");
+      throw new Error(
+        "无法解析用户 userId，无法执行 scope=user 绑定校验测试。",
+      );
     }
 
     const tenantResult = await createTenantByAuth(
@@ -6091,22 +6629,22 @@ describe("Control Plane API", () => {
         name: `预算用户租户-${nonce}`,
         slug: `budget-user-tenant-${nonce}`,
       },
-      ownerUserId
+      ownerUserId,
     );
     assertApiStatus(tenantResult, [201]);
     const tenantId = extractEntityId(tenantResult.payload);
     if (!tenantId) {
       throw new Error(
         `预算用户租户创建响应缺少 tenantId，path=${tenantResult.path}，payload=${JSON.stringify(
-          tenantResult.payload
-        )}`
+          tenantResult.payload,
+        )}`,
       );
     }
 
     const tenantHeaders = await issueTenantScopedAuthHeaders(
       tenantId,
       owner.accessToken,
-      ownerUserId
+      ownerUserId,
     );
 
     const crossTenantUserResponse = await app.request("/api/v1/budgets", {
@@ -6155,8 +6693,13 @@ describe("Control Plane API", () => {
   test("POST /api/v1/budgets/:id/release-requests 双人审批通过后执行解冻", async () => {
     const authHeaders = await resolveAuthHeaders();
     const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
-    const reviewer = await registerAndLoginUser(createNonce("budget-release-reviewer"));
-    const reviewerHeaders = await resolveAuthHeaders(reviewer.accessToken, reviewer.userId);
+    const reviewer = await registerAndLoginUser(
+      createNonce("budget-release-reviewer"),
+    );
+    const reviewerHeaders = await resolveAuthHeaders(
+      reviewer.accessToken,
+      reviewer.userId,
+    );
 
     const putBudgetResponse = await app.request("/api/v1/budgets", {
       method: "PUT",
@@ -6184,16 +6727,19 @@ describe("Control Plane API", () => {
       severity: "critical",
     });
     try {
-      const ackResponse = await app.request(`/api/v1/alerts/${alert.id}/status`, {
-        method: "PATCH",
-        headers: {
-          "content-type": "application/json",
-          ...authHeaders,
+      const ackResponse = await app.request(
+        `/api/v1/alerts/${alert.id}/status`,
+        {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+            ...authHeaders,
+          },
+          body: JSON.stringify({
+            status: "acknowledged",
+          }),
         },
-        body: JSON.stringify({
-          status: "acknowledged",
-        }),
-      });
+      );
       expect(ackResponse.status).toBe(200);
 
       const frozenListResponse = await app.request("/api/v1/budgets", {
@@ -6202,7 +6748,9 @@ describe("Control Plane API", () => {
       const frozenList = (await frozenListResponse.json()) as {
         items: Budget[];
       };
-      const frozenBudget = frozenList.items.find((item) => item.id === budget.id);
+      const frozenBudget = frozenList.items.find(
+        (item) => item.id === budget.id,
+      );
       expect(frozenBudget?.governanceState).toBe("frozen");
       expect(frozenBudget?.frozenByAlertId).toBe(alert.id);
 
@@ -6217,7 +6765,7 @@ describe("Control Plane API", () => {
           body: JSON.stringify({
             reason: "人工确认后申请释放。",
           }),
-        }
+        },
       );
       const createdRelease = (await createReleaseResponse.json()) as {
         id: string;
@@ -6234,7 +6782,7 @@ describe("Control Plane API", () => {
         {
           method: "POST",
           headers: authHeaders,
-        }
+        },
       );
       const firstApprove = (await firstApproveResponse.json()) as {
         status: string;
@@ -6249,7 +6797,7 @@ describe("Control Plane API", () => {
         {
           method: "POST",
           headers: authHeaders,
-        }
+        },
       );
       const duplicateApproveBody = (await duplicateApproveResponse.json()) as {
         message: string;
@@ -6262,7 +6810,7 @@ describe("Control Plane API", () => {
         {
           method: "POST",
           headers: reviewerHeaders,
-        }
+        },
       );
       const secondApprove = (await secondApproveResponse.json()) as {
         status: string;
@@ -6278,7 +6826,9 @@ describe("Control Plane API", () => {
       const activeList = (await activeListResponse.json()) as {
         items: Budget[];
       };
-      const activeBudget = activeList.items.find((item) => item.id === budget.id);
+      const activeBudget = activeList.items.find(
+        (item) => item.id === budget.id,
+      );
       expect(activeBudget?.governanceState).toBe("active");
       expect(activeBudget?.freezeReason).toBeUndefined();
       expect(activeBudget?.frozenAt).toBeUndefined();
@@ -6290,17 +6840,21 @@ describe("Control Plane API", () => {
 
   test("GET /api/v1/budgets 鉴权中间件边界：token/session 异常统一返回 401", async () => {
     const authContext = await getDefaultAuthContext();
-    const userId = authContext.userId ?? resolveUserIdFromAccessToken(authContext.accessToken);
+    const userId =
+      authContext.userId ??
+      resolveUserIdFromAccessToken(authContext.accessToken);
     if (!userId) {
       throw new Error("无法解析默认用户 userId，无法覆盖鉴权中间件分支。");
     }
     if (typeof repository.createAuthSession !== "function") {
-      throw new Error("repository.createAuthSession 不可用，无法构造会话分支。");
+      throw new Error(
+        "repository.createAuthSession 不可用，无法构造会话分支。",
+      );
     }
 
     const expectUnauthorized = async (
       headers: Record<string, string>,
-      expectedMessageFragment: string
+      expectedMessageFragment: string,
     ) => {
       const response = await app.request("/api/v1/budgets", { headers });
       const body = (await response.json()) as { message?: string };
@@ -6312,28 +6866,34 @@ describe("Control Plane API", () => {
       {
         authorization: "Token not-bearer",
       },
-      "认证凭证格式无效"
+      "认证凭证格式无效",
     );
 
     await expectUnauthorized(
       {
         authorization: "Bearer invalid-token",
       },
-      "访问令牌无效或已过期"
+      "访问令牌无效或已过期",
     );
 
     const tokenWithoutSessionId = issueAccessToken({
       userId,
       tenantId: "default",
     }).token;
-    await expectUnauthorized(buildAuthHeaders(tokenWithoutSessionId, userId), "访问令牌缺少会话信息");
+    await expectUnauthorized(
+      buildAuthHeaders(tokenWithoutSessionId, userId),
+      "访问令牌缺少会话信息",
+    );
 
     const tokenWithMissingSession = issueAccessToken({
       userId,
       tenantId: "default",
       sessionId: createNonce("missing-auth-session"),
     }).token;
-    await expectUnauthorized(buildAuthHeaders(tokenWithMissingSession, userId), "登录会话不存在或已失效");
+    await expectUnauthorized(
+      buildAuthHeaders(tokenWithMissingSession, userId),
+      "登录会话不存在或已失效",
+    );
 
     const expiredSession = await repository.createAuthSession({
       userId,
@@ -6346,7 +6906,10 @@ describe("Control Plane API", () => {
       tenantId: "default",
       sessionId: expiredSession.id,
     }).token;
-    await expectUnauthorized(buildAuthHeaders(tokenWithExpiredSession, userId), "登录会话已失效");
+    await expectUnauthorized(
+      buildAuthHeaders(tokenWithExpiredSession, userId),
+      "登录会话已失效",
+    );
 
     const activeSession = await repository.createAuthSession({
       userId,
@@ -6359,25 +6922,31 @@ describe("Control Plane API", () => {
       tenantId: createNonce("tenant-mismatch"),
       sessionId: activeSession.id,
     }).token;
-    await expectUnauthorized(buildAuthHeaders(tokenWithTenantMismatch, userId), "访问令牌与登录会话不匹配");
+    await expectUnauthorized(
+      buildAuthHeaders(tokenWithTenantMismatch, userId),
+      "访问令牌与登录会话不匹配",
+    );
   });
 
   test("POST /api/v1/integrations/callbacks/alerts 未配置 secret 返回 500", async () => {
     const originalCallbackSecret = Bun.env.INTEGRATION_CALLBACK_SECRET;
     delete Bun.env.INTEGRATION_CALLBACK_SECRET;
     try {
-      const response = await app.request("/api/v1/integrations/callbacks/alerts", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
+      const response = await app.request(
+        "/api/v1/integrations/callbacks/alerts",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            callback_id: createNonce("cb-secret-not-configured"),
+            tenant_id: "default",
+            action: "resolve",
+            alert_id: "alert-not-important",
+          }),
         },
-        body: JSON.stringify({
-          callback_id: createNonce("cb-secret-not-configured"),
-          tenant_id: "default",
-          action: "resolve",
-          alert_id: "alert-not-important",
-        }),
-      });
+      );
       const body = (await response.json()) as {
         message?: string;
       };
@@ -6397,17 +6966,10 @@ describe("Control Plane API", () => {
     const callbackSecret = `integration-secret-${createNonce("cb-invalid-payload-secret")}`;
     try {
       Bun.env.INTEGRATION_CALLBACK_SECRET = callbackSecret;
-      const response = await app.request("/api/v1/integrations/callbacks/alerts", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-integration-callback-secret": callbackSecret,
-        },
-        body: JSON.stringify({
-          callback_id: createNonce("cb-invalid-payload"),
-          tenant_id: "default",
-          action: "resolve",
-        }),
+      const response = await postIntegrationAlertCallback(callbackSecret, {
+        callback_id: createNonce("cb-invalid-payload"),
+        tenant_id: "default",
+        action: "resolve",
       });
       const body = (await response.json()) as {
         message?: string;
@@ -6428,18 +6990,21 @@ describe("Control Plane API", () => {
     const originalCallbackSecret = Bun.env.INTEGRATION_CALLBACK_SECRET;
     Bun.env.INTEGRATION_CALLBACK_SECRET = `integration-secret-${createNonce("cb-no-secret")}`;
     try {
-      const response = await app.request("/api/v1/integrations/callbacks/alerts", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
+      const response = await app.request(
+        "/api/v1/integrations/callbacks/alerts",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            callback_id: createNonce("cb-missing-secret"),
+            tenant_id: "default",
+            action: "resolve",
+            alert_id: "not-important",
+          }),
         },
-        body: JSON.stringify({
-          callback_id: createNonce("cb-missing-secret"),
-          tenant_id: "default",
-          action: "resolve",
-          alert_id: "not-important",
-        }),
-      });
+      );
       const body = (await response.json()) as {
         message?: string;
       };
@@ -6454,10 +7019,169 @@ describe("Control Plane API", () => {
     }
   });
 
+  test("POST /api/v1/integrations/callbacks/alerts 签名鉴权成功", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const originalCallbackSecret = Bun.env.INTEGRATION_CALLBACK_SECRET;
+    const callbackSecret = `integration-secret-${createNonce("cb-signature-success")}`;
+    const { alert, cleanup } = await createTestAlert(tenantId, "open");
+
+    try {
+      Bun.env.INTEGRATION_CALLBACK_SECRET = callbackSecret;
+      const response = await postIntegrationAlertCallback(callbackSecret, {
+        callback_id: createNonce("cb-signature-ok"),
+        tenant_id: tenantId,
+        action: "resolve",
+        alert_id: alert.id,
+      });
+      const body = (await response.json()) as {
+        duplicate: boolean;
+        result: {
+          alert?: Alert;
+        };
+      };
+
+      expect(response.status).toBe(200);
+      expect(body.duplicate).toBe(false);
+      expect(body.result.alert?.id).toBe(alert.id);
+      expect(body.result.alert?.status).toBe("resolved");
+    } finally {
+      if (originalCallbackSecret === undefined) {
+        delete Bun.env.INTEGRATION_CALLBACK_SECRET;
+      } else {
+        Bun.env.INTEGRATION_CALLBACK_SECRET = originalCallbackSecret;
+      }
+      await cleanup();
+    }
+  });
+
+  test("POST /api/v1/integrations/callbacks/alerts 签名错误返回 401", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const originalCallbackSecret = Bun.env.INTEGRATION_CALLBACK_SECRET;
+    const callbackSecret = `integration-secret-${createNonce("cb-signature-invalid")}`;
+
+    try {
+      Bun.env.INTEGRATION_CALLBACK_SECRET = callbackSecret;
+      const response = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
+          callback_id: createNonce("cb-signature-invalid"),
+          tenant_id: tenantId,
+          action: "resolve",
+          alert_id: "alert-not-important",
+        },
+        {
+          signature: "invalid-signature",
+        },
+      );
+      const body = (await response.json()) as {
+        message?: string;
+      };
+
+      expect(response.status).toBe(401);
+      expect(String(body.message ?? "")).toContain("signature");
+    } finally {
+      if (originalCallbackSecret === undefined) {
+        delete Bun.env.INTEGRATION_CALLBACK_SECRET;
+      } else {
+        Bun.env.INTEGRATION_CALLBACK_SECRET = originalCallbackSecret;
+      }
+    }
+  });
+
+  test("POST /api/v1/integrations/callbacks/alerts 过期 timestamp 返回 401", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const originalCallbackSecret = Bun.env.INTEGRATION_CALLBACK_SECRET;
+    const callbackSecret = `integration-secret-${createNonce("cb-timestamp-expired")}`;
+
+    try {
+      Bun.env.INTEGRATION_CALLBACK_SECRET = callbackSecret;
+      const response = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
+          callback_id: createNonce("cb-expired-timestamp"),
+          tenant_id: tenantId,
+          action: "resolve",
+          alert_id: "alert-not-important",
+        },
+        {
+          timestamp: String(Date.now() - 6 * 60 * 1000),
+        },
+      );
+      const body = (await response.json()) as {
+        message?: string;
+      };
+
+      expect(response.status).toBe(401);
+      expect(String(body.message ?? "")).toContain("timestamp");
+    } finally {
+      if (originalCallbackSecret === undefined) {
+        delete Bun.env.INTEGRATION_CALLBACK_SECRET;
+      } else {
+        Bun.env.INTEGRATION_CALLBACK_SECRET = originalCallbackSecret;
+      }
+    }
+  });
+
+  test("POST /api/v1/integrations/callbacks/alerts nonce 重放返回 401", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const originalCallbackSecret = Bun.env.INTEGRATION_CALLBACK_SECRET;
+    const callbackSecret = `integration-secret-${createNonce("cb-replay")}`;
+    const { alert, cleanup } = await createTestAlert(tenantId, "open");
+    const replayNonce = createNonce("cb-replay-nonce");
+    const replayTimestamp = String(Date.now());
+    const replayPayload: Record<string, unknown> = {
+      callback_id: createNonce("cb-replay-callback"),
+      tenant_id: tenantId,
+      action: "resolve",
+      alert_id: alert.id,
+    };
+
+    try {
+      Bun.env.INTEGRATION_CALLBACK_SECRET = callbackSecret;
+      const firstResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        replayPayload,
+        {
+          timestamp: replayTimestamp,
+          nonce: replayNonce,
+        },
+      );
+      expect(firstResponse.status).toBe(200);
+
+      const secondResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        replayPayload,
+        {
+          timestamp: replayTimestamp,
+          nonce: replayNonce,
+        },
+      );
+      const secondBody = (await secondResponse.json()) as {
+        message?: string;
+      };
+
+      expect(secondResponse.status).toBe(401);
+      expect(String(secondBody.message ?? "")).toContain("nonce");
+    } finally {
+      if (originalCallbackSecret === undefined) {
+        delete Bun.env.INTEGRATION_CALLBACK_SECRET;
+      } else {
+        Bun.env.INTEGRATION_CALLBACK_SECRET = originalCallbackSecret;
+      }
+      await cleanup();
+    }
+  });
+
   test("POST /api/v1/integrations/callbacks/alerts 同 callback_id 在不同 tenant 不冲突", async () => {
     const authHeaders = await resolveAuthHeaders();
     const tenantAId = resolveTenantIdFromAuthHeaders(authHeaders);
-    const tenantBOwner = await registerAndLoginUser(createNonce("cb-tenant-owner-b"));
+    const tenantBOwner = await registerAndLoginUser(
+      createNonce("cb-tenant-owner-b"),
+    );
     if (!tenantBOwner.userId) {
       throw new Error("无法解析租户 B owner userId。");
     }
@@ -6468,15 +7192,15 @@ describe("Control Plane API", () => {
         name: `callback-tenant-b-${createNonce("cb-tenant-name-b")}`,
         slug: `callback-tenant-b-${createNonce("cb-tenant-slug-b")}`,
       },
-      tenantBOwner.userId
+      tenantBOwner.userId,
     );
     assertApiStatus(tenantBResult, [201]);
     const tenantBId = extractEntityId(tenantBResult.payload);
     if (!tenantBId) {
       throw new Error(
         `租户 B 创建响应缺少 tenantId，path=${tenantBResult.path}，payload=${JSON.stringify(
-          tenantBResult.payload
-        )}`
+          tenantBResult.payload,
+        )}`,
       );
     }
 
@@ -6484,24 +7208,16 @@ describe("Control Plane API", () => {
     const alertB = await createTestAlert(tenantBId, "open");
     const originalCallbackSecret = Bun.env.INTEGRATION_CALLBACK_SECRET;
     const callbackSecret = `integration-secret-${createNonce("cb-cross-tenant-secret")}`;
-    const callbackHeaders = {
-      "content-type": "application/json",
-      "x-integration-callback-secret": callbackSecret,
-    };
 
     try {
       Bun.env.INTEGRATION_CALLBACK_SECRET = callbackSecret;
       const sharedCallbackId = createNonce("cb-cross-tenant-shared");
 
-      const tenantAResponse = await app.request("/api/v1/integrations/callbacks/alerts", {
-        method: "POST",
-        headers: callbackHeaders,
-        body: JSON.stringify({
-          callback_id: sharedCallbackId,
-          tenant_id: tenantAId,
-          action: "resolve",
-          alert_id: alertA.alert.id,
-        }),
+      const tenantAResponse = await postIntegrationAlertCallback(callbackSecret, {
+        callback_id: sharedCallbackId,
+        tenant_id: tenantAId,
+        action: "resolve",
+        alert_id: alertA.alert.id,
       });
       const tenantABody = (await tenantAResponse.json()) as {
         duplicate: boolean;
@@ -6514,15 +7230,11 @@ describe("Control Plane API", () => {
       expect(tenantABody.result.alert?.id).toBe(alertA.alert.id);
       expect(tenantABody.result.alert?.tenantId).toBe(tenantAId);
 
-      const tenantBResponse = await app.request("/api/v1/integrations/callbacks/alerts", {
-        method: "POST",
-        headers: callbackHeaders,
-        body: JSON.stringify({
-          callback_id: sharedCallbackId,
-          tenant_id: tenantBId,
-          action: "resolve",
-          alert_id: alertB.alert.id,
-        }),
+      const tenantBResponse = await postIntegrationAlertCallback(callbackSecret, {
+        callback_id: sharedCallbackId,
+        tenant_id: tenantBId,
+        action: "resolve",
+        alert_id: alertB.alert.id,
       });
       const tenantBBody = (await tenantBResponse.json()) as {
         duplicate: boolean;
@@ -6535,16 +7247,15 @@ describe("Control Plane API", () => {
       expect(tenantBBody.result.alert?.id).toBe(alertB.alert.id);
       expect(tenantBBody.result.alert?.tenantId).toBe(tenantBId);
 
-      const tenantADuplicateResponse = await app.request("/api/v1/integrations/callbacks/alerts", {
-        method: "POST",
-        headers: callbackHeaders,
-        body: JSON.stringify({
+      const tenantADuplicateResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
           callback_id: sharedCallbackId,
           tenant_id: tenantAId,
           action: "resolve",
           alert_id: alertA.alert.id,
-        }),
-      });
+        },
+      );
       const tenantADuplicateBody = (await tenantADuplicateResponse.json()) as {
         duplicate: boolean;
         result: {
@@ -6607,10 +7318,6 @@ describe("Control Plane API", () => {
     const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
     const originalCallbackSecret = Bun.env.INTEGRATION_CALLBACK_SECRET;
     const callbackSecret = `integration-secret-${createNonce("cb-warning-no-freeze")}`;
-    const callbackHeaders = {
-      "content-type": "application/json",
-      "x-integration-callback-secret": callbackSecret,
-    };
 
     const putBudgetResponse = await app.request("/api/v1/budgets", {
       method: "PUT",
@@ -6641,15 +7348,11 @@ describe("Control Plane API", () => {
     try {
       Bun.env.INTEGRATION_CALLBACK_SECRET = callbackSecret;
 
-      const ackResponse = await app.request("/api/v1/integrations/callbacks/alerts", {
-        method: "POST",
-        headers: callbackHeaders,
-        body: JSON.stringify({
-          callback_id: createNonce("cb-warning-ack"),
-          tenant_id: tenantId,
-          action: "ack",
-          alert_id: warningAlert.alert.id,
-        }),
+      const ackResponse = await postIntegrationAlertCallback(callbackSecret, {
+        callback_id: createNonce("cb-warning-ack"),
+        tenant_id: tenantId,
+        action: "ack",
+        alert_id: warningAlert.alert.id,
       });
       const ackBody = (await ackResponse.json()) as {
         duplicate: boolean;
@@ -6686,12 +7389,15 @@ describe("Control Plane API", () => {
     const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
     const authContext = await getDefaultAuthContext();
     const actorUserId =
-      authContext.userId ?? resolveUserIdFromAccessToken(authContext.accessToken);
+      authContext.userId ??
+      resolveUserIdFromAccessToken(authContext.accessToken);
     if (!actorUserId) {
       throw new Error("无法解析 callback 主审批人 userId。");
     }
 
-    const reviewer = await registerAndLoginUser(createNonce("callback-reviewer"));
+    const reviewer = await registerAndLoginUser(
+      createNonce("callback-reviewer"),
+    );
     const reviewerUserId =
       reviewer.userId ?? resolveUserIdFromAccessToken(reviewer.accessToken);
     if (!reviewerUserId) {
@@ -6699,10 +7405,6 @@ describe("Control Plane API", () => {
     }
     const originalCallbackSecret = Bun.env.INTEGRATION_CALLBACK_SECRET;
     const callbackSecret = `integration-secret-${createNonce("cb-secret")}`;
-    const callbackHeaders = {
-      "content-type": "application/json",
-      "x-integration-callback-secret": callbackSecret,
-    };
 
     const putBudgetResponse = await app.request("/api/v1/budgets", {
       method: "PUT",
@@ -6735,15 +7437,11 @@ describe("Control Plane API", () => {
       Bun.env.INTEGRATION_CALLBACK_SECRET = callbackSecret;
 
       const ackCallbackId = createNonce("cb-ack");
-      const ackResponse = await app.request("/api/v1/integrations/callbacks/alerts", {
-        method: "POST",
-        headers: callbackHeaders,
-        body: JSON.stringify({
-          callback_id: ackCallbackId,
-          tenant_id: tenantId,
-          action: "ack",
-          alert_id: alertOne.alert.id,
-        }),
+      const ackResponse = await postIntegrationAlertCallback(callbackSecret, {
+        callback_id: ackCallbackId,
+        tenant_id: tenantId,
+        action: "ack",
+        alert_id: alertOne.alert.id,
       });
       const ackBody = (await ackResponse.json()) as {
         duplicate: boolean;
@@ -6757,32 +7455,30 @@ describe("Control Plane API", () => {
       expect(ackBody.result.alert?.status).toBe("acknowledged");
       expect(ackBody.result.budget?.governanceState).toBe("frozen");
 
-      const ackDuplicateResponse = await app.request("/api/v1/integrations/callbacks/alerts", {
-        method: "POST",
-        headers: callbackHeaders,
-        body: JSON.stringify({
+      const ackDuplicateResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
           callback_id: ackCallbackId,
           tenant_id: tenantId,
           action: "ack",
           alert_id: alertOne.alert.id,
-        }),
-      });
+        },
+      );
       const ackDuplicateBody = (await ackDuplicateResponse.json()) as {
         duplicate: boolean;
       };
       expect(ackDuplicateResponse.status).toBe(200);
       expect(ackDuplicateBody.duplicate).toBe(true);
 
-      const resolveResponse = await app.request("/api/v1/integrations/callbacks/alerts", {
-        method: "POST",
-        headers: callbackHeaders,
-        body: JSON.stringify({
+      const resolveResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
           callback_id: createNonce("cb-resolve"),
           tenant_id: tenantId,
           action: "resolve",
           alert_id: alertOne.alert.id,
-        }),
-      });
+        },
+      );
       const resolveBody = (await resolveResponse.json()) as {
         duplicate: boolean;
         result: {
@@ -6793,16 +7489,15 @@ describe("Control Plane API", () => {
       expect(resolveBody.duplicate).toBe(false);
       expect(resolveBody.result.alert?.status).toBe("resolved");
 
-      const lateAckResponse = await app.request("/api/v1/integrations/callbacks/alerts", {
-        method: "POST",
-        headers: callbackHeaders,
-        body: JSON.stringify({
+      const lateAckResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
           callback_id: createNonce("cb-ack-after-resolve"),
           tenant_id: tenantId,
           action: "ack",
           alert_id: alertOne.alert.id,
-        }),
-      });
+        },
+      );
       const lateAckBody = (await lateAckResponse.json()) as {
         duplicate: boolean;
         result: {
@@ -6815,10 +7510,9 @@ describe("Control Plane API", () => {
       expect(lateAckBody.result.alert?.status).toBe("resolved");
       expect(lateAckBody.result.budget).toBeUndefined();
 
-      const requestReleaseResponse = await app.request("/api/v1/integrations/callbacks/alerts", {
-        method: "POST",
-        headers: callbackHeaders,
-        body: JSON.stringify({
+      const requestReleaseResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
           callback_id: createNonce("cb-request-release-1"),
           tenant_id: tenantId,
           action: "request_release",
@@ -6826,8 +7520,8 @@ describe("Control Plane API", () => {
           actor_user_id: actorUserId,
           actor_email: "callback-owner@example.com",
           reason: "告警确认后申请释放。",
-        }),
-      });
+        },
+      );
       const requestReleaseBody = (await requestReleaseResponse.json()) as {
         result: {
           releaseRequest?: {
@@ -6841,10 +7535,9 @@ describe("Control Plane API", () => {
       const requestIdOne = requestReleaseBody.result.releaseRequest?.id;
       expect(typeof requestIdOne).toBe("string");
 
-      const approveOneResponse = await app.request("/api/v1/integrations/callbacks/alerts", {
-        method: "POST",
-        headers: callbackHeaders,
-        body: JSON.stringify({
+      const approveOneResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
           callback_id: createNonce("cb-approve-release-1"),
           tenant_id: tenantId,
           action: "approve_release",
@@ -6852,8 +7545,8 @@ describe("Control Plane API", () => {
           request_id: requestIdOne,
           actor_user_id: actorUserId,
           actor_email: "callback-owner@example.com",
-        }),
-      });
+        },
+      );
       const approveOneBody = (await approveOneResponse.json()) as {
         result: {
           releaseRequest?: {
@@ -6866,10 +7559,9 @@ describe("Control Plane API", () => {
       expect(approveOneBody.result.releaseRequest?.status).toBe("pending");
       expect(approveOneBody.result.releaseRequest?.approvals.length).toBe(1);
 
-      const approveTwoResponse = await app.request("/api/v1/integrations/callbacks/alerts", {
-        method: "POST",
-        headers: callbackHeaders,
-        body: JSON.stringify({
+      const approveTwoResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
           callback_id: createNonce("cb-approve-release-2"),
           tenant_id: tenantId,
           action: "approve_release",
@@ -6877,8 +7569,8 @@ describe("Control Plane API", () => {
           request_id: requestIdOne,
           actor_user_id: reviewerUserId,
           actor_email: reviewer.email,
-        }),
-      });
+        },
+      );
       const approveTwoBody = (await approveTwoResponse.json()) as {
         result: {
           releaseRequest?: {
@@ -6899,25 +7591,17 @@ describe("Control Plane API", () => {
 
       const concurrentAckCallbackId = createNonce("cb-ack-2");
       const [ackTwoResponseA, ackTwoResponseB] = await Promise.all([
-        app.request("/api/v1/integrations/callbacks/alerts", {
-          method: "POST",
-          headers: callbackHeaders,
-          body: JSON.stringify({
-            callback_id: concurrentAckCallbackId,
-            tenant_id: tenantId,
-            action: "ack",
-            alert_id: alertTwo.alert.id,
-          }),
+        postIntegrationAlertCallback(callbackSecret, {
+          callback_id: concurrentAckCallbackId,
+          tenant_id: tenantId,
+          action: "ack",
+          alert_id: alertTwo.alert.id,
         }),
-        app.request("/api/v1/integrations/callbacks/alerts", {
-          method: "POST",
-          headers: callbackHeaders,
-          body: JSON.stringify({
-            callback_id: concurrentAckCallbackId,
-            tenant_id: tenantId,
-            action: "ack",
-            alert_id: alertTwo.alert.id,
-          }),
+        postIntegrationAlertCallback(callbackSecret, {
+          callback_id: concurrentAckCallbackId,
+          tenant_id: tenantId,
+          action: "ack",
+          alert_id: alertTwo.alert.id,
         }),
       ]);
       const ackTwoBodyA = (await ackTwoResponseA.json()) as {
@@ -6941,44 +7625,42 @@ describe("Control Plane API", () => {
       expect(appliedAckBody.result.alert?.status).toBe("acknowledged");
       expect(appliedAckBody.result.budget?.governanceState).toBe("frozen");
 
-      const requestReleaseTwoResponse = await app.request("/api/v1/integrations/callbacks/alerts", {
-        method: "POST",
-        headers: callbackHeaders,
-        body: JSON.stringify({
+      const requestReleaseTwoResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
           callback_id: createNonce("cb-request-release-2"),
           tenant_id: tenantId,
           action: "request_release",
           budget_id: budget.id,
           actor_user_id: actorUserId,
           actor_email: "callback-owner@example.com",
-        }),
-      });
-      const requestReleaseTwoBody = (await requestReleaseTwoResponse.json()) as {
-        result: {
-          releaseRequest?: {
-            id: string;
-            status: string;
+        },
+      );
+      const requestReleaseTwoBody =
+        (await requestReleaseTwoResponse.json()) as {
+          result: {
+            releaseRequest?: {
+              id: string;
+              status: string;
+            };
           };
         };
-      };
       expect(requestReleaseTwoResponse.status).toBe(200);
-      expect(requestReleaseTwoBody.result.releaseRequest?.status).toBe("pending");
+      expect(requestReleaseTwoBody.result.releaseRequest?.status).toBe(
+        "pending",
+      );
       const requestIdTwo = requestReleaseTwoBody.result.releaseRequest?.id;
       expect(typeof requestIdTwo).toBe("string");
 
-      const rejectResponse = await app.request("/api/v1/integrations/callbacks/alerts", {
-        method: "POST",
-        headers: callbackHeaders,
-        body: JSON.stringify({
-          callback_id: createNonce("cb-reject-release-1"),
-          tenant_id: tenantId,
-          action: "reject_release",
-          budget_id: budget.id,
-          request_id: requestIdTwo,
-          actor_user_id: reviewerUserId,
-          actor_email: reviewer.email,
-          reason: "二审驳回，待人工复核。",
-        }),
+      const rejectResponse = await postIntegrationAlertCallback(callbackSecret, {
+        callback_id: createNonce("cb-reject-release-1"),
+        tenant_id: tenantId,
+        action: "reject_release",
+        budget_id: budget.id,
+        request_id: requestIdTwo,
+        actor_user_id: reviewerUserId,
+        actor_email: reviewer.email,
+        reason: "二审驳回，待人工复核。",
       });
       const rejectBody = (await rejectResponse.json()) as {
         result: {
@@ -7008,7 +7690,7 @@ describe("Control Plane API", () => {
       "/api/v1/alerts?status=open&severity=warning&sourceId=source-default-budget&from=2026-01-01T00:00:00.000Z&to=2026-12-31T23:59:59.999Z&limit=20",
       {
         headers: authHeaders,
-      }
+      },
     );
     const body = (await response.json()) as {
       items: Alert[];
@@ -7066,7 +7748,7 @@ describe("Control Plane API", () => {
 
       const audits = await queryAuditByAction(
         "control_plane.alert_status_updated",
-        alert.id
+        alert.id,
       );
       const targetAudit = audits.items.find((item) => {
         const metadataAlertId = item.metadata.alertId;
@@ -7255,7 +7937,7 @@ describe("Control Plane API", () => {
       `/api/v1/audits?keyword=${encodeURIComponent(nonce)}&limit=20`,
       {
         headers: authHeaders,
-      }
+      },
     );
 
     expect(response.status).toBe(200);
@@ -7265,7 +7947,7 @@ describe("Control Plane API", () => {
       "audit.query",
       nonce,
       auth.accessToken,
-      auth.userId
+      auth.userId,
     );
     const targetAudit = audits.items.find((item) => {
       const metadataRoute = item.metadata.route;
@@ -7294,7 +7976,9 @@ describe("Control Plane API", () => {
       }) => Promise<unknown>;
     };
     if (typeof repositoryWithAudit.appendAuditLog !== "function") {
-      throw new Error("repository.appendAuditLog 不可用，无法验证审计级别映射。");
+      throw new Error(
+        "repository.appendAuditLog 不可用，无法验证审计级别映射。",
+      );
     }
 
     await repositoryWithAudit.appendAuditLog({
@@ -7314,7 +7998,7 @@ describe("Control Plane API", () => {
       "test.audit.critical",
       nonce,
       auth.accessToken,
-      auth.userId
+      auth.userId,
     );
     const targetAudit = audits.items.find((item) => {
       const metadataNonce = item.metadata.nonce;
@@ -7333,7 +8017,7 @@ describe("Control Plane API", () => {
       "/api/v1/audits?level=warning&from=2026-01-01T00:00:00.000Z&to=2026-12-31T23:59:59.999Z&limit=20",
       {
         headers: authHeaders,
-      }
+      },
     );
     const body = (await response.json()) as {
       items: unknown[];
@@ -7356,7 +8040,7 @@ describe("Control Plane API", () => {
       "/api/v1/audits?from=2026-03-02T00:00:00.000Z&to=2026-03-01T00:00:00.000Z",
       {
         headers: authHeaders,
-      }
+      },
     );
     const body = (await response.json()) as {
       message: string;

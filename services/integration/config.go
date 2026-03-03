@@ -25,6 +25,7 @@ const (
 	defaultWeeklyDurable          = "INTEGRATION_WEEKLY_REPORT_DISPATCHER"
 	defaultDLQSubject             = "integration.dispatch"
 	defaultWebhookTimeout         = 10 * time.Second
+	defaultCallbackSignatureTTL   = 5 * time.Minute
 	defaultRetryMax               = 5
 	defaultRetryBaseDelay         = 2 * time.Second
 	defaultRetryMaxDelay          = 60 * time.Second
@@ -70,6 +71,7 @@ type integrationConfig struct {
 	ControlPlaneBaseURL     string
 	CallbackPath            string
 	CallbackSecret          string
+	CallbackSignatureTTL    time.Duration
 	ControlPlaneCallbackURL string
 
 	Channels       []integrationChannel
@@ -113,9 +115,10 @@ func loadIntegrationConfig() (integrationConfig, error) {
 
 		DLQSubject: getEnv("INTEGRATION_DLQ_SUBJECT", defaultDLQSubject),
 
-		ControlPlaneBaseURL: getEnv("CONTROL_PLANE_BASE_URL", ""),
-		CallbackPath:        getEnv("INTEGRATION_CALLBACK_PATH", defaultCallbackPath),
-		CallbackSecret:      strings.TrimSpace(os.Getenv("INTEGRATION_CALLBACK_SECRET")),
+		ControlPlaneBaseURL:   getEnv("CONTROL_PLANE_BASE_URL", ""),
+		CallbackPath:          getEnv("INTEGRATION_CALLBACK_PATH", defaultCallbackPath),
+		CallbackSecret:        strings.TrimSpace(os.Getenv("INTEGRATION_CALLBACK_SECRET")),
+		CallbackSignatureTTL:  defaultCallbackSignatureTTL,
 
 		ChannelURLs: map[integrationChannel]string{
 			channelWebhook:  getEnv("INTEGRATION_WEBHOOK_URL", ""),
@@ -143,6 +146,11 @@ func loadIntegrationConfig() (integrationConfig, error) {
 	}
 
 	cfg.WebhookTimeout, err = durationFromEnv("INTEGRATION_WEBHOOK_TIMEOUT", cfg.WebhookTimeout)
+	if err != nil {
+		return integrationConfig{}, err
+	}
+
+	cfg.CallbackSignatureTTL, err = durationFromEnv("INTEGRATION_CALLBACK_SIGNATURE_TTL", cfg.CallbackSignatureTTL)
 	if err != nil {
 		return integrationConfig{}, err
 	}
@@ -250,6 +258,9 @@ func loadIntegrationConfig() (integrationConfig, error) {
 	}
 	if cfg.WebhookTimeout <= 0 {
 		return integrationConfig{}, fmt.Errorf("invalid INTEGRATION_WEBHOOK_TIMEOUT: must be > 0")
+	}
+	if cfg.CallbackSignatureTTL <= 0 {
+		return integrationConfig{}, fmt.Errorf("invalid INTEGRATION_CALLBACK_SIGNATURE_TTL: must be > 0")
 	}
 	if cfg.ConsumerAckWait <= 0 {
 		return integrationConfig{}, fmt.Errorf("invalid INTEGRATION_CONSUMER_ACK_WAIT: must be > 0")
