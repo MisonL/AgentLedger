@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package agentledger.session.v1;
+
+option go_package = "github.com/agentledger/agentledger/packages/gen/go/session/v1;sessionv1";
+
+message SessionSummary {
+  string id = 1;
+  string source_id = 2;
+  string tool = 3;
+  string model = 4;
+  int64 started_at_unix_ms = 5;
+  int64 ended_at_unix_ms = 6;
+  int64 tokens = 7;
+  double cost = 8;
+}
+
+message SessionSearchRequest {
+  string tenant_id = 1;
+  string workspace_id = 2;
+  string source_id = 3;
+  string keyword = 4;
+  int64 from_unix_ms = 5;
+  int64 to_unix_ms = 6;
+  int32 limit = 7;
+  string cursor = 8;
+}
+
+message SessionSearchResponse {
+  repeated SessionSummary items = 1;
+  int32 total = 2;
+  string next_cursor = 3;
+}

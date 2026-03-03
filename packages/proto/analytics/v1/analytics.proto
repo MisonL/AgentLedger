@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package agentledger.analytics.v1;
+
+import "common/v1/common.proto";
+
+option go_package = "github.com/agentledger/agentledger/packages/gen/go/analytics/v1;analyticsv1";
+
+message TokenUsage {
+  int64 prompt_tokens = 1;
+  int64 completion_tokens = 2;
+  int64 total_tokens = 3;
+}
+
+message SessionMetric {
+  string session_id = 1;
+  string tenant_id = 2;
+  string workspace_id = 3;
+  int64 started_at_unix_ms = 4;
+  int64 ended_at_unix_ms = 5;
+  int64 message_count = 6;
+  TokenUsage tokens = 7;
+  repeated agentledger.common.v1.KeyValue dimensions = 8;
+}
+
+message UsageHeatPoint {
+  string day = 1;
+  int64 active_minutes = 2;
+  int64 session_count = 3;
+}
+
+message AnalyticsSnapshot {
+  string snapshot_id = 1;
+  int64 computed_at_unix_ms = 2;
+  repeated SessionMetric sessions = 3;
+  repeated UsageHeatPoint heatmap = 4;
+}

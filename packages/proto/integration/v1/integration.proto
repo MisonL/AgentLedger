@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package agentledger.integration.v1;
+
+import "common/v1/common.proto";
+
+option go_package = "github.com/agentledger/agentledger/packages/gen/go/integration/v1;integrationv1";
+
+enum DispatchStatus {
+  DISPATCH_STATUS_UNSPECIFIED = 0;
+  DISPATCH_STATUS_PENDING = 1;
+  DISPATCH_STATUS_DELIVERED = 2;
+  DISPATCH_STATUS_FAILED = 3;
+  DISPATCH_STATUS_DROPPED = 4;
+}
+
+message DispatchTarget {
+  string integration_id = 1;
+  string channel = 2;
+  string endpoint = 3;
+  string auth_ref = 4;
+  repeated agentledger.common.v1.KeyValue metadata = 5;
+}
+
+message DispatchRequest {
+  string request_id = 1;
+  DispatchTarget target = 2;
+  bytes payload = 3;
+  string content_type = 4;
+  int32 retry_limit = 5;
+  agentledger.common.v1.TraceContext trace = 6;
+}
+
+message DispatchResult {
+  string request_id = 1;
+  DispatchStatus status = 2;
+  int32 attempt = 3;
+  string provider_message_id = 4;
+  string error = 5;
+  int64 dispatched_at_unix_ms = 6;
+}

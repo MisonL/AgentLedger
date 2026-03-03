@@ -1,0 +1,29 @@
+import { Hono } from "hono";
+import { auditRoutes } from "./audits";
+import { alertRoutes } from "./alerts";
+import { authRoutes } from "./auth";
+import { budgetRoutes } from "./budgets";
+import { exportRoutes } from "./exports";
+import { healthRoutes } from "./health";
+import { identityRoutes } from "./identity";
+import { integrationCallbackRoutes } from "./integration-callbacks";
+import { pricingRoutes } from "./pricing";
+import { sessionRoutes } from "./sessions";
+import { sourceRoutes } from "./sources";
+import { usageRoutes } from "./usage";
+import type { AppEnv } from "../types";
+
+export const apiV1Routes = new Hono<AppEnv>();
+
+apiV1Routes.route("/", healthRoutes);
+apiV1Routes.route("/", sourceRoutes);
+apiV1Routes.route("/", sessionRoutes);
+apiV1Routes.route("/", exportRoutes);
+apiV1Routes.route("/", usageRoutes);
+apiV1Routes.route("/", pricingRoutes);
+apiV1Routes.route("/", budgetRoutes);
+apiV1Routes.route("/", alertRoutes);
+apiV1Routes.route("/", integrationCallbackRoutes);
+apiV1Routes.route("/", auditRoutes);
+apiV1Routes.route("/auth", authRoutes);
+apiV1Routes.route("/", identityRoutes);

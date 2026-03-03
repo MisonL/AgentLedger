@@ -1,0 +1,21 @@
+version: v2
+
+inputs:
+  - directory: packages/proto
+
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: packages/gen/go
+    opt:
+      - paths=source_relative
+
+  - remote: buf.build/grpc/go
+    out: packages/gen/go
+    opt:
+      - paths=source_relative
+
+  # 若当前环境无法拉取 TS 远程插件，可先注释此段并仅生成 Go 代码。
+  - remote: buf.build/bufbuild/es
+    out: packages/gen/ts
+    opt:
+      - target=ts

@@ -1,0 +1,385 @@
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/agentledger/agentledger/services/internal/shared/ingest"
+)
+
+const parserCancelCheckEvery = 100
+
+var (
+	nativeRolePattern = regexp.MustCompile(`(?i)^\s*(user|assistant|system|tool)\s*[:：]\s*(.+)$`)
+	timePrefixPattern = regexp.MustCompile(`^\s*(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)\s+(.+)$`)
+)
+
+type cancelChecker func(ctx context.Context) (bool, error)
+
+type parseInput struct {
+	Source      sourceRecord
+	SourcePath  string
+	Lines       []lineRecord
+	JSONLStart  int64
+	NativeStart int64
+	CheckCancel cancelChecker
+}
+
+func splitLines(content []byte) ([]lineRecord, error) {
+	scanner := bufio.NewScanner(bytes.NewReader(content))
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+
+	lines := make([]lineRecord, 0)
+	var lineNo int64 = 0
+	for scanner.Scan() {
+		lineNo++
+		lines = append(lines, lineRecord{No: lineNo, Text: scanner.Text()})
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan lines failed: %w", err)
+	}
+	return lines, nil
+}
+
+func parseLinesConcurrently(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	outputs := make(map[string]parserOutput, 2)
+	var mu sync.Mutex
+	var once sync.Once
+	var parseErr error
+
+	setErr := func(err error) {
+		once.Do(func() {
+			parseErr = err
+			cancel()
+		})
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		out, err := parseJSONLLines(ctx, input)
+		if err != nil {
+			setErr(err)
+			return
+		}
+		mu.Lock()
+		outputs[parserKeyJSONL] = out
+		mu.Unlock()
+	}()
+
+	go func() {
+		defer wg.Done()
+		out, err := parseNativeLines(ctx, input)
+		if err != nil {
+			setErr(err)
+			return
+		}
+		mu.Lock()
+		outputs[parserKeyNative] = out
+		mu.Unlock()
+	}()
+
+	wg.Wait()
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	return outputs, nil
+}
+
+func parseJSONLLines(ctx context.Context, input parseInput) (parserOutput, error) {
+	out := parserOutput{ParserKey: parserKeyJSONL, MaxLine: input.JSONLStart}
+	checkCounter := 0
+
+	for _, line := range input.Lines {
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
+		if line.No <= input.JSONLStart {
+			continue
+		}
+
+		trimmed := strings.TrimSpace(line.Text)
+		if trimmed == "" {
+			continue
+		}
+
+		checkCounter++
+		if checkCounter >= parserCancelCheckEvery {
+			checkCounter = 0
+			if canceled, err := checkCancelled(ctx, input.CheckCancel); err != nil {
+				return out, err
+			} else if canceled {
+				return out, errJobCancelled
+			}
+		}
+
+		var payload any
+		if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+			continue
+		}
+
+		data, ok := payload.(map[string]any)
+		if !ok {
+			data = map[string]any{"value": payload}
+		}
+
+		rawPayload, err := json.Marshal(data)
+		if err != nil {
+			return out, fmt.Errorf("marshal json line payload failed: %w", err)
+		}
+
+		event := ingest.RawEvent{}
+		event.EventID = firstNonEmpty(
+			valueFromMap(data, "event_id", "eventId", "id"),
+			stableID("evt", input.Source.ID, parserKeyJSONL, fmt.Sprintf("%d", line.No), trimmed),
+		)
+
+		sessionID := extractSessionIDFromJSON(data)
+		occurredAtRaw := firstNonEmpty(valueFromMap(data, "occurred_at", "occurredAt", "timestamp", "time", "created_at"))
+		occurredAt, dateKey := normalizeOccurredAt(occurredAtRaw, time.Now().UTC())
+		if sessionID == "" {
+			sessionID = stableID("sess", input.Source.ID, parserKeyJSONL, dateKey)
+		}
+
+		event.SessionID = sessionID
+		event.EventType = firstNonEmpty(valueFromMap(data, "event_type", "eventType", "type"), "message")
+		event.Role = firstNonEmpty(valueFromMap(data, "role"))
+		event.Text = firstNonEmpty(valueFromMap(data, "text", "message", "content"))
+		event.Model = firstNonEmpty(valueFromMap(data, "model"))
+		event.OccurredAt = occurredAt
+		event.SourcePath = input.SourcePath
+		event.SourceOffset = int64Ptr(line.No)
+		event.Metadata = map[string]string{
+			"parser": parserKeyJSONL,
+			"line":   fmt.Sprintf("%d", line.No),
+		}
+		event.Payload = rawPayload
+
+		out.Events = append(out.Events, rawEventWithLine{LineNo: line.No, Event: event})
+		if line.No > out.MaxLine {
+			out.MaxLine = line.No
+		}
+	}
+
+	return out, nil
+}
+
+func parseNativeLines(ctx context.Context, input parseInput) (parserOutput, error) {
+	out := parserOutput{ParserKey: parserKeyNative, MaxLine: input.NativeStart}
+	checkCounter := 0
+
+	for _, line := range input.Lines {
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
+		if line.No <= input.NativeStart {
+			continue
+		}
+
+		trimmed := strings.TrimSpace(line.Text)
+		if trimmed == "" {
+			continue
+		}
+		if json.Valid([]byte(trimmed)) {
+			continue
+		}
+
+		checkCounter++
+		if checkCounter >= parserCancelCheckEvery {
+			checkCounter = 0
+			if canceled, err := checkCancelled(ctx, input.CheckCancel); err != nil {
+				return out, err
+			} else if canceled {
+				return out, errJobCancelled
+			}
+		}
+
+		role, text, occurredAt, dateKey := parseNativeLine(trimmed, time.Now().UTC())
+		eventID := stableID("evt", input.Source.ID, parserKeyNative, fmt.Sprintf("%d", line.No), trimmed)
+		sessionID := stableID("sess", input.Source.ID, parserKeyNative, dateKey)
+		payload, err := json.Marshal(map[string]any{
+			"raw_line": trimmed,
+			"parser":   parserKeyNative,
+		})
+		if err != nil {
+			return out, fmt.Errorf("marshal native payload failed: %w", err)
+		}
+
+		event := ingest.RawEvent{
+			EventID:      eventID,
+			SessionID:    sessionID,
+			EventType:    "message",
+			Role:         role,
+			Text:         text,
+			OccurredAt:   occurredAt,
+			SourcePath:   input.SourcePath,
+			SourceOffset: int64Ptr(line.No),
+			Metadata: map[string]string{
+				"parser": parserKeyNative,
+				"line":   fmt.Sprintf("%d", line.No),
+			},
+			Payload: payload,
+		}
+
+		out.Events = append(out.Events, rawEventWithLine{LineNo: line.No, Event: event})
+		if line.No > out.MaxLine {
+			out.MaxLine = line.No
+		}
+	}
+
+	return out, nil
+}
+
+func collectAndSortEvents(outputs map[string]parserOutput) []ingest.RawEvent {
+	combined := make([]rawEventWithLine, 0)
+	for _, output := range outputs {
+		combined = append(combined, output.Events...)
+	}
+
+	sort.Slice(combined, func(i, j int) bool {
+		if combined[i].LineNo == combined[j].LineNo {
+			return combined[i].Event.EventID < combined[j].Event.EventID
+		}
+		return combined[i].LineNo < combined[j].LineNo
+	})
+
+	out := make([]ingest.RawEvent, 0, len(combined))
+	for _, item := range combined {
+		out = append(out, item.Event)
+	}
+	return out
+}
+
+func checkCancelled(ctx context.Context, checker cancelChecker) (bool, error) {
+	if checker == nil {
+		return false, nil
+	}
+	canceled, err := checker(ctx)
+	if err != nil {
+		return false, fmt.Errorf("check cancel_requested failed: %w", err)
+	}
+	return canceled, nil
+}
+
+func parseNativeLine(line string, now time.Time) (role, text, occurredAt, dateKey string) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		date := now.Format("2006-01-02")
+		return "assistant", "", now.Format(time.RFC3339Nano), date
+	}
+
+	parsedTime := now.UTC()
+	remaining := trimmed
+
+	if matches := timePrefixPattern.FindStringSubmatch(trimmed); len(matches) == 3 {
+		if parsed, err := ingest.ParseTimestamp(matches[1]); err == nil {
+			parsedTime = parsed
+			remaining = strings.TrimSpace(matches[2])
+		}
+	}
+
+	resolvedRole := "assistant"
+	resolvedText := remaining
+	if matches := nativeRolePattern.FindStringSubmatch(remaining); len(matches) == 3 {
+		resolvedRole = strings.ToLower(strings.TrimSpace(matches[1]))
+		resolvedText = strings.TrimSpace(matches[2])
+	}
+	if resolvedText == "" {
+		resolvedText = trimmed
+	}
+
+	occurred := parsedTime.UTC().Format(time.RFC3339Nano)
+	dateKey = parsedTime.UTC().Format("2006-01-02")
+	return resolvedRole, resolvedText, occurred, dateKey
+}
+
+func extractSessionIDFromJSON(payload map[string]any) string {
+	if sessionID := firstNonEmpty(valueFromMap(payload, "session_id", "sessionId", "sessionID")); sessionID != "" {
+		return sessionID
+	}
+
+	rawSession, ok := payload["session"]
+	if !ok {
+		return ""
+	}
+
+	switch typed := rawSession.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case map[string]any:
+		return firstNonEmpty(valueFromMap(typed, "id", "session_id", "sessionId"))
+	default:
+		return ""
+	}
+}
+
+func normalizeOccurredAt(raw string, fallback time.Time) (occurredAt string, dateKey string) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed != "" {
+		if parsed, err := ingest.ParseTimestamp(trimmed); err == nil {
+			utc := parsed.UTC()
+			return utc.Format(time.RFC3339Nano), utc.Format("2006-01-02")
+		}
+	}
+
+	utc := fallback.UTC()
+	return utc.Format(time.RFC3339Nano), utc.Format("2006-01-02")
+}
+
+func valueFromMap(input map[string]any, keys ...string) string {
+	for _, key := range keys {
+		value, ok := input[key]
+		if !ok {
+			continue
+		}
+		if text := anyToString(value); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func anyToString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case fmt.Stringer:
+		return strings.TrimSpace(typed.String())
+	case float64:
+		return strings.TrimSpace(fmt.Sprintf("%.0f", typed))
+	case float32:
+		return strings.TrimSpace(fmt.Sprintf("%.0f", typed))
+	case int, int8, int16, int32, int64:
+		return strings.TrimSpace(fmt.Sprintf("%d", typed))
+	case uint, uint8, uint16, uint32, uint64:
+		return strings.TrimSpace(fmt.Sprintf("%d", typed))
+	case bool:
+		if typed {
+			return "true"
+		}
+		return "false"
+	default:
+		return ""
+	}
+}
+
+func stableID(prefix string, parts ...string) string {
+	joined := strings.Join(parts, "|")
+	sum := sha256.Sum256([]byte(joined))
+	return prefix + "_" + hex.EncodeToString(sum[:12])
+}

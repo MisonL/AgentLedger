@@ -1,0 +1,159 @@
+syntax = "proto3";
+
+package agentledger.ingestion.v1;
+
+import "common/v1/common.proto";
+import "source/v1/source.proto";
+
+option go_package = "github.com/agentledger/agentledger/packages/gen/go/ingestion/v1;ingestionv1";
+
+enum ClientType {
+  CLIENT_TYPE_UNSPECIFIED = 0;
+  CLIENT_TYPE_CLI = 1;
+  CLIENT_TYPE_IDE = 2;
+}
+
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_USER = 1;
+  EVENT_TYPE_ASSISTANT = 2;
+  EVENT_TYPE_TOOL = 3;
+  EVENT_TYPE_META = 4;
+  EVENT_TYPE_USAGE = 5;
+}
+
+enum EventRole {
+  EVENT_ROLE_UNSPECIFIED = 0;
+  EVENT_ROLE_USER = 1;
+  EVENT_ROLE_ASSISTANT = 2;
+  EVENT_ROLE_SYSTEM = 3;
+  EVENT_ROLE_TOOL = 4;
+}
+
+enum CostMode {
+  COST_MODE_UNSPECIFIED = 0;
+  COST_MODE_RAW = 1;
+  COST_MODE_ESTIMATED = 2;
+  COST_MODE_NONE = 3;
+}
+
+message RawEventEnvelope {
+  string envelope_id = 1;
+  string tenant_id = 2;
+  string workspace_id = 3;
+  agentledger.source.v1.Source source = 4;
+  agentledger.source.v1.SourceRecordRef record_ref = 5;
+  string native_session_id = 6;
+  bytes payload = 7;
+  string payload_format = 8;
+  int64 observed_at_unix_ms = 9;
+  agentledger.common.v1.TraceContext trace = 10;
+  repeated agentledger.common.v1.KeyValue attributes = 11;
+}
+
+message NormalizedEvent {
+  string event_id = 1;
+  string tenant_id = 2;
+  string workspace_id = 3;
+  string source_id = 4;
+  string session_id = 5;
+  ClientType client_type = 6;
+  string provider = 7;
+  EventType event_type = 8;
+  int64 occurred_at_unix_ms = 9;
+  EventRole role = 10;
+  string text = 11;
+  string model = 12;
+  string request_id = 13;
+  int64 input_tokens = 14;
+  int64 output_tokens = 15;
+  int64 cache_read_tokens = 16;
+  int64 cache_write_tokens = 17;
+  int64 reasoning_tokens = 18;
+  double cost_usd = 19;
+  CostMode cost_mode = 20;
+  string source_path = 21;
+  int64 source_offset = 22;
+  string raw_hash = 23;
+  agentledger.common.v1.TraceContext trace = 24;
+}
+
+message IngestionAck {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_ACCEPTED = 1;
+    STATUS_REJECTED = 2;
+    STATUS_RETRYABLE = 3;
+  }
+
+  string envelope_id = 1;
+  Status status = 2;
+  string message = 3;
+  int64 processed_at_unix_ms = 4;
+}
+
+message PushBatchRequest {
+  message AgentInfo {
+    string agent_id = 1;
+    string tenant_id = 2;
+    string workspace_id = 3;
+    string hostname = 4;
+    string version = 5;
+  }
+
+  message SourceInfo {
+    string source_id = 1;
+    string provider = 2;
+    string source_type = 3;
+  }
+
+  message TokenUsage {
+    int64 input_tokens = 1;
+    int64 output_tokens = 2;
+    int64 cache_read_tokens = 3;
+    int64 cache_write_tokens = 4;
+    int64 reasoning_tokens = 5;
+  }
+
+  message Event {
+    string event_id = 1;
+    string session_id = 2;
+    string event_type = 3;
+    string role = 4;
+    string text = 5;
+    string model = 6;
+    string occurred_at = 7;
+    TokenUsage tokens = 8;
+    optional double cost_usd = 9;
+    string cost_mode = 10;
+    string source_path = 11;
+    optional int64 source_offset = 12;
+    map<string, string> metadata = 13;
+    bytes payload = 14;
+  }
+
+  string batch_id = 1;
+  AgentInfo agent = 2;
+  SourceInfo source = 3;
+  repeated Event events = 4;
+  map<string, string> metadata = 5;
+  string sent_at = 6;
+}
+
+message PushBatchResponse {
+  message ErrorItem {
+    int32 index = 1;
+    string event_id = 2;
+    string message = 3;
+  }
+
+  string batch_id = 1;
+  int32 accepted = 2;
+  int32 rejected = 3;
+  repeated ErrorItem errors = 4;
+  int64 duration_ms = 5;
+}
+
+service IngestService {
+  rpc PushBatch(PushBatchRequest) returns (PushBatchResponse);
+}

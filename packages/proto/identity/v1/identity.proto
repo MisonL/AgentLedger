@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package agentledger.identity.v1;
+
+option go_package = "github.com/agentledger/agentledger/packages/gen/go/identity/v1;identityv1";
+
+message Tenant {
+  string id = 1;
+  string name = 2;
+  bool active = 3;
+}
+
+message Workspace {
+  string id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  string timezone = 4;
+}
+
+message AgentIdentity {
+  string agent_id = 1;
+  string tenant_id = 2;
+  string workspace_id = 3;
+  string source_system = 4;
+  string host_id = 5;
+  string user_id = 6;
+  string version = 7;
+}
+
+message IdentitySnapshot {
+  Tenant tenant = 1;
+  Workspace workspace = 2;
+  AgentIdentity agent = 3;
+}

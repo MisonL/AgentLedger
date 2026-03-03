@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    name: 基线检查 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: true
+          cache-dependency-path: '**/go.sum'
+
+      - name: 安装 Buf CLI
+        uses: bufbuild/buf-setup-action@v1
+
+      - name: 安装依赖
+        run: bun install
+
+      - name: Proto 契约检查
+        run: bun run proto:lint
+
+      - name: TypeScript 检查
+        run: bun run check:ts
+
+      - name: Go 测试
+        run: bun run test:go
+
+      - name: Coverage Gate
+        if: matrix.os == 'ubuntu-latest'
+        run: bun run test:coverage
+
+  build-agent-cross:
+    name: 客户端三平台构建
+    runs-on: ubuntu-latest
+    needs: baseline
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: true
+          cache-dependency-path: '**/go.sum'
+
+      - name: 构建 Agent 三平台二进制
+        run: bash ./scripts/build-agent-cross.sh
+
+      - name: 上传 Agent 构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-cross-${{ github.sha }}
+          path: dist/agent/
+          if-no-files-found: error

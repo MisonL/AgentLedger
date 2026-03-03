@@ -1,0 +1,35 @@
+{
+  "name": "agentledger",
+  "version": "0.0.0",
+  "private": true,
+  "description": "AgentLedger Monorepo Root",
+  "workspaces": [
+    "apps/*",
+    "services/*",
+    "packages/*",
+    "clients/*"
+  ],
+  "scripts": {
+    "format": "bash ./scripts/format.sh",
+    "lint": "bash ./scripts/lint.sh",
+    "test": "bash ./scripts/test.sh",
+    "build": "bash ./scripts/build.sh",
+    "check:ts": "bash ./scripts/ts-check.sh",
+    "check:support-matrix": "bun run ./scripts/check-support-matrix.ts",
+    "check:callback-stream-binding": "bash ./scripts/check-callback-stream-binding.sh",
+    "test:go": "bash ./scripts/go-test-all.sh",
+    "test:coverage": "bash ./scripts/test-coverage.sh",
+    "test:callback-chain-targeted": "bash ./scripts/test-callback-chain-targeted.sh",
+    "test:e2e-governance-callback-chain": "bash ./scripts/e2e-governance-callback-chain.sh",
+    "check:coverage": "bash ./scripts/check-coverage-threshold.sh",
+    "proto:lint": "bash ./scripts/proto-lint.sh",
+    "proto:gen": "bash ./scripts/proto-gen.sh",
+    "proto:breaking": "bash ./scripts/proto-breaking.sh"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/pg": "^8.15.6",
+    "@types/node": "latest",
+    "typescript": "^5"
+  }
+}

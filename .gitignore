@@ -1,0 +1,33 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Bun / Node
+node_modules
+.pnp.*
+
+# Build outputs
+dist
+build
+coverage
+.coverage
+*.tsbuildinfo
+agent
+agent.exe
+dist/agent/
+
+# Proto / Buf 生成产物
+packages/gen/go/
+packages/gen/ts/
+
+# Go
+bin/
+.coverprofile
+
+# Environment
+.env
+.env.*
+!.env.example

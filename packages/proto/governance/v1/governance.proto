@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package agentledger.governance.v1;
+
+import "common/v1/common.proto";
+
+option go_package = "github.com/agentledger/agentledger/packages/gen/go/governance/v1;governancev1";
+
+enum AlertSeverity {
+  ALERT_SEVERITY_UNSPECIFIED = 0;
+  ALERT_SEVERITY_LOW = 1;
+  ALERT_SEVERITY_MEDIUM = 2;
+  ALERT_SEVERITY_HIGH = 3;
+  ALERT_SEVERITY_CRITICAL = 4;
+}
+
+message PolicyMatch {
+  string policy_id = 1;
+  string policy_name = 2;
+  string rule_id = 3;
+  string reason = 4;
+  repeated agentledger.common.v1.KeyValue evidence = 5;
+}
+
+message GovernanceAlert {
+  string alert_id = 1;
+  AlertSeverity severity = 2;
+  string tenant_id = 3;
+  string workspace_id = 4;
+  string event_id = 5;
+  PolicyMatch match = 6;
+  int64 created_at_unix_ms = 7;
+  agentledger.common.v1.TraceContext trace = 8;
+}
+
+message AuditLogEntry {
+  string log_id = 1;
+  string category = 2;
+  string action = 3;
+  string resource_id = 4;
+  string detail = 5;
+  agentledger.common.v1.AuditMeta meta = 6;
+}

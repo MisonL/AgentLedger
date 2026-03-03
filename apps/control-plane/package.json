@@ -1,0 +1,14 @@
+{
+  "name": "@agentledger/control-plane",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "start": "bun src/index.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "hono": "^4.10.3",
+    "pg": "^8.16.3"
+  }
+}

@@ -1,0 +1,305 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
+)
+
+func TestDispatchMessageKeyFallbackWithoutMetadata(t *testing.T) {
+	t.Parallel()
+
+	msg := &messageKeyFallbackTestMsg{
+		data:        []byte(`{"id":"evt-1","severity":"warning"}`),
+		metadataErr: errors.New("metadata unavailable"),
+		subject:     "governance.alerts",
+		reply:       "_INBOX.reply",
+		headers: nats.Header{
+			"X-Trace-ID": []string{"trace-1"},
+		},
+	}
+
+	alertKey := dispatchMessageKey(msg, eventTypeAlert)
+	if alertKey == "" {
+		t.Fatalf("fallback message key should not be empty")
+	}
+	if !strings.HasPrefix(alertKey, "fallback/alert/") {
+		t.Fatalf("fallback message key format mismatch: %q", alertKey)
+	}
+
+	alertKeyAgain := dispatchMessageKey(msg, eventTypeAlert)
+	if alertKeyAgain != alertKey {
+		t.Fatalf("fallback message key should be stable for same message: got %q want %q", alertKeyAgain, alertKey)
+	}
+
+	weeklyKey := dispatchMessageKey(msg, eventTypeWeeklyReport)
+	if weeklyKey == alertKey {
+		t.Fatalf("different event type should generate different fallback key")
+	}
+
+	msgWithDifferentPayload := &messageKeyFallbackTestMsg{
+		data:        []byte(`{"id":"evt-2","severity":"warning"}`),
+		metadataErr: errors.New("metadata unavailable"),
+		subject:     "governance.alerts",
+		reply:       "_INBOX.reply",
+		headers: nats.Header{
+			"X-Trace-ID": []string{"trace-1"},
+		},
+	}
+	if got := dispatchMessageKey(msgWithDifferentPayload, eventTypeAlert); got == alertKey {
+		t.Fatalf("different payload should generate different fallback key")
+	}
+}
+
+func TestDispatchMessageKeyPreferMetadata(t *testing.T) {
+	t.Parallel()
+
+	msg := &messageKeyFallbackTestMsg{
+		data: []byte(`{"id":"evt-1","severity":"warning"}`),
+		metadata: &jetstream.MsgMetadata{
+			Stream: "GOVERNANCE_ALERTS",
+			Sequence: jetstream.SequencePair{
+				Stream:   2048,
+				Consumer: 1,
+			},
+		},
+		metadataErr: nil,
+	}
+
+	if got := dispatchMessageKey(msg, eventTypeAlert); got != "GOVERNANCE_ALERTS/2048" {
+		t.Fatalf("message key should prefer metadata sequence: got %q", got)
+	}
+}
+
+func TestDispatchProgressCleanupLockedEvictsOverLimit(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 3, 2, 9, 0, 0, 0, time.UTC)
+	store := &dispatchProgressStore{
+		items: map[string]*dispatchProgressEntry{
+			"oldest": {updatedAt: base},
+			"middle": {updatedAt: base.Add(1 * time.Minute)},
+			"newest": {updatedAt: base.Add(2 * time.Minute)},
+		},
+		ttl:        0,
+		maxEntries: 2,
+	}
+
+	result := store.cleanupLocked(base.Add(3 * time.Minute))
+	if result.evicted != 1 {
+		t.Fatalf("evicted mismatch: got %d want %d", result.evicted, 1)
+	}
+	if len(store.items) != 2 {
+		t.Fatalf("remaining items mismatch: got %d want %d", len(store.items), 2)
+	}
+	if _, exists := store.items["oldest"]; exists {
+		t.Fatalf("oldest entry should be evicted when over max entries")
+	}
+	if _, exists := store.items["middle"]; !exists {
+		t.Fatalf("middle entry should be retained")
+	}
+	if _, exists := store.items["newest"]; !exists {
+		t.Fatalf("newest entry should be retained")
+	}
+}
+
+func TestRetryDecision(t *testing.T) {
+	t.Parallel()
+
+	retryableErr := &dispatchError{retryable: true, message: "temporary failure"}
+	nonRetryableErr := &dispatchError{retryable: false, message: "bad request"}
+
+	testCases := []struct {
+		name       string
+		err        error
+		attempt    int
+		maxRetries int
+		wantRetry  bool
+	}{
+		{
+			name:       "retryable and within retry budget",
+			err:        retryableErr,
+			attempt:    3,
+			maxRetries: 5,
+			wantRetry:  true,
+		},
+		{
+			name:       "retryable and equal retry budget",
+			err:        retryableErr,
+			attempt:    5,
+			maxRetries: 5,
+			wantRetry:  true,
+		},
+		{
+			name:       "retryable but exceeded retry budget",
+			err:        retryableErr,
+			attempt:    6,
+			maxRetries: 5,
+			wantRetry:  false,
+		},
+		{
+			name:       "non-retryable error",
+			err:        nonRetryableErr,
+			attempt:    1,
+			maxRetries: 5,
+			wantRetry:  false,
+		},
+		{
+			name:       "plain error defaults to non-retryable",
+			err:        errors.New("plain error"),
+			attempt:    1,
+			maxRetries: 5,
+			wantRetry:  false,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := isRetryable(tc.err) && shouldRetry(tc.attempt, tc.maxRetries)
+			if got != tc.wantRetry {
+				t.Fatalf("retry decision mismatch: got %v, want %v", got, tc.wantRetry)
+			}
+		})
+	}
+}
+
+type messageKeyFallbackTestMsg struct {
+	data        []byte
+	metadata    *jetstream.MsgMetadata
+	metadataErr error
+	subject     string
+	reply       string
+	headers     nats.Header
+}
+
+func (m *messageKeyFallbackTestMsg) Metadata() (*jetstream.MsgMetadata, error) {
+	if m.metadataErr != nil {
+		return nil, m.metadataErr
+	}
+	return m.metadata, nil
+}
+
+func (m *messageKeyFallbackTestMsg) Data() []byte {
+	return append([]byte(nil), m.data...)
+}
+
+func (m *messageKeyFallbackTestMsg) Headers() nats.Header {
+	dup := make(nats.Header, len(m.headers))
+	for key, values := range m.headers {
+		dup[key] = append([]string(nil), values...)
+	}
+	return dup
+}
+
+func (m *messageKeyFallbackTestMsg) Subject() string {
+	return m.subject
+}
+
+func (m *messageKeyFallbackTestMsg) Reply() string {
+	return m.reply
+}
+
+func (m *messageKeyFallbackTestMsg) Ack() error {
+	return nil
+}
+
+func (m *messageKeyFallbackTestMsg) DoubleAck(_ context.Context) error {
+	return nil
+}
+
+func (m *messageKeyFallbackTestMsg) Nak() error {
+	return nil
+}
+
+func (m *messageKeyFallbackTestMsg) NakWithDelay(_ time.Duration) error {
+	return nil
+}
+
+func (m *messageKeyFallbackTestMsg) InProgress() error {
+	return nil
+}
+
+func (m *messageKeyFallbackTestMsg) Term() error {
+	return nil
+}
+
+func (m *messageKeyFallbackTestMsg) TermWithReason(_ string) error {
+	return nil
+}
+
+func TestBackoffDelay(t *testing.T) {
+	t.Parallel()
+
+	base := 2 * time.Second
+	max := 60 * time.Second
+
+	testCases := []struct {
+		attempt int
+		want    time.Duration
+	}{
+		{attempt: 1, want: 2 * time.Second},
+		{attempt: 2, want: 4 * time.Second},
+		{attempt: 3, want: 8 * time.Second},
+		{attempt: 5, want: 32 * time.Second},
+		{attempt: 6, want: 60 * time.Second},
+		{attempt: 10, want: 60 * time.Second},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.want.String(), func(t *testing.T) {
+			t.Parallel()
+
+			got := backoffDelay(tc.attempt, base, max)
+			if got != tc.want {
+				t.Fatalf("backoff mismatch: attempt=%d got=%s want=%s", tc.attempt, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildDLQPayload(t *testing.T) {
+	t.Parallel()
+
+	event := []byte(`{"alert_id":123,"severity":"critical"}`)
+	failedAt := time.Date(2026, 3, 2, 8, 30, 0, 0, time.UTC)
+	dispatchErr := errors.New("webhook returned status 400")
+
+	raw, err := buildDLQPayload(event, eventTypeAlert, dispatchErr, 4, failedAt)
+	if err != nil {
+		t.Fatalf("buildDLQPayload returned error: %v", err)
+	}
+
+	var decoded dlqPayload
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal dlq payload failed: %v", err)
+	}
+
+	if decoded.Error != dispatchErr.Error() {
+		t.Fatalf("error mismatch: got %q want %q", decoded.Error, dispatchErr.Error())
+	}
+	if decoded.Attempt != 4 {
+		t.Fatalf("attempt mismatch: got %d want %d", decoded.Attempt, 4)
+	}
+	if decoded.EventType != eventTypeAlert {
+		t.Fatalf("event_type mismatch: got %q want %q", decoded.EventType, eventTypeAlert)
+	}
+	if !decoded.FailedAt.Equal(failedAt) {
+		t.Fatalf("failed_at mismatch: got %s want %s", decoded.FailedAt, failedAt)
+	}
+	if string(decoded.Event) != string(event) {
+		t.Fatalf("event mismatch: got %s want %s", decoded.Event, event)
+	}
+	if decoded.EventRaw != "" {
+		t.Fatalf("event_raw should be empty for valid json event")
+	}
+}

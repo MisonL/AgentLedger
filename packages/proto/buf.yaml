@@ -1,0 +1,13 @@
+version: v2
+
+lint:
+  use:
+    - STANDARD
+  # 当前目录结构为 <domain>/v1/*.proto，
+  # 不与完整包名 agentledger.<domain>.v1 一一对应，先关闭目录强绑定规则。
+  except:
+    - PACKAGE_DIRECTORY_MATCH
+
+breaking:
+  use:
+    - FILE

@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package agentledger.source.v1;
+
+import "common/v1/common.proto";
+
+option go_package = "github.com/agentledger/agentledger/packages/gen/go/source/v1;sourcev1";
+
+enum SourceKind {
+  SOURCE_KIND_UNSPECIFIED = 0;
+  SOURCE_KIND_LOCAL_FS = 1;
+  SOURCE_KIND_REMOTE_SSH = 2;
+  SOURCE_KIND_API_PULL = 3;
+  SOURCE_KIND_QUEUE_SUB = 4;
+}
+
+enum SourceAccessMode {
+  SOURCE_ACCESS_MODE_UNSPECIFIED = 0;
+  SOURCE_ACCESS_MODE_REALTIME = 1;
+  SOURCE_ACCESS_MODE_SYNC = 2;
+  SOURCE_ACCESS_MODE_HYBRID = 3;
+}
+
+message Source {
+  string id = 1;
+  string name = 2;
+  SourceKind kind = 3;
+  string uri = 4;
+  string host = 5;
+  repeated string base_paths = 6;
+  SourceAccessMode access_mode = 7;
+  string sync_cron = 8;
+  int32 sync_retention_days = 9;
+  bool enabled = 10;
+  int64 created_at_unix_ms = 11;
+  repeated agentledger.common.v1.KeyValue metadata = 12;
+}
+
+message SourceCursor {
+  string source_id = 1;
+  string checkpoint = 2;
+  int64 offset = 3;
+}
+
+message SourceRecordRef {
+  string source_id = 1;
+  string session_id = 2;
+  string record_id = 3;
+  int64 sequence = 4;
+  int64 captured_at_unix_ms = 5;
+}
