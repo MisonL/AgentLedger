@@ -121,6 +121,13 @@ type PgErrorLike = {
 export interface SessionSearchResult {
   items: Session[];
   total: number;
+  nextCursor: string | null;
+}
+
+export interface SessionEventListResult {
+  items: SessionEvent[];
+  total: number;
+  nextCursor: string | null;
 }
 
 export interface SourceParseFailure {
@@ -256,6 +263,7 @@ interface NormalizedSessionSearchInput {
   from?: string;
   to?: string;
   limit: number;
+  cursor?: string;
 }
 
 interface NormalizedSourceParseFailureQueryInput {
@@ -1404,6 +1412,43 @@ function mapAuthSessionRow(row: DbRow): AuthSession {
   };
 }
 
+interface TimePaginationCursor {
+  timestamp: string;
+  id: string;
+}
+
+function encodeTimePaginationCursor(input: TimePaginationCursor): string {
+  return Buffer.from(JSON.stringify(input), "utf8").toString("base64url");
+}
+
+function decodeTimePaginationCursor(value: string | undefined): TimePaginationCursor | null {
+  const raw = firstNonEmptyString(value);
+  if (!raw) {
+    return null;
+  }
+
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+
+  if (typeof decoded !== "object" || decoded === null) {
+    return null;
+  }
+  const record = decoded as Record<string, unknown>;
+  const timestamp = firstNonEmptyString(record.timestamp);
+  const id = firstNonEmptyString(record.id);
+  if (!timestamp || !id) {
+    return null;
+  }
+  if (!Number.isFinite(Date.parse(timestamp))) {
+    return null;
+  }
+  return { timestamp, id };
+}
+
 function normalizeSessionSearchInput(
   input: SessionSearchInput,
   tenantId?: string
@@ -1420,6 +1465,7 @@ function normalizeSessionSearchInput(
     from: input.from,
     to: input.to,
     limit: input.limit ?? DEFAULT_SESSION_LIMIT,
+    cursor: firstNonEmptyString(input.cursor) ?? undefined,
   };
 }
 
@@ -2440,6 +2486,7 @@ class ControlPlaneRepository {
         NULLIF(s.source_metadata->>'workspace_id', ''),
         ''
       )`;
+      const cursor = decodeTimePaginationCursor(normalized.cursor);
       const sessionsFromSql = `FROM (
         SELECT
           sess.id,
@@ -2558,11 +2605,27 @@ class ControlPlaneRepository {
         params
       );
 
-      const listParams = [...params, normalized.limit];
+      const listParams = [...params];
+      const listWhereClauses = [...whereClauses];
+      if (cursor) {
+        listParams.push(cursor.timestamp);
+        const timestampToken = `$${listParams.length}`;
+        listParams.push(cursor.id);
+        const idToken = `$${listParams.length}`;
+        listWhereClauses.push(
+          `(s.started_at < ${timestampToken}::timestamptz
+            OR (s.started_at = ${timestampToken}::timestamptz AND s.id < ${idToken}))`
+        );
+      }
+
+      const listWhereSql =
+        listWhereClauses.length > 0 ? `WHERE ${listWhereClauses.join(" AND ")}` : "";
+      listParams.push(normalized.limit + 1);
       const listResult = await pool.query(
         `SELECT s.id,
                 s.source_id,
                 s.started_at,
+                to_char(s.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS started_at_cursor,
                 s.ended_at,
                 s.session_json AS row_data,
                 COALESCE(NULLIF(s.session_json->>'tokens', ''), NULLIF(s.session_json->>'total_tokens', ''), '0') AS tokens,
@@ -2570,18 +2633,40 @@ class ControlPlaneRepository {
                   NULLIF(s.session_json->>'cost', ''),
                   NULLIF(s.session_json->>'cost_usd', ''),
                   NULLIF(s.session_json->>'total_cost', ''),
-                  '0'
+                 '0'
                 ) AS cost
          ${sessionsFromSql}
-         ${whereSql}
-         ORDER BY s.started_at DESC NULLS LAST
+         ${listWhereSql}
+         ORDER BY s.started_at DESC NULLS LAST, s.id DESC
          LIMIT $${listParams.length}`,
         listParams
       );
 
+      const mappedItems = listResult.rows.map(mapSessionRow);
+      const hasMore = mappedItems.length > normalized.limit;
+      const items = hasMore ? mappedItems.slice(0, normalized.limit) : mappedItems;
+      const cursorRows = hasMore ? listResult.rows.slice(0, normalized.limit) : listResult.rows;
+      const lastItem = items[items.length - 1];
+      const lastCursorRow = cursorRows[cursorRows.length - 1];
+      const cursorTimestamp =
+        firstNonEmptyString((lastCursorRow as DbRow | undefined)?.started_at_cursor) ??
+        toIsoString((lastCursorRow as DbRow | undefined)?.started_at);
+      const nextCursor =
+        hasMore &&
+        lastItem &&
+        typeof cursorTimestamp === "string" &&
+        Number.isFinite(Date.parse(cursorTimestamp)) &&
+        lastItem.id.trim().length > 0
+          ? encodeTimePaginationCursor({
+              timestamp: cursorTimestamp,
+              id: lastItem.id,
+            })
+          : null;
+
       return {
-        items: listResult.rows.map(mapSessionRow),
+        items,
         total: Math.max(0, Math.trunc(toNumber(countResult.rows[0]?.total, 0))),
+        nextCursor,
       };
     };
 
@@ -2663,24 +2748,59 @@ class ControlPlaneRepository {
   async listSessionEvents(
     tenantId: string,
     sessionId: string,
-    limit = 500
-  ): Promise<SessionEvent[]> {
+    limit = 500,
+    cursor?: string
+  ): Promise<SessionEventListResult> {
     const normalizedTenantId = normalizeScopedTenantId(tenantId);
     const normalizedSessionId = firstNonEmptyString(sessionId);
     if (!normalizedSessionId) {
-      return [];
+      return {
+        items: [],
+        total: 0,
+        nextCursor: null,
+      };
     }
     const normalizedLimit =
       Number.isFinite(limit) && Number.isInteger(limit) && limit > 0
         ? Math.min(limit, 2000)
         : 500;
+    const parsedCursor = decodeTimePaginationCursor(cursor);
 
     const pool = await this.getPool();
     if (!pool) {
-      return [];
+      return this.listSessionEventsFromMemory(
+        normalizedTenantId,
+        normalizedSessionId,
+        normalizedLimit,
+        parsedCursor
+      );
     }
 
     try {
+      const countResult = await pool.query(
+        `SELECT COUNT(*)::int AS total
+         FROM events AS evt
+         INNER JOIN sources AS src ON src.id = evt.source_id
+         WHERE evt.session_id = $1
+           AND COALESCE(NULLIF(src.tenant_id, ''), $2) = $2`,
+        [normalizedSessionId, normalizedTenantId]
+      );
+
+      const listParams: unknown[] = [normalizedSessionId, normalizedTenantId];
+      let cursorSql = "";
+      if (parsedCursor) {
+        listParams.push(parsedCursor.timestamp);
+        const timestampToken = `$${listParams.length}`;
+        listParams.push(parsedCursor.id);
+        const idToken = `$${listParams.length}`;
+        cursorSql = `
+           AND (
+             evt.timestamp > ${timestampToken}::timestamptz
+             OR (evt.timestamp = ${timestampToken}::timestamptz AND evt.id > ${idToken})
+           )`;
+      }
+      listParams.push(normalizedLimit + 1);
+
       const result = await pool.query(
         `SELECT
            evt.id,
@@ -2691,6 +2811,7 @@ class ControlPlaneRepository {
            evt.text,
            evt.model,
            evt.timestamp,
+           to_char(evt.timestamp AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS timestamp_cursor,
            evt.input_tokens,
            evt.output_tokens,
            evt.cache_read_tokens,
@@ -2703,17 +2824,52 @@ class ControlPlaneRepository {
          INNER JOIN sources AS src ON src.id = evt.source_id
          WHERE evt.session_id = $1
            AND COALESCE(NULLIF(src.tenant_id, ''), $2) = $2
-         ORDER BY evt.timestamp ASC, evt.created_at ASC
-         LIMIT $3`,
-        [normalizedSessionId, normalizedTenantId, normalizedLimit]
+           ${cursorSql}
+         ORDER BY evt.timestamp ASC, evt.id ASC
+         LIMIT $${listParams.length}`,
+        listParams
       );
-      return result.rows.map(mapSessionEventRow);
+      const mappedItems = result.rows.map(mapSessionEventRow);
+      const hasMore = mappedItems.length > normalizedLimit;
+      const items = hasMore ? mappedItems.slice(0, normalizedLimit) : mappedItems;
+      const cursorRows = hasMore ? result.rows.slice(0, normalizedLimit) : result.rows;
+      const lastItem = items[items.length - 1];
+      const lastCursorRow = cursorRows[cursorRows.length - 1];
+      const cursorTimestamp =
+        firstNonEmptyString((lastCursorRow as DbRow | undefined)?.timestamp_cursor) ??
+        toIsoString((lastCursorRow as DbRow | undefined)?.timestamp);
+      const nextCursor =
+        hasMore &&
+        lastItem &&
+        typeof cursorTimestamp === "string" &&
+        Number.isFinite(Date.parse(cursorTimestamp)) &&
+        lastItem.id.trim().length > 0
+          ? encodeTimePaginationCursor({
+              timestamp: cursorTimestamp,
+              id: lastItem.id,
+            })
+          : null;
+
+      return {
+        items,
+        total: Math.max(0, Math.trunc(toNumber(countResult.rows[0]?.total, 0))),
+        nextCursor,
+      };
     } catch (error) {
       if (isPgUndefinedTable(error)) {
-        return [];
+        return {
+          items: [],
+          total: 0,
+          nextCursor: null,
+        };
       }
       this.disableDb(error, "查询 session events 失败");
-      return [];
+      return this.listSessionEventsFromMemory(
+        normalizedTenantId,
+        normalizedSessionId,
+        normalizedLimit,
+        parsedCursor
+      );
     }
   }
 
@@ -8062,12 +8218,58 @@ class ControlPlaneRepository {
       return true;
     });
 
-    items = items.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    items = items.sort((a, b) => {
+      const startedAtCompare = b.startedAt.localeCompare(a.startedAt);
+      if (startedAtCompare !== 0) {
+        return startedAtCompare;
+      }
+      return b.id.localeCompare(a.id);
+    });
     const total = items.length;
+    const cursor = decodeTimePaginationCursor(input.cursor);
+    if (cursor) {
+      const cursorTimestamp = Date.parse(cursor.timestamp);
+      items = items.filter((session) => {
+        const startedAtTimestamp = Date.parse(session.startedAt);
+        if (Number.isFinite(startedAtTimestamp) && Number.isFinite(cursorTimestamp)) {
+          if (startedAtTimestamp < cursorTimestamp) {
+            return true;
+          }
+          if (startedAtTimestamp > cursorTimestamp) {
+            return false;
+          }
+          return session.id < cursor.id;
+        }
+        const startedAtCompare = session.startedAt.localeCompare(cursor.timestamp);
+        if (startedAtCompare < 0) {
+          return true;
+        }
+        if (startedAtCompare > 0) {
+          return false;
+        }
+        return session.id < cursor.id;
+      });
+    }
+
+    const visibleItems = items.slice(0, input.limit + 1);
+    const hasMore = visibleItems.length > input.limit;
+    const pagedItems = hasMore ? visibleItems.slice(0, input.limit) : visibleItems;
+    const lastItem = pagedItems[pagedItems.length - 1];
+    const nextCursor =
+      hasMore &&
+      lastItem &&
+      Number.isFinite(Date.parse(lastItem.startedAt)) &&
+      lastItem.id.trim().length > 0
+        ? encodeTimePaginationCursor({
+            timestamp: lastItem.startedAt,
+            id: lastItem.id,
+          })
+        : null;
 
     return {
-      items: items.slice(0, input.limit),
+      items: pagedItems,
       total,
+      nextCursor,
     };
   }
 
@@ -8110,6 +8312,107 @@ class ControlPlaneRepository {
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
       reasoningTokens: 0,
+    };
+  }
+
+  private listSessionEventsFromMemory(
+    tenantId: string,
+    sessionId: string,
+    limit: number,
+    cursor: TimePaginationCursor | null
+  ): SessionEventListResult {
+    const sourceTenantById = new Map<string, string>();
+    for (const source of this.memorySources) {
+      sourceTenantById.set(source.id, this.resolveSourceTenantIdFromMemory(source));
+    }
+
+    const items = this.memorySessionEvents
+      .map((event, index) => ({
+        event,
+        index,
+      }))
+      .filter(({ event }) => {
+        if (event.sessionId !== sessionId) {
+          return false;
+        }
+        const resolvedTenant = sourceTenantById.get(event.sourceId) ?? DEFAULT_TENANT_ID;
+        return resolvedTenant === tenantId;
+      })
+      .map(({ event, index }) => {
+        const timestamp = new Date(index * 1000).toISOString();
+        return {
+          id: `${event.sessionId}-${index}`,
+          sessionId: event.sessionId,
+          sourceId: event.sourceId,
+          eventType: "message",
+          role: "user",
+          text: event.text,
+          model: undefined,
+          timestamp,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          reasoningTokens: 0,
+          cost: 0,
+          sourcePath: firstNonEmptyString(event.sourcePath) ?? undefined,
+          sourceOffset: undefined,
+        } satisfies SessionEvent;
+      })
+      .sort((left, right) => {
+        const timestampCompare = left.timestamp.localeCompare(right.timestamp);
+        if (timestampCompare !== 0) {
+          return timestampCompare;
+        }
+        return left.id.localeCompare(right.id);
+      });
+
+    const total = items.length;
+    let pagedCandidates = items;
+    if (cursor) {
+      const cursorTimestamp = Date.parse(cursor.timestamp);
+      pagedCandidates = items.filter((item) => {
+        const itemTimestamp = Date.parse(item.timestamp);
+        if (Number.isFinite(itemTimestamp) && Number.isFinite(cursorTimestamp)) {
+          if (itemTimestamp > cursorTimestamp) {
+            return true;
+          }
+          if (itemTimestamp < cursorTimestamp) {
+            return false;
+          }
+          return item.id > cursor.id;
+        }
+
+        const timestampCompare = item.timestamp.localeCompare(cursor.timestamp);
+        if (timestampCompare > 0) {
+          return true;
+        }
+        if (timestampCompare < 0) {
+          return false;
+        }
+        return item.id > cursor.id;
+      });
+    }
+
+    const visibleItems = pagedCandidates.slice(0, limit + 1);
+    const hasMore = visibleItems.length > limit;
+    const outputItems = hasMore ? visibleItems.slice(0, limit) : visibleItems;
+    const lastItem = outputItems[outputItems.length - 1];
+    const nextCursor =
+      hasMore &&
+      lastItem &&
+      Number.isFinite(Date.parse(lastItem.timestamp)) &&
+      lastItem.id.trim().length > 0
+        ? encodeTimePaginationCursor({
+            timestamp: lastItem.timestamp,
+            id: lastItem.id,
+          })
+        : null;
+
+    return {
+      items: outputItems,
+      total,
+      nextCursor,
     };
   }
 

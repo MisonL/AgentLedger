@@ -7,6 +7,7 @@ import type {
 } from "../contracts";
 import { getControlPlaneRepository } from "../data/repository";
 import { authMiddleware } from "../middleware/auth";
+import { parseOptionalTimePaginationCursor } from "./pagination-cursor";
 import type { AppEnv } from "../types";
 
 export const sessionRoutes = new Hono<AppEnv>();
@@ -307,8 +308,16 @@ sessionRoutes.post("/sessions/search", async (c) => {
       400,
     );
   }
+  const searchCursorResult = parseOptionalTimePaginationCursor(result.data.cursor);
+  if (!searchCursorResult.success) {
+    return c.json({ message: searchCursorResult.error }, 400);
+  }
+  const normalizedInput = {
+    ...result.data,
+    cursor: searchCursorResult.cursor,
+  };
 
-  const sourceId = result.data.sourceId?.trim();
+  const sourceId = normalizedInput.sourceId?.trim();
   const source =
     sourceId && sourceId.length > 0
       ? await findSourceById(auth.tenantId, sourceId)
@@ -361,13 +370,13 @@ sessionRoutes.post("/sessions/search", async (c) => {
     sourceFreshness.push(sourceFreshnessItem);
   }
 
-  const payload = await repository.searchSessions(result.data, auth.tenantId);
+  const payload = await repository.searchSessions(normalizedInput, auth.tenantId);
 
   return c.json({
     items: payload.items,
     total: payload.total,
-    nextCursor: null,
-    filters: result.data,
+    nextCursor: payload.nextCursor,
+    filters: normalizedInput,
     sourceFreshness,
   });
 });
@@ -414,15 +423,21 @@ sessionRoutes.get("/sessions/:id/events", async (c) => {
   if (!limitResult.success) {
     return c.json({ message: limitResult.error }, 400);
   }
+  const cursorResult = parseOptionalTimePaginationCursor(c.req.query("cursor"));
+  if (!cursorResult.success) {
+    return c.json({ message: cursorResult.error }, 400);
+  }
 
-  const items = await repository.listSessionEvents(
+  const eventList = await repository.listSessionEvents(
     auth.tenantId,
     sessionId,
     limitResult.limit,
+    cursorResult.cursor,
   );
   return c.json({
-    items,
-    total: items.length,
+    items: eventList.items,
+    total: eventList.total,
     limit: limitResult.limit,
+    nextCursor: eventList.nextCursor,
   });
 });

@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  useInfiniteQuery,
   QueryClient,
   QueryClientProvider,
   useMutation,
@@ -819,14 +820,26 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
 
   const hasAppliedFilters = Object.keys(normalizedFilters).length > 0;
 
-  const sessionsQuery = useQuery({
+  const sessionsQuery = useInfiniteQuery({
     queryKey: ["sessions-search", sessionSearchInput],
-    queryFn: ({ signal }) => searchSessions(sessionSearchInput, signal),
+    queryFn: ({ pageParam, signal }) =>
+      searchSessions(
+        {
+          ...sessionSearchInput,
+          cursor: typeof pageParam === "string" ? pageParam : undefined,
+        },
+        signal
+      ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     staleTime: 20_000,
   });
 
-  const sessions = sessionsQuery.data?.items ?? [];
-  const sourceFreshness = sessionsQuery.data?.sourceFreshness ?? [];
+  const sessions = useMemo(
+    () => sessionsQuery.data?.pages.flatMap((page) => page.items) ?? [],
+    [sessionsQuery.data?.pages]
+  );
+  const sourceFreshness = sessionsQuery.data?.pages[0]?.sourceFreshness ?? [];
   const sourceFreshnessText =
     sourceFreshness.length > 0
       ? `来源新鲜度：${sourceFreshness.map((item) => formatSourceFreshness(item)).join("；")}`
@@ -843,10 +856,18 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
     }
   }, [selectedSessionId, sessions]);
 
-  const eventsQuery = useQuery({
+  const eventsQuery = useInfiniteQuery({
     queryKey: ["session-events", selectedSessionId],
     enabled: Boolean(selectedSessionId),
-    queryFn: ({ signal }) => fetchSessionEvents(selectedSessionId!, 50, signal),
+    queryFn: ({ pageParam, signal }) =>
+      fetchSessionEvents(
+        selectedSessionId!,
+        50,
+        typeof pageParam === "string" ? pageParam : undefined,
+        signal
+      ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     staleTime: 20_000,
   });
 
@@ -857,7 +878,10 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
     staleTime: 20_000,
   });
 
-  const eventItems = eventsQuery.data?.items ?? [];
+  const eventItems = useMemo(
+    () => eventsQuery.data?.pages.flatMap((page) => page.items) ?? [],
+    [eventsQuery.data?.pages]
+  );
   const sessionDetail = detailQuery.data as SessionDetailResponse | undefined;
 
   function updateFilterField(field: keyof SessionSearchFilters, value: string) {
@@ -892,7 +916,7 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
         <header>
           <h2>会话列表</h2>
           <p>
-            共 {sessionsQuery.data?.total ?? 0} 条
+            共 {sessionsQuery.data?.pages[0]?.total ?? 0} 条
             {hasAppliedFilters ? "（已应用筛选）" : ""}
           </p>
           <p aria-label="来源新鲜度">{sourceFreshnessText}</p>
@@ -1045,6 +1069,18 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
             </tbody>
           </table>
         </div>
+        {sessionsQuery.hasNextPage ? (
+          <div className="button-row">
+            <button
+              type="button"
+              className="submit-button secondary-button"
+              onClick={() => void sessionsQuery.fetchNextPage()}
+              disabled={sessionsQuery.isFetchingNextPage}
+            >
+              {sessionsQuery.isFetchingNextPage ? "加载中..." : "加载更多会话"}
+            </button>
+          </div>
+        ) : null}
       </section>
 
       <section className="panel">
@@ -1148,6 +1184,18 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
             </tbody>
           </table>
         </div>
+        {eventsQuery.hasNextPage ? (
+          <div className="button-row">
+            <button
+              type="button"
+              className="submit-button secondary-button"
+              onClick={() => void eventsQuery.fetchNextPage()}
+              disabled={eventsQuery.isFetchingNextPage}
+            >
+              {eventsQuery.isFetchingNextPage ? "加载中..." : "加载更多事件"}
+            </button>
+          </div>
+        ) : null}
       </section>
     </>
   );

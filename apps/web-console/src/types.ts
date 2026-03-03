@@ -117,12 +117,13 @@ export interface SessionSearchInput {
   from?: string;
   to?: string;
   limit?: number;
+  cursor?: string;
 }
 
 export interface SessionSearchResponse {
   items: Session[];
   total: number;
-  nextCursor?: string | null;
+  nextCursor: string | null;
   filters?: SessionSearchInput;
   sourceFreshness?: SessionSourceFreshness[];
 }
@@ -199,6 +200,7 @@ export interface SessionEventListResponse {
   items: SessionEvent[];
   total: number;
   limit: number;
+  nextCursor?: string | null;
 }
 
 export interface UsageAggregateFilters {

@@ -1292,6 +1292,7 @@ export function validateSessionSearchInput(input: unknown): ValidationResult<Ses
   const host = normalizeString(input.host);
   const model = normalizeString(input.model);
   const project = normalizeString(input.project);
+  const cursor = normalizeString(input.cursor);
 
   if (input.sourceId !== undefined && !sourceId) {
     return { success: false, error: "sourceId 必须为非空字符串。" };
@@ -1313,6 +1314,9 @@ export function validateSessionSearchInput(input: unknown): ValidationResult<Ses
   }
   if (input.project !== undefined && !project) {
     return { success: false, error: "project 必须为非空字符串。" };
+  }
+  if (input.cursor !== undefined && !cursor) {
+    return { success: false, error: "cursor 必须为非空字符串。" };
   }
   if (from !== undefined && !isISODate(from)) {
     return { success: false, error: "from 必须为 ISO 日期字符串。" };
@@ -1348,6 +1352,7 @@ export function validateSessionSearchInput(input: unknown): ValidationResult<Ses
       from: from as string | undefined,
       to: to as string | undefined,
       limit: limit as number | undefined,
+      cursor,
     },
   };
 }

@@ -637,6 +637,166 @@ describe("Web Console", () => {
     });
   });
 
+  test("Sessions 页面支持会话与事件的 cursor 加载更多", async () => {
+    setAuthTokens({
+      accessToken: "access-token-test-session-cursor",
+      refreshToken: "refresh-token-test-session-cursor",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const searchPayloads: Array<Record<string, unknown>> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/sessions/search") && method === "POST") {
+        const payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        searchPayloads.push(payload);
+        if (payload.cursor === "session-cursor-2") {
+          return mockJsonResponse({
+            items: [
+              {
+                id: "session-2",
+                sourceId: "source-2",
+                tool: "Cursor IDE",
+                model: "claude-3.7",
+                startedAt: "2026-03-02T08:00:00.000Z",
+                endedAt: "2026-03-02T08:05:00.000Z",
+                tokens: 90,
+                cost: 0.09,
+              },
+            ],
+            total: 2,
+            nextCursor: null,
+          });
+        }
+        return mockJsonResponse({
+          items: [
+            {
+              id: "session-1",
+              sourceId: "source-1",
+              tool: "Codex CLI",
+              model: "gpt-5",
+              startedAt: "2026-03-02T09:00:00.000Z",
+              endedAt: "2026-03-02T09:05:00.000Z",
+              tokens: 100,
+              cost: 0.1,
+            },
+          ],
+          total: 2,
+          nextCursor: "session-cursor-2",
+          sourceFreshness: [],
+        });
+      }
+
+      if (url.endsWith("/api/v1/sessions/session-1") && method === "GET") {
+        return mockJsonResponse({
+          id: "session-1",
+          sourceId: "source-1",
+          tool: "Codex CLI",
+          model: "gpt-5",
+          startedAt: "2026-03-02T09:00:00.000Z",
+          endedAt: "2026-03-02T09:05:00.000Z",
+          tokens: 100,
+          cost: 0.1,
+          messageCount: 2,
+          inputTokens: 40,
+          outputTokens: 60,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          reasoningTokens: 0,
+          tokenBreakdown: {
+            inputTokens: 40,
+            outputTokens: 60,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            reasoningTokens: 0,
+            totalTokens: 100,
+          },
+          sourceTrace: {
+            sourceId: "source-1",
+            sourceName: "devbox-shanghai",
+            provider: "cursor-test",
+            path: "/workspace/main.ts",
+          },
+        });
+      }
+
+      if (url.includes("/api/v1/sessions/session-1/events?limit=50&cursor=event-cursor-2")) {
+        return mockJsonResponse({
+          items: [
+            {
+              id: "event-2",
+              sessionId: "session-1",
+              sourceId: "source-1",
+              eventType: "message",
+              role: "assistant",
+              text: "第二页事件",
+              timestamp: "2026-03-02T09:02:00.000Z",
+              inputTokens: 0,
+              outputTokens: 20,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              reasoningTokens: 0,
+              cost: 0.02,
+            },
+          ],
+          total: 2,
+          limit: 50,
+          nextCursor: null,
+        });
+      }
+
+      if (url.includes("/api/v1/sessions/session-1/events?limit=50")) {
+        return mockJsonResponse({
+          items: [
+            {
+              id: "event-1",
+              sessionId: "session-1",
+              sourceId: "source-1",
+              eventType: "message",
+              role: "user",
+              text: "第一页事件",
+              timestamp: "2026-03-02T09:01:00.000Z",
+              inputTokens: 10,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              reasoningTokens: 0,
+              cost: 0.01,
+            },
+          ],
+          total: 2,
+          limit: 50,
+          nextCursor: "event-cursor-2",
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+    expect(await screen.findByRole("heading", { name: "会话中心" })).toBeInTheDocument();
+    expect(await screen.findByText("source-1")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "加载更多会话" })).toBeInTheDocument();
+    expect(await screen.findByText("第一页事件")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "加载更多事件" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "加载更多会话" }));
+    expect(await screen.findByText("source-2")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "加载更多事件" }));
+    expect(await screen.findByText("第二页事件")).toBeInTheDocument();
+
+    await waitFor(() => {
+      const cursors = searchPayloads.map((item) => item.cursor ?? null);
+      expect(cursors).toContain("session-cursor-2");
+    });
+  });
+
   test("Dashboard 热力图点击后可下钻到 Sessions 并按日期查询", async () => {
     setAuthTokens({
       accessToken: "access-token-test-drilldown",

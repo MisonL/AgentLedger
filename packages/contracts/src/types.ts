@@ -292,6 +292,7 @@ export interface SessionSearchInput {
   from?: string;
   to?: string;
   limit?: number;
+  cursor?: string;
 }
 
 export type ExportFormat = "json" | "csv";

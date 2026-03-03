@@ -12,6 +12,7 @@ import {
 import type { AppendAuditLogInput } from "../data/repository";
 import { getControlPlaneRepository } from "../data/repository";
 import { authMiddleware } from "../middleware/auth";
+import { parseOptionalTimePaginationCursor } from "./pagination-cursor";
 import type { AppEnv } from "../types";
 
 export const exportRoutes = new Hono<AppEnv>();
@@ -32,7 +33,7 @@ const SESSION_EXPORT_CSV_HEADERS = [
 interface SessionExportJobResult {
   items: Session[];
   total: number;
-  nextCursor: null;
+  nextCursor: string | null;
   filters: SessionSearchInput;
 }
 
@@ -103,6 +104,7 @@ function toSessionSearchInput(input: {
   from?: string;
   to?: string;
   limit?: number;
+  cursor?: string;
 }): SessionSearchInput {
   return {
     sourceId: input.sourceId,
@@ -115,6 +117,7 @@ function toSessionSearchInput(input: {
     from: input.from,
     to: input.to,
     limit: input.limit,
+    cursor: input.cursor,
   };
 }
 
@@ -171,7 +174,7 @@ async function runSessionExportJob(jobId: string): Promise<void> {
     jobRecord.result = {
       items: payload.items,
       total: payload.total,
-      nextCursor: null,
+      nextCursor: payload.nextCursor,
       filters: jobRecord.job.filters,
     };
     if (jobRecord.job.format === "csv") {
@@ -241,6 +244,11 @@ exportRoutes.post("/exports/sessions/jobs", async (c) => {
   const requestId = c.get("requestId");
   const jobId = crypto.randomUUID();
   const filters = toSessionSearchInput(result.data);
+  const cursorResult = parseOptionalTimePaginationCursor(filters.cursor);
+  if (!cursorResult.success) {
+    return c.json({ message: cursorResult.error }, 400);
+  }
+  filters.cursor = cursorResult.cursor;
   const job: SessionExportJob = {
     id: jobId,
     status: "pending",
@@ -365,6 +373,11 @@ exportRoutes.get("/exports/sessions", async (c) => {
   }
 
   const filters = toSessionSearchInput(result.data);
+  const cursorResult = parseOptionalTimePaginationCursor(filters.cursor);
+  if (!cursorResult.success) {
+    return c.json({ message: cursorResult.error }, 400);
+  }
+  filters.cursor = cursorResult.cursor;
   const payload = await repository.searchSessions(filters, auth.tenantId);
   const requestId = c.get("requestId");
 
@@ -392,7 +405,7 @@ exportRoutes.get("/exports/sessions", async (c) => {
   return c.json({
     items: payload.items,
     total: payload.total,
-    nextCursor: null,
+    nextCursor: payload.nextCursor,
     filters,
   });
 });

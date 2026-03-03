@@ -388,9 +388,7 @@ function isSessionSearchResponse(value: unknown): value is SessionSearchResponse
   }
 
   const nextCursorOk =
-    value.nextCursor === undefined ||
-    value.nextCursor === null ||
-    typeof value.nextCursor === "string";
+    value.nextCursor === null || typeof value.nextCursor === "string";
   const filtersOk = value.filters === undefined || isRecord(value.filters);
   const sourceFreshnessOk =
     value.sourceFreshness === undefined ||
@@ -489,7 +487,15 @@ function isPricingCatalog(value: unknown): value is PricingCatalog {
 }
 
 function isSessionEventListResponse(value: unknown): value is SessionEventListResponse {
-  return isRecord(value) && Array.isArray(value.items) && typeof value.total === "number";
+  if (!isRecord(value) || !Array.isArray(value.items) || typeof value.total !== "number") {
+    return false;
+  }
+  const nextCursor = value.nextCursor;
+  return (
+    nextCursor === undefined ||
+    nextCursor === null ||
+    typeof nextCursor === "string"
+  );
 }
 
 function isSessionDetailResponse(value: unknown): value is SessionDetailResponse {
@@ -1060,6 +1066,7 @@ export async function fetchUsageSessions(
 export async function fetchSessionEvents(
   sessionId: string,
   limit = 20,
+  cursor?: string,
   signal?: AbortSignal
 ): Promise<SessionEventListResponse> {
   const normalizedSessionId = sessionId.trim();
@@ -1069,8 +1076,14 @@ export async function fetchSessionEvents(
 
   const normalizedLimit =
     Number.isInteger(limit) && limit > 0 ? String(limit) : "20";
+  const params = new URLSearchParams({
+    limit: normalizedLimit,
+  });
+  if (typeof cursor === "string" && cursor.trim().length > 0) {
+    params.set("cursor", cursor.trim());
+  }
   const result = await requestJson<unknown>(
-    `/api/v1/sessions/${encodeURIComponent(normalizedSessionId)}/events?limit=${normalizedLimit}`,
+    `/api/v1/sessions/${encodeURIComponent(normalizedSessionId)}/events?${params.toString()}`,
     undefined,
     signal
   );

@@ -5235,6 +5235,238 @@ describe("Control Plane API", () => {
     expect(Array.isArray(body.sourceFreshness)).toBe(true);
   });
 
+  test("POST /api/v1/sessions/search cursor 非法时返回 400", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const response = await app.request("/api/v1/sessions/search", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        cursor: "not-a-valid-cursor",
+      }),
+    });
+    const body = (await response.json()) as { message: string };
+
+    expect(response.status).toBe(400);
+    expect(body.message).toContain("cursor");
+  });
+
+  test("POST /api/v1/sessions/search 支持 cursor 翻页", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const nonce = createNonce("sessions-search-cursor");
+    const createSourceResponse = await app.request("/api/v1/sources", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        name: `cursor 检索源-${nonce}`,
+        type: "ssh",
+        location: `10.48.${Math.floor(Math.random() * 200) + 10}.${Math.floor(Math.random() * 200) + 10}`,
+        accessMode: "sync",
+      }),
+    });
+    expect(createSourceResponse.status).toBe(201);
+    const source = (await createSourceResponse.json()) as Source;
+
+    const first = await insertSessionForSearch(source.id, {
+      provider: `provider-${nonce}`,
+      tool: "Codex CLI",
+      model: "gpt-5-codex",
+      startedAt: "2026-03-02T12:00:00.000Z",
+      endedAt: "2026-03-02T12:05:00.000Z",
+      tokens: 30,
+      cost: 0.03,
+    });
+    const second = await insertSessionForSearch(source.id, {
+      provider: `provider-${nonce}`,
+      tool: "Codex CLI",
+      model: "gpt-5-codex",
+      startedAt: "2026-03-02T11:00:00.000Z",
+      endedAt: "2026-03-02T11:05:00.000Z",
+      tokens: 31,
+      cost: 0.031,
+    });
+    const third = await insertSessionForSearch(source.id, {
+      provider: `provider-${nonce}`,
+      tool: "Codex CLI",
+      model: "gpt-5-codex",
+      startedAt: "2026-03-02T10:00:00.000Z",
+      endedAt: "2026-03-02T10:05:00.000Z",
+      tokens: 32,
+      cost: 0.032,
+    });
+
+    try {
+      const firstPageResponse = await app.request("/api/v1/sessions/search", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          sourceId: source.id,
+          limit: 2,
+        }),
+      });
+      const firstPage = (await firstPageResponse.json()) as SessionSearchResponse;
+
+      expect(firstPageResponse.status).toBe(200);
+      expect(firstPage.total).toBe(3);
+      expect(firstPage.items.map((item) => item.id)).toEqual([first.id, second.id]);
+      expect(typeof firstPage.nextCursor).toBe("string");
+
+      const secondPageResponse = await app.request("/api/v1/sessions/search", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          sourceId: source.id,
+          limit: 2,
+          cursor: firstPage.nextCursor,
+        }),
+      });
+      const secondPage = (await secondPageResponse.json()) as SessionSearchResponse;
+
+      expect(secondPageResponse.status).toBe(200);
+      expect(secondPage.total).toBe(3);
+      expect(secondPage.items.map((item) => item.id)).toEqual([third.id]);
+      expect(secondPage.nextCursor).toBeNull();
+    } finally {
+      await first.cleanup();
+      await second.cleanup();
+      await third.cleanup();
+      await app.request(`/api/v1/sources/${source.id}`, {
+        method: "DELETE",
+        headers: authHeaders,
+      });
+    }
+  });
+
+  test("GET /api/v1/sessions/:id/events 支持 cursor 翻页", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const nonce = createNonce("session-events-cursor");
+    const createSourceResponse = await app.request("/api/v1/sources", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        name: `cursor 事件源-${nonce}`,
+        type: "ssh",
+        location: `10.49.${Math.floor(Math.random() * 200) + 10}.${Math.floor(Math.random() * 200) + 10}`,
+        accessMode: "sync",
+      }),
+    });
+    expect(createSourceResponse.status).toBe(201);
+    const source = (await createSourceResponse.json()) as Source;
+    const inserted = await insertSessionForSearch(source.id, {
+      provider: `provider-${nonce}`,
+      tool: "Codex CLI",
+      model: "gpt-5-codex",
+      startedAt: "2026-03-02T09:00:00.000Z",
+      endedAt: "2026-03-02T09:10:00.000Z",
+      eventTexts: ["event-1", "event-2", "event-3"],
+    });
+
+    try {
+      const firstPageResponse = await app.request(
+        `/api/v1/sessions/${encodeURIComponent(inserted.id)}/events?limit=2`,
+        {
+          headers: authHeaders,
+        },
+      );
+      const firstPage = (await firstPageResponse.json()) as {
+        items: Array<{ id: string }>;
+        total: number;
+        nextCursor: string | null;
+      };
+
+      expect(firstPageResponse.status).toBe(200);
+      expect(firstPage.total).toBe(3);
+      expect(firstPage.items).toHaveLength(2);
+      expect(typeof firstPage.nextCursor).toBe("string");
+
+      const secondPageResponse = await app.request(
+        `/api/v1/sessions/${encodeURIComponent(inserted.id)}/events?limit=2&cursor=${encodeURIComponent(
+          String(firstPage.nextCursor),
+        )}`,
+        {
+          headers: authHeaders,
+        },
+      );
+      const secondPage = (await secondPageResponse.json()) as {
+        items: Array<{ id: string }>;
+        total: number;
+        nextCursor: string | null;
+      };
+
+      expect(secondPageResponse.status).toBe(200);
+      expect(secondPage.total).toBe(3);
+      expect(secondPage.items).toHaveLength(1);
+      expect(secondPage.nextCursor).toBeNull();
+    } finally {
+      await inserted.cleanup();
+      await app.request(`/api/v1/sources/${source.id}`, {
+        method: "DELETE",
+        headers: authHeaders,
+      });
+    }
+  });
+
+  test("GET /api/v1/sessions/:id/events cursor 非法时返回 400", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const nonce = createNonce("session-events-invalid-cursor");
+    const createSourceResponse = await app.request("/api/v1/sources", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        name: `cursor 非法事件源-${nonce}`,
+        type: "ssh",
+        location: `10.50.${Math.floor(Math.random() * 200) + 10}.${Math.floor(Math.random() * 200) + 10}`,
+        accessMode: "sync",
+      }),
+    });
+    expect(createSourceResponse.status).toBe(201);
+    const source = (await createSourceResponse.json()) as Source;
+    const inserted = await insertSessionForSearch(source.id, {
+      provider: `provider-${nonce}`,
+      tool: "Codex CLI",
+      model: "gpt-5-codex",
+      startedAt: "2026-03-02T09:00:00.000Z",
+      endedAt: "2026-03-02T09:10:00.000Z",
+      eventTexts: ["event-invalid-cursor"],
+    });
+
+    try {
+      const response = await app.request(
+        `/api/v1/sessions/${encodeURIComponent(inserted.id)}/events?cursor=not-a-valid-cursor`,
+        {
+          headers: authHeaders,
+        },
+      );
+      const body = (await response.json()) as { message: string };
+
+      expect(response.status).toBe(400);
+      expect(body.message).toContain("cursor");
+    } finally {
+      await inserted.cleanup();
+      await app.request(`/api/v1/sources/${source.id}`, {
+        method: "DELETE",
+        headers: authHeaders,
+      });
+    }
+  });
+
   test("POST /api/v1/sessions/search 对 ssh realtime source 走 puller realtime 并返回 sourceFreshness", async () => {
     const authHeaders = await resolveAuthHeaders();
     const nonce = createNonce("sessions-search-realtime-ok");

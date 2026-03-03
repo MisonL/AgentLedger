@@ -144,6 +144,22 @@ describe("api mock fallback gate", () => {
     );
   });
 
+  test("searchSessions 响应缺失 nextCursor 时抛错", async () => {
+    env.DEV = false;
+    delete env.VITE_ENABLE_MOCK_FALLBACK;
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockJsonResponse({
+        items: [],
+        total: 0,
+        filters: createSessionSearchInput(),
+      }),
+    );
+
+    await expect(searchSessions(createSessionSearchInput())).rejects.toThrow(
+      "session 返回结构不合法",
+    );
+  });
+
   test("请求层会自动注入 Bearer token", async () => {
     env.DEV = false;
     setAuthTokens({
