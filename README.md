@@ -2,7 +2,9 @@
 
 面向企业的 AI 使用治理平台，用于统一采集、审计、预算与分析团队的 AI CLI/IDE 会话数据。
 
-## 定位
+[![CI](https://github.com/MisonL/AgentLedger/actions/workflows/ci.yml/badge.svg)](https://github.com/MisonL/AgentLedger/actions/workflows/ci.yml)
+
+## 核心价值
 
 AgentLedger 面向企业研发与平台团队，目标是把分散在 AI CLI 与 AI IDE 的会话行为统一纳入治理闭环：
 
@@ -11,7 +13,7 @@ AgentLedger 面向企业研发与平台团队，目标是把分散在 AI CLI 与
 - 可预算：按租户/组织/用户/模型设置阈值与告警。
 - 可分析：提供热力图、会话检索、模型与成本统计。
 
-## 能力
+## 当前功能
 
 | 能力域 | 当前可用能力 |
 | --- | --- |
@@ -25,20 +27,34 @@ AgentLedger 面向企业研发与平台团队，目标是把分散在 AI CLI 与
 
 ## 架构
 
-```text
-客户端（CLI / IDE / Agent）
-        |
-        v
-接入网关（Ingestion Gateway, Go） -> NATS JetStream -> 标准化/分析/治理/集成服务（Go）
-                                                                 |
-                                                                 v
-                                                       控制面 API（Bun + Hono）
-                                                                 |
-                                                                 v
-                                                       Web 控制台（React + Vite）
+```mermaid
+flowchart LR
+    A[AI 客户端<br/>CLI / IDE / Agent]
+    B[Ingestion Gateway<br/>Go]
+    C[NATS JetStream]
+    D[Normalizer<br/>Go]
+    E[Analytics<br/>Go]
+    F[Governance<br/>Go]
+    G[Integration<br/>Go]
+    H[Control Plane API<br/>Bun + Hono]
+    I[Web Console<br/>React + Vite]
+
+    A --> B --> C
+    C --> D
+    C --> E
+    C --> F
+    C --> G
+    D --> H
+    E --> H
+    F --> H
+    G --> H
+    H --> I
 ```
 
-## 清理后的目录
+## 仓库结构
+
+<details>
+<summary>目录结构（精简）</summary>
 
 ```text
 apps/
@@ -54,6 +70,8 @@ scripts/
 docs/
 deploy/
 ```
+
+</details>
 
 ## 快速开始
 
@@ -128,7 +146,6 @@ bun run test:e2e-governance-callback-chain
 
 1. 在变更前阅读 `docs/` 内相关设计与验收文档。
 2. 提交前至少执行：`bun run lint && bun run test && bun run build`。
-3. 涉及客户端矩阵、回调链路或环境变量时，同步更新：
-   - `docs/09-主流AI客户端支持矩阵.md`
-   - `docs/13-环境变量参考.md`
-4. PR 描述需包含：变更范围、验证步骤、风险与回滚策略。
+3. 涉及客户端矩阵变更时，同步更新 `docs/09-主流AI客户端支持矩阵.md`。
+4. 涉及回调链路或环境变量变更时，同步更新 `docs/13-环境变量参考.md`。
+5. PR 描述需包含：变更范围、验证步骤、风险与回滚策略。
