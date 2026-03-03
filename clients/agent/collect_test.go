@@ -14,6 +14,7 @@ import (
 func TestResolveCollectSources_DefaultAndOverride(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
 
 	sources, err := resolveCollectSources("auto", "")
 	if err != nil {
