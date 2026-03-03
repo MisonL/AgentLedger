@@ -81,6 +81,14 @@ jobs:
           cache: true
           cache-dependency-path: '**/go.sum'
 
+      - name: 安装 Buf CLI
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+
+      - name: 生成 Proto 代码（构建前）
+        run: bash ./scripts/proto-gen.sh
+
       - name: 构建 Agent 三平台二进制
         run: bash ./scripts/build-agent-cross.sh
 
