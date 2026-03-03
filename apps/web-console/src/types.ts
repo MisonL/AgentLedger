@@ -163,7 +163,12 @@ export interface UsageAggregateResponse<TItem> {
   filters?: UsageAggregateFilters;
 }
 
+export type UsageCostMode = "raw" | "estimated" | "reported" | "mixed" | "none";
+
 export interface UsageCostMetrics {
+  costRaw?: number;
+  costEstimated?: number;
+  costMode?: UsageCostMode;
   rawCost?: number;
   estimatedCost?: number;
   totalCost?: number;

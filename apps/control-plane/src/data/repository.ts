@@ -86,6 +86,7 @@ const CONTROL_PLANE_SOURCE_PROVIDER = "manual";
 const DEFAULT_TENANT_ID = "default";
 const DEFAULT_TENANT_NAME = "Default Tenant";
 const DEFAULT_HEATMAP_TIMEZONE = "UTC";
+const DEFAULT_CALLBACK_CLAIM_STALE_AFTER_MS = 2 * 60 * 1000;
 
 type DbRow = Record<string, unknown>;
 
@@ -4351,8 +4352,15 @@ class ControlPlaneRepository {
   async claimIntegrationAlertCallback(
     input: Pick<IntegrationAlertCallbackRecord, "callbackId" | "tenantId" | "action"> & {
       processedAt?: string;
+      staleAfterMs?: number;
     }
   ): Promise<ClaimIntegrationAlertCallbackResult> {
+    const staleAfterMs =
+      typeof input.staleAfterMs === "number" &&
+      Number.isFinite(input.staleAfterMs) &&
+      input.staleAfterMs > 0
+        ? Math.trunc(input.staleAfterMs)
+        : DEFAULT_CALLBACK_CLAIM_STALE_AFTER_MS;
     const normalizedRecord: IntegrationAlertCallbackRecord = {
       callbackId: firstNonEmptyString(input.callbackId) ?? crypto.randomUUID(),
       tenantId: firstNonEmptyString(input.tenantId) ?? DEFAULT_TENANT_ID,
@@ -4362,6 +4370,9 @@ class ControlPlaneRepository {
       },
       processedAt: toIsoString(input.processedAt) ?? new Date().toISOString(),
     };
+    const staleBefore = new Date(
+      Date.parse(normalizedRecord.processedAt) - staleAfterMs
+    ).toISOString();
 
     const pool = await this.getPool();
     if (!pool) {
@@ -4385,7 +4396,12 @@ class ControlPlaneRepository {
            $5::timestamptz
          )
          ON CONFLICT (tenant_id, callback_id)
-         DO NOTHING
+         DO UPDATE
+           SET action = EXCLUDED.action,
+               response_payload = EXCLUDED.response_payload,
+               processed_at = EXCLUDED.processed_at
+         WHERE COALESCE(integration_alert_callbacks.response_payload ->> 'state', '') = 'processing'
+           AND integration_alert_callbacks.processed_at <= $6::timestamptz
          RETURNING callback_id,
                    tenant_id,
                    action,
@@ -4397,6 +4413,7 @@ class ControlPlaneRepository {
           normalizedRecord.action,
           safeStringifyJson(normalizedRecord.response),
           normalizedRecord.processedAt,
+          staleBefore,
         ]
       );
       const claimedRow = claimResult.rows[0];
@@ -4431,7 +4448,7 @@ class ControlPlaneRepository {
       };
     } catch (error) {
       this.disableDb(error, "claim integration callback 幂等记录失败");
-      return this.claimIntegrationAlertCallbackToMemory(normalizedRecord);
+      return this.claimIntegrationAlertCallbackToMemory(normalizedRecord, staleAfterMs);
     }
   }
 
@@ -8353,13 +8370,28 @@ class ControlPlaneRepository {
   }
 
   private claimIntegrationAlertCallbackToMemory(
-    record: IntegrationAlertCallbackRecord
+    record: IntegrationAlertCallbackRecord,
+    staleAfterMs: number = DEFAULT_CALLBACK_CLAIM_STALE_AFTER_MS
   ): ClaimIntegrationAlertCallbackResult {
     const existing = this.getIntegrationAlertCallbackByIdFromMemory(
       record.tenantId,
       record.callbackId
     );
     if (existing) {
+      const existingState = String(existing.response.state ?? "");
+      const existingTs = Date.parse(existing.processedAt);
+      const cutoffTs = Date.parse(record.processedAt) - staleAfterMs;
+      const isStaleProcessing =
+        existingState === "processing" &&
+        Number.isFinite(existingTs) &&
+        Number.isFinite(cutoffTs) &&
+        existingTs <= cutoffTs;
+      if (isStaleProcessing) {
+        return {
+          claimed: true,
+          record: this.saveIntegrationAlertCallbackToMemory(record),
+        };
+      }
       return {
         claimed: false,
         record: existing,

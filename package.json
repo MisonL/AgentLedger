@@ -27,7 +27,10 @@
     "check:coverage": "bash ./scripts/check-coverage-threshold.sh",
     "proto:lint": "bash ./scripts/proto-lint.sh",
     "proto:gen": "bash ./scripts/proto-gen.sh",
-    "proto:breaking": "bash ./scripts/proto-breaking.sh"
+    "proto:breaking": "bash ./scripts/proto-breaking.sh",
+    "build:agent-cross": "bash ./scripts/build-agent-cross.sh",
+    "verify:agent-cross": "bash ./scripts/verify-agent-cross-artifacts.sh",
+    "smoke:fr505": "bash ./scripts/smoke-fr505-cross-platform.sh"
   },
   "devDependencies": {
     "@types/bun": "latest",

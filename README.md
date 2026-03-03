@@ -78,7 +78,7 @@ deploy/
 ### 1. 环境准备
 
 - Bun `>= 1.3`
-- Go `>= 1.23`
+- Go `>= 1.24`
 - CI 侧固定 Bun `1.3.9`（来自 `packageManager`），并使用 `bun install --frozen-lockfile`
 
 ### 2. 安装依赖

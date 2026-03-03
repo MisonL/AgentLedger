@@ -159,20 +159,25 @@ describe("Web Console", () => {
               date: "2026-02-10",
               tokens: 100,
               cost: 1.2,
-              rawCost: 1.0,
-              estimatedCost: 0.2,
-              totalCost: 1.2,
-              costLabel: "raw + estimated",
+              costRaw: 1.0,
+              costEstimated: 0.2,
+              costMode: "mixed",
+              rawCost: 9,
+              estimatedCost: 9,
+              totalCost: 18,
+              costLabel: "legacy should not win",
               sessions: 2,
             },
             {
               date: "2026-02-11",
               tokens: 150,
               cost: 1.8,
-              rawCost: 1.5,
-              estimatedCost: 0.3,
-              totalCost: 1.8,
-              costLabel: "raw + estimated",
+              costRaw: 0,
+              costEstimated: 1.8,
+              costMode: "estimated",
+              rawCost: 7,
+              totalCost: 7,
+              costBasis: "legacy should not win",
               sessions: 3,
             },
           ],
@@ -187,20 +192,18 @@ describe("Web Console", () => {
               month: "2026-01",
               tokens: 700,
               cost: 0.9,
-              rawCost: 0.8,
-              estimatedCost: 0.1,
-              totalCost: 0.9,
-              costBasis: "raw + estimated",
+              costRaw: 0.9,
+              costEstimated: 0,
+              costMode: "raw",
               sessions: 2,
             },
             {
               month: "2026-02",
               tokens: 1000,
               cost: 1.25,
-              rawCost: 1.1,
-              estimatedCost: 0.15,
-              totalCost: 1.25,
-              costBasis: "raw + estimated",
+              costRaw: 1.25,
+              costEstimated: 0,
+              costMode: "reported",
               sessions: 3,
             },
           ],
@@ -215,14 +218,27 @@ describe("Web Console", () => {
               model: "gpt-5",
               tokens: 900,
               cost: 1.1,
-              rawCost: 1.0,
-              estimatedCost: 0.1,
-              totalCost: 1.1,
-              costLabel: "raw + estimated",
+              costRaw: 1.0,
+              costEstimated: 0.1,
+              costMode: "mixed",
+              rawCost: 8,
+              estimatedCost: 8,
+              totalCost: 16,
+              costLabel: "legacy should not win",
               sessions: 2,
             },
+            {
+              model: "legacy-model",
+              tokens: 200,
+              cost: 0.45,
+              rawCost: 0.3,
+              estimatedCost: 0.15,
+              totalCost: 0.45,
+              costBasis: "raw + estimated",
+              sessions: 1,
+            },
           ],
-          total: 1,
+          total: 2,
         });
       }
 
@@ -242,10 +258,9 @@ describe("Web Console", () => {
               reasoningTokens: 0,
               totalTokens: 500,
               cost: 0.5,
-              rawCost: 0.4,
-              estimatedCost: 0.1,
-              totalCost: 0.5,
-              costBasis: "raw + estimated",
+              costRaw: 0.5,
+              costEstimated: 0,
+              costMode: "reported",
             },
           ],
           total: 1,
@@ -266,7 +281,13 @@ describe("Web Console", () => {
     expect(await screen.findByText("总成本趋势（monthly）")).toBeInTheDocument();
     expect(await screen.findByRole("img", { name: "monthly 总成本趋势图" })).toBeInTheDocument();
     expect((await screen.findAllByText("环比 +50.0%")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("raw")).toBeInTheDocument();
+    expect(await screen.findByText("estimated")).toBeInTheDocument();
+    expect((await screen.findAllByText("total")).length).toBeGreaterThan(0);
     expect((await screen.findAllByText("raw + estimated")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("$1.1000")).toBeInTheDocument();
+    expect(screen.queryByText("$16.0000")).not.toBeInTheDocument();
+    expect(screen.queryByText("legacy should not win")).not.toBeInTheDocument();
 
     expect(
       fetchSpy.mock.calls.some(([url]) => toUrl(url).includes("/api/v1/usage/daily"))

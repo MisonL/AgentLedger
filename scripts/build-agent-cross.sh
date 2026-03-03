@@ -8,18 +8,18 @@ OUT_DIR="dist/agent"
 MAIN_PKG="./clients/agent"
 
 mkdir -p "$OUT_DIR"
-rm -f \
-  "$OUT_DIR/agent-linux-amd64" \
-  "$OUT_DIR/agent-darwin-amd64" \
-  "$OUT_DIR/agent-windows-amd64.exe"
+rm -f "$OUT_DIR"/agent-*
 
 declare -a TARGETS=(
   "linux amd64 agent-linux-amd64"
+  "linux arm64 agent-linux-arm64"
   "darwin amd64 agent-darwin-amd64"
+  "darwin arm64 agent-darwin-arm64"
   "windows amd64 agent-windows-amd64.exe"
+  "windows arm64 agent-windows-arm64.exe"
 )
 
-echo "开始构建 Agent 三平台产物..."
+echo "开始构建 Agent 多平台产物..."
 for target in "${TARGETS[@]}"; do
   read -r goos goarch output_name <<<"$target"
   output_path="${OUT_DIR}/${output_name}"

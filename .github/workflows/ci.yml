@@ -79,6 +79,9 @@ jobs:
       - name: 生成 Proto 代码（Go 测试前）
         run: bun run proto:gen
 
+      - name: FR-505 三平台安装运行最小冒烟
+        run: bun run smoke:fr505
+
       - name: Go 测试
         run: bun run test:go
 
@@ -111,7 +114,7 @@ jobs:
         run: bun run test:e2e-governance-callback-chain
 
   build-agent-cross:
-    name: 客户端三平台构建
+    name: 客户端多架构构建
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: baseline
@@ -138,8 +141,11 @@ jobs:
       - name: 生成 Proto 代码（构建前）
         run: bash ./scripts/proto-gen.sh
 
-      - name: 构建 Agent 三平台二进制
+      - name: 构建 Agent 多架构二进制
         run: bash ./scripts/build-agent-cross.sh
+
+      - name: 校验 Agent 跨平台构建产物
+        run: bash ./scripts/verify-agent-cross-artifacts.sh
 
       - name: 上传 Agent 构建产物
         uses: actions/upload-artifact@v4

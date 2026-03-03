@@ -63,6 +63,22 @@ describe("Control Plane API", () => {
       sourcePath?: string;
     }>;
     memoryAlerts?: Alert[];
+    claimIntegrationAlertCallback?: (input: {
+      callbackId: string;
+      tenantId: string;
+      action: "ack" | "resolve" | "request_release" | "approve_release" | "reject_release";
+      processedAt?: string;
+      staleAfterMs?: number;
+    }) => Promise<{
+      claimed: boolean;
+      record: {
+        callbackId: string;
+        tenantId: string;
+        action: string;
+        response: Record<string, unknown>;
+        processedAt: string;
+      };
+    }>;
     createLocalUser?: (input: {
       email: string;
       passwordHash: string;
@@ -5622,6 +5638,43 @@ describe("Control Plane API", () => {
       await alertA.cleanup();
       await alertB.cleanup();
     }
+  });
+
+  test("integration callback claim 在 processing 超时后允许重试接管", async () => {
+    if (typeof repository.claimIntegrationAlertCallback !== "function") {
+      throw new Error("repository.claimIntegrationAlertCallback 不可用。");
+    }
+
+    const tenantId = "default";
+    const callbackId = createNonce("cb-stale-reclaim");
+    const staleBefore = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+    const first = await repository.claimIntegrationAlertCallback({
+      callbackId,
+      tenantId,
+      action: "resolve",
+      processedAt: staleBefore,
+      staleAfterMs: 60_000,
+    });
+    expect(first.claimed).toBe(true);
+
+    const second = await repository.claimIntegrationAlertCallback({
+      callbackId,
+      tenantId,
+      action: "resolve",
+      staleAfterMs: 60_000,
+    });
+    expect(second.claimed).toBe(true);
+    expect(second.record.callbackId).toBe(callbackId);
+
+    const third = await repository.claimIntegrationAlertCallback({
+      callbackId,
+      tenantId,
+      action: "resolve",
+      staleAfterMs: 60_000,
+    });
+    expect(third.claimed).toBe(false);
+    expect(third.record.callbackId).toBe(callbackId);
   });
 
   test("POST /api/v1/integrations/callbacks/alerts 支持全 action 与 callback_id 幂等", async () => {

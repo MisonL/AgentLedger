@@ -38,6 +38,7 @@ import type {
   SourceConnectionTestResponse,
   SourceType,
   UsageAggregateFilters,
+  UsageCostMode,
 } from "./types";
 import "./App.css";
 
@@ -291,6 +292,9 @@ interface UsageCostPresentation {
 
 interface UsageCostCandidate {
   cost?: number;
+  costRaw?: number;
+  costEstimated?: number;
+  costMode?: UsageCostMode;
   rawCost?: number;
   estimatedCost?: number;
   totalCost?: number;
@@ -302,25 +306,76 @@ function toFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function resolveUsageCost(candidate: UsageCostCandidate): UsageCostPresentation {
-  const rawCost = toFiniteNumber(candidate.rawCost);
-  const estimatedCost = toFiniteNumber(candidate.estimatedCost);
-  const fallbackCost = toFiniteNumber(candidate.cost) ?? 0;
-  const providedTotal = toFiniteNumber(candidate.totalCost);
+function normalizeUsageCostMode(value: unknown): UsageCostMode | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "raw" ||
+    normalized === "estimated" ||
+    normalized === "reported" ||
+    normalized === "mixed" ||
+    normalized === "none"
+  ) {
+    return normalized;
+  }
+  return null;
+}
 
-  const hasDualTrack =
-    rawCost !== null || estimatedCost !== null || providedTotal !== null;
-  const totalCost =
-    providedTotal ??
-    (hasDualTrack ? (rawCost ?? 0) + (estimatedCost ?? 0) : fallbackCost);
+function formatUsageCostModeLabel(mode: UsageCostMode | null): string | null {
+  if (mode === "raw") {
+    return "raw";
+  }
+  if (mode === "estimated") {
+    return "estimated";
+  }
+  if (mode === "reported" || mode === "none") {
+    return "total";
+  }
+  if (mode === "mixed") {
+    return "raw + estimated";
+  }
+  return null;
+}
+
+function resolveUsageCost(candidate: UsageCostCandidate): UsageCostPresentation {
+  const contractRawCost = toFiniteNumber(candidate.costRaw);
+  const contractEstimatedCost = toFiniteNumber(candidate.costEstimated);
+  const legacyRawCost = toFiniteNumber(candidate.rawCost);
+  const legacyEstimatedCost = toFiniteNumber(candidate.estimatedCost);
+  const providedCost = toFiniteNumber(candidate.cost);
+  const legacyTotal = toFiniteNumber(candidate.totalCost);
+  const costMode = normalizeUsageCostMode(candidate.costMode);
+
+  let rawCost = contractRawCost ?? legacyRawCost;
+  let estimatedCost = contractEstimatedCost ?? legacyEstimatedCost;
+
+  const hasContractFields =
+    costMode !== null || contractRawCost !== null || contractEstimatedCost !== null;
+
+  if (hasContractFields && providedCost !== null) {
+    if ((costMode === "raw" || costMode === "reported") && rawCost === null) {
+      rawCost = providedCost;
+    }
+    if (costMode === "estimated" && estimatedCost === null) {
+      estimatedCost = providedCost;
+    }
+  }
+
+  const hasSplitCost = rawCost !== null || estimatedCost !== null;
+  const totalCost = hasContractFields
+    ? providedCost ?? (rawCost ?? 0) + (estimatedCost ?? 0)
+    : legacyTotal ?? (hasSplitCost ? (rawCost ?? 0) + (estimatedCost ?? 0) : providedCost ?? 0);
 
   return {
-    rawCost: rawCost ?? (hasDualTrack ? null : fallbackCost),
+    rawCost: rawCost ?? (hasContractFields || hasSplitCost ? null : providedCost ?? 0),
     estimatedCost,
     totalCost,
     label:
+      formatUsageCostModeLabel(costMode) ??
       normalizeOptionalText(candidate.costLabel ?? candidate.costBasis ?? "") ??
-      (hasDualTrack ? "raw + estimated" : "raw"),
+      (hasSplitCost ? "raw + estimated" : "raw"),
   };
 }
 
