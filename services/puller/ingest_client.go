@@ -20,12 +20,12 @@ func (s *pullerService) pushEvents(ctx context.Context, source sourceRecord, job
 
 	provider := strings.TrimSpace(source.Provider)
 	if provider == "" {
-		provider = firstNonEmpty(strings.TrimSpace(source.Type), "ssh")
+		provider = firstNonEmpty(strings.TrimSpace(source.Type), "unknown")
 	}
 
 	sourceType := strings.TrimSpace(source.Type)
 	if sourceType == "" {
-		sourceType = "ssh"
+		sourceType = "local"
 	}
 
 	chunkSize := ingest.MaxBatchEvents

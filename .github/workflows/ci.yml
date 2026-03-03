@@ -47,6 +47,9 @@ jobs:
       - name: 安装依赖
         run: bun install
 
+      - name: 支持矩阵一致性检查
+        run: bun run check:support-matrix
+
       - name: Proto 契约检查
         run: bun run proto:lint
 
