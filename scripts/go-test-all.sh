@@ -4,6 +4,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+if [ ! -f "$ROOT_DIR/packages/gen/go/ingestion/v1/ingestion.pb.go" ]; then
+  echo "未检测到 Go Proto 生成代码，先执行 proto 生成..."
+  bash "$ROOT_DIR/scripts/proto-gen.sh"
+fi
+
 GO_MODULE_TESTED=0
 
 while IFS= read -r mod; do
