@@ -130,6 +130,12 @@ func parseJSONLLines(ctx context.Context, input parseInput) (parserOutput, error
 
 		var payload any
 		if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+			out.Failures = append(out.Failures, parseFailure{
+				ParserKey:    parserKeyJSONL,
+				SourcePath:   input.SourcePath,
+				SourceOffset: line.No,
+				Error:        err.Error(),
+			})
 			continue
 		}
 
@@ -263,6 +269,25 @@ func collectAndSortEvents(outputs map[string]parserOutput) []ingest.RawEvent {
 		out = append(out, item.Event)
 	}
 	return out
+}
+
+func collectAndSortParseFailures(outputs map[string]parserOutput) []parseFailure {
+	combined := make([]parseFailure, 0)
+	for _, output := range outputs {
+		combined = append(combined, output.Failures...)
+	}
+
+	sort.Slice(combined, func(i, j int) bool {
+		if combined[i].SourceOffset == combined[j].SourceOffset {
+			if combined[i].ParserKey == combined[j].ParserKey {
+				return combined[i].Error < combined[j].Error
+			}
+			return combined[i].ParserKey < combined[j].ParserKey
+		}
+		return combined[i].SourceOffset < combined[j].SourceOffset
+	})
+
+	return combined
 }
 
 func checkCancelled(ctx context.Context, checker cancelChecker) (bool, error) {

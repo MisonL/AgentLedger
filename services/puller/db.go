@@ -59,21 +59,29 @@ func ensurePullerSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		   ADD COLUMN IF NOT EXISTS error_code TEXT,
 		   ADD COLUMN IF NOT EXISTS error_detail TEXT,
 		   ADD COLUMN IF NOT EXISTS duration_ms BIGINT,
-		   ADD COLUMN IF NOT EXISTS cancel_requested BOOLEAN NOT NULL DEFAULT FALSE`,
+		   ADD COLUMN IF NOT EXISTS cancel_requested BOOLEAN NOT NULL DEFAULT FALSE,
+		   ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMPTZ`,
 		`UPDATE sync_jobs
 		 SET attempt = COALESCE(attempt, 0),
 		     cancel_requested = COALESCE(cancel_requested, FALSE),
 		     "trigger" = COALESCE(NULLIF("trigger", ''), 'manual'),
 		     ended_at = COALESCE(ended_at, finished_at),
-		     finished_at = COALESCE(finished_at, ended_at)
+		     finished_at = COALESCE(finished_at, ended_at),
+		     next_run_at = CASE
+		       WHEN COALESCE(status, '') = 'pending' THEN COALESCE(next_run_at, created_at, NOW())
+		       ELSE next_run_at
+		     END
 		 WHERE attempt IS NULL
 		    OR cancel_requested IS NULL
 		    OR "trigger" IS NULL
 		    OR "trigger" = ''
 		    OR (ended_at IS NULL AND finished_at IS NOT NULL)
-		    OR (finished_at IS NULL AND ended_at IS NOT NULL)`,
+		    OR (finished_at IS NULL AND ended_at IS NOT NULL)
+		    OR (COALESCE(status, '') = 'pending' AND next_run_at IS NULL)`,
 		`CREATE INDEX IF NOT EXISTS idx_sync_jobs_status_created_at
 		 ON sync_jobs (status, created_at ASC)`,
+		`CREATE INDEX IF NOT EXISTS idx_sync_jobs_status_next_run_at_created_at
+		 ON sync_jobs (status, next_run_at ASC, created_at ASC)`,
 		`CREATE INDEX IF NOT EXISTS idx_sync_jobs_source_trigger_created_at
 		 ON sync_jobs (source_id, "trigger", created_at DESC)`,
 		`ALTER TABLE sources
@@ -139,6 +147,22 @@ func ensurePullerSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		 ON source_watermarks (source_id, provider)`,
 		`CREATE INDEX IF NOT EXISTS idx_source_watermarks_source_updated_at
 		 ON source_watermarks (source_id, updated_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS puller_parse_failures (
+		   id BIGSERIAL PRIMARY KEY,
+		   job_id TEXT NOT NULL REFERENCES sync_jobs(id) ON DELETE CASCADE,
+		   source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+		   parser_key TEXT NOT NULL DEFAULT 'jsonl',
+		   source_path TEXT NOT NULL DEFAULT '',
+		   source_offset BIGINT NOT NULL DEFAULT 0,
+		   error TEXT NOT NULL DEFAULT '',
+		   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		 )`,
+		`CREATE INDEX IF NOT EXISTS idx_puller_parse_failures_job_created_at
+		 ON puller_parse_failures (job_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_puller_parse_failures_source_created_at
+		 ON puller_parse_failures (source_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_puller_parse_failures_source_path_offset
+		 ON puller_parse_failures (source_id, source_path, source_offset DESC)`,
 	}
 
 	for _, query := range queries {
@@ -155,7 +179,8 @@ WITH picked AS (
   SELECT id
   FROM sync_jobs
   WHERE status = 'pending'
-  ORDER BY created_at ASC
+    AND COALESCE(next_run_at, created_at, NOW()) <= NOW()
+  ORDER BY COALESCE(next_run_at, created_at, NOW()) ASC, created_at ASC
   FOR UPDATE SKIP LOCKED
   LIMIT 1
 )
@@ -169,7 +194,8 @@ SET status = 'running',
     error = NULL,
     error_code = NULL,
     error_detail = NULL,
-    duration_ms = NULL
+    duration_ms = NULL,
+    next_run_at = NULL
 FROM picked
 WHERE job.id = picked.id
 RETURNING job.id,
@@ -320,6 +346,7 @@ INSERT INTO sync_jobs (
   status,
   "trigger",
   attempt,
+  next_run_at,
   created_at,
   updated_at
 )
@@ -330,6 +357,7 @@ SELECT
   'pending',
   'schedule',
   0,
+  $4,
   $4,
   $4
 WHERE NOT EXISTS (
@@ -347,6 +375,95 @@ ON CONFLICT (id) DO NOTHING
 	}
 
 	return result.RowsAffected() > 0, nil
+}
+
+func (s *pullerService) createManualSyncJob(ctx context.Context, sourceID, mode string) (syncJob, error) {
+	normalizedSourceID := strings.TrimSpace(sourceID)
+	if normalizedSourceID == "" {
+		return syncJob{}, fmt.Errorf("source_id is required")
+	}
+
+	normalizedMode := normalizeSyncJobMode(mode)
+	jobID := stableID("syncjob", normalizedSourceID, "manual", fmt.Sprintf("%d", time.Now().UTC().UnixNano()))
+
+	row := s.pool.QueryRow(ctx, `
+INSERT INTO sync_jobs (
+  id,
+  source_id,
+  mode,
+  status,
+  "trigger",
+  attempt,
+  started_at,
+  created_at,
+  updated_at,
+  cancel_requested
+)
+VALUES (
+  $1,
+  $2,
+  $3,
+  'running',
+  'manual',
+  1,
+  NOW(),
+  NOW(),
+  NOW(),
+  FALSE
+)
+RETURNING id,
+          source_id,
+          COALESCE(mode, 'realtime'),
+          status,
+          COALESCE(attempt, 1),
+          COALESCE(started_at, NOW()),
+          COALESCE(cancel_requested, FALSE)
+`, jobID, normalizedSourceID, normalizedMode)
+
+	var job syncJob
+	if err := row.Scan(
+		&job.ID,
+		&job.SourceID,
+		&job.Mode,
+		&job.Status,
+		&job.Attempt,
+		&job.StartedAt,
+		&job.CancelRequested,
+	); err != nil {
+		return syncJob{}, fmt.Errorf("create manual sync job failed: %w", err)
+	}
+
+	return job, nil
+}
+
+func (s *pullerService) loadSyncJobResult(ctx context.Context, jobID string) (syncJobResult, error) {
+	row := s.pool.QueryRow(ctx, `
+SELECT id,
+       source_id,
+       COALESCE(status, ''),
+       COALESCE(error_code, ''),
+       COALESCE(error_detail, ''),
+       COALESCE(attempt, 0)
+FROM sync_jobs
+WHERE id = $1
+LIMIT 1
+`, jobID)
+
+	var result syncJobResult
+	if err := row.Scan(
+		&result.JobID,
+		&result.SourceID,
+		&result.Status,
+		&result.ErrorCode,
+		&result.ErrorDetail,
+		&result.Attempt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return syncJobResult{}, fmt.Errorf("sync job not found")
+		}
+		return syncJobResult{}, fmt.Errorf("query sync job result failed: %w", err)
+	}
+	return result, nil
 }
 
 func (s *pullerService) isCancelRequested(ctx context.Context, jobID string) (bool, error) {
@@ -427,6 +544,42 @@ SET provider = EXCLUDED.provider,
 	return nil
 }
 
+func (s *pullerService) insertParseFailures(ctx context.Context, jobID, sourceID string, failures []parseFailure) error {
+	if len(failures) == 0 {
+		return nil
+	}
+
+	normalizedJobID := strings.TrimSpace(jobID)
+	if normalizedJobID == "" {
+		return fmt.Errorf("job_id is required")
+	}
+	normalizedSourceID := strings.TrimSpace(sourceID)
+	if normalizedSourceID == "" {
+		return fmt.Errorf("source_id is required")
+	}
+
+	_, err := s.pool.CopyFrom(
+		ctx,
+		pgx.Identifier{"puller_parse_failures"},
+		[]string{"job_id", "source_id", "parser_key", "source_path", "source_offset", "error"},
+		pgx.CopyFromSlice(len(failures), func(i int) ([]any, error) {
+			failure := failures[i]
+			return []any{
+				normalizedJobID,
+				normalizedSourceID,
+				firstNonEmpty(strings.TrimSpace(failure.ParserKey), parserKeyJSONL),
+				strings.TrimSpace(failure.SourcePath),
+				failure.SourceOffset,
+				firstNonEmpty(strings.TrimSpace(failure.Error), "parse failed"),
+			}, nil
+		}),
+	)
+	if err != nil {
+		return fmt.Errorf("insert parse failures failed: %w", err)
+	}
+	return nil
+}
+
 func (s *pullerService) finishJobStatus(ctx context.Context, job syncJob, status, code, detail string) error {
 	trimmedDetail := strings.TrimSpace(detail)
 	if len(trimmedDetail) > 8000 {
@@ -450,6 +603,7 @@ SET status = $2,
     ended_at = NOW(),
     finished_at = NOW(),
     duration_ms = $3,
+    next_run_at = NULL,
     error_code = $4,
     error_detail = $5,
     error = $6
@@ -464,6 +618,39 @@ WHERE id = $1
 	)
 	if err != nil {
 		return fmt.Errorf("update sync job status failed: %w", err)
+	}
+	return nil
+}
+
+func (s *pullerService) scheduleJobRetry(ctx context.Context, job syncJob, code, detail string, nextRunAt time.Time) error {
+	trimmedDetail := strings.TrimSpace(detail)
+	if len(trimmedDetail) > 8000 {
+		trimmedDetail = trimmedDetail[:8000]
+	}
+
+	legacyError := nullableString(trimmedDetail)
+	_, err := s.pool.Exec(ctx, `
+UPDATE sync_jobs
+SET status = 'pending',
+    updated_at = NOW(),
+    started_at = NULL,
+    ended_at = NULL,
+    finished_at = NULL,
+    duration_ms = NULL,
+    next_run_at = $2,
+    error_code = $3,
+    error_detail = $4,
+    error = $5
+WHERE id = $1
+`,
+		job.ID,
+		nextRunAt.UTC(),
+		nullableString(code),
+		nullableString(trimmedDetail),
+		legacyError,
+	)
+	if err != nil {
+		return fmt.Errorf("schedule sync job retry failed: %w", err)
 	}
 	return nil
 }

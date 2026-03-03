@@ -39,6 +39,9 @@ func TestParseLinesConcurrently(t *testing.T) {
 	if len(jsonOut.Events) != 2 {
 		t.Fatalf("json events = %d, want 2", len(jsonOut.Events))
 	}
+	if len(jsonOut.Failures) != 2 {
+		t.Fatalf("json failures = %d, want 2", len(jsonOut.Failures))
+	}
 	if len(nativeOut.Events) != 2 {
 		t.Fatalf("native events = %d, want 2", len(nativeOut.Events))
 	}
@@ -58,6 +61,16 @@ func TestParseLinesConcurrently(t *testing.T) {
 	}
 	if nativeOut.Events[1].Event.SourceOffset == nil || *nativeOut.Events[1].Event.SourceOffset != 5 {
 		t.Fatalf("native line5 source_offset invalid: %#v", nativeOut.Events[1].Event.SourceOffset)
+	}
+
+	if jsonOut.Failures[0].SourcePath != "/tmp/test.log" || jsonOut.Failures[0].SourceOffset != 2 {
+		t.Fatalf("json failure[0] = %#v, want source_path=/tmp/test.log source_offset=2", jsonOut.Failures[0])
+	}
+	if jsonOut.Failures[1].SourceOffset != 5 {
+		t.Fatalf("json failure[1].source_offset = %d, want 5", jsonOut.Failures[1].SourceOffset)
+	}
+	if jsonOut.Failures[0].Error == "" || jsonOut.Failures[1].Error == "" {
+		t.Fatalf("json failure error should not be empty: %#v", jsonOut.Failures)
 	}
 }
 

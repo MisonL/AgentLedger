@@ -7,15 +7,22 @@ import (
 )
 
 const (
-	connectorNameCodex    = "codex"
-	connectorNameClaude   = "claude"
-	connectorNameGemini   = "gemini"
-	connectorNameAider    = "aider"
-	connectorNameOpenCode = "opencode"
-	connectorNameQwenCode = "qwen-code"
-	connectorNameCursor   = "cursor"
-	connectorNameVSCode   = "vscode"
-	connectorNameTRAEIDE  = "trae-ide"
+	connectorNameCodex        = "codex"
+	connectorNameClaude       = "claude"
+	connectorNameGemini       = "gemini"
+	connectorNameAider        = "aider"
+	connectorNameOpenCode     = "opencode"
+	connectorNameQwenCode     = "qwen-code"
+	connectorNameCursor       = "cursor"
+	connectorNameVSCode       = "vscode"
+	connectorNameTRAEIDE      = "trae-ide"
+	connectorNameKimiCLI      = "kimi-cli"
+	connectorNameTRAECLI      = "trae-cli"
+	connectorNameCodeBuddyCLI = "codebuddy-cli"
+	connectorNameWindsurf     = "windsurf"
+	connectorNameLingma       = "lingma"
+	connectorNameCodeBuddyIDE = "codebuddy-ide"
+	connectorNameZed          = "zed"
 )
 
 type pullerConnector interface {
@@ -29,14 +36,14 @@ type connectorRegistry struct {
 }
 
 var defaultPullerConnectorRegistry = newConnectorRegistry(
-	newFeatureConnector(connectorNameCodex, []string{"codex", "openai"}),
-	newFeatureConnector(connectorNameClaude, []string{"claude", "anthropic"}),
-	newFeatureConnector(connectorNameGemini, []string{"gemini", "gemini-cli", ".gemini"}),
-	newFeatureConnector(connectorNameAider, []string{"aider", ".aider"}),
-	newFeatureConnector(connectorNameOpenCode, []string{"opencode", "opencode-ai"}),
-	newFeatureConnector(connectorNameQwenCode, []string{"qwen", "qwen-code", "qwen code"}),
-	newFeatureConnector(connectorNameCursor, []string{"cursor"}),
-	newFeatureConnector(connectorNameVSCode, []string{
+	newFeatureConnectorWithParser(connectorNameCodex, []string{"codex", "openai"}, parseCodexLines),
+	newFeatureConnectorWithParser(connectorNameClaude, []string{"claude", "anthropic"}, parseClaudeLines),
+	newFeatureConnectorWithParser(connectorNameGemini, []string{"gemini", "gemini-cli", ".gemini"}, parseGeminiLines),
+	newFeatureConnectorWithParser(connectorNameAider, []string{"aider", ".aider"}, parseAiderLines),
+	newFeatureConnectorWithParser(connectorNameOpenCode, []string{"opencode", "opencode-ai"}, parseOpenCodeLines),
+	newFeatureConnectorWithParser(connectorNameQwenCode, []string{"qwen", "qwen-code", "qwen code"}, parseQwenCodeLines),
+	newFeatureConnectorWithParser(connectorNameCursor, []string{"cursor"}, parseCursorLines),
+	newFeatureConnectorWithParser(connectorNameVSCode, []string{
 		"vscode",
 		".vscode",
 		"visual studio code",
@@ -45,8 +52,15 @@ var defaultPullerConnectorRegistry = newConnectorRegistry(
 		"continue.continue",
 		"roo-cline",
 		"cline",
-	}),
-	newFeatureConnector(connectorNameTRAEIDE, []string{"trae", "trae ide", ".trae"}),
+	}, parseVSCodeLines),
+	newFeatureConnectorWithParser(connectorNameTRAEIDE, []string{"trae-ide", "trae ide", ".trae"}, parseTRAEIDELines),
+	newFeatureConnectorWithParser(connectorNameKimiCLI, []string{"kimi", "kimi-cli"}, parseKimiCLILines),
+	newFeatureConnectorWithParser(connectorNameTRAECLI, []string{"trae-cli", "trae cli"}, parseTRAECLILines),
+	newFeatureConnectorWithParser(connectorNameCodeBuddyCLI, []string{"codebuddy-cli", "codebuddy cli"}, parseCodeBuddyCLILines),
+	newFeatureConnectorWithParser(connectorNameWindsurf, []string{"windsurf"}, parseWindsurfLines),
+	newFeatureConnectorWithParser(connectorNameLingma, []string{"lingma"}, parseLingmaLines),
+	newFeatureConnectorWithParser(connectorNameCodeBuddyIDE, []string{"codebuddy-ide", "codebuddy ide"}, parseCodeBuddyIDELines),
+	newFeatureConnectorWithParser(connectorNameZed, []string{"zed", ".zed"}, parseZedLines),
 )
 
 func newConnectorRegistry(connectors ...pullerConnector) *connectorRegistry {
@@ -84,9 +98,16 @@ func (r *connectorRegistry) Select(source sourceRecord, sourcePath string) pulle
 type featureConnector struct {
 	name     string
 	features []string
+	parser   connectorParser
 }
 
 func newFeatureConnector(name string, features []string) pullerConnector {
+	return newFeatureConnectorWithParser(name, features, nil)
+}
+
+type connectorParser func(context.Context, parseInput) (map[string]parserOutput, error)
+
+func newFeatureConnectorWithParser(name string, features []string, parser connectorParser) pullerConnector {
 	normalizedFeatures := make([]string, 0, len(features))
 	for _, feature := range features {
 		trimmed := strings.ToLower(strings.TrimSpace(feature))
@@ -99,6 +120,7 @@ func newFeatureConnector(name string, features []string) pullerConnector {
 	return &featureConnector{
 		name:     strings.TrimSpace(name),
 		features: normalizedFeatures,
+		parser:   parser,
 	}
 }
 
@@ -137,6 +159,73 @@ func (c *featureConnector) Match(source sourceRecord, sourcePath string) bool {
 }
 
 func (c *featureConnector) Parse(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	if c != nil && c.parser != nil {
+		return c.parser(ctx, input)
+	}
+	return parseLinesConcurrently(ctx, input)
+}
+
+func parseCodexLines(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	return parseLinesConcurrently(ctx, input)
+}
+
+func parseClaudeLines(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	return parseLinesConcurrently(ctx, input)
+}
+
+func parseGeminiLines(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	return parseLinesConcurrently(ctx, input)
+}
+
+func parseAiderLines(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	return parseLinesConcurrently(ctx, input)
+}
+
+func parseOpenCodeLines(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	return parseLinesConcurrently(ctx, input)
+}
+
+func parseQwenCodeLines(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	return parseLinesConcurrently(ctx, input)
+}
+
+func parseCursorLines(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	return parseLinesConcurrently(ctx, input)
+}
+
+func parseVSCodeLines(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	return parseLinesConcurrently(ctx, input)
+}
+
+func parseTRAEIDELines(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	return parseLinesConcurrently(ctx, input)
+}
+
+func parseKimiCLILines(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	return parseLinesConcurrently(ctx, input)
+}
+
+func parseTRAECLILines(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	return parseLinesConcurrently(ctx, input)
+}
+
+func parseCodeBuddyCLILines(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	return parseLinesConcurrently(ctx, input)
+}
+
+func parseWindsurfLines(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	return parseLinesConcurrently(ctx, input)
+}
+
+func parseLingmaLines(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	return parseLinesConcurrently(ctx, input)
+}
+
+func parseCodeBuddyIDELines(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	return parseLinesConcurrently(ctx, input)
+}
+
+func parseZedLines(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
 	return parseLinesConcurrently(ctx, input)
 }
 

@@ -17,13 +17,16 @@ const (
 var errJobCancelled = errors.New("sync job cancelled")
 
 type pullerRuntimeConfig struct {
-	PollInterval   time.Duration
-	JobTimeout     time.Duration
-	SSHTimeout     time.Duration
-	IngestTimeout  time.Duration
-	IngestEndpoint string
-	IngestBearer   string
-	AgentID        string
+	PollInterval      time.Duration
+	JobTimeout        time.Duration
+	JobMaxRetries     int
+	JobRetryBaseDelay time.Duration
+	SSHTimeout        time.Duration
+	IngestTimeout     time.Duration
+	IngestEndpoint    string
+	IngestBearer      string
+	AgentID           string
+	InternalToken     string
 }
 
 type syncJob struct {
@@ -84,10 +87,27 @@ type lineRecord struct {
 type parserOutput struct {
 	ParserKey string
 	Events    []rawEventWithLine
+	Failures  []parseFailure
 	MaxLine   int64
 }
 
 type rawEventWithLine struct {
 	LineNo int64
 	Event  ingest.RawEvent
+}
+
+type parseFailure struct {
+	ParserKey    string
+	SourcePath   string
+	SourceOffset int64
+	Error        string
+}
+
+type syncJobResult struct {
+	JobID       string
+	SourceID    string
+	Status      string
+	ErrorCode   string
+	ErrorDetail string
+	Attempt     int
 }

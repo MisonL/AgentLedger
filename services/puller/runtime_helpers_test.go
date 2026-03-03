@@ -13,11 +13,14 @@ import (
 func TestLoadPullerRuntimeConfig_DefaultsAndOverrides(t *testing.T) {
 	t.Setenv("PULLER_POLL_INTERVAL", "")
 	t.Setenv("PULLER_JOB_TIMEOUT", "")
+	t.Setenv("PULLER_JOB_MAX_RETRIES", "")
+	t.Setenv("PULLER_JOB_RETRY_BASE_DELAY", "")
 	t.Setenv("PULLER_SSH_TIMEOUT", "")
 	t.Setenv("PULLER_INGEST_TIMEOUT", "")
 	t.Setenv("PULLER_INGEST_ENDPOINT", "")
 	t.Setenv("PULLER_INGEST_BEARER_TOKEN", " bearer-token ")
 	t.Setenv("PULLER_AGENT_ID", "")
+	t.Setenv("PULLER_INTERNAL_TOKEN", " internal-token ")
 
 	cfg, err := loadPullerRuntimeConfig()
 	if err != nil {
@@ -29,13 +32,24 @@ func TestLoadPullerRuntimeConfig_DefaultsAndOverrides(t *testing.T) {
 	if cfg.IngestEndpoint != defaultIngestEndpoint {
 		t.Fatalf("IngestEndpoint = %q, want %q", cfg.IngestEndpoint, defaultIngestEndpoint)
 	}
+	if cfg.JobMaxRetries != 3 {
+		t.Fatalf("JobMaxRetries = %d, want 3", cfg.JobMaxRetries)
+	}
+	if cfg.JobRetryBaseDelay != 5*time.Second {
+		t.Fatalf("JobRetryBaseDelay = %v, want 5s", cfg.JobRetryBaseDelay)
+	}
 	if cfg.IngestBearer != "bearer-token" {
 		t.Fatalf("IngestBearer = %q, want bearer-token", cfg.IngestBearer)
+	}
+	if cfg.InternalToken != "internal-token" {
+		t.Fatalf("InternalToken = %q, want internal-token", cfg.InternalToken)
 	}
 
 	t.Setenv("PULLER_AGENT_ID", "agent-custom")
 	t.Setenv("PULLER_POLL_INTERVAL", "3s")
 	t.Setenv("PULLER_JOB_TIMEOUT", "30s")
+	t.Setenv("PULLER_JOB_MAX_RETRIES", "6")
+	t.Setenv("PULLER_JOB_RETRY_BASE_DELAY", "9s")
 	t.Setenv("PULLER_SSH_TIMEOUT", "11s")
 	t.Setenv("PULLER_INGEST_TIMEOUT", "9s")
 	t.Setenv("PULLER_INGEST_ENDPOINT", "http://127.0.0.1:18081/v1/ingest")
@@ -50,6 +64,12 @@ func TestLoadPullerRuntimeConfig_DefaultsAndOverrides(t *testing.T) {
 	if cfg.PollInterval != 3*time.Second || cfg.JobTimeout != 30*time.Second || cfg.SSHTimeout != 11*time.Second || cfg.IngestTimeout != 9*time.Second {
 		t.Fatalf("duration override not applied: %+v", cfg)
 	}
+	if cfg.JobMaxRetries != 6 {
+		t.Fatalf("JobMaxRetries = %d, want 6", cfg.JobMaxRetries)
+	}
+	if cfg.JobRetryBaseDelay != 9*time.Second {
+		t.Fatalf("JobRetryBaseDelay = %v, want 9s", cfg.JobRetryBaseDelay)
+	}
 	if cfg.IngestEndpoint != "http://127.0.0.1:18081/v1/ingest" {
 		t.Fatalf("IngestEndpoint = %q, want override", cfg.IngestEndpoint)
 	}
@@ -63,10 +83,28 @@ func TestLoadPullerRuntimeConfig_InvalidEnv(t *testing.T) {
 
 	t.Setenv("PULLER_POLL_INTERVAL", "0s")
 	t.Setenv("PULLER_JOB_TIMEOUT", "1s")
+	t.Setenv("PULLER_JOB_MAX_RETRIES", "1")
+	t.Setenv("PULLER_JOB_RETRY_BASE_DELAY", "1s")
 	t.Setenv("PULLER_SSH_TIMEOUT", "1s")
 	t.Setenv("PULLER_INGEST_TIMEOUT", "1s")
 	if _, err := loadPullerRuntimeConfig(); err == nil || !strings.Contains(err.Error(), "PULLER_POLL_INTERVAL") {
 		t.Fatalf("loadPullerRuntimeConfig() error = %v, want poll interval > 0", err)
+	}
+
+	t.Setenv("PULLER_POLL_INTERVAL", "1s")
+	t.Setenv("PULLER_JOB_TIMEOUT", "1s")
+	t.Setenv("PULLER_JOB_MAX_RETRIES", "-1")
+	t.Setenv("PULLER_JOB_RETRY_BASE_DELAY", "1s")
+	t.Setenv("PULLER_SSH_TIMEOUT", "1s")
+	t.Setenv("PULLER_INGEST_TIMEOUT", "1s")
+	if _, err := loadPullerRuntimeConfig(); err == nil || !strings.Contains(err.Error(), "PULLER_JOB_MAX_RETRIES") {
+		t.Fatalf("loadPullerRuntimeConfig() error = %v, want retries >= 0", err)
+	}
+
+	t.Setenv("PULLER_JOB_MAX_RETRIES", "1")
+	t.Setenv("PULLER_JOB_RETRY_BASE_DELAY", "0s")
+	if _, err := loadPullerRuntimeConfig(); err == nil || !strings.Contains(err.Error(), "PULLER_JOB_RETRY_BASE_DELAY") {
+		t.Fatalf("loadPullerRuntimeConfig() error = %v, want retry base delay > 0", err)
 	}
 }
 
@@ -92,6 +130,61 @@ func TestDurationFromEnv(t *testing.T) {
 	t.Setenv("PULLER_TEST_DURATION", "bad")
 	if _, err := durationFromEnv("PULLER_TEST_DURATION", 0); err == nil || !strings.Contains(err.Error(), "invalid PULLER_TEST_DURATION") {
 		t.Fatalf("durationFromEnv() error = %v, want invalid env", err)
+	}
+}
+
+func TestIntFromEnv(t *testing.T) {
+	t.Setenv("PULLER_TEST_INT", "")
+	got, err := intFromEnv("PULLER_TEST_INT", 7)
+	if err != nil {
+		t.Fatalf("intFromEnv() unexpected error: %v", err)
+	}
+	if got != 7 {
+		t.Fatalf("intFromEnv() = %d, want 7", got)
+	}
+
+	t.Setenv("PULLER_TEST_INT", "12")
+	got, err = intFromEnv("PULLER_TEST_INT", 0)
+	if err != nil {
+		t.Fatalf("intFromEnv() unexpected error: %v", err)
+	}
+	if got != 12 {
+		t.Fatalf("intFromEnv() = %d, want 12", got)
+	}
+
+	t.Setenv("PULLER_TEST_INT", "bad")
+	if _, err := intFromEnv("PULLER_TEST_INT", 0); err == nil || !strings.Contains(err.Error(), "invalid PULLER_TEST_INT") {
+		t.Fatalf("intFromEnv() error = %v, want invalid env", err)
+	}
+}
+
+func TestRetryHelpers(t *testing.T) {
+	if !isRetryableSyncJobError(errCodeIngestFailed) {
+		t.Fatalf("isRetryableSyncJobError(%q) = false, want true", errCodeIngestFailed)
+	}
+	if isRetryableSyncJobError(errCodeParseFailed) {
+		t.Fatalf("isRetryableSyncJobError(%q) = true, want false", errCodeParseFailed)
+	}
+
+	if !shouldRetrySyncJobFailure(syncJob{Attempt: 1}, errCodeIngestFailed, 3) {
+		t.Fatalf("shouldRetrySyncJobFailure(first attempt) = false, want true")
+	}
+	if shouldRetrySyncJobFailure(syncJob{Attempt: 4}, errCodeIngestFailed, 3) {
+		t.Fatalf("shouldRetrySyncJobFailure(over max retries) = true, want false")
+	}
+	if shouldRetrySyncJobFailure(syncJob{Attempt: 1}, errCodeParseFailed, 3) {
+		t.Fatalf("shouldRetrySyncJobFailure(non-retryable code) = true, want false")
+	}
+
+	base := 2 * time.Second
+	if got := retryBackoffDelay(base, 1); got != 2*time.Second {
+		t.Fatalf("retryBackoffDelay(attempt=1) = %v, want 2s", got)
+	}
+	if got := retryBackoffDelay(base, 2); got != 4*time.Second {
+		t.Fatalf("retryBackoffDelay(attempt=2) = %v, want 4s", got)
+	}
+	if got := retryBackoffDelay(base, 3); got != 8*time.Second {
+		t.Fatalf("retryBackoffDelay(attempt=3) = %v, want 8s", got)
 	}
 }
 
@@ -287,5 +380,40 @@ func TestSyncCronAndConnectorHelpers(t *testing.T) {
 	}
 	if len(out[parserKeyJSONL].Events) != 1 {
 		t.Fatalf("featureConnector.Parse() json output invalid: %#v", out)
+	}
+}
+
+func TestParseBearerTokenAndParseFailureSort(t *testing.T) {
+	if got := parseBearerToken("Bearer token-1"); got != "token-1" {
+		t.Fatalf("parseBearerToken(valid) = %q, want token-1", got)
+	}
+	if got := parseBearerToken("token-1"); got != "" {
+		t.Fatalf("parseBearerToken(invalid) = %q, want empty", got)
+	}
+
+	failures := collectAndSortParseFailures(map[string]parserOutput{
+		parserKeyJSONL: {
+			Failures: []parseFailure{
+				{ParserKey: parserKeyJSONL, SourceOffset: 9, Error: "b"},
+				{ParserKey: parserKeyJSONL, SourceOffset: 1, Error: "a"},
+			},
+		},
+		parserKeyNative: {
+			Failures: []parseFailure{
+				{ParserKey: parserKeyNative, SourceOffset: 1, Error: "a"},
+			},
+		},
+	})
+	if len(failures) != 3 {
+		t.Fatalf("collectAndSortParseFailures() len = %d, want 3", len(failures))
+	}
+	if failures[0].ParserKey != parserKeyJSONL || failures[0].SourceOffset != 1 {
+		t.Fatalf("collectAndSortParseFailures()[0] = %#v, want jsonl offset 1", failures[0])
+	}
+	if failures[1].ParserKey != parserKeyNative || failures[1].SourceOffset != 1 {
+		t.Fatalf("collectAndSortParseFailures()[1] = %#v, want native offset 1", failures[1])
+	}
+	if failures[2].SourceOffset != 9 {
+		t.Fatalf("collectAndSortParseFailures()[2] = %#v, want offset 9", failures[2])
 	}
 }

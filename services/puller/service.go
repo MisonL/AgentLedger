@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -47,6 +49,10 @@ type pullerServiceDeps struct {
 	fetchLocalSourceContents func(context.Context, sourceRecord) ([]sourceContent, error)
 	getWatermark             func(context.Context, string, string, string) (int64, error)
 	upsertWatermark          func(context.Context, string, string, string, int64) error
+	insertParseFailures      func(context.Context, string, string, []parseFailure) error
+	createManualSyncJob      func(context.Context, string, string) (syncJob, error)
+	loadSyncJobResult        func(context.Context, string) (syncJobResult, error)
+	scheduleJobRetry         func(context.Context, syncJob, string, string, time.Time) error
 	finishJobStatus          func(context.Context, syncJob, string, string, string) error
 }
 
@@ -111,6 +117,34 @@ func (s *pullerService) depUpsertWatermark(ctx context.Context, sourceID, parser
 		return s.deps.upsertWatermark(ctx, sourceID, parserKey, hostKey, line)
 	}
 	return s.upsertWatermark(ctx, sourceID, parserKey, hostKey, line)
+}
+
+func (s *pullerService) depInsertParseFailures(ctx context.Context, jobID, sourceID string, failures []parseFailure) error {
+	if s != nil && s.deps != nil && s.deps.insertParseFailures != nil {
+		return s.deps.insertParseFailures(ctx, jobID, sourceID, failures)
+	}
+	return s.insertParseFailures(ctx, jobID, sourceID, failures)
+}
+
+func (s *pullerService) depCreateManualSyncJob(ctx context.Context, sourceID, mode string) (syncJob, error) {
+	if s != nil && s.deps != nil && s.deps.createManualSyncJob != nil {
+		return s.deps.createManualSyncJob(ctx, sourceID, mode)
+	}
+	return s.createManualSyncJob(ctx, sourceID, mode)
+}
+
+func (s *pullerService) depLoadSyncJobResult(ctx context.Context, jobID string) (syncJobResult, error) {
+	if s != nil && s.deps != nil && s.deps.loadSyncJobResult != nil {
+		return s.deps.loadSyncJobResult(ctx, jobID)
+	}
+	return s.loadSyncJobResult(ctx, jobID)
+}
+
+func (s *pullerService) depScheduleJobRetry(ctx context.Context, job syncJob, errorCode, errorDetail string, nextRunAt time.Time) error {
+	if s != nil && s.deps != nil && s.deps.scheduleJobRetry != nil {
+		return s.deps.scheduleJobRetry(ctx, job, errorCode, errorDetail, nextRunAt)
+	}
+	return s.scheduleJobRetry(ctx, job, errorCode, errorDetail, nextRunAt)
 }
 
 func (s *pullerService) depFinishJobStatus(ctx context.Context, job syncJob, status, errorCode, errorDetail string) error {
@@ -254,6 +288,13 @@ func (s *pullerService) executeJob(ctx context.Context, job syncJob) error {
 		}
 	}
 
+	parseFailures := collectAndSortParseFailures(outputs)
+	if len(parseFailures) > 0 {
+		if err := s.depInsertParseFailures(jobCtx, job.ID, source.ID, parseFailures); err != nil && s.log != nil {
+			s.log.Warn("persist parse failures failed", "job_id", job.ID, "source_id", source.ID, "error", err, "count", len(parseFailures))
+		}
+	}
+
 	if jsonOutput, ok := outputs[parserKeyJSONL]; ok && jsonOutput.MaxLine > jsonLineWatermark {
 		if err := s.depUpsertWatermark(jobCtx, source.ID, parserKeyJSONL, hostKey, jsonOutput.MaxLine); err != nil {
 			return s.failJob(job, errCodeWatermarkFailed, err)
@@ -351,6 +392,13 @@ func (s *pullerService) executeLocalSourceJob(jobCtx context.Context, job syncJo
 			totalEvents += len(events)
 		}
 
+		parseFailures := collectAndSortParseFailures(outputs)
+		if len(parseFailures) > 0 {
+			if err := s.depInsertParseFailures(jobCtx, job.ID, source.ID, parseFailures); err != nil && s.log != nil {
+				s.log.Warn("persist parse failures failed", "job_id", job.ID, "source_id", source.ID, "source_path", content.SourcePath, "error", err, "count", len(parseFailures))
+			}
+		}
+
 		if jsonOutput, ok := outputs[parserKeyJSONL]; ok && jsonOutput.MaxLine > jsonLineWatermark {
 			if err := s.depUpsertWatermark(jobCtx, source.ID, parserKeyJSONL, content.HostKey, jsonOutput.MaxLine); err != nil {
 				return s.failJob(job, errCodeWatermarkFailed, err)
@@ -397,12 +445,76 @@ func (s *pullerService) failJob(job syncJob, code string, err error) error {
 		detail = err.Error()
 	}
 
+	if shouldRetrySyncJobFailure(job, code, s.runtime.JobMaxRetries) {
+		delay := retryBackoffDelay(s.runtime.JobRetryBaseDelay, job.Attempt)
+		nextRunAt := time.Now().UTC().Add(delay)
+		finalize, finalizeCancel := finalizeCtx()
+		defer finalizeCancel()
+		if updateErr := s.depScheduleJobRetry(finalize, job, code, detail, nextRunAt); updateErr != nil {
+			return fmt.Errorf("%s (status update failed: %v)", detail, updateErr)
+		}
+		if s.log != nil {
+			s.log.Warn(
+				"sync job scheduled for retry",
+				"job_id", job.ID,
+				"source_id", job.SourceID,
+				"attempt", job.Attempt,
+				"max_retries", s.runtime.JobMaxRetries,
+				"retry_after", delay.String(),
+				"next_run_at", nextRunAt.Format(time.RFC3339),
+				"error_code", code,
+			)
+		}
+		return err
+	}
+
 	finalize, finalizeCancel := finalizeCtx()
 	defer finalizeCancel()
 	if updateErr := s.depFinishJobStatus(finalize, job, "failed", code, detail); updateErr != nil {
 		return fmt.Errorf("%s (status update failed: %v)", detail, updateErr)
 	}
 	return err
+}
+
+func shouldRetrySyncJobFailure(job syncJob, code string, maxRetries int) bool {
+	if maxRetries <= 0 {
+		return false
+	}
+	if !isRetryableSyncJobError(code) {
+		return false
+	}
+	return job.Attempt > 0 && job.Attempt <= maxRetries
+}
+
+func isRetryableSyncJobError(code string) bool {
+	switch strings.TrimSpace(code) {
+	case errCodeSSHPullFailed,
+		errCodeReadLocalFailed,
+		errCodeReadRemoteFailed,
+		errCodeIngestFailed,
+		errCodeWatermarkFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+func retryBackoffDelay(base time.Duration, attempt int) time.Duration {
+	if base <= 0 {
+		base = time.Second
+	}
+	if attempt <= 1 {
+		return base
+	}
+
+	delay := base
+	for i := 1; i < attempt; i++ {
+		if delay > time.Duration(math.MaxInt64/2) {
+			return time.Duration(math.MaxInt64)
+		}
+		delay *= 2
+	}
+	return delay
 }
 
 func (s *pullerService) cancelJob(job syncJob, detail string) error {
@@ -420,4 +532,120 @@ func getOutputMaxLine(outputs map[string]parserOutput, key string) int64 {
 		return 0
 	}
 	return output.MaxLine
+}
+
+func (s *pullerService) registerInternalRoutes(mux *http.ServeMux) {
+	if s == nil || mux == nil {
+		return
+	}
+	mux.HandleFunc("/v1/sources/", s.handleInternalSourceRoutes)
+}
+
+func (s *pullerService) handleInternalSourceRoutes(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(r.URL.Path, "/v1/sources/") || !strings.HasSuffix(r.URL.Path, "/sync-now") {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !s.isInternalRequestAuthorized(r) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "unauthorized",
+		})
+		return
+	}
+
+	sourceID := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/sources/"), "/sync-now"))
+	if sourceID == "" || strings.Contains(sourceID, "/") {
+		http.NotFound(w, r)
+		return
+	}
+
+	result, err := s.executeSyncNow(r.Context(), sourceID)
+	if err != nil {
+		if s.log != nil {
+			s.log.Error("sync-now failed", "source_id", sourceID, "error", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+func (s *pullerService) isInternalRequestAuthorized(r *http.Request) bool {
+	if s == nil || r == nil {
+		return false
+	}
+
+	expected := strings.TrimSpace(s.runtime.InternalToken)
+	if expected == "" {
+		return false
+	}
+
+	token := strings.TrimSpace(r.Header.Get("X-Internal-Token"))
+	if token == "" {
+		token = parseBearerToken(r.Header.Get("Authorization"))
+	}
+	if token == "" {
+		return false
+	}
+
+	return token == expected
+}
+
+func parseBearerToken(raw string) string {
+	parts := strings.Fields(strings.TrimSpace(raw))
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
+}
+
+func (s *pullerService) executeSyncNow(ctx context.Context, sourceID string) (syncJobResult, error) {
+	job, err := s.depCreateManualSyncJob(ctx, sourceID, "sync")
+	if err != nil {
+		return syncJobResult{}, err
+	}
+
+	execErr := s.depExecuteJob(ctx, job)
+	if execErr != nil && !errors.Is(execErr, errJobCancelled) && s.log != nil {
+		s.log.Warn("sync-now execute job returned error", "job_id", job.ID, "source_id", sourceID, "error", execErr)
+	}
+
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	result, err := s.depLoadSyncJobResult(queryCtx, job.ID)
+	if err != nil {
+		fallback := syncJobResult{
+			JobID:    job.ID,
+			SourceID: job.SourceID,
+			Attempt:  job.Attempt,
+		}
+		switch {
+		case execErr == nil:
+			fallback.Status = "success"
+		case errors.Is(execErr, errJobCancelled):
+			fallback.Status = "cancelled"
+			fallback.ErrorCode = errCodeCancelled
+			fallback.ErrorDetail = execErr.Error()
+		default:
+			fallback.Status = "failed"
+			fallback.ErrorDetail = execErr.Error()
+		}
+		return fallback, nil
+	}
+
+	return result, nil
 }

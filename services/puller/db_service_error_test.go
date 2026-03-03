@@ -114,6 +114,15 @@ func TestDBMethods_ErrorPaths(t *testing.T) {
 	if err == nil || created || !strings.Contains(err.Error(), "create scheduled sync job failed") {
 		t.Fatalf("createScheduledSyncJob(query error) = (%v, %v), want create failed", created, err)
 	}
+	if _, err := svc.createManualSyncJob(ctx, "  ", "sync"); err == nil || !strings.Contains(err.Error(), "source_id is required") {
+		t.Fatalf("createManualSyncJob(blank source) error = %v, want required error", err)
+	}
+	if _, err := svc.createManualSyncJob(ctx, "source-1", "sync"); err == nil || !strings.Contains(err.Error(), "create manual sync job failed") {
+		t.Fatalf("createManualSyncJob(query error) error = %v, want create failed", err)
+	}
+	if _, err := svc.loadSyncJobResult(ctx, "job-1"); err == nil || !strings.Contains(err.Error(), "query sync job result failed") {
+		t.Fatalf("loadSyncJobResult() error = %v, want query sync job result failed", err)
+	}
 
 	if _, err := svc.isCancelRequested(ctx, "job-1"); err == nil || !strings.Contains(err.Error(), "query cancel_requested failed") {
 		t.Fatalf("isCancelRequested() error = %v, want query cancel_requested failed", err)
@@ -124,10 +133,22 @@ func TestDBMethods_ErrorPaths(t *testing.T) {
 	if err := svc.upsertWatermark(ctx, "source-1", parserKeyJSONL, "host-key", -10); err == nil || !strings.Contains(err.Error(), "upsert watermark failed") {
 		t.Fatalf("upsertWatermark() error = %v, want upsert watermark failed", err)
 	}
+	if err := svc.insertParseFailures(ctx, "", "source-1", []parseFailure{{SourceOffset: 1, Error: "bad"}}); err == nil || !strings.Contains(err.Error(), "job_id is required") {
+		t.Fatalf("insertParseFailures(empty job) error = %v, want job_id is required", err)
+	}
+	if err := svc.insertParseFailures(ctx, "job-1", "", []parseFailure{{SourceOffset: 1, Error: "bad"}}); err == nil || !strings.Contains(err.Error(), "source_id is required") {
+		t.Fatalf("insertParseFailures(empty source) error = %v, want source_id is required", err)
+	}
+	if err := svc.insertParseFailures(ctx, "job-1", "source-1", []parseFailure{{SourceOffset: 1, Error: "bad"}}); err == nil || !strings.Contains(err.Error(), "insert parse failures failed") {
+		t.Fatalf("insertParseFailures() error = %v, want insert parse failures failed", err)
+	}
 
 	job := syncJob{ID: "job-1", SourceID: "source-1", StartedAt: time.Time{}}
 	if err := svc.finishJobStatus(ctx, job, "failed", "code1", strings.Repeat("x", 9000)); err == nil || !strings.Contains(err.Error(), "update sync job status failed") {
 		t.Fatalf("finishJobStatus() error = %v, want update sync job status failed", err)
+	}
+	if err := svc.scheduleJobRetry(ctx, job, "code1", "retry later", time.Now().Add(10*time.Second)); err == nil || !strings.Contains(err.Error(), "schedule sync job retry failed") {
+		t.Fatalf("scheduleJobRetry() error = %v, want schedule sync job retry failed", err)
 	}
 
 	finalCtx, finalizeCancel := finalizeCtx()

@@ -5,23 +5,39 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const matrixDocPath = path.join(repoRoot, "docs/09-主流AI客户端支持矩阵.md");
 const connectorDeclPath = path.join(repoRoot, "services/puller/connectors.go");
+const parserDeclPath = path.join(repoRoot, "services/puller/parser.go");
 
 type ConnectorRule = {
   pattern: RegExp;
   connector: string;
 };
 
-const p0ConnectorRules: ConnectorRule[] = [
+const p0p1ConnectorRules: ConnectorRule[] = [
   { pattern: /\bcodex\b/i, connector: "codex" },
   { pattern: /\bclaude\b/i, connector: "claude" },
   { pattern: /\bgemini\b/i, connector: "gemini" },
   { pattern: /\baider\b/i, connector: "aider" },
   { pattern: /\bopencode\b/i, connector: "opencode" },
   { pattern: /\bqwen\b/i, connector: "qwen-code" },
+  { pattern: /\bkimi\b/i, connector: "kimi-cli" },
   { pattern: /\bcursor\b/i, connector: "cursor" },
+  { pattern: /\bwindsurf\b/i, connector: "windsurf" },
+  { pattern: /\bcodebuddy\s+code\s+cli\b/i, connector: "codebuddy-cli" },
+  { pattern: /\bcodebuddy\s+ide\b/i, connector: "codebuddy-ide" },
+  { pattern: /通义灵码|lingma/i, connector: "lingma" },
   { pattern: /\bvs\s*code\b/i, connector: "vscode" },
+  { pattern: /\btrae\s+cli\b/i, connector: "trae-cli" },
   { pattern: /\btrae\b/i, connector: "trae-ide" },
+  { pattern: /\bzed\b/i, connector: "zed" },
 ];
+
+type ParserEntrypointCheckResult = {
+  entrypoints: string[];
+  declaredParsers: string[];
+  missingEntrypoints: string[];
+  hasParseWithConnectorDispatch: boolean;
+  hasParseWithConnectorFallback: boolean;
+};
 
 function splitMarkdownRow(row: string): string[] {
   const trimmed = row.trim();
@@ -48,11 +64,12 @@ function normalizePriorityCell(value: string): string {
   return value.replace(/[`*_~\s]/g, "").toUpperCase();
 }
 
-export function parseP0Clients(markdown: string): string[] {
+export function parseClientsByPriorities(markdown: string, priorities: string[]): string[] {
+  const normalizedPriorities = new Set(priorities.map((priority) => priority.toUpperCase()));
   const lines = normalizeMarkdown(markdown)
     .split("\n")
     .map((line) => line.trimEnd());
-  const p0Clients: string[] = [];
+  const clients: string[] = [];
   let index = 0;
 
   while (index < lines.length) {
@@ -94,19 +111,28 @@ export function parseP0Clients(markdown: string): string[] {
       }
 
       const priority = normalizePriorityCell(cells[priorityIdx]);
-      if (priority !== "P0") {
+      if (!normalizedPriorities.has(priority)) {
         index += 1;
         continue;
       }
+
       const client = cells[clientIdx];
       if (client) {
-        p0Clients.push(client);
+        clients.push(client);
       }
       index += 1;
     }
   }
 
-  return [...new Set(p0Clients)];
+  return [...new Set(clients)];
+}
+
+export function parseP0Clients(markdown: string): string[] {
+  return parseClientsByPriorities(markdown, ["P0"]);
+}
+
+export function parseP0P1Clients(markdown: string): string[] {
+  return parseClientsByPriorities(markdown, ["P0", "P1"]);
 }
 
 function parseConnectorNameConstMap(source: string): Map<string, string> {
@@ -154,7 +180,7 @@ export function parseDeclaredPullerConnectors(source: string): string[] {
   const registrySource = sliceDefaultRegistryCall(source);
   const connectorSet = new Set<string>();
 
-  const callRegex = /newFeatureConnector\(\s*([^,]+?)\s*,/g;
+  const callRegex = /newFeatureConnector(?:WithParser)?\(\s*([^,]+?)\s*,/g;
   let match: RegExpExecArray | null;
   while ((match = callRegex.exec(registrySource)) !== null) {
     const raw = match[1].trim();
@@ -168,13 +194,113 @@ export function parseDeclaredPullerConnectors(source: string): string[] {
   return [...connectorSet].sort((a, b) => a.localeCompare(b));
 }
 
-function mapClientToConnector(client: string): string | null {
-  for (const rule of p0ConnectorRules) {
+function parseDeclaredConnectorParsers(source: string): string[] {
+  const parserSet = new Set<string>();
+  const parserRegex =
+    /newFeatureConnectorWithParser\(\s*[^,]+?\s*,\s*\[\]string\s*\{[\s\S]*?\}\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = parserRegex.exec(source)) !== null) {
+    const parserName = match[1].trim();
+    if (parserName && parserName !== "nil") {
+      parserSet.add(parserName);
+    }
+  }
+  return [...parserSet].sort((a, b) => a.localeCompare(b));
+}
+
+export function mapClientToConnector(client: string): string | null {
+  for (const rule of p0p1ConnectorRules) {
     if (rule.pattern.test(client)) {
       return rule.connector;
     }
   }
   return null;
+}
+
+function sliceFunctionBlock(source: string, signaturePattern: RegExp): string | null {
+  const match = signaturePattern.exec(source);
+  if (!match || match.index === undefined) {
+    return null;
+  }
+
+  const openBraceIndex = source.indexOf("{", match.index + match[0].length);
+  if (openBraceIndex < 0) {
+    return null;
+  }
+
+  let depth = 0;
+  for (let index = openBraceIndex; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+    if (char !== "}") {
+      continue;
+    }
+
+    depth -= 1;
+    if (depth === 0) {
+      return source.slice(openBraceIndex + 1, index);
+    }
+  }
+
+  return null;
+}
+
+function hasFunctionDeclaration(source: string, fnName: string): boolean {
+  const pattern = new RegExp(`\\bfunc\\s+${fnName}\\s*\\(`);
+  return pattern.test(source);
+}
+
+export function parseFeatureConnectorParserEntrypoints(connectorSource: string): string[] {
+  const parseBody = sliceFunctionBlock(
+    connectorSource,
+    /func\s+\(c\s+\*featureConnector\)\s+Parse\s*\(/,
+  );
+  if (!parseBody) {
+    return [];
+  }
+
+  const entrypointSet = new Set<string>();
+  const callRegex = /(?<!\.)\b([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*ctx\s*,\s*input\s*\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = callRegex.exec(parseBody)) !== null) {
+    entrypointSet.add(match[1]);
+  }
+
+  return [...entrypointSet].sort((a, b) => a.localeCompare(b));
+}
+
+export function validateParserEntrypoints(
+  connectorSource: string,
+  parserSource: string,
+): ParserEntrypointCheckResult {
+  const entrypoints = parseFeatureConnectorParserEntrypoints(connectorSource);
+  const declaredParsers = parseDeclaredConnectorParsers(connectorSource);
+  const expectedEntrypoints = [...new Set([...entrypoints, ...declaredParsers])].sort((a, b) =>
+    a.localeCompare(b),
+  );
+  const parseWithConnectorBody = sliceFunctionBlock(connectorSource, /func\s+parseWithConnector\s*\(/);
+  const hasParseWithConnectorDispatch =
+    parseWithConnectorBody !== null &&
+    /connector\.Parse\s*\(\s*ctx\s*,\s*input\s*\)/.test(parseWithConnectorBody);
+  const hasParseWithConnectorFallback =
+    parseWithConnectorBody !== null &&
+    /parseLinesConcurrently\s*\(\s*ctx\s*,\s*input\s*\)/.test(parseWithConnectorBody);
+  const missingEntrypoints = expectedEntrypoints.filter(
+    (entrypoint) =>
+      !hasFunctionDeclaration(connectorSource, entrypoint) &&
+      !hasFunctionDeclaration(parserSource, entrypoint),
+  );
+
+  return {
+    entrypoints,
+    declaredParsers,
+    missingEntrypoints,
+    hasParseWithConnectorDispatch,
+    hasParseWithConnectorFallback,
+  };
 }
 
 function fail(message: string): never {
@@ -185,15 +311,16 @@ function fail(message: string): never {
 function main(): void {
   const matrixDoc = readFileSync(matrixDocPath, "utf8");
   const connectorDecl = readFileSync(connectorDeclPath, "utf8");
+  const parserDecl = readFileSync(parserDeclPath, "utf8");
 
-  const p0Clients = parseP0Clients(matrixDoc);
-  if (p0Clients.length === 0) {
-    fail(`no P0 clients found in ${path.relative(repoRoot, matrixDocPath)}`);
+  const p0p1Clients = parseP0P1Clients(matrixDoc);
+  if (p0p1Clients.length === 0) {
+    fail(`no P0/P1 clients found in ${path.relative(repoRoot, matrixDocPath)}`);
   }
 
   const requiredByConnector = new Map<string, string[]>();
   const unmappedClients: string[] = [];
-  for (const client of p0Clients) {
+  for (const client of p0p1Clients) {
     const connector = mapClientToConnector(client);
     if (!connector) {
       unmappedClients.push(client);
@@ -206,7 +333,7 @@ function main(): void {
 
   if (unmappedClients.length > 0) {
     fail(
-      `unable to map P0 clients to connector keys: ${unmappedClients
+      `unable to map P0/P1 clients to connector keys: ${unmappedClients
         .sort((a, b) => a.localeCompare(b))
         .join(", ")}`,
     );
@@ -215,28 +342,75 @@ function main(): void {
   const declaredConnectors = parseDeclaredPullerConnectors(connectorDecl);
   const declaredSet = new Set(declaredConnectors);
   const requiredConnectors = [...requiredByConnector.keys()].sort((a, b) => a.localeCompare(b));
+  const requiredSet = new Set(requiredConnectors);
 
   const missing = requiredConnectors.filter((connector) => !declaredSet.has(connector));
-  const extra = declaredConnectors.filter((connector) => !requiredByConnector.has(connector));
+  const extra = declaredConnectors.filter((connector) => !requiredSet.has(connector));
+
+  const parserCheck = validateParserEntrypoints(connectorDecl, parserDecl);
 
   console.log(
-    `[support-matrix] P0 clients in docs/09: ${p0Clients.length}, required connectors: ${requiredConnectors.length}`,
+    `[support-matrix] P0/P1 clients in docs/09: ${p0p1Clients.length}, required connectors: ${requiredConnectors.length}`,
   );
   console.log(`[support-matrix] Declared puller connectors: ${declaredConnectors.join(", ") || "(none)"}`);
+  console.log(
+    `[support-matrix] featureConnector parser entrypoints: ${parserCheck.entrypoints.join(", ") || "(none)"}`,
+  );
+  console.log(
+    `[support-matrix] connector parser handlers: ${parserCheck.declaredParsers.join(", ") || "(none)"}`,
+  );
 
+  let hasFailure = false;
   if (missing.length > 0) {
-    console.error("[support-matrix] FAILED: missing puller connectors for docs/09 P0 clients:");
+    hasFailure = true;
+    console.error("[support-matrix] FAILED: missing puller connectors for docs/09 P0/P1 clients:");
     for (const connector of missing) {
       const clients = requiredByConnector.get(connector) ?? [];
       console.error(`  - ${connector} <- ${clients.join(" | ")}`);
     }
+  }
+
+  if (extra.length > 0) {
+    hasFailure = true;
+    console.error("[support-matrix] FAILED: redundant puller connectors not referenced by docs/09 P0/P1:");
+    for (const connector of extra) {
+      console.error(`  - ${connector}`);
+    }
+  }
+
+  if (parserCheck.entrypoints.length === 0) {
+    hasFailure = true;
+    console.error(
+      "[support-matrix] FAILED: featureConnector.Parse 未声明 parser 入口调用（例如 parseLinesConcurrently(ctx, input)）。",
+    );
+  }
+
+  if (!parserCheck.hasParseWithConnectorDispatch) {
+    hasFailure = true;
+    console.error("[support-matrix] FAILED: parseWithConnector 缺少 connector.Parse(ctx, input) 调度入口。");
+  }
+
+  if (!parserCheck.hasParseWithConnectorFallback) {
+    hasFailure = true;
+    console.error(
+      "[support-matrix] FAILED: parseWithConnector 缺少 parseLinesConcurrently(ctx, input) 回退入口。",
+    );
+  }
+
+  if (parserCheck.missingEntrypoints.length > 0) {
+    hasFailure = true;
+    console.error(
+      `[support-matrix] FAILED: parser 入口函数不存在: ${parserCheck.missingEntrypoints.join(", ")}`,
+    );
+  }
+
+  if (hasFailure) {
     process.exit(1);
   }
 
-  console.log("[support-matrix] PASSED: docs/09 P0 clients are fully covered by puller connectors.");
-  if (extra.length > 0) {
-    console.log(`[support-matrix] Note: non-P0 connectors currently declared: ${extra.join(", ")}`);
-  }
+  console.log(
+    "[support-matrix] PASSED: docs/09 P0/P1、puller connectors 与 parser 入口均严格一致。",
+  );
 }
 
 const isMainModule = (() => {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -52,13 +53,20 @@ func main() {
 		connectors: defaultPullerConnectorRegistry,
 	}
 
-	healthErrCh := health.Start(ctx, cfg.HTTPAddr, cfg.ServiceName, log)
+	mux := http.NewServeMux()
+	health.Register(mux, cfg.ServiceName)
+	svc.registerInternalRoutes(mux)
+
+	healthErrCh := health.StartWithHandler(ctx, cfg.HTTPAddr, log, mux)
 	log.Info(
 		"service started",
 		"http_addr", cfg.HTTPAddr,
 		"poll_interval", runtimeCfg.PollInterval.String(),
 		"job_timeout", runtimeCfg.JobTimeout.String(),
+		"job_max_retries", runtimeCfg.JobMaxRetries,
+		"job_retry_base_delay", runtimeCfg.JobRetryBaseDelay.String(),
 		"ingest_endpoint", runtimeCfg.IngestEndpoint,
+		"internal_sync_now", runtimeCfg.InternalToken != "",
 	)
 
 	if err := svc.pollOnce(ctx); err != nil {
