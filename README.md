@@ -18,6 +18,7 @@ AgentLedger 面向企业研发与平台团队，目标是把分散在 AI CLI 与
 | 会话与使用量 | usage heatmap、daily/monthly/models/sessions 聚合、会话详情与事件列表 |
 | Source 管理 | source 新增/查询/删除、连通性测试、同步任务管理 |
 | 预算治理 | budgets 读写、阈值分级、告警与状态流转 |
+| 集成分发 | 支持 `alert/weekly` 双事件；`webhook` 原样转发，`wecom/dingtalk/feishu` 使用 `text` 模板消息 |
 | 回调链路 | governance -> integration -> control-plane callback 闭环 |
 | Web Console | Dashboard / Sessions / Analytics / Sources / Pricing 最小可用页面 |
 | 工程质量 | Bun + Go 混合 monorepo、基础 CI、脚本化门禁 |

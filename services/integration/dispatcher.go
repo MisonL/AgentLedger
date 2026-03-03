@@ -508,7 +508,7 @@ func (d *alertDispatcher) dispatchWithMessageKey(messageKey string, payload []by
 	failures := make([]channelDispatchFailure, 0, len(channels))
 	for _, channel := range channels {
 		channelStarted := time.Now()
-		err := d.dispatchToChannel(channel, payload)
+		err := d.dispatchToChannel(channel, payload, eventType)
 		result := channelDispatchResult{
 			channel:  channel,
 			duration: time.Since(channelStarted),
@@ -593,12 +593,88 @@ func filterChannels(enabled []integrationChannel, targets ...integrationChannel)
 	return routed
 }
 
-func (d *alertDispatcher) dispatchToChannel(channel integrationChannel, payload []byte) error {
+type weComDingTalkTextPayload struct {
+	MsgType string `json:"msgtype"`
+	Text    struct {
+		Content string `json:"content"`
+	} `json:"text"`
+}
+
+type feishuTextPayload struct {
+	MsgType string `json:"msg_type"`
+	Content struct {
+		Text string `json:"text"`
+	} `json:"content"`
+}
+
+func buildChannelPayload(channel integrationChannel, payload []byte, eventType string) ([]byte, error) {
+	if channel == channelWebhook {
+		return append([]byte(nil), payload...), nil
+	}
+
+	text := formatEventTextPayload(payload, eventType)
+	switch channel {
+	case channelWeCom, channelDingTalk:
+		message := weComDingTalkTextPayload{MsgType: "text"}
+		message.Text.Content = text
+		body, err := json.Marshal(message)
+		if err != nil {
+			return nil, err
+		}
+		return body, nil
+	case channelFeishu:
+		message := feishuTextPayload{MsgType: "text"}
+		message.Content.Text = text
+		body, err := json.Marshal(message)
+		if err != nil {
+			return nil, err
+		}
+		return body, nil
+	default:
+		return nil, fmt.Errorf("unsupported channel %s", channel)
+	}
+}
+
+func formatEventTextPayload(payload []byte, eventType string) string {
+	normalizedEventType := strings.ToLower(strings.TrimSpace(eventType))
+	if normalizedEventType == "" {
+		normalizedEventType = "unknown"
+	}
+	return fmt.Sprintf("[agentledger][%s]\n%s", normalizedEventType, compactJSONPayload(payload))
+}
+
+func compactJSONPayload(payload []byte) string {
+	trimmed := bytes.TrimSpace(payload)
+	if len(trimmed) == 0 {
+		return "{}"
+	}
+
+	if !json.Valid(trimmed) {
+		return string(trimmed)
+	}
+
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, trimmed); err != nil {
+		return string(trimmed)
+	}
+	return buf.String()
+}
+
+func (d *alertDispatcher) dispatchToChannel(channel integrationChannel, payload []byte, eventType string) error {
 	endpoint := strings.TrimSpace(d.cfg.ChannelURLs[channel])
 	if endpoint == "" {
 		return &dispatchError{
 			retryable: false,
 			message:   fmt.Sprintf("channel %s is not configured", channel),
+		}
+	}
+
+	channelPayload, err := buildChannelPayload(channel, payload, eventType)
+	if err != nil {
+		return &dispatchError{
+			retryable: false,
+			message:   fmt.Sprintf("build %s payload failed", channel),
+			err:       err,
 		}
 	}
 
@@ -610,7 +686,7 @@ func (d *alertDispatcher) dispatchToChannel(channel integrationChannel, payload 
 	reqCtx, cancel := context.WithTimeout(baseCtx, d.cfg.WebhookTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(channelPayload))
 	if err != nil {
 		return &dispatchError{
 			retryable: false,
