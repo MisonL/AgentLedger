@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -81,6 +82,62 @@ func parseSSHLocation(raw string) (sshLocation, error) {
 }
 
 func (s *pullerService) pullSSHFile(ctx context.Context, location sshLocation) ([]byte, error) {
+	return s.runSSHCommand(ctx, location, buildSSHCatCommand(location.Path))
+}
+
+func (s *pullerService) fetchSSHSourceContents(ctx context.Context, location sshLocation) ([]sourceContent, error) {
+	paths, err := s.listSSHSourcePaths(ctx, location)
+	if err != nil {
+		return nil, err
+	}
+
+	contents := make([]sourceContent, 0, len(paths))
+	for _, sourcePath := range paths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		fileLocation := location
+		fileLocation.Path = sourcePath
+
+		content, err := s.pullSSHFile(ctx, fileLocation)
+		if err != nil {
+			return nil, fmt.Errorf("pull remote file failed (%s): %w", sourcePath, err)
+		}
+
+		contents = append(contents, sourceContent{
+			SourcePath: sourcePath,
+			HostKey:    fileLocation.HostKey(),
+			Content:    content,
+		})
+	}
+
+	if len(contents) == 0 {
+		return nil, fmt.Errorf("no readable remote files found under %s", strings.TrimSpace(location.Path))
+	}
+	return contents, nil
+}
+
+func (s *pullerService) listSSHSourcePaths(ctx context.Context, location sshLocation) ([]string, error) {
+	output, err := s.runSSHCommand(ctx, location, buildSSHListCommand(location.Path))
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(strings.ReplaceAll(string(output), "\r\n", "\n"), "\n")
+	paths := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		paths = append(paths, trimmed)
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+func (s *pullerService) runSSHCommand(ctx context.Context, location sshLocation, remoteCommand string) ([]byte, error) {
 	sshCtx, cancel := context.WithTimeout(ctx, s.runtime.SSHTimeout)
 	defer cancel()
 
@@ -88,7 +145,7 @@ func (s *pullerService) pullSSHFile(ctx context.Context, location sshLocation) (
 	if location.Port > 0 {
 		args = append(args, "-p", strconv.Itoa(location.Port))
 	}
-	args = append(args, location.Target(), "cat -- "+shellQuote(location.Path))
+	args = append(args, location.Target(), remoteCommand)
 
 	cmd := exec.CommandContext(sshCtx, "ssh", args...)
 	output, err := cmd.CombinedOutput()
@@ -101,6 +158,21 @@ func (s *pullerService) pullSSHFile(ctx context.Context, location sshLocation) (
 	}
 
 	return output, nil
+}
+
+func buildSSHCatCommand(path string) string {
+	return "cat -- " + shellQuote(path)
+}
+
+func buildSSHListCommand(path string) string {
+	quotedPath := shellQuote(path)
+	return "if [ -f " + quotedPath + " ]; then " +
+		"printf '%s\\n' " + quotedPath + "; " +
+		"elif [ -d " + quotedPath + " ]; then " +
+		"find " + quotedPath + " -type f \\( -name '*.json' -o -name '*.jsonl' -o -name '*.md' \\) -print | LC_ALL=C sort; " +
+		"else " +
+		"echo 'ssh source path not found or not regular file/directory' >&2; exit 3; " +
+		"fi"
 }
 
 func shellQuote(raw string) string {

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 type serviceTestConnector struct {
 	outputs map[string]parserOutput
 	err     error
+	parseFn func(context.Context, parseInput) (map[string]parserOutput, error)
 }
 
 func (c serviceTestConnector) Name() string {
@@ -29,6 +31,9 @@ func (c serviceTestConnector) Match(source sourceRecord, sourcePath string) bool
 }
 
 func (c serviceTestConnector) Parse(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+	if c.parseFn != nil {
+		return c.parseFn(ctx, input)
+	}
 	if c.err != nil {
 		return nil, c.err
 	}
@@ -284,6 +289,230 @@ func TestExecuteLocalSourceJob_LocalFetchErrorMapped(t *testing.T) {
 	}
 	if gotStatus != "failed" || gotCode != errCodeLocalLocationInvalid {
 		t.Fatalf("finishJobStatus = (%q, %q), want (failed, %q)", gotStatus, gotCode, errCodeLocalLocationInvalid)
+	}
+}
+
+func TestExecuteJob_SSHSource_MultiFileSuccess(t *testing.T) {
+	var (
+		finishStatus      string
+		getWatermarkCalls int
+		upsertCalls       []string
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"accepted":1,"rejected":0}`))
+	}))
+	defer server.Close()
+
+	svc := &pullerService{
+		log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		httpClient: newHTTPClient(),
+		runtime: pullerRuntimeConfig{
+			JobTimeout:     time.Second,
+			IngestTimeout:  time.Second,
+			IngestEndpoint: server.URL,
+			AgentID:        "puller-test",
+		},
+		hostname: "ssh-host",
+		connectors: newConnectorRegistry(serviceTestConnector{
+			parseFn: func(ctx context.Context, input parseInput) (map[string]parserOutput, error) {
+				eventID := "event-" + input.SourcePath
+				return map[string]parserOutput{
+					parserKeyJSONL: {
+						ParserKey: parserKeyJSONL,
+						MaxLine:   1,
+						Events: []rawEventWithLine{
+							{
+								LineNo: 1,
+								Event: ingest.RawEvent{
+									EventID:   eventID,
+									SessionID: "session-1",
+									EventType: "message",
+								},
+							},
+						},
+					},
+					parserKeyNative: {
+						ParserKey: parserKeyNative,
+						MaxLine:   1,
+					},
+				}, nil
+			},
+		}),
+		deps: &pullerServiceDeps{
+			isCancelRequested: func(context.Context, string) (bool, error) {
+				return false, nil
+			},
+			loadSource: func(context.Context, string) (sourceRecord, error) {
+				return sourceRecord{
+					ID:          "source-ssh-1",
+					Type:        "ssh",
+					Location:    "dev@example.com:/remote/logs",
+					Enabled:     true,
+					TenantID:    "tenant-a",
+					WorkspaceID: "ws-a",
+				}, nil
+			},
+			fetchSSHSourceContents: func(context.Context, sshLocation) ([]sourceContent, error) {
+				return []sourceContent{
+					{
+						SourcePath: "/remote/logs/a.json",
+						HostKey:    "dev@example.com:22:/remote/logs/a.json",
+						Content:    []byte(`{"type":"a"}` + "\n"),
+					},
+					{
+						SourcePath: "/remote/logs/b.md",
+						HostKey:    "dev@example.com:22:/remote/logs/b.md",
+						Content:    []byte("markdown\n"),
+					},
+				}, nil
+			},
+			getWatermark: func(context.Context, string, string, string) (int64, error) {
+				getWatermarkCalls++
+				return 0, nil
+			},
+			upsertWatermark: func(_ context.Context, _ string, parserKey, hostKey string, line int64) error {
+				upsertCalls = append(upsertCalls, parserKey+"|"+hostKey+"|"+strconv.FormatInt(line, 10))
+				return nil
+			},
+			finishJobStatus: func(ctx context.Context, job syncJob, status, errorCode, errorDetail string) error {
+				finishStatus = status
+				return nil
+			},
+		},
+	}
+
+	err := svc.executeJob(context.Background(), syncJob{
+		ID:       "job-ssh-1",
+		SourceID: "source-ssh-1",
+		Attempt:  1,
+	})
+	if err != nil {
+		t.Fatalf("executeJob(ssh multi-file) unexpected error: %v", err)
+	}
+	if finishStatus != "success" {
+		t.Fatalf("finish status = %q, want success", finishStatus)
+	}
+	if getWatermarkCalls != 4 {
+		t.Fatalf("getWatermark calls = %d, want 4", getWatermarkCalls)
+	}
+	if len(upsertCalls) != 4 {
+		t.Fatalf("upsertWatermark calls = %d, want 4", len(upsertCalls))
+	}
+}
+
+func TestExecuteJob_SSHSource_FetchFailureMappedToSSHPullFailed(t *testing.T) {
+	var (
+		gotStatus string
+		gotCode   string
+	)
+
+	svc := &pullerService{
+		runtime: pullerRuntimeConfig{JobTimeout: time.Second},
+		deps: &pullerServiceDeps{
+			isCancelRequested: func(context.Context, string) (bool, error) {
+				return false, nil
+			},
+			loadSource: func(context.Context, string) (sourceRecord, error) {
+				return sourceRecord{
+					ID:       "source-ssh-2",
+					Type:     "ssh",
+					Location: "dev@example.com:/remote/logs",
+					Enabled:  true,
+				}, nil
+			},
+			fetchSSHSourceContents: func(context.Context, sshLocation) ([]sourceContent, error) {
+				return nil, errors.New("list remote files failed")
+			},
+			finishJobStatus: func(ctx context.Context, job syncJob, status, errorCode, errorDetail string) error {
+				gotStatus = status
+				gotCode = errorCode
+				return nil
+			},
+		},
+	}
+
+	err := svc.executeJob(context.Background(), syncJob{
+		ID:       "job-ssh-2",
+		SourceID: "source-ssh-2",
+	})
+	if err == nil || !strings.Contains(err.Error(), "list remote files failed") {
+		t.Fatalf("executeJob(ssh fetch fail) error = %v, want fetch failure", err)
+	}
+	if gotStatus != "failed" || gotCode != errCodeSSHPullFailed {
+		t.Fatalf("finishJobStatus = (%q, %q), want (failed, %q)", gotStatus, gotCode, errCodeSSHPullFailed)
+	}
+}
+
+func TestExecuteJob_SSHSource_MultiFileSplitFailureMappedToReadRemoteFailed(t *testing.T) {
+	var (
+		gotStatus         string
+		gotCode           string
+		getWatermarkCalls int
+	)
+
+	svc := &pullerService{
+		runtime: pullerRuntimeConfig{JobTimeout: time.Second},
+		connectors: newConnectorRegistry(serviceTestConnector{
+			outputs: map[string]parserOutput{
+				parserKeyJSONL: {ParserKey: parserKeyJSONL, MaxLine: 0},
+				parserKeyNative: {
+					ParserKey: parserKeyNative,
+					MaxLine:   0,
+				},
+			},
+		}),
+		deps: &pullerServiceDeps{
+			isCancelRequested: func(context.Context, string) (bool, error) {
+				return false, nil
+			},
+			loadSource: func(context.Context, string) (sourceRecord, error) {
+				return sourceRecord{
+					ID:       "source-ssh-3",
+					Type:     "ssh",
+					Location: "dev@example.com:/remote/logs",
+					Enabled:  true,
+				}, nil
+			},
+			fetchSSHSourceContents: func(context.Context, sshLocation) ([]sourceContent, error) {
+				return []sourceContent{
+					{
+						SourcePath: "/remote/logs/a.jsonl",
+						HostKey:    "dev@example.com:22:/remote/logs/a.jsonl",
+						Content:    []byte(`{"ok":true}` + "\n"),
+					},
+					{
+						SourcePath: "/remote/logs/b.md",
+						HostKey:    "dev@example.com:22:/remote/logs/b.md",
+						Content:    []byte(strings.Repeat("x", (8*1024*1024)+1)),
+					},
+				}, nil
+			},
+			getWatermark: func(context.Context, string, string, string) (int64, error) {
+				getWatermarkCalls++
+				return 0, nil
+			},
+			finishJobStatus: func(ctx context.Context, job syncJob, status, errorCode, errorDetail string) error {
+				gotStatus = status
+				gotCode = errorCode
+				return nil
+			},
+		},
+	}
+
+	err := svc.executeJob(context.Background(), syncJob{
+		ID:       "job-ssh-3",
+		SourceID: "source-ssh-3",
+	})
+	if err == nil || !strings.Contains(err.Error(), "split remote file failed") {
+		t.Fatalf("executeJob(ssh split fail) error = %v, want split remote file failed", err)
+	}
+	if gotStatus != "failed" || gotCode != errCodeReadRemoteFailed {
+		t.Fatalf("finishJobStatus = (%q, %q), want (failed, %q)", gotStatus, gotCode, errCodeReadRemoteFailed)
+	}
+	if getWatermarkCalls != 2 {
+		t.Fatalf("getWatermark calls = %d, want 2 (only first file parsed)", getWatermarkCalls)
 	}
 }
 
