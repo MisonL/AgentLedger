@@ -8,7 +8,7 @@ BUF_CMD=(buf)
 if ! command -v buf >/dev/null 2>&1; then
   if command -v bunx >/dev/null 2>&1; then
     echo "未检测到系统 buf，改用 bunx 临时执行 @bufbuild/buf。"
-    BUF_CMD=(bunx --bun @bufbuild/buf)
+    BUF_CMD=(bunx --bun --package @bufbuild/buf buf)
   else
     echo "错误：未找到 buf CLI，也未找到 bunx。"
     echo "请先安装 buf，或通过 Bun 安装 @bufbuild/buf。"

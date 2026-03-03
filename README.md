@@ -103,6 +103,23 @@ bun --cwd apps/control-plane run dev
 bun --cwd apps/web-console run dev
 ```
 
+如需启用 `sessions/search` 对 puller 的实时同步重试，可在启动 control-plane 前设置：
+
+```bash
+export PULLER_BASE_URL=http://127.0.0.1:8086
+export PULLER_SYNC_TIMEOUT_MS=1200
+export PULLER_SYNC_RETRY_MAX_ATTEMPTS=3
+export PULLER_SYNC_RETRY_BASE_BACKOFF_MS=200
+export PULLER_SYNC_RETRY_MAX_BACKOFF_MS=2000
+```
+
+如需启用 puller 后台 `sync_jobs` 失败重试，可在启动 `services/puller` 前设置：
+
+```bash
+export PULLER_JOB_MAX_RETRIES=3
+export PULLER_JOB_RETRY_BASE_DELAY=5s
+```
+
 ### 5. 回调链路联调（建议先跑）
 
 ```bash
@@ -122,7 +139,7 @@ bun run test:e2e-governance-callback-chain
 | 构建门禁 | `bun run build` | `scripts/build.sh` |
 | 覆盖率门禁 | `bun run test:coverage` | `scripts/test-coverage.sh` + `scripts/check-coverage-threshold.sh` |
 | 文本规范（LF/BOM） | `bun run check:text-normalization` | `scripts/check-text-normalization.sh` |
-| 支持矩阵一致性 | `bun run check:support-matrix` | `scripts/check-support-matrix.ts` |
+| 支持矩阵一致性（P0/P1 + parser 入口） | `bun run check:support-matrix` | `scripts/check-support-matrix.ts` |
 | 回调配置绑定一致性 | `bun run check:callback-stream-binding` | `scripts/check-callback-stream-binding.sh` |
 
 ### Coverage 阈值（当前执行）
