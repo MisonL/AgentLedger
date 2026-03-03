@@ -20,7 +20,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         os:
           - ubuntu-latest
@@ -47,7 +47,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-          cache-dependency-path: '**/go.sum'
+          cache-dependency-path: "**/go.sum"
 
       - name: 安装 Buf CLI
         uses: bufbuild/buf-setup-action@v1
@@ -130,7 +130,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-          cache-dependency-path: '**/go.sum'
+          cache-dependency-path: "**/go.sum"
 
       - name: 安装 Buf CLI
         uses: bufbuild/buf-setup-action@v1

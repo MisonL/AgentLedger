@@ -431,8 +431,29 @@ func TestDecodeBatchRequestAdditional(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 
 		_, err := decodeBatchRequest(rec, req)
-		if err == nil || !strings.Contains(err.Error(), "decode json") {
-			t.Fatalf("decodeBatchRequest() error = %v, want decode json error", err)
+		if err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("decodeBatchRequest() error = %v, want unknown field", err)
+		}
+	})
+
+	t.Run("nested_unknown_fields", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/v1/ingest",
+			strings.NewReader(`{
+					"batch_id":"b2",
+					"agent":{"agent_id":"agent-1","extra":"x"},
+					"source":{"source_id":"source-1","provider":"codex","extra":"y"},
+					"events":[{"session_id":"s1","event_type":"message","text":"hello","extra":"z"}],
+					"metadata":{"k":"v"}
+				}`),
+		)
+		req.Header.Set("Content-Type", "application/json")
+
+		_, err := decodeBatchRequest(rec, req)
+		if err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("decodeBatchRequest() error = %v, want unknown field", err)
 		}
 	})
 

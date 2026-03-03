@@ -4,8 +4,26 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-CONTROL_PLANE_PORT="${FR505_CONTROL_PLANE_PORT:-18080}"
-MOCK_INGEST_PORT="${FR505_MOCK_INGEST_PORT:-18081}"
+pick_free_port() {
+  bun -e 'import { createServer } from "node:net";
+const server = createServer();
+server.listen(0, "127.0.0.1", () => {
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    process.exitCode = 1;
+    server.close();
+    return;
+  }
+  process.stdout.write(String(address.port));
+  server.close();
+});'
+}
+
+CONTROL_PLANE_PORT="${FR505_CONTROL_PLANE_PORT:-$(pick_free_port)}"
+MOCK_INGEST_PORT="${FR505_MOCK_INGEST_PORT:-$(pick_free_port)}"
+if [[ "$CONTROL_PLANE_PORT" == "$MOCK_INGEST_PORT" ]]; then
+  MOCK_INGEST_PORT="$(pick_free_port)"
+fi
 WAIT_TIMEOUT_MS="${FR505_SMOKE_TIMEOUT_MS:-20000}"
 WAIT_INTERVAL_MS="${FR505_SMOKE_INTERVAL_MS:-250}"
 
@@ -84,19 +102,46 @@ fi
 echo "agent version --short => $version_output"
 
 echo "[6/6] 校验 agent run 最小上报..."
-run_output="$("$AGENT_BIN" run \
-  --endpoint "http://127.0.0.1:${MOCK_INGEST_PORT}/v1/ingest" \
-  --generate 1 \
-  --timeout 5s \
-  2>&1)"
-echo "$run_output"
+run_output=""
+run_status=""
+run_accepted=""
+run_rejected=""
+run_success=0
 
-if [[ "$run_output" != *"status=200"* ]]; then
-  echo "agent run 未返回 status=200"
-  exit 1
-fi
-if [[ "$run_output" != *"accepted=1"* ]]; then
-  echo "agent run 未返回 accepted=1"
+for attempt in 1 2 3; do
+  run_exit_code=0
+  if run_output="$("$AGENT_BIN" run \
+    --endpoint "http://127.0.0.1:${MOCK_INGEST_PORT}/v1/ingest" \
+    --generate 1 \
+    --timeout 5s \
+    2>&1)"; then
+    run_exit_code=0
+  else
+    run_exit_code=$?
+  fi
+  echo "$run_output"
+
+  run_status="$(printf '%s\n' "$run_output" | grep -Eo 'status=[0-9]+' | tail -n 1 | cut -d'=' -f2 || true)"
+  run_accepted="$(printf '%s\n' "$run_output" | grep -Eo 'accepted=[0-9]+' | tail -n 1 | cut -d'=' -f2 || true)"
+  run_rejected="$(printf '%s\n' "$run_output" | grep -Eo 'rejected=[0-9]+' | tail -n 1 | cut -d'=' -f2 || true)"
+
+  if [[ "$run_exit_code" -eq 0 ]] &&
+    [[ "$run_status" =~ ^2[0-9][0-9]$ ]] &&
+    [[ "$run_accepted" =~ ^[0-9]+$ ]] &&
+    [[ "$run_rejected" =~ ^[0-9]+$ ]] &&
+    [[ "$run_accepted" -eq 1 ]] &&
+    [[ "$run_rejected" -eq 0 ]]; then
+    run_success=1
+    break
+  fi
+
+  if [[ "$attempt" -lt 3 ]]; then
+    sleep "$attempt"
+  fi
+done
+
+if [[ "$run_success" -ne 1 ]]; then
+  echo "agent run 校验失败: status=${run_status:-n/a} accepted=${run_accepted:-n/a} rejected=${run_rejected:-n/a}"
   exit 1
 fi
 

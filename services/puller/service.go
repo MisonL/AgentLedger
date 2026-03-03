@@ -500,6 +500,7 @@ func isRetryableSyncJobError(code string) bool {
 	case errCodeSSHPullFailed,
 		errCodeReadLocalFailed,
 		errCodeReadRemoteFailed,
+		errCodeParseFailed,
 		errCodeIngestFailed,
 		errCodeWatermarkFailed:
 		return true

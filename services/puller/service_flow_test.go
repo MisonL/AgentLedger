@@ -646,6 +646,51 @@ func TestFailJob_FirstFailureSchedulesRetry(t *testing.T) {
 	}
 }
 
+func TestFailJob_ParseFailedSchedulesRetry(t *testing.T) {
+	var (
+		scheduled    bool
+		finishCalled bool
+		gotCode      string
+	)
+
+	svc := &pullerService{
+		runtime: pullerRuntimeConfig{
+			JobMaxRetries:     3,
+			JobRetryBaseDelay: 2 * time.Second,
+		},
+		deps: &pullerServiceDeps{
+			scheduleJobRetry: func(ctx context.Context, job syncJob, errorCode, errorDetail string, nextRunAt time.Time) error {
+				scheduled = true
+				gotCode = errorCode
+				return nil
+			},
+			finishJobStatus: func(ctx context.Context, job syncJob, status, errorCode, errorDetail string) error {
+				finishCalled = true
+				return nil
+			},
+		},
+	}
+
+	originalErr := errors.New("parse failed")
+	err := svc.failJob(syncJob{
+		ID:       "job-retry-parse-1",
+		SourceID: "source-1",
+		Attempt:  1,
+	}, errCodeParseFailed, originalErr)
+	if !errors.Is(err, originalErr) {
+		t.Fatalf("failJob() error = %v, want original error", err)
+	}
+	if !scheduled {
+		t.Fatalf("scheduleJobRetry() was not called")
+	}
+	if finishCalled {
+		t.Fatalf("finishJobStatus() should not be called when scheduling retry")
+	}
+	if gotCode != errCodeParseFailed {
+		t.Fatalf("scheduleJobRetry errorCode = %q, want %q", gotCode, errCodeParseFailed)
+	}
+}
+
 func TestFailJob_OverMaxRetriesMarksFailed(t *testing.T) {
 	var (
 		scheduled    bool
@@ -720,12 +765,12 @@ func TestFailJob_NonRetryableErrorDoesNotRetry(t *testing.T) {
 		},
 	}
 
-	originalErr := errors.New("parse failed permanently")
+	originalErr := errors.New("source missing")
 	err := svc.failJob(syncJob{
 		ID:       "job-retry-3",
 		SourceID: "source-1",
 		Attempt:  1,
-	}, errCodeParseFailed, originalErr)
+	}, errCodeSourceNotFound, originalErr)
 	if !errors.Is(err, originalErr) {
 		t.Fatalf("failJob() error = %v, want original error", err)
 	}
@@ -735,8 +780,8 @@ func TestFailJob_NonRetryableErrorDoesNotRetry(t *testing.T) {
 	if !finishCalled {
 		t.Fatalf("finishJobStatus() was not called")
 	}
-	if gotStatus != "failed" || gotCode != errCodeParseFailed {
-		t.Fatalf("finishJobStatus = (%q, %q), want (failed, %q)", gotStatus, gotCode, errCodeParseFailed)
+	if gotStatus != "failed" || gotCode != errCodeSourceNotFound {
+		t.Fatalf("finishJobStatus = (%q, %q), want (failed, %q)", gotStatus, gotCode, errCodeSourceNotFound)
 	}
 }
 

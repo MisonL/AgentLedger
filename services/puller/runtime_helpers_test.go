@@ -162,8 +162,8 @@ func TestRetryHelpers(t *testing.T) {
 	if !isRetryableSyncJobError(errCodeIngestFailed) {
 		t.Fatalf("isRetryableSyncJobError(%q) = false, want true", errCodeIngestFailed)
 	}
-	if isRetryableSyncJobError(errCodeParseFailed) {
-		t.Fatalf("isRetryableSyncJobError(%q) = true, want false", errCodeParseFailed)
+	if !isRetryableSyncJobError(errCodeParseFailed) {
+		t.Fatalf("isRetryableSyncJobError(%q) = false, want true", errCodeParseFailed)
 	}
 
 	if !shouldRetrySyncJobFailure(syncJob{Attempt: 1}, errCodeIngestFailed, 3) {
@@ -172,8 +172,8 @@ func TestRetryHelpers(t *testing.T) {
 	if shouldRetrySyncJobFailure(syncJob{Attempt: 4}, errCodeIngestFailed, 3) {
 		t.Fatalf("shouldRetrySyncJobFailure(over max retries) = true, want false")
 	}
-	if shouldRetrySyncJobFailure(syncJob{Attempt: 1}, errCodeParseFailed, 3) {
-		t.Fatalf("shouldRetrySyncJobFailure(non-retryable code) = true, want false")
+	if !shouldRetrySyncJobFailure(syncJob{Attempt: 1}, errCodeParseFailed, 3) {
+		t.Fatalf("shouldRetrySyncJobFailure(parse_failed) = false, want true")
 	}
 
 	base := 2 * time.Second

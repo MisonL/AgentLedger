@@ -1,6 +1,10 @@
 import { Hono, type Context } from "hono";
 import { validateSessionSearchInput } from "../contracts";
-import type { SessionDetail, Source } from "../contracts";
+import type {
+  SessionDetail,
+  SessionSourceFreshness,
+  Source,
+} from "../contracts";
 import { getControlPlaneRepository } from "../data/repository";
 import { authMiddleware } from "../middleware/auth";
 import type { AppEnv } from "../types";
@@ -24,10 +28,16 @@ const MAX_PULLER_SYNC_RETRY_BACKOFF_MS = 60_000;
 type SessionSearchFetchPath = "realtime" | "fallback-cache" | "cache";
 
 interface SourceFreshnessMetadata {
+  sourceId: string;
+  sourceName?: string;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  failureCount: number;
+  avgLatencyMs: number | null;
   fetchPath: SessionSearchFetchPath;
   freshnessMinutes: number | null;
   fallbackReason: string | null;
-  accessMode: Source["accessMode"] | null;
+  accessMode: Source["accessMode"];
 }
 
 async function requireAuthContext(c: Context<AppEnv>) {
@@ -52,7 +62,7 @@ function normalizeSessionId(value: string | undefined): string | undefined {
 }
 
 function parseSessionEventLimit(
-  value: string | undefined
+  value: string | undefined,
 ): { success: true; limit: number } | { success: false; error: string } {
   if (value === undefined) {
     return { success: true, limit: DEFAULT_SESSION_EVENT_LIMIT };
@@ -64,7 +74,11 @@ function parseSessionEventLimit(
   }
 
   const parsed = Number(trimmed);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_SESSION_EVENT_LIMIT) {
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < 1 ||
+    parsed > MAX_SESSION_EVENT_LIMIT
+  ) {
     return { success: false, error: "limit 必须是 1 到 2000 的整数。" };
   }
 
@@ -103,7 +117,7 @@ function parseBoundedInteger(
   raw: string | undefined,
   fallback: number,
   min: number,
-  max: number
+  max: number,
 ): number {
   const trimmed = (raw ?? "").trim();
   if (!trimmed || !/^\d+$/.test(trimmed)) {
@@ -128,7 +142,7 @@ function getPullerSyncRetryMaxAttempts(): number {
     Bun.env.PULLER_SYNC_RETRY_MAX_ATTEMPTS,
     DEFAULT_PULLER_SYNC_RETRY_MAX_ATTEMPTS,
     MIN_PULLER_SYNC_RETRY_MAX_ATTEMPTS,
-    MAX_PULLER_SYNC_RETRY_MAX_ATTEMPTS
+    MAX_PULLER_SYNC_RETRY_MAX_ATTEMPTS,
   );
 }
 
@@ -137,7 +151,7 @@ function getPullerSyncRetryBaseBackoffMs(): number {
     Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS,
     DEFAULT_PULLER_SYNC_RETRY_BASE_BACKOFF_MS,
     MIN_PULLER_SYNC_RETRY_BACKOFF_MS,
-    MAX_PULLER_SYNC_RETRY_BACKOFF_MS
+    MAX_PULLER_SYNC_RETRY_BACKOFF_MS,
   );
 }
 
@@ -146,12 +160,16 @@ function getPullerSyncRetryMaxBackoffMs(baseBackoffMs: number): number {
     Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS,
     DEFAULT_PULLER_SYNC_RETRY_MAX_BACKOFF_MS,
     MIN_PULLER_SYNC_RETRY_BACKOFF_MS,
-    MAX_PULLER_SYNC_RETRY_BACKOFF_MS
+    MAX_PULLER_SYNC_RETRY_BACKOFF_MS,
   );
   return parsed < baseBackoffMs ? baseBackoffMs : parsed;
 }
 
-function computeRetryBackoffMs(baseBackoffMs: number, maxBackoffMs: number, attempt: number): number {
+function computeRetryBackoffMs(
+  baseBackoffMs: number,
+  maxBackoffMs: number,
+  attempt: number,
+): number {
   if (attempt <= 1) {
     return Math.min(baseBackoffMs, maxBackoffMs);
   }
@@ -190,7 +208,7 @@ function shouldTryRealtimeSync(source: Source): boolean {
 
 async function findSourceById(
   tenantId: string,
-  sourceId: string
+  sourceId: string,
 ): Promise<Source | undefined> {
   const sources = await repository.listSources(tenantId);
   return sources.find((item) => item.id === sourceId);
@@ -198,8 +216,11 @@ async function findSourceById(
 
 async function triggerSyncNow(
   sourceId: string,
-  tenantId: string
-): Promise<{ ok: true; attempts: number } | { ok: false; reason: string; attempts: number }> {
+  tenantId: string,
+): Promise<
+  | { ok: true; attempts: number }
+  | { ok: false; reason: string; attempts: number }
+> {
   const syncUrl = `${getPullerBaseUrl()}/v1/sources/${encodeURIComponent(sourceId)}/sync-now`;
   const maxAttempts = getPullerSyncRetryMaxAttempts();
   const baseBackoffMs = getPullerSyncRetryBaseBackoffMs();
@@ -225,7 +246,10 @@ async function triggerSyncNow(
       }
       reason = `puller_http_${response.status}`;
     } catch (error) {
-      reason = error instanceof Error && error.name === "AbortError" ? "puller_timeout" : "puller_unreachable";
+      reason =
+        error instanceof Error && error.name === "AbortError"
+          ? "puller_timeout"
+          : "puller_unreachable";
     } finally {
       clearTimeout(timeoutId);
     }
@@ -234,7 +258,11 @@ async function triggerSyncNow(
       return { ok: false, reason, attempts: attempt };
     }
 
-    const backoffMs = computeRetryBackoffMs(baseBackoffMs, maxBackoffMs, attempt);
+    const backoffMs = computeRetryBackoffMs(
+      baseBackoffMs,
+      maxBackoffMs,
+      attempt,
+    );
     await sleepMs(backoffMs);
   }
 
@@ -276,7 +304,7 @@ sessionRoutes.post("/sessions/search", async (c) => {
       {
         message: result.error,
       },
-      400
+      400,
     );
   }
 
@@ -286,35 +314,54 @@ sessionRoutes.post("/sessions/search", async (c) => {
       ? await findSourceById(auth.tenantId, sourceId)
       : undefined;
 
-  const sourceFreshness: SourceFreshnessMetadata = {
-    fetchPath: "cache",
-    freshnessMinutes: null,
-    fallbackReason: null,
-    accessMode: source?.accessMode ?? null,
-  };
+  const sourceFreshness: Array<
+    SessionSourceFreshness & SourceFreshnessMetadata
+  > = [];
 
-  if (source && shouldTryRealtimeSync(source)) {
-    const syncResult = await triggerSyncNow(source.id, auth.tenantId);
-    if (syncResult.ok) {
-      sourceFreshness.fetchPath = "realtime";
-    } else {
-      sourceFreshness.fetchPath = "fallback-cache";
-      sourceFreshness.fallbackReason = syncResult.reason;
-      console.warn("[control-plane] sessions/search realtime 拉取失败，回退缓存。", {
-        sourceId: source.id,
-        tenantId: auth.tenantId,
-        reason: syncResult.reason,
-      });
+  if (source) {
+    const sourceFreshnessItem: SessionSourceFreshness &
+      SourceFreshnessMetadata = {
+      sourceId: source.id,
+      sourceName: source.name,
+      accessMode: source.accessMode,
+      lastSuccessAt: null,
+      lastFailureAt: null,
+      failureCount: 0,
+      avgLatencyMs: null,
+      fetchPath: "cache",
+      freshnessMinutes: null,
+      fallbackReason: null,
+    };
+
+    if (shouldTryRealtimeSync(source)) {
+      const syncResult = await triggerSyncNow(source.id, auth.tenantId);
+      if (syncResult.ok) {
+        sourceFreshnessItem.fetchPath = "realtime";
+      } else {
+        sourceFreshnessItem.fetchPath = "fallback-cache";
+        sourceFreshnessItem.fallbackReason = syncResult.reason;
+        console.warn(
+          "[control-plane] sessions/search realtime 拉取失败，回退缓存。",
+          {
+            sourceId: source.id,
+            tenantId: auth.tenantId,
+            reason: syncResult.reason,
+          },
+        );
+      }
     }
+
+    const health = await repository.getSourceHealth(auth.tenantId, source.id);
+    sourceFreshnessItem.freshnessMinutes = health?.freshnessMinutes ?? null;
+    sourceFreshnessItem.accessMode = health?.accessMode ?? source.accessMode;
+    sourceFreshnessItem.lastSuccessAt = health?.lastSuccessAt ?? null;
+    sourceFreshnessItem.lastFailureAt = health?.lastFailureAt ?? null;
+    sourceFreshnessItem.failureCount = health?.failureCount ?? 0;
+    sourceFreshnessItem.avgLatencyMs = health?.avgLatencyMs ?? null;
+    sourceFreshness.push(sourceFreshnessItem);
   }
 
   const payload = await repository.searchSessions(result.data, auth.tenantId);
-
-  if (source) {
-    const health = await repository.getSourceHealth(auth.tenantId, source.id);
-    sourceFreshness.freshnessMinutes = health?.freshnessMinutes ?? null;
-    sourceFreshness.accessMode = health?.accessMode ?? source.accessMode;
-  }
 
   return c.json({
     items: payload.items,
@@ -355,7 +402,10 @@ sessionRoutes.get("/sessions/:id/events", async (c) => {
     return c.json({ message: "sessionId 必须为非空字符串。" }, 400);
   }
 
-  const sessionDetail = await repository.getSessionById(auth.tenantId, sessionId);
+  const sessionDetail = await repository.getSessionById(
+    auth.tenantId,
+    sessionId,
+  );
   if (!sessionDetail) {
     return c.json({ message: `未找到会话 ${sessionId}。` }, 404);
   }
@@ -368,7 +418,7 @@ sessionRoutes.get("/sessions/:id/events", async (c) => {
   const items = await repository.listSessionEvents(
     auth.tenantId,
     sessionId,
-    limitResult.limit
+    limitResult.limit,
   );
   return c.json({
     items,
