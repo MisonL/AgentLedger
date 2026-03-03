@@ -79,6 +79,7 @@ deploy/
 
 - Bun `>= 1.3`
 - Go `>= 1.23`
+- CI 侧固定 Bun `1.3.9`（来自 `packageManager`），并使用 `bun install --frozen-lockfile`
 
 ### 2. 安装依赖
 
@@ -120,6 +121,7 @@ bun run test:e2e-governance-callback-chain
 | 测试门禁 | `bun run test` | `scripts/test.sh` |
 | 构建门禁 | `bun run build` | `scripts/build.sh` |
 | 覆盖率门禁 | `bun run test:coverage` | `scripts/test-coverage.sh` + `scripts/check-coverage-threshold.sh` |
+| 文本规范（LF/BOM） | `bun run check:text-normalization` | `scripts/check-text-normalization.sh` |
 | 支持矩阵一致性 | `bun run check:support-matrix` | `scripts/check-support-matrix.ts` |
 | 回调配置绑定一致性 | `bun run check:callback-stream-binding` | `scripts/check-callback-stream-binding.sh` |
 

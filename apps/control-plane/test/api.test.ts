@@ -3035,6 +3035,11 @@ describe("Control Plane API", () => {
         expect(typeof pickString(first, ["date"])).toBe("string");
         expect(typeof first.tokens).toBe("number");
         expect(typeof first.cost).toBe("number");
+        expect(typeof first.costRaw).toBe("number");
+        expect(typeof first.costEstimated).toBe("number");
+        expect(["raw", "estimated", "reported", "mixed", "none"]).toContain(
+          String(first.costMode)
+        );
         expect(typeof first.sessions).toBe("number");
         expect(isRecord(first.change)).toBe(true);
         if (isRecord(first.change)) {
@@ -3065,6 +3070,11 @@ describe("Control Plane API", () => {
         expect(typeof pickString(first, ["month"])).toBe("string");
         expect(typeof first.tokens).toBe("number");
         expect(typeof first.cost).toBe("number");
+        expect(typeof first.costRaw).toBe("number");
+        expect(typeof first.costEstimated).toBe("number");
+        expect(["raw", "estimated", "reported", "mixed", "none"]).toContain(
+          String(first.costMode)
+        );
         expect(typeof first.sessions).toBe("number");
       }
 
@@ -3090,6 +3100,11 @@ describe("Control Plane API", () => {
         expect(typeof pickString(first, ["model"])).toBe("string");
         expect(typeof first.tokens).toBe("number");
         expect(typeof first.cost).toBe("number");
+        expect(typeof first.costRaw).toBe("number");
+        expect(typeof first.costEstimated).toBe("number");
+        expect(["raw", "estimated", "reported", "mixed", "none"]).toContain(
+          String(first.costMode)
+        );
         expect(typeof first.sessions).toBe("number");
       }
 
@@ -3119,6 +3134,11 @@ describe("Control Plane API", () => {
         expect(typeof pickString(first, ["startedAt", "started_at"])).toBe("string");
         expect(typeof first.totalTokens).toBe("number");
         expect(typeof first.cost).toBe("number");
+        expect(typeof first.costRaw).toBe("number");
+        expect(typeof first.costEstimated).toBe("number");
+        expect(["raw", "estimated", "reported", "mixed", "none"]).toContain(
+          String(first.costMode)
+        );
       }
     } finally {
       await monthlySession.cleanup();
@@ -3127,6 +3147,252 @@ describe("Control Plane API", () => {
         method: "DELETE",
         headers: authHeaders,
       });
+    }
+  });
+
+  test("GET /api/v1/usage 成本双轨：raw 优先并按 estimated 补齐，兼容 legacy reported", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const nonce = createNonce("usage-cost-dual-track");
+    const originalGetPool = repository.getPool;
+    const insertedSessionIds: string[] = [];
+    let sourceId: string | undefined;
+
+    try {
+      repository.getPool = async () => null;
+      if (!Array.isArray(repository.memorySessions)) {
+        throw new Error("repository.memorySessions 不可用，无法注入 usage 双轨数据。");
+      }
+
+      const createSourceResponse = await app.request("/api/v1/sources", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          name: `Usage 双轨数据源-${nonce}`,
+          type: "ssh",
+          location: `10.40.${Math.floor(Math.random() * 200) + 10}.${Math.floor(Math.random() * 200) + 10}`,
+        }),
+      });
+      const source = (await createSourceResponse.json()) as Source;
+      expect(createSourceResponse.status).toBe(201);
+      sourceId = source.id;
+
+      const baseStartedAt = "2026-02-10T09:00:00.000Z";
+      const rows: Array<Session & Record<string, unknown>> = [
+        {
+          id: `usage-cost-raw-${nonce}`,
+          sourceId: source.id,
+          tool: "Codex CLI",
+          model: `usage-raw-${nonce}`,
+          startedAt: baseStartedAt,
+          endedAt: "2026-02-10T09:03:00.000Z",
+          tokens: 120,
+          cost: 0.3,
+          costRaw: 0.3,
+          costMode: "raw",
+        },
+        {
+          id: `usage-cost-estimated-${nonce}`,
+          sourceId: source.id,
+          tool: "Codex CLI",
+          model: `usage-estimated-${nonce}`,
+          startedAt: "2026-02-10T09:10:00.000Z",
+          endedAt: "2026-02-10T09:13:00.000Z",
+          tokens: 90,
+          cost: 0.2,
+          costEstimated: 0.2,
+          costMode: "estimated",
+        },
+        {
+          id: `usage-cost-reported-${nonce}`,
+          sourceId: source.id,
+          tool: "Codex CLI",
+          model: `usage-reported-${nonce}`,
+          startedAt: "2026-02-10T09:20:00.000Z",
+          endedAt: "2026-02-10T09:22:00.000Z",
+          tokens: 60,
+          cost: 0.1,
+          costMode: "reported",
+        },
+        {
+          id: `usage-cost-mixed-${nonce}`,
+          sourceId: source.id,
+          tool: "Codex CLI",
+          model: `usage-mixed-${nonce}`,
+          startedAt: "2026-02-10T09:30:00.000Z",
+          endedAt: "2026-02-10T09:35:00.000Z",
+          tokens: 150,
+          cost: 0.45,
+          costRaw: 0.4,
+          costEstimated: 0.05,
+        },
+      ];
+      repository.memorySessions.push(...rows);
+      insertedSessionIds.push(...rows.map((row) => row.id));
+
+      const baseQuery = new URLSearchParams({
+        from: "2026-02-01T00:00:00.000Z",
+        to: "2026-02-28T23:59:59.999Z",
+        limit: "20",
+      }).toString();
+
+      const dailyResponse = await app.request(`/api/v1/usage/daily?${baseQuery}`, {
+        headers: authHeaders,
+      });
+      const dailyPayload = await readResponseAsUnknown(dailyResponse);
+      const dailyItems = extractListItems(dailyPayload);
+      expect(dailyResponse.status).toBe(200);
+      const dailyTarget = dailyItems.find((item) =>
+        (pickString(item, ["date"]) ?? "").startsWith("2026-02-10")
+      );
+      expect(dailyTarget).toBeDefined();
+      if (dailyTarget) {
+        expect(Number(dailyTarget.costRaw)).toBeCloseTo(0.8, 6);
+        expect(Number(dailyTarget.costEstimated)).toBeCloseTo(0.25, 6);
+        expect(Number(dailyTarget.cost)).toBeCloseTo(1.05, 6);
+        expect(String(dailyTarget.costMode)).toBe("mixed");
+      }
+
+      const monthlyResponse = await app.request(`/api/v1/usage/monthly?${baseQuery}`, {
+        headers: authHeaders,
+      });
+      const monthlyPayload = await readResponseAsUnknown(monthlyResponse);
+      const monthlyItems = extractListItems(monthlyPayload);
+      expect(monthlyResponse.status).toBe(200);
+      const monthlyTarget = monthlyItems.find((item) =>
+        (pickString(item, ["month"]) ?? "").startsWith("2026-02-01")
+      );
+      expect(monthlyTarget).toBeDefined();
+      if (monthlyTarget) {
+        expect(Number(monthlyTarget.costRaw)).toBeCloseTo(0.8, 6);
+        expect(Number(monthlyTarget.costEstimated)).toBeCloseTo(0.25, 6);
+        expect(Number(monthlyTarget.cost)).toBeCloseTo(1.05, 6);
+        expect(String(monthlyTarget.costMode)).toBe("mixed");
+      }
+
+      const modelResponse = await app.request(`/api/v1/usage/models?${baseQuery}`, {
+        headers: authHeaders,
+      });
+      const modelPayload = await readResponseAsUnknown(modelResponse);
+      const modelItems = extractListItems(modelPayload);
+      expect(modelResponse.status).toBe(200);
+      const rawModel = modelItems.find(
+        (item) => pickString(item, ["model"]) === `usage-raw-${nonce}`
+      );
+      const estimatedModel = modelItems.find(
+        (item) => pickString(item, ["model"]) === `usage-estimated-${nonce}`
+      );
+      const reportedModel = modelItems.find(
+        (item) => pickString(item, ["model"]) === `usage-reported-${nonce}`
+      );
+      const mixedModel = modelItems.find(
+        (item) => pickString(item, ["model"]) === `usage-mixed-${nonce}`
+      );
+      expect(rawModel).toBeDefined();
+      expect(estimatedModel).toBeDefined();
+      expect(reportedModel).toBeDefined();
+      expect(mixedModel).toBeDefined();
+      if (rawModel) {
+        expect(Number(rawModel.costRaw)).toBeCloseTo(0.3, 6);
+        expect(Number(rawModel.costEstimated)).toBeCloseTo(0, 6);
+        expect(String(rawModel.costMode)).toBe("raw");
+      }
+      if (estimatedModel) {
+        expect(Number(estimatedModel.costRaw)).toBeCloseTo(0, 6);
+        expect(Number(estimatedModel.costEstimated)).toBeCloseTo(0.2, 6);
+        expect(String(estimatedModel.costMode)).toBe("estimated");
+      }
+      if (reportedModel) {
+        expect(Number(reportedModel.costRaw)).toBeCloseTo(0.1, 6);
+        expect(Number(reportedModel.costEstimated)).toBeCloseTo(0, 6);
+        expect(String(reportedModel.costMode)).toBe("reported");
+      }
+      if (mixedModel) {
+        expect(Number(mixedModel.costRaw)).toBeCloseTo(0.4, 6);
+        expect(Number(mixedModel.costEstimated)).toBeCloseTo(0.05, 6);
+        expect(String(mixedModel.costMode)).toBe("mixed");
+      }
+
+      const sessionResponse = await app.request(`/api/v1/usage/sessions?${baseQuery}`, {
+        headers: authHeaders,
+      });
+      const sessionPayload = await readResponseAsUnknown(sessionResponse);
+      const sessionItems = extractListItems(sessionPayload);
+      expect(sessionResponse.status).toBe(200);
+      const sessionModeByModel = new Map<string, string>();
+      for (const item of sessionItems) {
+        const model = pickString(item, ["model"]);
+        if (!model) {
+          continue;
+        }
+        sessionModeByModel.set(model, String(item.costMode));
+      }
+      expect(sessionModeByModel.get(`usage-raw-${nonce}`)).toBe("raw");
+      expect(sessionModeByModel.get(`usage-estimated-${nonce}`)).toBe("estimated");
+      expect(sessionModeByModel.get(`usage-reported-${nonce}`)).toBe("reported");
+      expect(sessionModeByModel.get(`usage-mixed-${nonce}`)).toBe("mixed");
+    } finally {
+      if (Array.isArray(repository.memorySessions) && insertedSessionIds.length > 0) {
+        for (let index = repository.memorySessions.length - 1; index >= 0; index -= 1) {
+          if (insertedSessionIds.includes(repository.memorySessions[index]?.id)) {
+            repository.memorySessions.splice(index, 1);
+          }
+        }
+      }
+      if (sourceId) {
+        await app.request(`/api/v1/sources/${sourceId}`, {
+          method: "DELETE",
+          headers: authHeaders,
+        });
+      }
+      repository.getPool = originalGetPool;
+    }
+  });
+
+  test("GET /api/v1/usage/daily 租户隔离：忽略 query tenant 参数并强制使用 auth tenant", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const authTenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const originalListUsageDaily = repository.listUsageDaily;
+    const calls: Array<{
+      tenantId?: string;
+      from?: string;
+      to?: string;
+      limit?: number;
+    }> = [];
+
+    try {
+      if (typeof originalListUsageDaily !== "function") {
+        throw new Error("repository.listUsageDaily 不可用，无法验证 tenant 隔离。");
+      }
+
+      repository.listUsageDaily = async (input) => {
+        calls.push(input ?? {});
+        return [];
+      };
+
+      const query = new URLSearchParams({
+        tenantId: "tenant-from-query",
+        from: "2026-02-01T00:00:00.000Z",
+        to: "2026-02-28T23:59:59.999Z",
+        limit: "5",
+      });
+      const response = await app.request(
+        `/api/v1/usage/daily?${query.toString()}&tenant_id=tenant-from-query-2`,
+        {
+          headers: authHeaders,
+        }
+      );
+
+      expect(response.status).toBe(200);
+      expect(calls.length).toBe(1);
+      expect(calls[0]?.tenantId).toBe(authTenantId);
+      expect(calls[0]?.from).toBe("2026-02-01T00:00:00.000Z");
+      expect(calls[0]?.to).toBe("2026-02-28T23:59:59.999Z");
+      expect(calls[0]?.limit).toBe(5);
+    } finally {
+      repository.listUsageDaily = originalListUsageDaily;
     }
   });
 

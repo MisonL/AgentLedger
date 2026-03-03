@@ -6,6 +6,7 @@ import {
   fetchSessionEvents,
   fetchHeatmap,
   fetchSources,
+  fetchUsageDaily,
   fetchUsageModels,
   fetchUsageMonthly,
   fetchUsageSessions,
@@ -347,7 +348,7 @@ describe("api mock fallback gate", () => {
     expect(hasAccessToken()).toBe(false);
   });
 
-  test("usage 聚合接口会拼接 query 并返回列表结构", async () => {
+  test("usage 聚合接口（daily/monthly/models/sessions）会拼接 query 并返回列表结构", async () => {
     env.DEV = false;
     setAuthTokens({
       accessToken: "access-token-usage",
@@ -360,6 +361,12 @@ describe("api mock fallback gate", () => {
       const url = toUrl(input);
       const method = (init?.method ?? "GET").toUpperCase();
 
+      if (url.includes("/api/v1/usage/daily") && method === "GET") {
+        return mockJsonResponse({
+          items: [{ date: "2026-02-01", tokens: 12, cost: 0.012, sessions: 2 }],
+          total: 1,
+        });
+      }
       if (url.includes("/api/v1/usage/monthly") && method === "GET") {
         return mockJsonResponse({
           items: [{ month: "2026-02", tokens: 10, cost: 0.01, sessions: 1 }],
@@ -401,6 +408,9 @@ describe("api mock fallback gate", () => {
       to: "2026-02-28T23:59:59.999Z",
       limit: 20,
     };
+    await expect(fetchUsageDaily(filters)).resolves.toEqual(
+      expect.objectContaining({ total: 1 })
+    );
     await expect(fetchUsageMonthly(filters)).resolves.toEqual(
       expect.objectContaining({ total: 1 })
     );
@@ -411,6 +421,9 @@ describe("api mock fallback gate", () => {
       expect.objectContaining({ total: 1 })
     );
 
+    expect(fetchSpy.mock.calls.some(([url]) => toUrl(url).includes("/api/v1/usage/daily?"))).toBe(
+      true
+    );
     expect(fetchSpy.mock.calls.some(([url]) => toUrl(url).includes("/api/v1/usage/monthly?"))).toBe(
       true
     );

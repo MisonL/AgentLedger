@@ -22,6 +22,7 @@ import type {
   SessionSearchResponse,
   UsageAggregateFilters,
   UsageAggregateResponse,
+  UsageDailyItem,
   UsageHeatmapResponse,
   UsageModelItem,
   UsageMonthlyItem,
@@ -716,6 +717,21 @@ export async function fetchUsageMonthly(
   );
   if (!isUsageAggregateResponse<UsageMonthlyItem>(result)) {
     throw new Error("usage.monthly 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchUsageDaily(
+  filters?: UsageAggregateFilters,
+  signal?: AbortSignal
+): Promise<UsageAggregateResponse<UsageDailyItem>> {
+  const result = await requestJson<unknown>(
+    `/api/v1/usage/daily${buildUsageAggregateQuery(filters)}`,
+    undefined,
+    signal
+  );
+  if (!isUsageAggregateResponse<UsageDailyItem>(result)) {
+    throw new Error("usage.daily 返回结构不合法");
   }
   return result;
 }

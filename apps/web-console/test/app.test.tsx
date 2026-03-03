@@ -140,7 +140,7 @@ describe("Web Console", () => {
     });
   });
 
-  test("Analytics 页面会请求 usage monthly/models/sessions", async () => {
+  test("Analytics 页面会请求 usage daily/monthly/models/sessions 并展示环比与趋势图", async () => {
     setAuthTokens({
       accessToken: "access-token-test-analytics",
       refreshToken: "refresh-token-test-analytics",
@@ -152,17 +152,59 @@ describe("Web Console", () => {
       const url = toUrl(input);
       const method = (init?.method ?? "GET").toUpperCase();
 
+      if (url.includes("/api/v1/usage/daily") && method === "GET") {
+        return mockJsonResponse({
+          items: [
+            {
+              date: "2026-02-10",
+              tokens: 100,
+              cost: 1.2,
+              rawCost: 1.0,
+              estimatedCost: 0.2,
+              totalCost: 1.2,
+              costLabel: "raw + estimated",
+              sessions: 2,
+            },
+            {
+              date: "2026-02-11",
+              tokens: 150,
+              cost: 1.8,
+              rawCost: 1.5,
+              estimatedCost: 0.3,
+              totalCost: 1.8,
+              costLabel: "raw + estimated",
+              sessions: 3,
+            },
+          ],
+          total: 2,
+        });
+      }
+
       if (url.includes("/api/v1/usage/monthly") && method === "GET") {
         return mockJsonResponse({
           items: [
             {
+              month: "2026-01",
+              tokens: 700,
+              cost: 0.9,
+              rawCost: 0.8,
+              estimatedCost: 0.1,
+              totalCost: 0.9,
+              costBasis: "raw + estimated",
+              sessions: 2,
+            },
+            {
               month: "2026-02",
               tokens: 1000,
               cost: 1.25,
+              rawCost: 1.1,
+              estimatedCost: 0.15,
+              totalCost: 1.25,
+              costBasis: "raw + estimated",
               sessions: 3,
             },
           ],
-          total: 1,
+          total: 2,
         });
       }
 
@@ -173,6 +215,10 @@ describe("Web Console", () => {
               model: "gpt-5",
               tokens: 900,
               cost: 1.1,
+              rawCost: 1.0,
+              estimatedCost: 0.1,
+              totalCost: 1.1,
+              costLabel: "raw + estimated",
               sessions: 2,
             },
           ],
@@ -196,6 +242,10 @@ describe("Web Console", () => {
               reasoningTokens: 0,
               totalTokens: 500,
               cost: 0.5,
+              rawCost: 0.4,
+              estimatedCost: 0.1,
+              totalCost: 0.5,
+              costBasis: "raw + estimated",
             },
           ],
           total: 1,
@@ -209,10 +259,18 @@ describe("Web Console", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Analytics" }));
     expect(await screen.findByRole("heading", { name: "聚合分析" })).toBeInTheDocument();
+    expect(await screen.findByText("2026-02-11")).toBeInTheDocument();
     expect(await screen.findByText("2026-02")).toBeInTheDocument();
     expect((await screen.findAllByText("gpt-5")).length).toBeGreaterThan(0);
     expect(await screen.findByText("session-1")).toBeInTheDocument();
+    expect(await screen.findByText("总成本趋势（monthly）")).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "monthly 总成本趋势图" })).toBeInTheDocument();
+    expect((await screen.findAllByText("环比 +50.0%")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("raw + estimated")).length).toBeGreaterThan(0);
 
+    expect(
+      fetchSpy.mock.calls.some(([url]) => toUrl(url).includes("/api/v1/usage/daily"))
+    ).toBe(true);
     expect(
       fetchSpy.mock.calls.some(([url]) => toUrl(url).includes("/api/v1/usage/monthly"))
     ).toBe(true);
@@ -305,6 +363,137 @@ describe("Web Console", () => {
     expect(await screen.findByText("provider：session-detail-test")).toBeInTheDocument();
     expect(await screen.findByText("path：/workspace/main.ts")).toBeInTheDocument();
     expect(await screen.findByText("input：40")).toBeInTheDocument();
+  });
+
+  test("Sessions 页面支持关键词与多维过滤参数下发", async () => {
+    setAuthTokens({
+      accessToken: "access-token-test-session-filters",
+      refreshToken: "refresh-token-test-session-filters",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const searchPayloads: Array<Record<string, unknown>> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/sessions/search") && method === "POST") {
+        searchPayloads.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+        return mockJsonResponse({
+          items: [],
+          total: 0,
+          nextCursor: null,
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+    expect(await screen.findByRole("heading", { name: "会话中心" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(searchPayloads.length).toBeGreaterThanOrEqual(1);
+    });
+
+    const dateKey = (screen.getByLabelText("日期") as HTMLInputElement).value;
+    const nextDate = new Date(`${dateKey}T00:00:00.000Z`);
+    nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+    const nextDateKey = nextDate.toISOString().slice(0, 10);
+
+    fireEvent.change(screen.getByLabelText("关键词"), { target: { value: "deploy failed" } });
+    fireEvent.change(screen.getByLabelText("客户端类型"), { target: { value: "cli" } });
+    fireEvent.change(screen.getByLabelText("工具"), { target: { value: "Codex CLI" } });
+    fireEvent.change(screen.getByLabelText("主机"), { target: { value: "devbox-01" } });
+    fireEvent.change(screen.getByLabelText("模型"), { target: { value: "gpt-5-codex" } });
+    fireEvent.change(screen.getByLabelText("项目"), { target: { value: "agentledger" } });
+    fireEvent.click(screen.getByRole("button", { name: "应用筛选" }));
+
+    await waitFor(() => {
+      expect(searchPayloads.length).toBeGreaterThanOrEqual(2);
+    });
+
+    expect(searchPayloads.at(-1)).toMatchObject({
+      from: `${dateKey}T00:00:00.000Z`,
+      to: `${nextDateKey}T00:00:00.000Z`,
+      limit: 50,
+      keyword: "deploy failed",
+      clientType: "cli",
+      tool: "Codex CLI",
+      host: "devbox-01",
+      model: "gpt-5-codex",
+      project: "agentledger",
+    });
+  });
+
+  test("Dashboard 热力图点击后可下钻到 Sessions 并按日期查询", async () => {
+    setAuthTokens({
+      accessToken: "access-token-test-drilldown",
+      refreshToken: "refresh-token-test-drilldown",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const drillDate = new Date();
+    drillDate.setUTCDate(drillDate.getUTCDate() - 1);
+    const drillDateKey = drillDate.toISOString().slice(0, 10);
+    const searchPayloads: Array<Record<string, unknown>> = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/usage/heatmap") && method === "GET") {
+        return mockJsonResponse({
+          cells: [
+            {
+              date: `${drillDateKey}T00:00:00.000Z`,
+              tokens: 2048,
+              cost: 1.28,
+              sessions: 4,
+            },
+          ],
+          summary: {
+            tokens: 2048,
+            cost: 1.28,
+            sessions: 4,
+          },
+        });
+      }
+
+      if (url.endsWith("/api/v1/sessions/search") && method === "POST") {
+        searchPayloads.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+        return mockJsonResponse({
+          items: [],
+          total: 0,
+          nextCursor: null,
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "AI 使用热力图" })).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("gridcell", { name: new RegExp(drillDateKey) }));
+    expect(await screen.findByRole("heading", { name: "会话中心" })).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(searchPayloads.length).toBeGreaterThanOrEqual(1);
+    });
+
+    const nextDate = new Date(`${drillDateKey}T00:00:00.000Z`);
+    nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+    const nextDateKey = nextDate.toISOString().slice(0, 10);
+
+    expect(searchPayloads.at(-1)).toMatchObject({
+      from: `${drillDateKey}T00:00:00.000Z`,
+      to: `${nextDateKey}T00:00:00.000Z`,
+      limit: 50,
+    });
   });
 
   test("未登录时显示登录页，登录成功后进入控制台", async () => {

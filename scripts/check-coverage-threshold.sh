@@ -5,9 +5,13 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COVERAGE_DIR="${ROOT_DIR}/.coverage"
 GO_COVERAGE_PROFILE="${COVERAGE_DIR}/go-cover.out"
 CONTROL_PLANE_COVERAGE_TEXT="${COVERAGE_DIR}/control-plane-coverage.txt"
+COVERAGE_GATE_LOG="${COVERAGE_DIR}/coverage-gate.log"
 
 GO_SERVICE_ORDER=("ingestion-gateway" "puller" "integration")
 CONTROL_PLANE_LINE_THRESHOLD="80"
+
+mkdir -p "${COVERAGE_DIR}"
+exec > >(tee "${COVERAGE_GATE_LOG}") 2>&1
 
 require_file() {
   local file_path="$1"
@@ -16,6 +20,11 @@ require_file() {
     echo "[coverage-check] 请先执行: bash ./scripts/test-coverage.sh" >&2
     exit 1
   fi
+}
+
+show_control_plane_report_tail() {
+  echo "[coverage-check] control-plane 覆盖率报告末尾 40 行："
+  tail -n 40 "${CONTROL_PLANE_COVERAGE_TEXT}" || true
 }
 
 strip_ansi() {
@@ -76,6 +85,7 @@ read_control_plane_all_files_line_coverage() {
 
   if [[ -z "${all_files_line}" ]]; then
     echo "[coverage-check] 未找到 control-plane 覆盖率中的 All files 行。" >&2
+    show_control_plane_report_tail
     return 1
   fi
 
@@ -127,11 +137,17 @@ read_go_service_coverage() {
 require_file "${GO_COVERAGE_PROFILE}"
 require_file "${CONTROL_PLANE_COVERAGE_TEXT}"
 
+echo "[coverage-check] 使用覆盖率输入文件："
+echo "  - ${GO_COVERAGE_PROFILE}"
+echo "  - ${CONTROL_PLANE_COVERAGE_TEXT}"
+echo "[coverage-check] 诊断日志输出：${COVERAGE_GATE_LOG}"
+
 GO_COVERAGES_RAW="$(read_go_service_coverages)"
 
 CONTROL_PLANE_LINE_COVERAGE="$(read_control_plane_all_files_line_coverage)"
 if [[ ! "${CONTROL_PLANE_LINE_COVERAGE}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
   echo "[coverage-check] control-plane 行覆盖率解析失败: ${CONTROL_PLANE_LINE_COVERAGE}" >&2
+  show_control_plane_report_tail
   exit 1
 fi
 

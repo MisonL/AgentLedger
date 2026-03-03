@@ -14,6 +14,7 @@ import {
   fetchSessionDetail,
   fetchSessionEvents,
   fetchSources,
+  fetchUsageDaily,
   fetchUsageModels,
   fetchUsageMonthly,
   fetchUsageSessions,
@@ -33,6 +34,7 @@ import type {
   PricingCatalogUpsertInput,
   Session,
   SessionDetailResponse,
+  SessionSearchInput,
   SourceConnectionTestResponse,
   SourceType,
   UsageAggregateFilters,
@@ -69,7 +71,7 @@ const ROUTE_ITEMS: Array<{
     key: "analytics",
     label: "Analytics",
     title: "聚合分析",
-    subtitle: "接入 monthly/models/sessions 聚合接口。",
+    subtitle: "接入 daily/monthly/models/sessions 聚合接口。",
   },
   {
     key: "sources",
@@ -117,6 +119,24 @@ interface PricingEntryFormState {
   outputPer1k: string;
   currency: string;
 }
+
+interface SessionSearchFilters {
+  keyword: string;
+  clientType: string;
+  tool: string;
+  host: string;
+  model: string;
+  project: string;
+}
+
+const EMPTY_SESSION_SEARCH_FILTERS: SessionSearchFilters = {
+  keyword: "",
+  clientType: "",
+  tool: "",
+  host: "",
+  model: "",
+  project: "",
+};
 
 function createEmptyPricingEntry(): PricingEntryFormState {
   return {
@@ -176,6 +196,10 @@ function nextDateKey(dateKey: string): string {
   const date = new Date(`${dateKey}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + 1);
   return date.toISOString().slice(0, 10);
+}
+
+function isDateKey(value: string | null | undefined): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 function createDateSeries(days: number): string[] {
@@ -256,6 +280,90 @@ function parsePriceNumber(raw: string): number | null {
     return null;
   }
   return value;
+}
+
+interface UsageCostPresentation {
+  rawCost: number | null;
+  estimatedCost: number | null;
+  totalCost: number;
+  label: string;
+}
+
+interface UsageCostCandidate {
+  cost?: number;
+  rawCost?: number;
+  estimatedCost?: number;
+  totalCost?: number;
+  costLabel?: string;
+  costBasis?: string;
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function resolveUsageCost(candidate: UsageCostCandidate): UsageCostPresentation {
+  const rawCost = toFiniteNumber(candidate.rawCost);
+  const estimatedCost = toFiniteNumber(candidate.estimatedCost);
+  const fallbackCost = toFiniteNumber(candidate.cost) ?? 0;
+  const providedTotal = toFiniteNumber(candidate.totalCost);
+
+  const hasDualTrack =
+    rawCost !== null || estimatedCost !== null || providedTotal !== null;
+  const totalCost =
+    providedTotal ??
+    (hasDualTrack ? (rawCost ?? 0) + (estimatedCost ?? 0) : fallbackCost);
+
+  return {
+    rawCost: rawCost ?? (hasDualTrack ? null : fallbackCost),
+    estimatedCost,
+    totalCost,
+    label:
+      normalizeOptionalText(candidate.costLabel ?? candidate.costBasis ?? "") ??
+      (hasDualTrack ? "raw + estimated" : "raw"),
+  };
+}
+
+function calculateChainRatio(current: number, previous: number): number | null {
+  if (!Number.isFinite(current) || !Number.isFinite(previous) || Math.abs(previous) < 0.000001) {
+    return null;
+  }
+  return (current - previous) / Math.abs(previous);
+}
+
+function formatChainRatio(value: number | null): string {
+  if (value === null) {
+    return "--";
+  }
+  const signedPrefix = value > 0 ? "+" : "";
+  return `${signedPrefix}${(value * 100).toFixed(1)}%`;
+}
+
+function chainRatioClass(value: number | null): string {
+  if (value === null || Math.abs(value) < 0.000001) {
+    return "is-flat";
+  }
+  return value > 0 ? "is-up" : "is-down";
+}
+
+function buildPolylinePath(points: Array<{ x: number; y: number }>): string {
+  return points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+    .join(" ");
+}
+
+function buildAreaPath(points: Array<{ x: number; y: number }>, baseY: number): string {
+  if (points.length === 0) {
+    return "";
+  }
+  const first = points[0];
+  const last = points[points.length - 1];
+  return `${buildPolylinePath(points)} L ${last.x} ${baseY} L ${first.x} ${baseY} Z`;
+}
+
+function normalizeOptionalText(value: string): string | undefined {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function mapPricingEntryToForm(entry: PricingCatalogEntry): PricingEntryFormState {
@@ -409,7 +517,11 @@ function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
   );
 }
 
-function DashboardPage() {
+interface DashboardPageProps {
+  onDrilldownDate?: (dateKey: string) => void;
+}
+
+function DashboardPage({ onDrilldownDate }: DashboardPageProps) {
   const [metric, setMetric] = useState<MetricKey>("tokens");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
@@ -509,7 +621,10 @@ function DashboardPage() {
                 role="gridcell"
                 type="button"
                 className={`heatmap-cell level-${level} ${isSelected ? "is-selected" : ""}`}
-                onClick={() => setSelectedDate(dateKey)}
+                onClick={() => {
+                  setSelectedDate(dateKey);
+                  onDrilldownDate?.(dateKey);
+                }}
                 title={`${dateKey} | ${formatMetric(value, metric)}`}
                 aria-label={`${dateKey} ${formatMetric(value, metric)}`}
               />
@@ -533,21 +648,77 @@ function DashboardPage() {
   );
 }
 
-function SessionsPage() {
-  const [dateKey, setDateKey] = useState(() => todayDateKey());
+interface SessionsPageProps {
+  initialDateKey?: string | null;
+}
+
+function SessionsPage({ initialDateKey }: SessionsPageProps) {
+  const [dateKey, setDateKey] = useState(() =>
+    isDateKey(initialDateKey) ? initialDateKey : todayDateKey()
+  );
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [filterForm, setFilterForm] = useState<SessionSearchFilters>(EMPTY_SESSION_SEARCH_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState<SessionSearchFilters>(
+    EMPTY_SESSION_SEARCH_FILTERS
+  );
+
+  useEffect(() => {
+    if (isDateKey(initialDateKey) && initialDateKey !== dateKey) {
+      setDateKey(initialDateKey);
+    }
+  }, [dateKey, initialDateKey]);
+
+  const normalizedFilters = useMemo<Partial<SessionSearchInput>>(() => {
+    const normalized: Partial<SessionSearchInput> = {};
+
+    const keyword = normalizeOptionalText(appliedFilters.keyword);
+    if (keyword) {
+      normalized.keyword = keyword;
+    }
+
+    const clientType = normalizeOptionalText(appliedFilters.clientType);
+    if (clientType) {
+      normalized.clientType = clientType;
+    }
+
+    const tool = normalizeOptionalText(appliedFilters.tool);
+    if (tool) {
+      normalized.tool = tool;
+    }
+
+    const host = normalizeOptionalText(appliedFilters.host);
+    if (host) {
+      normalized.host = host;
+    }
+
+    const model = normalizeOptionalText(appliedFilters.model);
+    if (model) {
+      normalized.model = model;
+    }
+
+    const project = normalizeOptionalText(appliedFilters.project);
+    if (project) {
+      normalized.project = project;
+    }
+
+    return normalized;
+  }, [appliedFilters]);
+
+  const sessionSearchInput = useMemo<SessionSearchInput>(
+    () => ({
+      from: `${dateKey}T00:00:00.000Z`,
+      to: `${nextDateKey(dateKey)}T00:00:00.000Z`,
+      limit: 50,
+      ...normalizedFilters,
+    }),
+    [dateKey, normalizedFilters]
+  );
+
+  const hasAppliedFilters = Object.keys(normalizedFilters).length > 0;
 
   const sessionsQuery = useQuery({
-    queryKey: ["sessions-search", dateKey],
-    queryFn: ({ signal }) =>
-      searchSessions(
-        {
-          from: `${dateKey}T00:00:00.000Z`,
-          to: `${nextDateKey(dateKey)}T00:00:00.000Z`,
-          limit: 50,
-        },
-        signal
-      ),
+    queryKey: ["sessions-search", sessionSearchInput],
+    queryFn: ({ signal }) => searchSessions(sessionSearchInput, signal),
     staleTime: 20_000,
   });
 
@@ -581,21 +752,137 @@ function SessionsPage() {
   const eventItems = eventsQuery.data?.items ?? [];
   const sessionDetail = detailQuery.data as SessionDetailResponse | undefined;
 
+  function updateFilterField(field: keyof SessionSearchFilters, value: string) {
+    setFilterForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  }
+
+  function handleFilterSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAppliedFilters({
+      keyword: filterForm.keyword,
+      clientType: filterForm.clientType,
+      tool: filterForm.tool,
+      host: filterForm.host,
+      model: filterForm.model,
+      project: filterForm.project,
+    });
+    setSelectedSessionId(null);
+  }
+
+  function handleFilterReset() {
+    setFilterForm(EMPTY_SESSION_SEARCH_FILTERS);
+    setAppliedFilters(EMPTY_SESSION_SEARCH_FILTERS);
+    setSelectedSessionId(null);
+  }
+
   return (
     <>
       <section className="panel">
         <header>
           <h2>会话列表</h2>
-          <label className="inline-field" htmlFor="session-date">
-            日期
-            <input
-              id="session-date"
-              type="date"
-              value={dateKey}
-              onChange={(event) => setDateKey(event.target.value)}
-            />
-          </label>
+          <p>
+            共 {sessionsQuery.data?.total ?? 0} 条
+            {hasAppliedFilters ? "（已应用筛选）" : ""}
+          </p>
         </header>
+
+        <form className="session-filter-form" onSubmit={handleFilterSubmit}>
+          <div className="filters-row">
+            <label className="inline-field" htmlFor="session-date">
+              日期
+              <input
+                id="session-date"
+                type="date"
+                value={dateKey}
+                onChange={(event) => setDateKey(event.target.value)}
+              />
+            </label>
+
+            <label className="inline-field" htmlFor="session-keyword">
+              关键词
+              <input
+                id="session-keyword"
+                type="text"
+                placeholder="例如：deploy failed"
+                value={filterForm.keyword}
+                onChange={(event) => updateFilterField("keyword", event.target.value)}
+              />
+            </label>
+
+            <label className="inline-field" htmlFor="session-client-type">
+              客户端类型
+              <select
+                id="session-client-type"
+                value={filterForm.clientType}
+                onChange={(event) => updateFilterField("clientType", event.target.value)}
+              >
+                <option value="">全部</option>
+                <option value="cli">CLI</option>
+                <option value="ide">IDE</option>
+              </select>
+            </label>
+
+            <label className="inline-field" htmlFor="session-tool">
+              工具
+              <input
+                id="session-tool"
+                type="text"
+                placeholder="例如：Codex CLI"
+                value={filterForm.tool}
+                onChange={(event) => updateFilterField("tool", event.target.value)}
+              />
+            </label>
+
+            <label className="inline-field" htmlFor="session-host">
+              主机
+              <input
+                id="session-host"
+                type="text"
+                placeholder="例如：devbox-01"
+                value={filterForm.host}
+                onChange={(event) => updateFilterField("host", event.target.value)}
+              />
+            </label>
+
+            <label className="inline-field" htmlFor="session-model">
+              模型
+              <input
+                id="session-model"
+                type="text"
+                placeholder="例如：gpt-5-codex"
+                value={filterForm.model}
+                onChange={(event) => updateFilterField("model", event.target.value)}
+              />
+            </label>
+
+            <label className="inline-field" htmlFor="session-project">
+              项目
+              <input
+                id="session-project"
+                type="text"
+                placeholder="例如：agentledger"
+                value={filterForm.project}
+                onChange={(event) => updateFilterField("project", event.target.value)}
+              />
+            </label>
+          </div>
+
+          <div className="button-row">
+            <button type="submit" className="submit-button">
+              应用筛选
+            </button>
+            <button
+              type="button"
+              className="submit-button secondary-button"
+              onClick={handleFilterReset}
+            >
+              重置
+            </button>
+          </div>
+        </form>
 
         {sessionsQuery.isLoading ? <p className="feedback info">会话加载中...</p> : null}
         {sessionsQuery.isError ? (
@@ -772,6 +1059,13 @@ function AnalyticsPage() {
     [fromDate, toDate]
   );
 
+  const dailyQuery = useQuery({
+    queryKey: ["usage-daily", filters],
+    enabled: rangeValid,
+    queryFn: ({ signal }) => fetchUsageDaily(filters, signal),
+    staleTime: 20_000,
+  });
+
   const monthlyQuery = useQuery({
     queryKey: ["usage-monthly", filters],
     enabled: rangeValid,
@@ -792,6 +1086,113 @@ function AnalyticsPage() {
     queryFn: ({ signal }) => fetchUsageSessions(filters, signal),
     staleTime: 20_000,
   });
+
+  const dailyRows = useMemo(() => {
+    const sorted = [...(dailyQuery.data?.items ?? [])].sort((left, right) =>
+      left.date.localeCompare(right.date)
+    );
+
+    return sorted.map((item, index) => {
+      const previous = sorted[index - 1];
+      const currentCost = resolveUsageCost(item);
+      const previousCost = previous ? resolveUsageCost(previous) : null;
+
+      return {
+        item,
+        cost: currentCost,
+        tokensRatio: previous
+          ? calculateChainRatio(item.tokens, previous.tokens)
+          : null,
+        sessionsRatio: previous
+          ? calculateChainRatio(item.sessions, previous.sessions)
+          : null,
+        totalCostRatio:
+          previousCost === null
+            ? null
+            : calculateChainRatio(currentCost.totalCost, previousCost.totalCost),
+      };
+    });
+  }, [dailyQuery.data?.items]);
+
+  const latestDaily = dailyRows.at(-1) ?? null;
+
+  const monthlyRows = useMemo(
+    () =>
+      [...(monthlyQuery.data?.items ?? [])]
+        .sort((left, right) => left.month.localeCompare(right.month))
+        .map((item) => ({
+          item,
+          cost: resolveUsageCost(item),
+        })),
+    [monthlyQuery.data?.items]
+  );
+
+  const monthlyTrend = useMemo(() => {
+    if (monthlyRows.length === 0) {
+      return null;
+    }
+
+    const width = 720;
+    const height = 220;
+    const paddingX = 34;
+    const paddingY = 26;
+    const innerWidth = width - paddingX * 2;
+    const innerHeight = height - paddingY * 2;
+    const bottomY = height - paddingY;
+
+    const values = monthlyRows.map((row) => row.cost.totalCost);
+    const minValue = Math.min(...values);
+    const maxValue = Math.max(...values);
+    const span = maxValue - minValue;
+    const isFlatLine = span < 0.000001;
+
+    const points = monthlyRows.map((row, index) => {
+      const ratio = monthlyRows.length === 1 ? 0.5 : index / (monthlyRows.length - 1);
+      const x = paddingX + ratio * innerWidth;
+      const normalized = isFlatLine ? 0.5 : (row.cost.totalCost - minValue) / span;
+      const y = paddingY + (1 - normalized) * innerHeight;
+      return {
+        x,
+        y,
+        label: row.item.month,
+        value: row.cost.totalCost,
+      };
+    });
+
+    return {
+      width,
+      height,
+      bottomY,
+      minValue,
+      maxValue,
+      points,
+      linePath: buildPolylinePath(points),
+      areaPath: buildAreaPath(points, bottomY),
+    };
+  }, [monthlyRows]);
+
+  const modelRows = useMemo(
+    () =>
+      (modelsQuery.data?.items ?? []).map((item) => ({
+        item,
+        cost: resolveUsageCost(item),
+      })),
+    [modelsQuery.data?.items]
+  );
+
+  const modelTotalCost = useMemo(
+    () => modelRows.reduce((sum, row) => sum + row.cost.totalCost, 0),
+    [modelRows]
+  );
+
+  const sessionRows = useMemo(
+    () =>
+      (sessionBreakdownQuery.data?.items ?? []).map((item) => ({
+        item,
+        cost: resolveUsageCost(item),
+      })),
+    [sessionBreakdownQuery.data?.items]
+  );
 
   return (
     <>
@@ -827,6 +1228,90 @@ function AnalyticsPage() {
 
       <section className="panel">
         <header>
+          <h2>日聚合（usage/daily）</h2>
+          <p>共 {dailyQuery.data?.total ?? 0} 条</p>
+        </header>
+        {dailyQuery.isLoading ? <p className="feedback info">daily 加载中...</p> : null}
+        {dailyQuery.isError ? (
+          <p className="feedback error">daily 加载失败：{toErrorMessage(dailyQuery.error)}</p>
+        ) : null}
+
+        {latestDaily ? (
+          <section className="analytics-kpi-grid" aria-label="daily 环比概览">
+            <article className="analytics-kpi-card">
+              <h3>最新日 Tokens</h3>
+              <strong>{latestDaily.item.tokens.toLocaleString("zh-CN")}</strong>
+              <span className={`chain-badge ${chainRatioClass(latestDaily.tokensRatio)}`}>
+                环比 {formatChainRatio(latestDaily.tokensRatio)}
+              </span>
+            </article>
+            <article className="analytics-kpi-card">
+              <h3>最新日总成本</h3>
+              <strong>${latestDaily.cost.totalCost.toFixed(4)}</strong>
+              <span className={`chain-badge ${chainRatioClass(latestDaily.totalCostRatio)}`}>
+                环比 {formatChainRatio(latestDaily.totalCostRatio)}
+              </span>
+            </article>
+            <article className="analytics-kpi-card">
+              <h3>最新日 Sessions</h3>
+              <strong>{latestDaily.item.sessions.toLocaleString("zh-CN")}</strong>
+              <span className={`chain-badge ${chainRatioClass(latestDaily.sessionsRatio)}`}>
+                环比 {formatChainRatio(latestDaily.sessionsRatio)}
+              </span>
+            </article>
+          </section>
+        ) : null}
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>日期</th>
+                <th>Tokens</th>
+                <th>Raw</th>
+                <th>Estimated</th>
+                <th>总成本</th>
+                <th>总成本环比</th>
+                <th>Sessions</th>
+                <th>口径</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dailyRows.length === 0 ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={8}>
+                    暂无数据
+                  </td>
+                </tr>
+              ) : (
+                dailyRows.map((row) => (
+                  <tr key={row.item.date}>
+                    <td>{toDateKey(row.item.date)}</td>
+                    <td>{row.item.tokens.toLocaleString("zh-CN")}</td>
+                    <td>{row.cost.rawCost === null ? "--" : `$${row.cost.rawCost.toFixed(4)}`}</td>
+                    <td>
+                      {row.cost.estimatedCost === null
+                        ? "--"
+                        : `$${row.cost.estimatedCost.toFixed(4)}`}
+                    </td>
+                    <td>${row.cost.totalCost.toFixed(4)}</td>
+                    <td>
+                      <span className={`chain-badge ${chainRatioClass(row.totalCostRatio)}`}>
+                        {formatChainRatio(row.totalCostRatio)}
+                      </span>
+                    </td>
+                    <td>{row.item.sessions.toLocaleString("zh-CN")}</td>
+                    <td>{row.cost.label}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel">
+        <header>
           <h2>月度聚合（usage/monthly）</h2>
           <p>共 {monthlyQuery.data?.total ?? 0} 条</p>
         </header>
@@ -835,30 +1320,71 @@ function AnalyticsPage() {
           <p className="feedback error">monthly 加载失败：{toErrorMessage(monthlyQuery.error)}</p>
         ) : null}
 
+        {monthlyTrend ? (
+          <figure className="trend-chart-shell">
+            <figcaption>总成本趋势（monthly）</figcaption>
+            <svg
+              className="trend-chart"
+              role="img"
+              aria-label="monthly 总成本趋势图"
+              viewBox={`0 0 ${monthlyTrend.width} ${monthlyTrend.height}`}
+            >
+              <path className="trend-area" d={monthlyTrend.areaPath} />
+              <path className="trend-line" d={monthlyTrend.linePath} />
+              {monthlyTrend.points.map((point) => (
+                <circle
+                  key={point.label}
+                  className="trend-point"
+                  cx={point.x}
+                  cy={point.y}
+                  r={4}
+                >
+                  <title>
+                    {point.label}: ${point.value.toFixed(4)}
+                  </title>
+                </circle>
+              ))}
+            </svg>
+            <p className="trend-chart-meta">
+              区间最小 ${monthlyTrend.minValue.toFixed(4)} / 最大 ${monthlyTrend.maxValue.toFixed(4)}
+            </p>
+          </figure>
+        ) : null}
+
         <div className="table-wrapper">
           <table className="session-table">
             <thead>
               <tr>
                 <th>月份</th>
                 <th>Tokens</th>
-                <th>Cost</th>
+                <th>Raw</th>
+                <th>Estimated</th>
+                <th>总成本</th>
                 <th>Sessions</th>
+                <th>口径</th>
               </tr>
             </thead>
             <tbody>
-              {(monthlyQuery.data?.items ?? []).length === 0 ? (
+              {monthlyRows.length === 0 ? (
                 <tr>
-                  <td className="table-empty-cell" colSpan={4}>
+                  <td className="table-empty-cell" colSpan={7}>
                     暂无数据
                   </td>
                 </tr>
               ) : (
-                (monthlyQuery.data?.items ?? []).map((item) => (
-                  <tr key={item.month}>
-                    <td>{item.month}</td>
-                    <td>{item.tokens.toLocaleString("zh-CN")}</td>
-                    <td>${item.cost.toFixed(4)}</td>
-                    <td>{item.sessions.toLocaleString("zh-CN")}</td>
+                monthlyRows.map((row) => (
+                  <tr key={row.item.month}>
+                    <td>{row.item.month}</td>
+                    <td>{row.item.tokens.toLocaleString("zh-CN")}</td>
+                    <td>{row.cost.rawCost === null ? "--" : `$${row.cost.rawCost.toFixed(4)}`}</td>
+                    <td>
+                      {row.cost.estimatedCost === null
+                        ? "--"
+                        : `$${row.cost.estimatedCost.toFixed(4)}`}
+                    </td>
+                    <td>${row.cost.totalCost.toFixed(4)}</td>
+                    <td>{row.item.sessions.toLocaleString("zh-CN")}</td>
+                    <td>{row.cost.label}</td>
                   </tr>
                 ))
               )}
@@ -883,24 +1409,40 @@ function AnalyticsPage() {
               <tr>
                 <th>Model</th>
                 <th>Tokens</th>
-                <th>Cost</th>
+                <th>Raw</th>
+                <th>Estimated</th>
+                <th>总成本</th>
+                <th>成本占比</th>
                 <th>Sessions</th>
+                <th>口径</th>
               </tr>
             </thead>
             <tbody>
-              {(modelsQuery.data?.items ?? []).length === 0 ? (
+              {modelRows.length === 0 ? (
                 <tr>
-                  <td className="table-empty-cell" colSpan={4}>
+                  <td className="table-empty-cell" colSpan={8}>
                     暂无数据
                   </td>
                 </tr>
               ) : (
-                (modelsQuery.data?.items ?? []).map((item) => (
-                  <tr key={item.model}>
-                    <td>{item.model}</td>
-                    <td>{item.tokens.toLocaleString("zh-CN")}</td>
-                    <td>${item.cost.toFixed(4)}</td>
-                    <td>{item.sessions.toLocaleString("zh-CN")}</td>
+                modelRows.map((row) => (
+                  <tr key={row.item.model}>
+                    <td>{row.item.model}</td>
+                    <td>{row.item.tokens.toLocaleString("zh-CN")}</td>
+                    <td>{row.cost.rawCost === null ? "--" : `$${row.cost.rawCost.toFixed(4)}`}</td>
+                    <td>
+                      {row.cost.estimatedCost === null
+                        ? "--"
+                        : `$${row.cost.estimatedCost.toFixed(4)}`}
+                    </td>
+                    <td>${row.cost.totalCost.toFixed(4)}</td>
+                    <td>
+                      {modelTotalCost > 0
+                        ? `${((row.cost.totalCost / modelTotalCost) * 100).toFixed(1)}%`
+                        : "0.0%"}
+                    </td>
+                    <td>{row.item.sessions.toLocaleString("zh-CN")}</td>
+                    <td>{row.cost.label}</td>
                   </tr>
                 ))
               )}
@@ -930,27 +1472,39 @@ function AnalyticsPage() {
                 <th>工具</th>
                 <th>模型</th>
                 <th>开始时间</th>
+                <th>Input</th>
+                <th>Output</th>
+                <th>Cache Read</th>
+                <th>Cache Write</th>
+                <th>Reasoning</th>
                 <th>Total Tokens</th>
-                <th>Cost</th>
+                <th>总成本</th>
+                <th>口径</th>
               </tr>
             </thead>
             <tbody>
-              {(sessionBreakdownQuery.data?.items ?? []).length === 0 ? (
+              {sessionRows.length === 0 ? (
                 <tr>
-                  <td className="table-empty-cell" colSpan={7}>
+                  <td className="table-empty-cell" colSpan={13}>
                     暂无数据
                   </td>
                 </tr>
               ) : (
-                (sessionBreakdownQuery.data?.items ?? []).map((item) => (
-                  <tr key={`${item.sessionId}:${item.startedAt}`}>
-                    <td>{item.sessionId}</td>
-                    <td>{item.sourceId}</td>
-                    <td>{item.tool}</td>
-                    <td>{item.model}</td>
-                    <td>{formatDateTime(item.startedAt)}</td>
-                    <td>{item.totalTokens.toLocaleString("zh-CN")}</td>
-                    <td>${item.cost.toFixed(4)}</td>
+                sessionRows.map((row) => (
+                  <tr key={`${row.item.sessionId}:${row.item.startedAt}`}>
+                    <td>{row.item.sessionId}</td>
+                    <td>{row.item.sourceId}</td>
+                    <td>{row.item.tool}</td>
+                    <td>{row.item.model}</td>
+                    <td>{formatDateTime(row.item.startedAt)}</td>
+                    <td>{row.item.inputTokens.toLocaleString("zh-CN")}</td>
+                    <td>{row.item.outputTokens.toLocaleString("zh-CN")}</td>
+                    <td>{row.item.cacheReadTokens.toLocaleString("zh-CN")}</td>
+                    <td>{row.item.cacheWriteTokens.toLocaleString("zh-CN")}</td>
+                    <td>{row.item.reasoningTokens.toLocaleString("zh-CN")}</td>
+                    <td>{row.item.totalTokens.toLocaleString("zh-CN")}</td>
+                    <td>${row.cost.totalCost.toFixed(4)}</td>
+                    <td>{row.cost.label}</td>
                   </tr>
                 ))
               )}
@@ -1383,9 +1937,16 @@ function PricingPage() {
 interface WorkspaceProps {
   route: ConsoleRoute;
   onRouteChange: (route: ConsoleRoute) => void;
+  sessionsDateKey: string | null;
+  onDashboardDrilldownDate: (dateKey: string) => void;
 }
 
-function Workspace({ route, onRouteChange }: WorkspaceProps) {
+function Workspace({
+  route,
+  onRouteChange,
+  sessionsDateKey,
+  onDashboardDrilldownDate,
+}: WorkspaceProps) {
   const activeRoute = ROUTE_ITEMS.find((item) => item.key === route) ?? ROUTE_ITEMS[0];
 
   return (
@@ -1410,8 +1971,10 @@ function Workspace({ route, onRouteChange }: WorkspaceProps) {
         </nav>
       </section>
 
-      {route === "dashboard" ? <DashboardPage /> : null}
-      {route === "sessions" ? <SessionsPage /> : null}
+      {route === "dashboard" ? (
+        <DashboardPage onDrilldownDate={onDashboardDrilldownDate} />
+      ) : null}
+      {route === "sessions" ? <SessionsPage initialDateKey={sessionsDateKey} /> : null}
       {route === "analytics" ? <AnalyticsPage /> : null}
       {route === "sources" ? <SourcesPage /> : null}
       {route === "pricing" ? <PricingPage /> : null}
@@ -1424,6 +1987,7 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => hasAccessToken());
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [route, setRoute] = useState<ConsoleRoute>(() => readRouteFromHash());
+  const [sessionsDateKey, setSessionsDateKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1469,10 +2033,21 @@ export default function App() {
     writeRouteToHash(nextRoute);
   }
 
+  function handleDashboardDrilldownDate(dateKey: string) {
+    setSessionsDateKey(dateKey);
+    setRoute("sessions");
+    writeRouteToHash("sessions");
+  }
+
   return (
     <QueryClientProvider client={queryClient}>
       {isAuthenticated ? (
-        <Workspace route={route} onRouteChange={handleRouteChange} />
+        <Workspace
+          route={route}
+          onRouteChange={handleRouteChange}
+          sessionsDateKey={sessionsDateKey}
+          onDashboardDrilldownDate={handleDashboardDrilldownDate}
+        />
       ) : (
         <LoginPage authMessage={authMessage} onLoggedIn={handleLoggedIn} />
       )}

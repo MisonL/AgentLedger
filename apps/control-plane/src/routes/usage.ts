@@ -1,8 +1,17 @@
 import { Hono, type Context } from "hono";
-import { isHeatmapCell, type HeatmapCell, type UsageHeatmapResponse } from "../contracts";
+import {
+  isHeatmapCell,
+  type HeatmapCell,
+  type UsageAggregateFilters,
+  type UsageDailyItem,
+  type UsageHeatmapResponse,
+  type UsageListResponse,
+  type UsageModelItem,
+  type UsageMonthlyItem,
+  type UsageSessionBreakdownItem,
+} from "../contracts";
 import {
   getControlPlaneRepository,
-  type UsageAggregateQueryInput,
   type UsageHeatmapQueryInput,
 } from "../data/repository";
 import { authMiddleware } from "../middleware/auth";
@@ -134,7 +143,7 @@ function toOptionalQueryString(value: string | null): string | undefined {
 function parseUsageAggregateQuery(
   query: Record<string, string | undefined>
 ):
-  | { success: true; data: Required<Pick<UsageAggregateQueryInput, "limit">> & Omit<UsageAggregateQueryInput, "limit"> }
+  | { success: true; data: UsageAggregateFilters }
   | { success: false; error: string } {
   const from = toOptionalQueryString(query.from ?? null);
   const to = toOptionalQueryString(query.to ?? null);
@@ -350,11 +359,13 @@ usageRoutes.get("/usage/monthly", async (c) => {
   const normalizedItems =
     items.length > filters.limit ? items.slice(-filters.limit) : items;
 
-  return c.json({
+  const payload: UsageListResponse<UsageMonthlyItem> = {
     items: normalizedItems,
     total: normalizedItems.length,
     filters,
-  });
+  };
+
+  return c.json(payload);
 });
 
 usageRoutes.get("/usage/daily", async (c) => {
@@ -378,11 +389,13 @@ usageRoutes.get("/usage/daily", async (c) => {
   const normalizedItems =
     items.length > filters.limit ? items.slice(-filters.limit) : items;
 
-  return c.json({
+  const payload: UsageListResponse<UsageDailyItem> = {
     items: normalizedItems,
     total: normalizedItems.length,
     filters,
-  });
+  };
+
+  return c.json(payload);
 });
 
 usageRoutes.get("/usage/models", async (c) => {
@@ -404,11 +417,13 @@ usageRoutes.get("/usage/models", async (c) => {
     limit: filters.limit,
   });
 
-  return c.json({
+  const payload: UsageListResponse<UsageModelItem> = {
     items,
     total: items.length,
     filters,
-  });
+  };
+
+  return c.json(payload);
 });
 
 usageRoutes.get("/usage/sessions", async (c) => {
@@ -430,9 +445,11 @@ usageRoutes.get("/usage/sessions", async (c) => {
     limit: filters.limit,
   });
 
-  return c.json({
+  const payload: UsageListResponse<UsageSessionBreakdownItem> = {
     items,
     total: items.length,
     filters,
-  });
+  };
+
+  return c.json(payload);
 });

@@ -33,6 +33,7 @@ import type {
   SyncJob,
   SyncJobStatus,
   UsageDailyItem,
+  UsageCostMode,
   UsageModelItem,
   UsageMonthlyItem,
   UsageSessionBreakdownItem,
@@ -177,7 +178,27 @@ interface UsageDailyBaseItem {
   date: string;
   tokens: number;
   cost: number;
+  costRaw: number;
+  costEstimated: number;
+  costMode: UsageCostMode;
   sessions: number;
+}
+
+interface UsageCostComponents {
+  cost: number;
+  costRaw: number;
+  costEstimated: number;
+  costMode: UsageCostMode;
+}
+
+interface UsageCostModeCounters {
+  raw: number;
+  reported: number;
+  estimated: number;
+}
+
+interface SessionUsageCostSnapshot extends UsageCostComponents {
+  modeCounters: UsageCostModeCounters;
 }
 
 interface MemorySessionEventRecord {
@@ -743,6 +764,191 @@ function computeRelativeChange(current: number, previous: number): number | null
     return null;
   }
   return Number((((current - previous) / previous)).toFixed(6));
+}
+
+function roundUsageCost(value: number): number {
+  return Number(Math.max(0, value).toFixed(6));
+}
+
+function createUsageCostModeCounters(): UsageCostModeCounters {
+  return {
+    raw: 0,
+    reported: 0,
+    estimated: 0,
+  };
+}
+
+function resolveUsageCostMode(counters: UsageCostModeCounters): UsageCostMode {
+  const hasRawLike = counters.raw > 0 || counters.reported > 0;
+  if (hasRawLike && counters.estimated > 0) {
+    return "mixed";
+  }
+  if (counters.raw > 0) {
+    return "raw";
+  }
+  if (counters.reported > 0) {
+    return "reported";
+  }
+  if (counters.estimated > 0) {
+    return "estimated";
+  }
+  return "none";
+}
+
+function buildUsageCostComponents(
+  costRaw: number,
+  costEstimated: number,
+  modeCounters: UsageCostModeCounters
+): UsageCostComponents {
+  const normalizedRaw = roundUsageCost(costRaw);
+  const normalizedEstimated = roundUsageCost(costEstimated);
+
+  return {
+    cost: roundUsageCost(normalizedRaw + normalizedEstimated),
+    costRaw: normalizedRaw,
+    costEstimated: normalizedEstimated,
+    costMode: resolveUsageCostMode(modeCounters),
+  };
+}
+
+function readCostValueFromRecord(
+  record: DbRow | null | undefined,
+  keys: readonly string[]
+): number | null {
+  if (!record) {
+    return null;
+  }
+
+  for (const key of keys) {
+    if (!(key in record)) {
+      continue;
+    }
+    const rawValue = record[key];
+    if (rawValue === undefined || rawValue === null || rawValue === "") {
+      continue;
+    }
+    const parsed = toNumber(rawValue, Number.NaN);
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, parsed);
+    }
+  }
+
+  return null;
+}
+
+function readUsageCostModeHint(record: DbRow | null | undefined): UsageCostMode | null {
+  const mode = firstNonEmptyString(record?.cost_mode, record?.costMode);
+  if (mode === "raw" || mode === "estimated" || mode === "reported") {
+    return mode;
+  }
+  return null;
+}
+
+function resolveSessionUsageCostSnapshotFromRecord(
+  record: DbRow | null | undefined,
+  legacyCostInput: number
+): SessionUsageCostSnapshot {
+  const modeCounters = createUsageCostModeCounters();
+  const legacyCost = Math.max(0, toNumber(legacyCostInput, 0));
+  const rawCost = readCostValueFromRecord(record, ["cost_raw", "raw_cost", "costRaw", "rawCost"]);
+  const estimatedCost = readCostValueFromRecord(record, [
+    "cost_estimated",
+    "estimated_cost",
+    "costEstimated",
+    "estimatedCost",
+  ]);
+  const reportedCost = readCostValueFromRecord(record, [
+    "cost_reported",
+    "reported_cost",
+    "costReported",
+    "reportedCost",
+  ]);
+  const modeHint = readUsageCostModeHint(record);
+
+  let costRaw = 0;
+  let costEstimated = 0;
+  const hasExplicitCost =
+    rawCost !== null || estimatedCost !== null || reportedCost !== null;
+
+  if (rawCost !== null) {
+    costRaw += rawCost;
+    modeCounters.raw += 1;
+  }
+  if (reportedCost !== null) {
+    costRaw += reportedCost;
+    if (rawCost === null) {
+      modeCounters.reported += 1;
+    }
+  }
+  if (estimatedCost !== null) {
+    costEstimated += estimatedCost;
+    modeCounters.estimated += 1;
+  }
+
+  if (!hasExplicitCost && legacyCost > 0) {
+    if (modeHint === "estimated") {
+      costEstimated = legacyCost;
+      modeCounters.estimated += 1;
+    } else if (modeHint === "raw") {
+      costRaw = legacyCost;
+      modeCounters.raw += 1;
+    } else {
+      costRaw = legacyCost;
+      modeCounters.reported += 1;
+    }
+  }
+
+  return {
+    ...buildUsageCostComponents(costRaw, costEstimated, modeCounters),
+    modeCounters,
+  };
+}
+
+function resolveSessionUsageCostSnapshotFromAggregateRow(
+  row: DbRow
+): SessionUsageCostSnapshot {
+  const hasAny = toBoolean(row.has_any_cost, false);
+  if (!hasAny) {
+    const payload = toDbRow(row.session_payload) ?? row;
+    return resolveSessionUsageCostSnapshotFromRecord(payload, toNumber(row.session_cost, 0));
+  }
+
+  const modeCounters = createUsageCostModeCounters();
+  const hasRaw = toBoolean(row.has_raw, false);
+  const hasReported = toBoolean(row.has_reported, false);
+  const hasEstimated = toBoolean(row.has_estimated, false);
+
+  if (hasRaw) {
+    modeCounters.raw += 1;
+  } else if (hasReported) {
+    modeCounters.reported += 1;
+  }
+  if (hasEstimated) {
+    modeCounters.estimated += 1;
+  }
+
+  const costRaw =
+    Math.max(0, toNumber(row.cost_raw, 0)) + Math.max(0, toNumber(row.cost_reported, 0));
+  const costEstimated = hasEstimated ? Math.max(0, toNumber(row.cost_estimated, 0)) : 0;
+
+  return {
+    ...buildUsageCostComponents(costRaw, costEstimated, modeCounters),
+    modeCounters,
+  };
+}
+
+function resolveUsageCostFromAggregateRow(row: DbRow): UsageCostComponents {
+  const modeCounters: UsageCostModeCounters = {
+    raw: Math.max(0, Math.trunc(toNumber(row.raw_count, 0))),
+    reported: Math.max(0, Math.trunc(toNumber(row.reported_count, 0))),
+    estimated: Math.max(0, Math.trunc(toNumber(row.estimated_count, 0))),
+  };
+
+  return buildUsageCostComponents(
+    toNumber(row.cost_raw, 0),
+    toNumber(row.cost_estimated, 0),
+    modeCounters
+  );
 }
 
 function buildUsageDailyItems(items: UsageDailyBaseItem[]): UsageDailyItem[] {
@@ -2345,25 +2551,96 @@ class ControlPlaneRepository {
       }
 
       const result = await pool.query(
-        `SELECT
-           date_trunc('day', sess.started_at) AS day,
-           COALESCE(SUM(sess.tokens), 0)::bigint AS tokens,
-           COALESCE(SUM(sess.cost), 0)::double precision AS cost,
-           COUNT(*)::bigint AS sessions
-         FROM sessions AS sess
-         INNER JOIN sources AS src ON src.id = sess.source_id
-         WHERE ${whereClauses.join(" AND ")}
+        `WITH event_cost AS (
+           SELECT
+             session_id,
+             COALESCE(SUM(CASE WHEN cost_mode = 'raw' THEN COALESCE(cost_usd, 0) ELSE 0 END), 0)::double precision AS cost_raw,
+             COALESCE(SUM(CASE WHEN cost_mode = 'estimated' THEN COALESCE(cost_usd, 0) ELSE 0 END), 0)::double precision AS cost_estimated,
+             COALESCE(SUM(CASE WHEN cost_mode = 'reported' THEN COALESCE(cost_usd, 0) ELSE 0 END), 0)::double precision AS cost_reported,
+             BOOL_OR(cost_mode = 'raw' AND cost_usd IS NOT NULL) AS has_raw,
+             BOOL_OR(cost_mode = 'estimated' AND cost_usd IS NOT NULL) AS has_estimated,
+             BOOL_OR(cost_mode = 'reported' AND cost_usd IS NOT NULL) AS has_reported,
+             BOOL_OR(cost_usd IS NOT NULL) AS has_any_cost
+           FROM events
+           GROUP BY session_id
+         ),
+         session_cost AS (
+           SELECT
+             sess.id,
+             sess.started_at,
+             COALESCE(sess.tokens, 0)::bigint AS tokens,
+             CASE
+               WHEN COALESCE(ec.has_any_cost, FALSE)
+                 THEN COALESCE(ec.cost_raw, 0) + COALESCE(ec.cost_reported, 0)
+               WHEN LOWER(COALESCE(NULLIF(to_jsonb(sess)->>'cost_mode', ''), NULLIF(to_jsonb(sess)->>'costMode', ''), 'reported')) = 'estimated'
+                 THEN 0
+               ELSE COALESCE(sess.cost, 0)::double precision
+             END AS cost_raw,
+             CASE
+               WHEN COALESCE(ec.has_any_cost, FALSE)
+                 THEN COALESCE(ec.cost_estimated, 0)
+               WHEN LOWER(COALESCE(NULLIF(to_jsonb(sess)->>'cost_mode', ''), NULLIF(to_jsonb(sess)->>'costMode', ''), 'reported')) = 'estimated'
+                 THEN COALESCE(sess.cost, 0)::double precision
+               ELSE 0
+             END AS cost_estimated,
+             CASE
+               WHEN COALESCE(ec.has_any_cost, FALSE) AND COALESCE(ec.has_raw, FALSE)
+                 THEN 1
+               WHEN NOT COALESCE(ec.has_any_cost, FALSE)
+                 AND COALESCE(sess.cost, 0) > 0
+                 AND LOWER(COALESCE(NULLIF(to_jsonb(sess)->>'cost_mode', ''), NULLIF(to_jsonb(sess)->>'costMode', ''), 'reported')) = 'raw'
+                 THEN 1
+               ELSE 0
+             END AS raw_count,
+             CASE
+               WHEN COALESCE(ec.has_any_cost, FALSE)
+                 AND NOT COALESCE(ec.has_raw, FALSE)
+                 AND COALESCE(ec.has_reported, FALSE)
+                 THEN 1
+               WHEN NOT COALESCE(ec.has_any_cost, FALSE)
+                 AND COALESCE(sess.cost, 0) > 0
+                 AND LOWER(COALESCE(NULLIF(to_jsonb(sess)->>'cost_mode', ''), NULLIF(to_jsonb(sess)->>'costMode', ''), 'reported')) NOT IN ('estimated', 'raw')
+                 THEN 1
+               ELSE 0
+             END AS reported_count,
+             CASE
+               WHEN COALESCE(ec.has_any_cost, FALSE) AND COALESCE(ec.has_estimated, FALSE)
+                 THEN 1
+               WHEN NOT COALESCE(ec.has_any_cost, FALSE)
+                 AND COALESCE(sess.cost, 0) > 0
+                 AND LOWER(COALESCE(NULLIF(to_jsonb(sess)->>'cost_mode', ''), NULLIF(to_jsonb(sess)->>'costMode', ''), 'reported')) = 'estimated'
+                 THEN 1
+               ELSE 0
+             END AS estimated_count
+           FROM sessions AS sess
+           INNER JOIN sources AS src ON src.id = sess.source_id
+           LEFT JOIN event_cost AS ec ON ec.session_id = sess.id
+           WHERE ${whereClauses.join(" AND ")}
+         )
+         SELECT
+           date_trunc('day', started_at) AS day,
+           COALESCE(SUM(tokens), 0)::bigint AS tokens,
+           COUNT(*)::bigint AS sessions,
+           COALESCE(SUM(cost_raw), 0)::double precision AS cost_raw,
+           COALESCE(SUM(cost_estimated), 0)::double precision AS cost_estimated,
+           COALESCE(SUM(raw_count), 0)::bigint AS raw_count,
+           COALESCE(SUM(reported_count), 0)::bigint AS reported_count,
+           COALESCE(SUM(estimated_count), 0)::bigint AS estimated_count
+         FROM session_cost
          GROUP BY 1
          ORDER BY 1 ASC`,
         params
       );
 
-      const dailyItems: UsageDailyBaseItem[] = result.rows.map((row) => ({
-        date: toIsoString(row.day) ?? new Date(0).toISOString(),
-        tokens: Math.max(0, Math.trunc(toNumber(row.tokens, 0))),
-        cost: Number(Math.max(0, toNumber(row.cost, 0)).toFixed(6)),
-        sessions: Math.max(0, Math.trunc(toNumber(row.sessions, 0))),
-      }));
+      const dailyItems: UsageDailyBaseItem[] = result.rows.map((row) => {
+        const cost = resolveUsageCostFromAggregateRow(row);
+        return {
+          date: toIsoString(row.day) ?? new Date(0).toISOString(),
+          tokens: Math.max(0, Math.trunc(toNumber(row.tokens, 0))),
+          sessions: Math.max(0, Math.trunc(toNumber(row.sessions, 0))),
+          ...cost,
+        };
+      });
 
       return buildUsageDailyItems(dailyItems);
     } catch (error) {
@@ -2395,14 +2672,82 @@ class ControlPlaneRepository {
       }
 
       const result = await pool.query(
-        `SELECT
-           to_char(date_trunc('month', sess.started_at), 'YYYY-MM-01T00:00:00.000Z') AS month,
-           COALESCE(SUM(sess.tokens), 0)::bigint AS tokens,
-           COALESCE(SUM(sess.cost), 0)::double precision AS cost,
-           COUNT(*)::bigint AS sessions
-         FROM sessions AS sess
-         INNER JOIN sources AS src ON src.id = sess.source_id
-         WHERE ${whereClauses.join(" AND ")}
+        `WITH event_cost AS (
+           SELECT
+             session_id,
+             COALESCE(SUM(CASE WHEN cost_mode = 'raw' THEN COALESCE(cost_usd, 0) ELSE 0 END), 0)::double precision AS cost_raw,
+             COALESCE(SUM(CASE WHEN cost_mode = 'estimated' THEN COALESCE(cost_usd, 0) ELSE 0 END), 0)::double precision AS cost_estimated,
+             COALESCE(SUM(CASE WHEN cost_mode = 'reported' THEN COALESCE(cost_usd, 0) ELSE 0 END), 0)::double precision AS cost_reported,
+             BOOL_OR(cost_mode = 'raw' AND cost_usd IS NOT NULL) AS has_raw,
+             BOOL_OR(cost_mode = 'estimated' AND cost_usd IS NOT NULL) AS has_estimated,
+             BOOL_OR(cost_mode = 'reported' AND cost_usd IS NOT NULL) AS has_reported,
+             BOOL_OR(cost_usd IS NOT NULL) AS has_any_cost
+           FROM events
+           GROUP BY session_id
+         ),
+         session_cost AS (
+           SELECT
+             sess.id,
+             sess.started_at,
+             COALESCE(sess.tokens, 0)::bigint AS tokens,
+             CASE
+               WHEN COALESCE(ec.has_any_cost, FALSE)
+                 THEN COALESCE(ec.cost_raw, 0) + COALESCE(ec.cost_reported, 0)
+               WHEN LOWER(COALESCE(NULLIF(to_jsonb(sess)->>'cost_mode', ''), NULLIF(to_jsonb(sess)->>'costMode', ''), 'reported')) = 'estimated'
+                 THEN 0
+               ELSE COALESCE(sess.cost, 0)::double precision
+             END AS cost_raw,
+             CASE
+               WHEN COALESCE(ec.has_any_cost, FALSE)
+                 THEN COALESCE(ec.cost_estimated, 0)
+               WHEN LOWER(COALESCE(NULLIF(to_jsonb(sess)->>'cost_mode', ''), NULLIF(to_jsonb(sess)->>'costMode', ''), 'reported')) = 'estimated'
+                 THEN COALESCE(sess.cost, 0)::double precision
+               ELSE 0
+             END AS cost_estimated,
+             CASE
+               WHEN COALESCE(ec.has_any_cost, FALSE) AND COALESCE(ec.has_raw, FALSE)
+                 THEN 1
+               WHEN NOT COALESCE(ec.has_any_cost, FALSE)
+                 AND COALESCE(sess.cost, 0) > 0
+                 AND LOWER(COALESCE(NULLIF(to_jsonb(sess)->>'cost_mode', ''), NULLIF(to_jsonb(sess)->>'costMode', ''), 'reported')) = 'raw'
+                 THEN 1
+               ELSE 0
+             END AS raw_count,
+             CASE
+               WHEN COALESCE(ec.has_any_cost, FALSE)
+                 AND NOT COALESCE(ec.has_raw, FALSE)
+                 AND COALESCE(ec.has_reported, FALSE)
+                 THEN 1
+               WHEN NOT COALESCE(ec.has_any_cost, FALSE)
+                 AND COALESCE(sess.cost, 0) > 0
+                 AND LOWER(COALESCE(NULLIF(to_jsonb(sess)->>'cost_mode', ''), NULLIF(to_jsonb(sess)->>'costMode', ''), 'reported')) NOT IN ('estimated', 'raw')
+                 THEN 1
+               ELSE 0
+             END AS reported_count,
+             CASE
+               WHEN COALESCE(ec.has_any_cost, FALSE) AND COALESCE(ec.has_estimated, FALSE)
+                 THEN 1
+               WHEN NOT COALESCE(ec.has_any_cost, FALSE)
+                 AND COALESCE(sess.cost, 0) > 0
+                 AND LOWER(COALESCE(NULLIF(to_jsonb(sess)->>'cost_mode', ''), NULLIF(to_jsonb(sess)->>'costMode', ''), 'reported')) = 'estimated'
+                 THEN 1
+               ELSE 0
+             END AS estimated_count
+           FROM sessions AS sess
+           INNER JOIN sources AS src ON src.id = sess.source_id
+           LEFT JOIN event_cost AS ec ON ec.session_id = sess.id
+           WHERE ${whereClauses.join(" AND ")}
+         )
+         SELECT
+           to_char(date_trunc('month', started_at), 'YYYY-MM-01T00:00:00.000Z') AS month,
+           COALESCE(SUM(tokens), 0)::bigint AS tokens,
+           COUNT(*)::bigint AS sessions,
+           COALESCE(SUM(cost_raw), 0)::double precision AS cost_raw,
+           COALESCE(SUM(cost_estimated), 0)::double precision AS cost_estimated,
+           COALESCE(SUM(raw_count), 0)::bigint AS raw_count,
+           COALESCE(SUM(reported_count), 0)::bigint AS reported_count,
+           COALESCE(SUM(estimated_count), 0)::bigint AS estimated_count
+         FROM session_cost
          GROUP BY 1
          ORDER BY 1 ASC`,
         params
@@ -2411,8 +2756,8 @@ class ControlPlaneRepository {
       return result.rows.map((row) => ({
         month: firstNonEmptyString(row.month) ?? new Date(0).toISOString(),
         tokens: Math.max(0, Math.trunc(toNumber(row.tokens, 0))),
-        cost: Number(Math.max(0, toNumber(row.cost, 0)).toFixed(6)),
         sessions: Math.max(0, Math.trunc(toNumber(row.sessions, 0))),
+        ...resolveUsageCostFromAggregateRow(row),
       }));
     } catch (error) {
       this.disableDb(error, "聚合 monthly usage 失败");
@@ -2443,16 +2788,84 @@ class ControlPlaneRepository {
       params.push(normalized.limit);
 
       const result = await pool.query(
-        `SELECT
-           COALESCE(NULLIF(sess.model, ''), 'unknown') AS model,
-           COALESCE(SUM(sess.tokens), 0)::bigint AS tokens,
-           COALESCE(SUM(sess.cost), 0)::double precision AS cost,
-           COUNT(*)::bigint AS sessions
-         FROM sessions AS sess
-         INNER JOIN sources AS src ON src.id = sess.source_id
-         WHERE ${whereClauses.join(" AND ")}
-         GROUP BY 1
-         ORDER BY cost DESC, tokens DESC
+        `WITH event_cost AS (
+           SELECT
+             session_id,
+             COALESCE(SUM(CASE WHEN cost_mode = 'raw' THEN COALESCE(cost_usd, 0) ELSE 0 END), 0)::double precision AS cost_raw,
+             COALESCE(SUM(CASE WHEN cost_mode = 'estimated' THEN COALESCE(cost_usd, 0) ELSE 0 END), 0)::double precision AS cost_estimated,
+             COALESCE(SUM(CASE WHEN cost_mode = 'reported' THEN COALESCE(cost_usd, 0) ELSE 0 END), 0)::double precision AS cost_reported,
+             BOOL_OR(cost_mode = 'raw' AND cost_usd IS NOT NULL) AS has_raw,
+             BOOL_OR(cost_mode = 'estimated' AND cost_usd IS NOT NULL) AS has_estimated,
+             BOOL_OR(cost_mode = 'reported' AND cost_usd IS NOT NULL) AS has_reported,
+             BOOL_OR(cost_usd IS NOT NULL) AS has_any_cost
+           FROM events
+           GROUP BY session_id
+         ),
+         session_cost AS (
+           SELECT
+             sess.id,
+             COALESCE(NULLIF(sess.model, ''), 'unknown') AS model,
+             COALESCE(sess.tokens, 0)::bigint AS tokens,
+             CASE
+               WHEN COALESCE(ec.has_any_cost, FALSE)
+                 THEN COALESCE(ec.cost_raw, 0) + COALESCE(ec.cost_reported, 0)
+               WHEN LOWER(COALESCE(NULLIF(to_jsonb(sess)->>'cost_mode', ''), NULLIF(to_jsonb(sess)->>'costMode', ''), 'reported')) = 'estimated'
+                 THEN 0
+               ELSE COALESCE(sess.cost, 0)::double precision
+             END AS cost_raw,
+             CASE
+               WHEN COALESCE(ec.has_any_cost, FALSE)
+                 THEN COALESCE(ec.cost_estimated, 0)
+               WHEN LOWER(COALESCE(NULLIF(to_jsonb(sess)->>'cost_mode', ''), NULLIF(to_jsonb(sess)->>'costMode', ''), 'reported')) = 'estimated'
+                 THEN COALESCE(sess.cost, 0)::double precision
+               ELSE 0
+             END AS cost_estimated,
+             CASE
+               WHEN COALESCE(ec.has_any_cost, FALSE) AND COALESCE(ec.has_raw, FALSE)
+                 THEN 1
+               WHEN NOT COALESCE(ec.has_any_cost, FALSE)
+                 AND COALESCE(sess.cost, 0) > 0
+                 AND LOWER(COALESCE(NULLIF(to_jsonb(sess)->>'cost_mode', ''), NULLIF(to_jsonb(sess)->>'costMode', ''), 'reported')) = 'raw'
+                 THEN 1
+               ELSE 0
+             END AS raw_count,
+             CASE
+               WHEN COALESCE(ec.has_any_cost, FALSE)
+                 AND NOT COALESCE(ec.has_raw, FALSE)
+                 AND COALESCE(ec.has_reported, FALSE)
+                 THEN 1
+               WHEN NOT COALESCE(ec.has_any_cost, FALSE)
+                 AND COALESCE(sess.cost, 0) > 0
+                 AND LOWER(COALESCE(NULLIF(to_jsonb(sess)->>'cost_mode', ''), NULLIF(to_jsonb(sess)->>'costMode', ''), 'reported')) NOT IN ('estimated', 'raw')
+                 THEN 1
+               ELSE 0
+             END AS reported_count,
+             CASE
+               WHEN COALESCE(ec.has_any_cost, FALSE) AND COALESCE(ec.has_estimated, FALSE)
+                 THEN 1
+               WHEN NOT COALESCE(ec.has_any_cost, FALSE)
+                 AND COALESCE(sess.cost, 0) > 0
+                 AND LOWER(COALESCE(NULLIF(to_jsonb(sess)->>'cost_mode', ''), NULLIF(to_jsonb(sess)->>'costMode', ''), 'reported')) = 'estimated'
+                 THEN 1
+               ELSE 0
+             END AS estimated_count
+           FROM sessions AS sess
+           INNER JOIN sources AS src ON src.id = sess.source_id
+           LEFT JOIN event_cost AS ec ON ec.session_id = sess.id
+           WHERE ${whereClauses.join(" AND ")}
+         )
+         SELECT
+           model,
+           COALESCE(SUM(tokens), 0)::bigint AS tokens,
+           COUNT(*)::bigint AS sessions,
+           COALESCE(SUM(cost_raw), 0)::double precision AS cost_raw,
+           COALESCE(SUM(cost_estimated), 0)::double precision AS cost_estimated,
+           COALESCE(SUM(raw_count), 0)::bigint AS raw_count,
+           COALESCE(SUM(reported_count), 0)::bigint AS reported_count,
+           COALESCE(SUM(estimated_count), 0)::bigint AS estimated_count
+         FROM session_cost
+         GROUP BY model
+         ORDER BY (COALESCE(SUM(cost_raw), 0) + COALESCE(SUM(cost_estimated), 0)) DESC, COALESCE(SUM(tokens), 0) DESC
          LIMIT $${params.length}`,
         params
       );
@@ -2460,8 +2873,8 @@ class ControlPlaneRepository {
       return result.rows.map((row) => ({
         model: firstNonEmptyString(row.model) ?? "unknown",
         tokens: Math.max(0, Math.trunc(toNumber(row.tokens, 0))),
-        cost: Number(Math.max(0, toNumber(row.cost, 0)).toFixed(6)),
         sessions: Math.max(0, Math.trunc(toNumber(row.sessions, 0))),
+        ...resolveUsageCostFromAggregateRow(row),
       }));
     } catch (error) {
       this.disableDb(error, "聚合 model ranking 失败");
@@ -2501,7 +2914,14 @@ class ControlPlaneRepository {
              COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
              COALESCE(SUM(cache_read_tokens), 0)::bigint AS cache_read_tokens,
              COALESCE(SUM(cache_write_tokens), 0)::bigint AS cache_write_tokens,
-             COALESCE(SUM(reasoning_tokens), 0)::bigint AS reasoning_tokens
+             COALESCE(SUM(reasoning_tokens), 0)::bigint AS reasoning_tokens,
+             COALESCE(SUM(CASE WHEN cost_mode = 'raw' THEN COALESCE(cost_usd, 0) ELSE 0 END), 0)::double precision AS cost_raw,
+             COALESCE(SUM(CASE WHEN cost_mode = 'estimated' THEN COALESCE(cost_usd, 0) ELSE 0 END), 0)::double precision AS cost_estimated,
+             COALESCE(SUM(CASE WHEN cost_mode = 'reported' THEN COALESCE(cost_usd, 0) ELSE 0 END), 0)::double precision AS cost_reported,
+             BOOL_OR(cost_mode = 'raw' AND cost_usd IS NOT NULL) AS has_raw,
+             BOOL_OR(cost_mode = 'estimated' AND cost_usd IS NOT NULL) AS has_estimated,
+             BOOL_OR(cost_mode = 'reported' AND cost_usd IS NOT NULL) AS has_reported,
+             BOOL_OR(cost_usd IS NOT NULL) AS has_any_cost
            FROM events
            GROUP BY session_id
          )
@@ -2511,13 +2931,21 @@ class ControlPlaneRepository {
            COALESCE(NULLIF(sess.tool, ''), sess.provider, 'unknown') AS tool,
            COALESCE(NULLIF(sess.model, ''), 'unknown') AS model,
            sess.started_at,
+           to_jsonb(sess) AS session_payload,
            COALESCE(evt.input_tokens, 0)::bigint AS input_tokens,
            COALESCE(evt.output_tokens, 0)::bigint AS output_tokens,
            COALESCE(evt.cache_read_tokens, 0)::bigint AS cache_read_tokens,
            COALESCE(evt.cache_write_tokens, 0)::bigint AS cache_write_tokens,
            COALESCE(evt.reasoning_tokens, 0)::bigint AS reasoning_tokens,
            COALESCE(sess.tokens, 0)::bigint AS total_tokens,
-           COALESCE(sess.cost, 0)::double precision AS cost
+           COALESCE(sess.cost, 0)::double precision AS session_cost,
+           COALESCE(evt.cost_raw, 0)::double precision AS cost_raw,
+           COALESCE(evt.cost_estimated, 0)::double precision AS cost_estimated,
+           COALESCE(evt.cost_reported, 0)::double precision AS cost_reported,
+           COALESCE(evt.has_raw, FALSE) AS has_raw,
+           COALESCE(evt.has_estimated, FALSE) AS has_estimated,
+           COALESCE(evt.has_reported, FALSE) AS has_reported,
+           COALESCE(evt.has_any_cost, FALSE) AS has_any_cost
          FROM sessions AS sess
          INNER JOIN sources AS src ON src.id = sess.source_id
          LEFT JOIN event_agg AS evt ON evt.session_id = sess.id
@@ -2527,20 +2955,24 @@ class ControlPlaneRepository {
         params
       );
 
-      return result.rows.map((row) => ({
-        sessionId: firstNonEmptyString(row.session_id) ?? "",
-        sourceId: firstNonEmptyString(row.source_id) ?? "",
-        tool: firstNonEmptyString(row.tool) ?? "unknown",
-        model: firstNonEmptyString(row.model) ?? "unknown",
-        startedAt: toIsoString(row.started_at) ?? new Date(0).toISOString(),
-        inputTokens: Math.max(0, Math.trunc(toNumber(row.input_tokens, 0))),
-        outputTokens: Math.max(0, Math.trunc(toNumber(row.output_tokens, 0))),
-        cacheReadTokens: Math.max(0, Math.trunc(toNumber(row.cache_read_tokens, 0))),
-        cacheWriteTokens: Math.max(0, Math.trunc(toNumber(row.cache_write_tokens, 0))),
-        reasoningTokens: Math.max(0, Math.trunc(toNumber(row.reasoning_tokens, 0))),
-        totalTokens: Math.max(0, Math.trunc(toNumber(row.total_tokens, 0))),
-        cost: Number(Math.max(0, toNumber(row.cost, 0)).toFixed(6)),
-      }));
+      return result.rows.map((row) => {
+        const costSnapshot = resolveSessionUsageCostSnapshotFromAggregateRow(row);
+        const { modeCounters: _modeCounters, ...cost } = costSnapshot;
+        return {
+          sessionId: firstNonEmptyString(row.session_id) ?? "",
+          sourceId: firstNonEmptyString(row.source_id) ?? "",
+          tool: firstNonEmptyString(row.tool) ?? "unknown",
+          model: firstNonEmptyString(row.model) ?? "unknown",
+          startedAt: toIsoString(row.started_at) ?? new Date(0).toISOString(),
+          inputTokens: Math.max(0, Math.trunc(toNumber(row.input_tokens, 0))),
+          outputTokens: Math.max(0, Math.trunc(toNumber(row.output_tokens, 0))),
+          cacheReadTokens: Math.max(0, Math.trunc(toNumber(row.cache_read_tokens, 0))),
+          cacheWriteTokens: Math.max(0, Math.trunc(toNumber(row.cache_write_tokens, 0))),
+          reasoningTokens: Math.max(0, Math.trunc(toNumber(row.reasoning_tokens, 0))),
+          totalTokens: Math.max(0, Math.trunc(toNumber(row.total_tokens, 0))),
+          ...cost,
+        };
+      });
     } catch (error) {
       if (isPgUndefinedTable(error)) {
         return this.listUsageSessionBreakdownFromMemory(normalized);
@@ -7231,7 +7663,19 @@ class ControlPlaneRepository {
     }
     const fromTimestamp = input.from ? Date.parse(input.from) : undefined;
     const toTimestamp = input.to ? Date.parse(input.to) : undefined;
-    const bucket = new Map<string, UsageDailyBaseItem>();
+    const bucket = new Map<
+      string,
+      {
+        date: string;
+        tokens: number;
+        sessions: number;
+        costRaw: number;
+        costEstimated: number;
+        rawCount: number;
+        reportedCount: number;
+        estimatedCount: number;
+      }
+    >();
 
     for (const session of this.memorySessions) {
       if (resolveSessionTenantId(session, sourceTenantById) !== input.tenantId) {
@@ -7250,21 +7694,45 @@ class ControlPlaneRepository {
 
       const day = new Date(startedAt).toISOString().slice(0, 10);
       const dayKey = `${day}T00:00:00.000Z`;
+      const sessionCost = resolveSessionUsageCostSnapshotFromRecord(
+        session as unknown as DbRow,
+        session.cost
+      );
       const current = bucket.get(dayKey) ?? {
         date: dayKey,
         tokens: 0,
-        cost: 0,
         sessions: 0,
+        costRaw: 0,
+        costEstimated: 0,
+        rawCount: 0,
+        reportedCount: 0,
+        estimatedCount: 0,
       };
       current.tokens += Math.max(0, Math.trunc(session.tokens));
-      current.cost += Math.max(0, session.cost);
       current.sessions += 1;
+      current.costRaw += sessionCost.costRaw;
+      current.costEstimated += sessionCost.costEstimated;
+      current.rawCount += sessionCost.modeCounters.raw;
+      current.reportedCount += sessionCost.modeCounters.reported;
+      current.estimatedCount += sessionCost.modeCounters.estimated;
       bucket.set(dayKey, current);
     }
 
     const dailyItems = [...bucket.values()]
       .sort((a, b) => a.date.localeCompare(b.date))
-      .map((item) => ({ ...item, cost: Number(item.cost.toFixed(6)) }));
+      .map((item) => {
+        const cost = buildUsageCostComponents(item.costRaw, item.costEstimated, {
+          raw: item.rawCount,
+          reported: item.reportedCount,
+          estimated: item.estimatedCount,
+        });
+        return {
+          date: item.date,
+          tokens: item.tokens,
+          sessions: item.sessions,
+          ...cost,
+        };
+      });
 
     return buildUsageDailyItems(dailyItems);
   }
@@ -7276,7 +7744,19 @@ class ControlPlaneRepository {
     }
     const fromTimestamp = input.from ? Date.parse(input.from) : undefined;
     const toTimestamp = input.to ? Date.parse(input.to) : undefined;
-    const bucket = new Map<string, UsageMonthlyItem>();
+    const bucket = new Map<
+      string,
+      {
+        month: string;
+        tokens: number;
+        sessions: number;
+        costRaw: number;
+        costEstimated: number;
+        rawCount: number;
+        reportedCount: number;
+        estimatedCount: number;
+      }
+    >();
 
     for (const session of this.memorySessions) {
       if (resolveSessionTenantId(session, sourceTenantById) !== input.tenantId) {
@@ -7294,21 +7774,42 @@ class ControlPlaneRepository {
       }
       const date = new Date(startedAt);
       const month = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-01T00:00:00.000Z`;
+      const sessionCost = resolveSessionUsageCostSnapshotFromRecord(
+        session as unknown as DbRow,
+        session.cost
+      );
       const current = bucket.get(month) ?? {
         month,
         tokens: 0,
-        cost: 0,
         sessions: 0,
+        costRaw: 0,
+        costEstimated: 0,
+        rawCount: 0,
+        reportedCount: 0,
+        estimatedCount: 0,
       };
       current.tokens += Math.max(0, Math.trunc(session.tokens));
-      current.cost += Math.max(0, session.cost);
       current.sessions += 1;
+      current.costRaw += sessionCost.costRaw;
+      current.costEstimated += sessionCost.costEstimated;
+      current.rawCount += sessionCost.modeCounters.raw;
+      current.reportedCount += sessionCost.modeCounters.reported;
+      current.estimatedCount += sessionCost.modeCounters.estimated;
       bucket.set(month, current);
     }
 
     return [...bucket.values()]
       .sort((a, b) => a.month.localeCompare(b.month))
-      .map((item) => ({ ...item, cost: Number(item.cost.toFixed(6)) }));
+      .map((item) => ({
+        month: item.month,
+        tokens: item.tokens,
+        sessions: item.sessions,
+        ...buildUsageCostComponents(item.costRaw, item.costEstimated, {
+          raw: item.rawCount,
+          reported: item.reportedCount,
+          estimated: item.estimatedCount,
+        }),
+      }));
   }
 
   private listUsageModelRankingFromMemory(input: NormalizedUsageAggregateInput): UsageModelItem[] {
@@ -7318,7 +7819,19 @@ class ControlPlaneRepository {
     }
     const fromTimestamp = input.from ? Date.parse(input.from) : undefined;
     const toTimestamp = input.to ? Date.parse(input.to) : undefined;
-    const bucket = new Map<string, UsageModelItem>();
+    const bucket = new Map<
+      string,
+      {
+        model: string;
+        tokens: number;
+        sessions: number;
+        costRaw: number;
+        costEstimated: number;
+        rawCount: number;
+        reportedCount: number;
+        estimatedCount: number;
+      }
+    >();
 
     for (const session of this.memorySessions) {
       if (resolveSessionTenantId(session, sourceTenantById) !== input.tenantId) {
@@ -7335,22 +7848,44 @@ class ControlPlaneRepository {
         continue;
       }
       const model = firstNonEmptyString(session.model, "unknown") ?? "unknown";
+      const sessionCost = resolveSessionUsageCostSnapshotFromRecord(
+        session as unknown as DbRow,
+        session.cost
+      );
       const current = bucket.get(model) ?? {
         model,
         tokens: 0,
-        cost: 0,
         sessions: 0,
+        costRaw: 0,
+        costEstimated: 0,
+        rawCount: 0,
+        reportedCount: 0,
+        estimatedCount: 0,
       };
       current.tokens += Math.max(0, Math.trunc(session.tokens));
-      current.cost += Math.max(0, session.cost);
       current.sessions += 1;
+      current.costRaw += sessionCost.costRaw;
+      current.costEstimated += sessionCost.costEstimated;
+      current.rawCount += sessionCost.modeCounters.raw;
+      current.reportedCount += sessionCost.modeCounters.reported;
+      current.estimatedCount += sessionCost.modeCounters.estimated;
       bucket.set(model, current);
     }
 
     return [...bucket.values()]
+      .map((item) => ({
+        model: item.model,
+        tokens: item.tokens,
+        sessions: item.sessions,
+        ...buildUsageCostComponents(item.costRaw, item.costEstimated, {
+          raw: item.rawCount,
+          reported: item.reportedCount,
+          estimated: item.estimatedCount,
+        }),
+      }))
       .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens)
       .slice(0, input.limit)
-      .map((item) => ({ ...item, cost: Number(item.cost.toFixed(6)) }));
+      .map((item) => ({ ...item, cost: roundUsageCost(item.cost) }));
   }
 
   private listUsageSessionBreakdownFromMemory(
@@ -7379,6 +7914,12 @@ class ControlPlaneRepository {
         continue;
       }
 
+      const sessionCost = resolveSessionUsageCostSnapshotFromRecord(
+        session as unknown as DbRow,
+        session.cost
+      );
+      const { modeCounters: _modeCounters, ...cost } = sessionCost;
+
       items.push({
         sessionId: session.id,
         sourceId: session.sourceId,
@@ -7391,7 +7932,7 @@ class ControlPlaneRepository {
         cacheWriteTokens: 0,
         reasoningTokens: 0,
         totalTokens: Math.max(0, Math.trunc(session.tokens)),
-        cost: Number(Math.max(0, session.cost).toFixed(6)),
+        ...cost,
       });
     }
 

@@ -2,6 +2,7 @@
   "name": "agentledger",
   "version": "0.0.0",
   "private": true,
+  "packageManager": "bun@1.3.9",
   "description": "AgentLedger Monorepo Root",
   "workspaces": [
     "apps/*",
@@ -15,7 +16,9 @@
     "test": "bash ./scripts/test.sh",
     "build": "bash ./scripts/build.sh",
     "check:ts": "bash ./scripts/ts-check.sh",
+    "check:text-normalization": "bash ./scripts/check-text-normalization.sh",
     "check:support-matrix": "bun run ./scripts/check-support-matrix.ts",
+    "test:scripts": "bun test ./scripts/check-support-matrix.test.ts",
     "check:callback-stream-binding": "bash ./scripts/check-callback-stream-binding.sh",
     "test:go": "bash ./scripts/go-test-all.sh",
     "test:coverage": "bash ./scripts/test-coverage.sh",

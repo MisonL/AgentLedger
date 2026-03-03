@@ -10,11 +10,17 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   baseline:
     name: 基线检查 (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
+      fail-fast: true
       matrix:
         os:
           - ubuntu-latest
@@ -27,28 +33,41 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      - name: 文本规范检查（LF / BOM）
+        run: bash ./scripts/check-text-normalization.sh
+
       - name: 安装 Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: 安装 Go
         uses: actions/setup-go@v5
         with:
-          go-version: 'stable'
+          go-version-file: go.mod
           cache: true
           cache-dependency-path: '**/go.sum'
 
       - name: 安装 Buf CLI
         uses: bufbuild/buf-setup-action@v1
         with:
+          version: 1.50.0
           github_token: ${{ github.token }}
 
+      - name: 工具链版本快照
+        run: |
+          echo "bun: $(bun --version)"
+          echo "go: $(go version)"
+          echo "buf: $(buf --version)"
+
       - name: 安装依赖
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: 支持矩阵一致性检查
         run: bun run check:support-matrix
+
+      - name: 支持矩阵脚本测试
+        run: bun run test:scripts
 
       - name: Proto 契约检查
         run: bun run proto:lint
@@ -66,9 +85,34 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: bun run test:coverage
 
+      - name: 上传 Coverage 诊断产物
+        if: matrix.os == 'ubuntu-latest' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.sha }}
+          path: .coverage/
+          if-no-files-found: warn
+
+      - name: 全量测试（M1 DoD）
+        if: matrix.os == 'ubuntu-latest'
+        run: bun run test
+
+      - name: 构建检查（M1 DoD）
+        if: matrix.os == 'ubuntu-latest'
+        run: bun run build
+
+      - name: 回调链路定向回归
+        if: matrix.os == 'ubuntu-latest'
+        run: bun run test:callback-chain-targeted
+
+      - name: 回调链路闭环冒烟
+        if: matrix.os == 'ubuntu-latest'
+        run: bun run test:e2e-governance-callback-chain
+
   build-agent-cross:
     name: 客户端三平台构建
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: baseline
     defaults:
       run:
@@ -80,13 +124,14 @@ jobs:
       - name: 安装 Go
         uses: actions/setup-go@v5
         with:
-          go-version: 'stable'
+          go-version-file: go.mod
           cache: true
           cache-dependency-path: '**/go.sum'
 
       - name: 安装 Buf CLI
         uses: bufbuild/buf-setup-action@v1
         with:
+          version: 1.50.0
           github_token: ${{ github.token }}
 
       - name: 生成 Proto 代码（构建前）

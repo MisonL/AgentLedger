@@ -29,43 +29,80 @@ function splitMarkdownRow(row: string): string[] {
   return withoutEdgePipes.split("|").map((cell) => cell.trim());
 }
 
-function parseP0Clients(markdown: string): string[] {
-  const tableBlocks = markdown.match(/\|.*\|\r?\n\|(?:[-:\s|])+\|\r?\n(?:\|.*\|\r?\n?)+/g) ?? [];
-  const p0Clients: string[] = [];
+function normalizeMarkdown(markdown: string): string {
+  return markdown.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
 
-  for (const block of tableBlocks) {
-    const rows = block
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    if (rows.length < 3) {
+function isTableSeparatorRow(row: string): boolean {
+  const cells = splitMarkdownRow(row);
+  return (
+    cells.length > 0 &&
+    cells.every((cell) => {
+      const token = cell.trim();
+      return /^:?-{3,}:?$/.test(token);
+    })
+  );
+}
+
+function normalizePriorityCell(value: string): string {
+  return value.replace(/[`*_~\s]/g, "").toUpperCase();
+}
+
+export function parseP0Clients(markdown: string): string[] {
+  const lines = normalizeMarkdown(markdown)
+    .split("\n")
+    .map((line) => line.trimEnd());
+  const p0Clients: string[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const headerRow = lines[index]?.trim();
+    if (!headerRow || !headerRow.startsWith("|")) {
+      index += 1;
       continue;
     }
 
-    const header = splitMarkdownRow(rows[0]);
+    const separatorRow = lines[index + 1]?.trim();
+    if (!separatorRow || !separatorRow.startsWith("|") || !isTableSeparatorRow(separatorRow)) {
+      index += 1;
+      continue;
+    }
+
+    const header = splitMarkdownRow(headerRow);
     const clientIdx = header.findIndex((cell) => cell.includes("客户端"));
     const priorityIdx = header.findIndex((cell) => cell.includes("优先级"));
     if (clientIdx < 0 || priorityIdx < 0) {
+      index += 1;
       continue;
     }
 
-    for (const row of rows.slice(2)) {
-      if (!row.startsWith("|")) {
-        continue;
+    index += 2;
+    while (index < lines.length) {
+      const row = lines[index]?.trim();
+      if (!row || !row.startsWith("|")) {
+        break;
       }
-      const cells = splitMarkdownRow(row);
-      if (cells.length <= Math.max(clientIdx, priorityIdx)) {
+      if (isTableSeparatorRow(row)) {
+        index += 1;
         continue;
       }
 
-      const priority = cells[priorityIdx].toUpperCase();
+      const cells = splitMarkdownRow(row);
+      if (cells.length <= Math.max(clientIdx, priorityIdx)) {
+        index += 1;
+        continue;
+      }
+
+      const priority = normalizePriorityCell(cells[priorityIdx]);
       if (priority !== "P0") {
+        index += 1;
         continue;
       }
       const client = cells[clientIdx];
       if (client) {
         p0Clients.push(client);
       }
+      index += 1;
     }
   }
 
@@ -112,7 +149,7 @@ function sliceDefaultRegistryCall(source: string): string {
   return source;
 }
 
-function parseDeclaredPullerConnectors(source: string): string[] {
+export function parseDeclaredPullerConnectors(source: string): string[] {
   const constMap = parseConnectorNameConstMap(source);
   const registrySource = sliceDefaultRegistryCall(source);
   const connectorSet = new Set<string>();
@@ -202,4 +239,14 @@ function main(): void {
   }
 }
 
-main();
+const isMainModule = (() => {
+  const entry = process.argv[1];
+  if (!entry) {
+    return false;
+  }
+  return path.resolve(entry) === fileURLToPath(import.meta.url);
+})();
+
+if (isMainModule) {
+  main();
+}

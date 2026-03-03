@@ -51,6 +51,10 @@ import type {
   PricingCatalog,
   PricingCatalogEntry,
   UsageDailyItem,
+  UsageModelItem,
+  UsageMonthlyItem,
+  UsageSessionBreakdownItem,
+  UsageCostMode,
 } from "./types";
 
 export type ValidationResult<T> =
@@ -102,6 +106,13 @@ const SYNC_JOB_STATUS_SET = new Set<SyncJobStatus>([
 ]);
 const TENANT_ROLE_SET = new Set<TenantRole>(["owner", "maintainer", "member", "readonly"]);
 const ORG_ROLE_SET = new Set<OrgRole>(["owner", "maintainer", "member", "readonly"]);
+const USAGE_COST_MODE_SET = new Set<UsageCostMode>([
+  "raw",
+  "estimated",
+  "reported",
+  "mixed",
+  "none",
+]);
 const SESSION_LIMIT_MAX = 200;
 const ALERT_LIMIT_MAX = 200;
 const AUDIT_LIMIT_MAX = 200;
@@ -587,6 +598,20 @@ export function isHeatmapCell(value: unknown): value is HeatmapCell {
   );
 }
 
+export function isUsageCostMode(value: unknown): value is UsageCostMode {
+  return typeof value === "string" && USAGE_COST_MODE_SET.has(value as UsageCostMode);
+}
+
+function isUsageCostSourceRecord(value: Record<string, unknown>): boolean {
+  return (
+    isNumber(value.costRaw) &&
+    value.costRaw >= 0 &&
+    isNumber(value.costEstimated) &&
+    value.costEstimated >= 0 &&
+    isUsageCostMode(value.costMode)
+  );
+}
+
 export function isUsageDailyItem(value: unknown): value is UsageDailyItem {
   if (!isRecord(value) || !isRecord(value.change)) {
     return false;
@@ -600,10 +625,67 @@ export function isUsageDailyItem(value: unknown): value is UsageDailyItem {
     isISODate(value.date) &&
     isNumber(value.tokens) &&
     isNumber(value.cost) &&
+    value.cost >= 0 &&
     isNumber(value.sessions) &&
+    isUsageCostSourceRecord(value) &&
     changeTokensOk &&
     changeCostOk &&
     changeSessionsOk
+  );
+}
+
+export function isUsageMonthlyItem(value: unknown): value is UsageMonthlyItem {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isISODate(value.month) &&
+    isNumber(value.tokens) &&
+    isNumber(value.cost) &&
+    value.cost >= 0 &&
+    isNumber(value.sessions) &&
+    isUsageCostSourceRecord(value)
+  );
+}
+
+export function isUsageModelItem(value: unknown): value is UsageModelItem {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isString(value.model) &&
+    isNumber(value.tokens) &&
+    isNumber(value.cost) &&
+    value.cost >= 0 &&
+    isNumber(value.sessions) &&
+    isUsageCostSourceRecord(value)
+  );
+}
+
+export function isUsageSessionBreakdownItem(
+  value: unknown
+): value is UsageSessionBreakdownItem {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isString(value.sessionId) &&
+    isString(value.sourceId) &&
+    isString(value.tool) &&
+    isString(value.model) &&
+    isISODate(value.startedAt) &&
+    isNumber(value.inputTokens) &&
+    isNumber(value.outputTokens) &&
+    isNumber(value.cacheReadTokens) &&
+    isNumber(value.cacheWriteTokens) &&
+    isNumber(value.reasoningTokens) &&
+    isNumber(value.totalTokens) &&
+    isNumber(value.cost) &&
+    value.cost >= 0 &&
+    isUsageCostSourceRecord(value)
   );
 }
 

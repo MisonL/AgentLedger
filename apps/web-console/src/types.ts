@@ -163,21 +163,36 @@ export interface UsageAggregateResponse<TItem> {
   filters?: UsageAggregateFilters;
 }
 
-export interface UsageMonthlyItem {
+export interface UsageCostMetrics {
+  rawCost?: number;
+  estimatedCost?: number;
+  totalCost?: number;
+  costLabel?: string;
+  costBasis?: string;
+}
+
+export interface UsageDailyItem extends UsageCostMetrics {
+  date: string;
+  tokens: number;
+  cost: number;
+  sessions: number;
+}
+
+export interface UsageMonthlyItem extends UsageCostMetrics {
   month: string;
   tokens: number;
   cost: number;
   sessions: number;
 }
 
-export interface UsageModelItem {
+export interface UsageModelItem extends UsageCostMetrics {
   model: string;
   tokens: number;
   cost: number;
   sessions: number;
 }
 
-export interface UsageSessionBreakdownItem {
+export interface UsageSessionBreakdownItem extends UsageCostMetrics {
   sessionId: string;
   sourceId: string;
   tool: string;

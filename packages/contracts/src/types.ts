@@ -284,14 +284,34 @@ export interface SessionSearchResponse {
   filters: SessionSearchInput;
 }
 
-export interface UsageMonthlyItem {
+export type UsageCostMode = "raw" | "estimated" | "reported" | "mixed" | "none";
+
+export interface UsageCostSource {
+  costRaw: number;
+  costEstimated: number;
+  costMode: UsageCostMode;
+}
+
+export interface UsageAggregateFilters {
+  from?: string;
+  to?: string;
+  limit: number;
+}
+
+export interface UsageListResponse<TItem> {
+  items: TItem[];
+  total: number;
+  filters: UsageAggregateFilters;
+}
+
+export interface UsageMonthlyItem extends UsageCostSource {
   month: string;
   tokens: number;
   cost: number;
   sessions: number;
 }
 
-export interface UsageDailyItem {
+export interface UsageDailyItem extends UsageCostSource {
   date: string;
   tokens: number;
   cost: number;
@@ -303,14 +323,14 @@ export interface UsageDailyItem {
   };
 }
 
-export interface UsageModelItem {
+export interface UsageModelItem extends UsageCostSource {
   model: string;
   tokens: number;
   cost: number;
   sessions: number;
 }
 
-export interface UsageSessionBreakdownItem {
+export interface UsageSessionBreakdownItem extends UsageCostSource {
   sessionId: string;
   sourceId: string;
   tool: string;
