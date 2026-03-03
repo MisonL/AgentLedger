@@ -45,6 +45,8 @@ const DEFAULT_SESSION_LIMIT = 50;
 const DEFAULT_ALERT_LIMIT = 50;
 const DEFAULT_AUDIT_LIMIT = 50;
 const DEFAULT_SYNC_JOB_LIMIT = 50;
+const DEFAULT_PARSE_FAILURE_LIMIT = 50;
+const MAX_PARSE_FAILURE_LIMIT = 500;
 const SOURCE_TYPES: ReadonlyArray<SourceType> = ["local", "ssh", "sync-cache"];
 const SOURCE_ACCESS_MODES: ReadonlyArray<SourceAccessMode> = ["realtime", "sync", "hybrid"];
 const ALERT_STATUS_SET: ReadonlyArray<AlertStatus> = ["open", "acknowledged", "resolved"];
@@ -121,6 +123,33 @@ export interface SessionSearchResult {
   total: number;
 }
 
+export interface SourceParseFailure {
+  id: string;
+  sourceId: string;
+  parserKey: string;
+  errorCode: string;
+  errorMessage: string;
+  sourcePath?: string;
+  sourceOffset?: number;
+  rawHash?: string;
+  metadata: Record<string, unknown>;
+  failedAt: string;
+  createdAt: string;
+}
+
+export interface SourceParseFailureQueryInput {
+  from?: string;
+  to?: string;
+  parserKey?: string;
+  errorCode?: string;
+  limit?: number;
+}
+
+export interface SourceParseFailureListResult {
+  items: SourceParseFailure[];
+  total: number;
+}
+
 export interface AuditListResult {
   items: AuditItem[];
   total: number;
@@ -147,6 +176,7 @@ export interface CreateSyncJobOptions {
   attempt?: number;
   startedAt?: string;
   endedAt?: string;
+  nextRunAt?: string;
   durationMs?: number;
   errorCode?: string;
   errorDetail?: string;
@@ -209,6 +239,11 @@ interface MemorySessionEventRecord {
   sourcePath?: string;
 }
 
+interface MemorySourceParseFailureRecord {
+  tenantId: string;
+  failure: SourceParseFailure;
+}
+
 interface NormalizedSessionSearchInput {
   tenantId?: string;
   sourceId?: string;
@@ -220,6 +255,14 @@ interface NormalizedSessionSearchInput {
   project?: string;
   from?: string;
   to?: string;
+  limit: number;
+}
+
+interface NormalizedSourceParseFailureQueryInput {
+  from?: string;
+  to?: string;
+  parserKey?: string;
+  errorCode?: string;
   limit: number;
 }
 
@@ -641,6 +684,7 @@ function mapSyncJobRow(row: DbRow): SyncJob {
   const createdAt = toIsoString(row.created_at) ?? new Date().toISOString();
   const startedAt = toIsoString(row.started_at) ?? undefined;
   const endedAt = toIsoString(row.ended_at) ?? undefined;
+  const nextRunAt = toIsoString(row.next_run_at ?? row.nextRunAt) ?? undefined;
   const durationMs = toOptionalNonNegativeInteger(row.duration_ms);
   const error = firstNonEmptyString(row.error, row.error_detail) ?? undefined;
 
@@ -654,6 +698,7 @@ function mapSyncJobRow(row: DbRow): SyncJob {
     attempt: toSyncJobAttempt(row.attempt),
     startedAt,
     endedAt,
+    nextRunAt,
     durationMs,
     errorCode: firstNonEmptyString(row.error_code) ?? undefined,
     errorDetail: firstNonEmptyString(row.error_detail) ?? undefined,
@@ -672,6 +717,27 @@ function mapSourceWatermarkRow(row: DbRow): SourceWatermark {
     watermark: firstNonEmptyString(row.watermark) ?? "",
     createdAt,
     updatedAt: toIsoString(row.updated_at) ?? createdAt,
+  };
+}
+
+function mapSourceParseFailureRow(row: DbRow): SourceParseFailure {
+  const createdAt = toIsoString(row.created_at) ?? new Date().toISOString();
+
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    sourceId: firstNonEmptyString(row.source_id) ?? "",
+    parserKey: firstNonEmptyString(row.parser_key) ?? "unknown",
+    errorCode: firstNonEmptyString(row.error_code) ?? "unknown",
+    errorMessage: firstNonEmptyString(row.error_message, row.message, row.error_detail, row.error) ?? "",
+    sourcePath: firstNonEmptyString(row.source_path) ?? undefined,
+    sourceOffset:
+      row.source_offset === null || row.source_offset === undefined
+        ? undefined
+        : Math.max(0, Math.trunc(toNumber(row.source_offset, 0))),
+    rawHash: firstNonEmptyString(row.raw_hash) ?? undefined,
+    metadata: toDbRow(row.metadata) ?? {},
+    failedAt: toIsoString(row.occurred_at) ?? createdAt,
+    createdAt,
   };
 }
 
@@ -1352,6 +1418,26 @@ function normalizeSessionSearchInput(
   };
 }
 
+function normalizeSourceParseFailureQueryInput(
+  input: SourceParseFailureQueryInput | undefined
+): NormalizedSourceParseFailureQueryInput {
+  const normalizedFrom = toIsoString(input?.from);
+  const normalizedTo = toIsoString(input?.to);
+  const rawLimit =
+    typeof input?.limit === "number" && Number.isFinite(input.limit)
+      ? Math.trunc(input.limit)
+      : DEFAULT_PARSE_FAILURE_LIMIT;
+  const limit = Math.max(1, Math.min(rawLimit, MAX_PARSE_FAILURE_LIMIT));
+
+  return {
+    from: normalizedFrom ?? undefined,
+    to: normalizedTo ?? undefined,
+    parserKey: firstNonEmptyString(input?.parserKey) ?? undefined,
+    errorCode: firstNonEmptyString(input?.errorCode) ?? undefined,
+    limit,
+  };
+}
+
 function normalizeAlertListInput(input: AlertListInput): NormalizedAlertListInput {
   return {
     status: input.status,
@@ -1680,6 +1766,7 @@ class ControlPlaneRepository {
   private readonly memorySourceTenantById = new Map<string, string>();
   private readonly memorySyncJobs: SyncJob[] = [];
   private readonly memorySourceWatermarks: SourceWatermark[] = [];
+  private readonly memorySourceParseFailures: MemorySourceParseFailureRecord[] = [];
   private readonly memorySessions: Session[] = [];
   private readonly memorySessionEvents: MemorySessionEventRecord[] = [];
   private readonly memoryBudgets: TenantBudgetRecord[] = [];
@@ -1826,6 +1913,7 @@ class ControlPlaneRepository {
                 attempt,
                 started_at,
                 ended_at,
+                next_run_at,
                 duration_ms,
                 error_code,
                 error_detail,
@@ -1860,6 +1948,7 @@ class ControlPlaneRepository {
     const now = new Date().toISOString();
     const startedAt = toIsoString(options?.startedAt) ?? undefined;
     const endedAt = toIsoString(options?.endedAt) ?? undefined;
+    const nextRunAt = toIsoString(options?.nextRunAt) ?? undefined;
     const durationMsCandidate = toOptionalNonNegativeInteger(options?.durationMs);
     const durationMs =
       durationMsCandidate ??
@@ -1878,6 +1967,7 @@ class ControlPlaneRepository {
       attempt: toSyncJobAttempt(options?.attempt),
       startedAt,
       endedAt,
+      nextRunAt,
       durationMs,
       errorCode: firstNonEmptyString(options?.errorCode) ?? undefined,
       errorDetail,
@@ -1903,6 +1993,7 @@ class ControlPlaneRepository {
            attempt,
            started_at,
            ended_at,
+           next_run_at,
            duration_ms,
            error_code,
            error_detail,
@@ -1920,15 +2011,16 @@ class ControlPlaneRepository {
            $7,
            $8::timestamptz,
            $9::timestamptz,
-           $10,
+           $10::timestamptz,
            $11,
            $12,
            $13,
-           $14::timestamptz,
-           $14::timestamptz
+           $14,
+           $15::timestamptz,
+           $15::timestamptz
          FROM sources AS src
          WHERE src.id = $2
-           AND src.tenant_id = $15
+           AND src.tenant_id = $16
          RETURNING id,
                    source_id,
                    mode,
@@ -1938,6 +2030,7 @@ class ControlPlaneRepository {
                    attempt,
                    started_at,
                    ended_at,
+                   next_run_at,
                    duration_ms,
                    error_code,
                    error_detail,
@@ -1954,6 +2047,7 @@ class ControlPlaneRepository {
           syncJob.attempt ?? 1,
           syncJob.startedAt ?? null,
           syncJob.endedAt ?? null,
+          syncJob.nextRunAt ?? null,
           syncJob.durationMs ?? null,
           syncJob.errorCode ?? null,
           syncJob.errorDetail ?? null,
@@ -2056,6 +2150,7 @@ class ControlPlaneRepository {
                    jobs.attempt,
                    jobs.started_at,
                    jobs.ended_at,
+                   jobs.next_run_at,
                    jobs.duration_ms,
                    jobs.error_code,
                    jobs.error_detail,
@@ -2181,6 +2276,94 @@ class ControlPlaneRepository {
     } catch (error) {
       this.disableDb(error, "查询 source health 失败");
       return this.getSourceHealthFromMemory(normalizedTenantId, normalizedSourceId);
+    }
+  }
+
+  async listSourceParseFailures(
+    tenantId: string,
+    sourceId: string,
+    input?: SourceParseFailureQueryInput
+  ): Promise<SourceParseFailureListResult> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedSourceId = firstNonEmptyString(sourceId);
+    if (!normalizedSourceId) {
+      return {
+        items: [],
+        total: 0,
+      };
+    }
+
+    const normalizedInput = normalizeSourceParseFailureQueryInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listSourceParseFailuresFromMemory(
+        normalizedTenantId,
+        normalizedSourceId,
+        normalizedInput
+      );
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId, normalizedSourceId];
+      const whereClauses = ["tenant_id = $1", "source_id = $2"];
+
+      if (normalizedInput.from) {
+        params.push(normalizedInput.from);
+        whereClauses.push(`occurred_at >= $${params.length}::timestamptz`);
+      }
+      if (normalizedInput.to) {
+        params.push(normalizedInput.to);
+        whereClauses.push(`occurred_at <= $${params.length}::timestamptz`);
+      }
+      if (normalizedInput.parserKey) {
+        params.push(normalizedInput.parserKey);
+        whereClauses.push(`LOWER(parser_key) = LOWER($${params.length})`);
+      }
+      if (normalizedInput.errorCode) {
+        params.push(normalizedInput.errorCode);
+        whereClauses.push(`LOWER(error_code) = LOWER($${params.length})`);
+      }
+
+      const whereSql = whereClauses.join(" AND ");
+      const countResult = await pool.query(
+        `SELECT COUNT(*)::int AS total
+         FROM parse_failures
+         WHERE ${whereSql}`,
+        params
+      );
+
+      const listParams = [...params, normalizedInput.limit];
+      const listResult = await pool.query(
+        `SELECT id,
+                tenant_id,
+                source_id,
+                parser_key,
+                error_code,
+                error_message,
+                source_path,
+                source_offset,
+                raw_hash,
+                metadata,
+                occurred_at,
+                created_at
+         FROM parse_failures
+         WHERE ${whereSql}
+         ORDER BY occurred_at DESC, created_at DESC
+         LIMIT $${listParams.length}`,
+        listParams
+      );
+
+      return {
+        items: listResult.rows.map(mapSourceParseFailureRow),
+        total: Math.max(0, Math.trunc(toNumber(countResult.rows[0]?.total, 0))),
+      };
+    } catch (error) {
+      this.disableDb(error, "查询 source parse failures 失败");
+      return this.listSourceParseFailuresFromMemory(
+        normalizedTenantId,
+        normalizedSourceId,
+        normalizedInput
+      );
     }
   }
 
@@ -6095,6 +6278,7 @@ class ControlPlaneRepository {
          attempt INTEGER NOT NULL DEFAULT 1,
          started_at TIMESTAMPTZ,
          ended_at TIMESTAMPTZ,
+         next_run_at TIMESTAMPTZ,
          duration_ms INTEGER,
          error_code TEXT,
          error_detail TEXT,
@@ -6114,6 +6298,7 @@ class ControlPlaneRepository {
          ADD COLUMN IF NOT EXISTS attempt INTEGER NOT NULL DEFAULT 1,
          ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ,
          ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMPTZ,
          ADD COLUMN IF NOT EXISTS duration_ms INTEGER,
          ADD COLUMN IF NOT EXISTS error_code TEXT,
          ADD COLUMN IF NOT EXISTS error_detail TEXT,
@@ -6283,6 +6468,100 @@ class ControlPlaneRepository {
     await pool.query(
       `CREATE INDEX IF NOT EXISTS idx_source_watermarks_source_updated_at
        ON source_watermarks (source_id, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS parse_failures (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+         parser_key TEXT NOT NULL DEFAULT 'unknown',
+         error_code TEXT NOT NULL DEFAULT 'unknown',
+         error_message TEXT NOT NULL DEFAULT '',
+         source_path TEXT,
+         source_offset INTEGER,
+         raw_hash TEXT,
+         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE parse_failures
+         ADD COLUMN IF NOT EXISTS id TEXT,
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         ADD COLUMN IF NOT EXISTS source_id TEXT,
+         ADD COLUMN IF NOT EXISTS parser_key TEXT,
+         ADD COLUMN IF NOT EXISTS error_code TEXT,
+         ADD COLUMN IF NOT EXISTS error_message TEXT,
+         ADD COLUMN IF NOT EXISTS source_path TEXT,
+         ADD COLUMN IF NOT EXISTS source_offset INTEGER,
+         ADD COLUMN IF NOT EXISTS raw_hash TEXT,
+         ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE parse_failures AS failures
+       SET id = COALESCE(
+             NULLIF(failures.id, ''),
+             md5(random()::text || clock_timestamp()::text)
+           ),
+           tenant_id = COALESCE(
+             NULLIF(failures.tenant_id, ''),
+             (
+               SELECT COALESCE(NULLIF(src.tenant_id, ''), '${DEFAULT_TENANT_ID}')
+               FROM sources AS src
+               WHERE src.id = failures.source_id
+               LIMIT 1
+             ),
+             '${DEFAULT_TENANT_ID}'
+           ),
+           parser_key = COALESCE(NULLIF(failures.parser_key, ''), 'unknown'),
+           error_code = COALESCE(NULLIF(failures.error_code, ''), 'unknown'),
+           error_message = COALESCE(
+             NULLIF(failures.error_message, ''),
+             NULLIF(failures.error_code, ''),
+             'unknown'
+           ),
+           source_path = NULLIF(failures.source_path, ''),
+           source_offset = CASE
+             WHEN failures.source_offset IS NULL THEN NULL
+             WHEN failures.source_offset < 0 THEN 0
+             ELSE failures.source_offset
+           END,
+           raw_hash = NULLIF(failures.raw_hash, ''),
+           metadata = COALESCE(failures.metadata, '{}'::jsonb),
+           occurred_at = COALESCE(failures.occurred_at, failures.created_at, NOW()),
+           created_at = COALESCE(failures.created_at, failures.occurred_at, NOW())
+       WHERE failures.id IS NULL
+          OR failures.id = ''
+          OR failures.tenant_id IS NULL
+          OR failures.tenant_id = ''
+          OR failures.parser_key IS NULL
+          OR failures.parser_key = ''
+          OR failures.error_code IS NULL
+          OR failures.error_code = ''
+          OR failures.error_message IS NULL
+          OR failures.error_message = ''
+          OR failures.source_path = ''
+          OR failures.source_offset < 0
+          OR failures.raw_hash = ''
+          OR failures.metadata IS NULL
+          OR failures.occurred_at IS NULL
+          OR failures.created_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_parse_failures_tenant_source_occurred_at
+       ON parse_failures (tenant_id, source_id, occurred_at DESC, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_parse_failures_source_parser_error
+       ON parse_failures (source_id, parser_key, error_code, occurred_at DESC)`
     );
 
     await pool.query(
@@ -7420,6 +7699,67 @@ class ControlPlaneRepository {
       .map((item) => ({ ...item }));
   }
 
+  private listSourceParseFailuresFromMemory(
+    tenantId: string,
+    sourceId: string,
+    input: NormalizedSourceParseFailureQueryInput
+  ): SourceParseFailureListResult {
+    const fromTimestamp = input.from ? Date.parse(input.from) : undefined;
+    const toTimestamp = input.to ? Date.parse(input.to) : undefined;
+    const parserKey = input.parserKey?.toLowerCase();
+    const errorCode = input.errorCode?.toLowerCase();
+
+    const filtered = this.memorySourceParseFailures.filter((record) => {
+      if (record.tenantId !== tenantId) {
+        return false;
+      }
+      if (record.failure.sourceId !== sourceId) {
+        return false;
+      }
+      if (
+        parserKey &&
+        record.failure.parserKey.toLowerCase() !== parserKey
+      ) {
+        return false;
+      }
+      if (
+        errorCode &&
+        record.failure.errorCode.toLowerCase() !== errorCode
+      ) {
+        return false;
+      }
+
+      const occurredAtTimestamp = Date.parse(record.failure.failedAt);
+      if (fromTimestamp !== undefined && occurredAtTimestamp < fromTimestamp) {
+        return false;
+      }
+      if (toTimestamp !== undefined && occurredAtTimestamp > toTimestamp) {
+        return false;
+      }
+
+      return true;
+    });
+
+    const items = [...filtered]
+      .sort((a, b) => {
+        const failedAtDiff = b.failure.failedAt.localeCompare(a.failure.failedAt);
+        if (failedAtDiff !== 0) {
+          return failedAtDiff;
+        }
+        return b.failure.createdAt.localeCompare(a.failure.createdAt);
+      })
+      .slice(0, input.limit)
+      .map((record) => ({
+        ...record.failure,
+        metadata: { ...record.failure.metadata },
+      }));
+
+    return {
+      items,
+      total: filtered.length,
+    };
+  }
+
   private getSourceHealthFromMemory(tenantId: string, sourceId: string): SourceHealth | null {
     const source = this.memorySources.find(
       (item) =>
@@ -7526,6 +7866,11 @@ class ControlPlaneRepository {
     for (let i = this.memorySourceWatermarks.length - 1; i >= 0; i -= 1) {
       if (this.memorySourceWatermarks[i]?.sourceId === id) {
         this.memorySourceWatermarks.splice(i, 1);
+      }
+    }
+    for (let i = this.memorySourceParseFailures.length - 1; i >= 0; i -= 1) {
+      if (this.memorySourceParseFailures[i]?.failure.sourceId === id) {
+        this.memorySourceParseFailures.splice(i, 1);
       }
     }
     return "deleted";

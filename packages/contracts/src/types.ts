@@ -96,6 +96,17 @@ export interface SessionSourceTrace {
   path?: string;
 }
 
+export interface SessionSourceFreshness {
+  sourceId: string;
+  sourceName?: string;
+  accessMode: SourceAccessMode;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  failureCount: number;
+  avgLatencyMs: number | null;
+  freshnessMinutes: number | null;
+}
+
 export interface SessionDetailResponse {
   session: SessionDetail;
   tokenBreakdown: SessionTokenBreakdown;
@@ -204,6 +215,7 @@ export interface SyncJob {
   attempt?: number;
   startedAt?: string;
   endedAt?: string;
+  nextRunAt?: string;
   durationMs?: number;
   errorCode?: string;
   errorDetail?: string;
@@ -221,6 +233,7 @@ export interface CreateSyncJobInput {
   attempt?: number;
   startedAt?: string;
   endedAt?: string;
+  nextRunAt?: string;
   durationMs?: number;
   errorCode?: string;
   errorDetail?: string;
@@ -233,6 +246,34 @@ export interface SourceWatermark {
   watermark: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SourceParseFailure {
+  id: string;
+  sourceId: string;
+  parserKey: string;
+  errorCode: string;
+  errorMessage: string;
+  sourcePath?: string;
+  sourceOffset?: number;
+  rawHash?: string;
+  metadata: Record<string, unknown>;
+  failedAt: string;
+  createdAt: string;
+}
+
+export interface SourceParseFailureQueryInput {
+  from?: string;
+  to?: string;
+  parserKey?: string;
+  errorCode?: string;
+  limit?: number;
+}
+
+export interface SourceParseFailureListResponse {
+  items: SourceParseFailure[];
+  total: number;
+  filters: SourceParseFailureQueryInput;
 }
 
 export interface SourceListResponse {
@@ -282,6 +323,7 @@ export interface SessionSearchResponse {
   total: number;
   nextCursor: string | null;
   filters: SessionSearchInput;
+  sourceFreshness?: SessionSourceFreshness[];
 }
 
 export type UsageCostMode = "raw" | "estimated" | "reported" | "mixed" | "none";

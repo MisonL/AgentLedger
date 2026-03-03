@@ -108,9 +108,9 @@ alertRoutes.patch("/alerts/:id/status", async (c) => {
   }
 
   let updatedBudgetGovernanceState: string | undefined;
-  if (result.data.status === "acknowledged") {
+  if (updatedAlert.status === "acknowledged" && updatedAlert.severity === "critical") {
     const frozenBudget = await repository.freezeBudget(tenantId, updatedAlert.budgetId, {
-      reason: "告警已确认，预算已冻结。",
+      reason: "critical 告警已确认，预算已冻结。",
       alertId: alertId,
     });
     updatedBudgetGovernanceState = frozenBudget?.governanceState;

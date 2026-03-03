@@ -3,7 +3,7 @@ import { access, constants as fsConstants } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import type { CreateSourceInput, Source, SourceAccessMode, SourceHealth, SyncJob } from "../contracts";
 import { validateCreateSourceInput } from "../contracts";
-import type { AppendAuditLogInput } from "../data/repository";
+import type { AppendAuditLogInput, SourceParseFailureQueryInput } from "../data/repository";
 import { getControlPlaneRepository } from "../data/repository";
 import { authMiddleware } from "../middleware/auth";
 import type { AppEnv } from "../types";
@@ -15,6 +15,8 @@ const SOURCE_SYNC_JOB_CANCEL_ACTION = "control_plane.source_sync_job_cancel_requ
 const SOURCE_CONNECTION_TESTED_ACTION = "control_plane.source_connection_tested";
 const DEFAULT_SYNC_JOB_LIMIT = 20;
 const MAX_SYNC_JOB_LIMIT = 200;
+const DEFAULT_PARSE_FAILURE_LIMIT = 50;
+const MAX_PARSE_FAILURE_LIMIT = 500;
 
 interface SourceConnectionTestResponse {
   sourceId: string;
@@ -92,6 +94,82 @@ function parseSyncJobMode(value: unknown): SourceAccessMode | undefined {
     return value;
   }
   return undefined;
+}
+
+function parseSyncJobNextRunAt(
+  value: unknown
+): { success: true; value: string | undefined } | { success: false; error: string } {
+  if (value === undefined || value === null) {
+    return { success: true, value: undefined };
+  }
+  if (typeof value !== "string") {
+    return { success: false, error: "nextRunAt 必须为 ISO 日期字符串。" };
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed || Number.isNaN(Date.parse(trimmed))) {
+    return { success: false, error: "nextRunAt 必须为 ISO 日期字符串。" };
+  }
+
+  return { success: true, value: new Date(trimmed).toISOString() };
+}
+
+function parseSourceParseFailureQuery(
+  query: Record<string, string | undefined>
+): { success: true; data: SourceParseFailureQueryInput } | { success: false; error: string } {
+  const normalizeOptional = (value: string | undefined): string | undefined => {
+    if (value === undefined) {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  };
+
+  const from = normalizeOptional(query.from);
+  const to = normalizeOptional(query.to);
+  const parserKey = normalizeOptional(query.parserKey);
+  const errorCode = normalizeOptional(query.errorCode);
+  const rawLimit = query.limit;
+
+  if (query.from !== undefined && !from) {
+    return { success: false, error: "from 必须为 ISO 日期字符串。" };
+  }
+  if (query.to !== undefined && !to) {
+    return { success: false, error: "to 必须为 ISO 日期字符串。" };
+  }
+  if (from && Number.isNaN(Date.parse(from))) {
+    return { success: false, error: "from 必须为 ISO 日期字符串。" };
+  }
+  if (to && Number.isNaN(Date.parse(to))) {
+    return { success: false, error: "to 必须为 ISO 日期字符串。" };
+  }
+  if (from && to && Date.parse(from) > Date.parse(to)) {
+    return { success: false, error: "from 不能晚于 to。" };
+  }
+
+  let limit = DEFAULT_PARSE_FAILURE_LIMIT;
+  if (rawLimit !== undefined) {
+    const trimmed = rawLimit.trim();
+    if (!trimmed) {
+      return { success: false, error: "limit 必须是 1 到 500 的整数。" };
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_PARSE_FAILURE_LIMIT) {
+      return { success: false, error: "limit 必须是 1 到 500 的整数。" };
+    }
+    limit = parsed;
+  }
+
+  return {
+    success: true,
+    data: {
+      from,
+      to,
+      parserKey,
+      errorCode,
+      limit,
+    },
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -555,6 +633,16 @@ sourceRoutes.post("/sources/:id/sync-jobs", async (c) => {
     );
   }
 
+  const nextRunAtResult = parseSyncJobNextRunAt(body?.nextRunAt ?? body?.next_run_at);
+  if (!nextRunAtResult.success) {
+    return c.json(
+      {
+        message: nextRunAtResult.error,
+      },
+      400
+    );
+  }
+
   const detail = "同步任务已创建，等待执行。";
   let job: SyncJob;
   try {
@@ -562,6 +650,7 @@ sourceRoutes.post("/sources/:id/sync-jobs", async (c) => {
       trigger: "manual",
       attempt: 1,
       cancelRequested: false,
+      nextRunAt: nextRunAtResult.value,
     });
   } catch (error) {
     if (error instanceof Error && error.message === "sync_job_source_not_found") {
@@ -624,6 +713,55 @@ sourceRoutes.get("/sources/:id/watermarks", async (c) => {
   return c.json({
     items,
     total: items.length,
+  });
+});
+
+sourceRoutes.get("/sources/:id/parse-failures", async (c) => {
+  const auth = await requireAuthContext(c);
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const sourceId = normalizeSourceId(c.req.param("id"));
+  if (!sourceId) {
+    return c.json(
+      {
+        message: "sourceId 必须为非空字符串。",
+      },
+      400
+    );
+  }
+
+  const source = await findSourceById(auth.tenantId, sourceId);
+  if (!source) {
+    return c.json(
+      {
+        message: `未找到数据源 ${sourceId}。`,
+      },
+      404
+    );
+  }
+
+  const queryResult = parseSourceParseFailureQuery(c.req.query());
+  if (!queryResult.success) {
+    return c.json(
+      {
+        message: queryResult.error,
+      },
+      400
+    );
+  }
+
+  const result = await repository.listSourceParseFailures(
+    auth.tenantId,
+    sourceId,
+    queryResult.data
+  );
+
+  return c.json({
+    items: result.items,
+    total: result.total,
+    filters: queryResult.data,
   });
 });
 

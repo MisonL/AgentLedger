@@ -22,7 +22,10 @@ import type {
 } from "../src/contracts";
 import { createApp } from "../src/app";
 import { getControlPlaneRepository } from "../src/data/repository";
-import type { UsageHeatmapQueryInput } from "../src/data/repository";
+import type {
+  SourceParseFailure,
+  UsageHeatmapQueryInput,
+} from "../src/data/repository";
 import {
   createAuthSessionToken,
   getRefreshSessionExpiresAt,
@@ -53,6 +56,7 @@ describe("Control Plane API", () => {
       durationMs?: number;
       startedAt?: string;
       endedAt?: string;
+      nextRunAt?: string;
       createdAt: string;
       updatedAt: string;
     }>;
@@ -61,6 +65,10 @@ describe("Control Plane API", () => {
       sourceId: string;
       text: string;
       sourcePath?: string;
+    }>;
+    memorySourceParseFailures?: Array<{
+      tenantId: string;
+      failure: SourceParseFailure;
     }>;
     memoryAlerts?: Alert[];
     claimIntegrationAlertCallback?: (input: {
@@ -163,6 +171,7 @@ describe("Control Plane API", () => {
         attempt?: number;
         startedAt?: string;
         endedAt?: string;
+        nextRunAt?: string;
         durationMs?: number;
         errorCode?: string;
         errorDetail?: string;
@@ -176,6 +185,7 @@ describe("Control Plane API", () => {
       durationMs?: number;
       startedAt?: string;
       endedAt?: string;
+      nextRunAt?: string;
       createdAt: string;
       updatedAt: string;
     }>;
@@ -554,12 +564,14 @@ describe("Control Plane API", () => {
     options?: {
       budgetId?: string;
       sourceId?: string;
+      severity?: Alert["severity"];
     }
   ): Promise<{ alert: Alert; cleanup: () => Promise<void> }> {
     const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const now = new Date().toISOString();
     const budgetId = options?.budgetId ?? `budget-${nonce}`;
     const sourceId = options?.sourceId ?? `source-${nonce}`;
+    const severity = options?.severity ?? "warning";
     const dedupeKey = `test-alert-${nonce}`;
 
     if (typeof repository.getPool === "function") {
@@ -616,7 +628,7 @@ describe("Control Plane API", () => {
             0.1,
             0.8,
             status,
-            "warning",
+            severity,
             dedupeKey,
             now,
           ]
@@ -636,7 +648,7 @@ describe("Control Plane API", () => {
           costLimit: 0.1,
           threshold: 0.8,
           status,
-          severity: "warning",
+          severity,
           triggeredAt: now,
           updatedAt: now,
         };
@@ -673,7 +685,7 @@ describe("Control Plane API", () => {
       costLimit: 0.1,
       threshold: 0.8,
       status,
-      severity: "warning",
+      severity,
       triggeredAt: now,
       updatedAt: now,
     };
@@ -1428,6 +1440,16 @@ describe("Control Plane API", () => {
       const jobId = pickString(candidate, ["syncJobId", "jobId", "id"]);
       if (jobId) {
         return jobId;
+      }
+    }
+    return undefined;
+  }
+
+  function extractSyncJobNextRunAt(payload: unknown): string | undefined {
+    for (const candidate of collectPayloadCandidates(payload)) {
+      const nextRunAt = pickString(candidate, ["nextRunAt", "next_run_at"]);
+      if (nextRunAt) {
+        return nextRunAt;
       }
     }
     return undefined;
@@ -3643,6 +3665,7 @@ describe("Control Plane API", () => {
   test("POST /api/v1/sources/:id/sync-jobs 创建成功，GET /api/v1/sources/:id/sync-jobs 可查询到", async () => {
     const authHeaders = await resolveAuthHeaders();
     const nonce = createNonce("source-sync-job");
+    const expectedNextRunAt = new Date(Date.now() + 15 * 60_000).toISOString();
     const createResponse = await app.request("/api/v1/sources", {
       method: "POST",
       headers: {
@@ -3667,7 +3690,7 @@ describe("Control Plane API", () => {
         ...authHeaders,
       },
       body: JSON.stringify({
-        trigger: "manual",
+        nextRunAt: expectedNextRunAt,
       }),
     });
     const createSyncJobPayload = await readResponseAsUnknown(createSyncJobResponse);
@@ -3676,6 +3699,7 @@ describe("Control Plane API", () => {
     expect(createSyncJobResponse.status).toBe(202);
     expect(typeof syncJobId).toBe("string");
     expect(extractJobStatus(createSyncJobPayload)).toBe("pending");
+    expect(extractSyncJobNextRunAt(createSyncJobPayload)).toBe(expectedNextRunAt);
 
     const listSyncJobsResponse = await app.request(`/api/v1/sources/${created.id}/sync-jobs`, {
       headers: authHeaders,
@@ -3686,17 +3710,18 @@ describe("Control Plane API", () => {
     expect(listSyncJobsResponse.status).toBe(200);
     expect(Array.isArray(items)).toBe(true);
     expect(items.length).toBeGreaterThan(0);
-    expect(
-      items.some((item) => {
-        const jobId = pickString(item, ["syncJobId", "jobId", "id"]);
-        return jobId === syncJobId;
-      })
-    ).toBe(true);
+    const createdItem = items.find((item) => {
+      const jobId = pickString(item, ["syncJobId", "jobId", "id"]);
+      return jobId === syncJobId;
+    });
+    expect(createdItem).toBeDefined();
+    expect(extractSyncJobNextRunAt(createdItem)).toBe(expectedNextRunAt);
   });
 
   test("PATCH /api/v1/sync-jobs/:id/cancel 可取消 pending 同步任务", async () => {
     const authHeaders = await resolveAuthHeaders();
     const nonce = createNonce("source-sync-job-cancel");
+    const expectedNextRunAt = new Date(Date.now() + 30 * 60_000).toISOString();
     const createResponse = await app.request("/api/v1/sources", {
       method: "POST",
       headers: {
@@ -3720,13 +3745,16 @@ describe("Control Plane API", () => {
         "content-type": "application/json",
         ...authHeaders,
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        nextRunAt: expectedNextRunAt,
+      }),
     });
     const createSyncJobPayload = await readResponseAsUnknown(createSyncJobResponse);
     const syncJobId = extractSourceSyncJobId(createSyncJobPayload);
 
     expect(createSyncJobResponse.status).toBe(202);
     expect(typeof syncJobId).toBe("string");
+    expect(extractSyncJobNextRunAt(createSyncJobPayload)).toBe(expectedNextRunAt);
 
     const cancelResponse = await app.request(`/api/v1/sync-jobs/${syncJobId}/cancel`, {
       method: "PATCH",
@@ -3736,6 +3764,7 @@ describe("Control Plane API", () => {
 
     expect(cancelResponse.status).toBe(202);
     expect(extractJobStatus(cancelPayload)).toBe("cancelled");
+    expect(extractSyncJobNextRunAt(cancelPayload)).toBe(expectedNextRunAt);
 
     let cancelRequested: boolean | undefined;
     for (const candidate of collectPayloadCandidates(cancelPayload)) {
@@ -3855,6 +3884,220 @@ describe("Control Plane API", () => {
     expect(watermarksResponse.status).toBe(200);
     expect(Array.isArray(items)).toBe(true);
     expect(items.length).toBeGreaterThanOrEqual(0);
+  });
+
+  test("GET /api/v1/sources/:id/parse-failures 支持过滤条件与 limit", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const nonce = createNonce("source-parse-failures");
+    const createResponse = await app.request("/api/v1/sources", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        name: `解析失败数据源-${nonce}`,
+        type: "ssh",
+        location: `10.46.${Math.floor(Math.random() * 200) + 10}.${Math.floor(Math.random() * 200) + 10}`,
+      }),
+    });
+    const source = (await createResponse.json()) as Source;
+    expect(createResponse.status).toBe(201);
+
+    const insertedIds: string[] = [];
+    const insertedMemoryIds: string[] = [];
+    const now = Date.now();
+    const firstFailedAt = new Date(now - 2 * 60_000).toISOString();
+    const secondFailedAt = new Date(now - 60_000).toISOString();
+
+    try {
+      if (typeof repository.getPool === "function") {
+        const pool = await repository.getPool();
+        if (pool) {
+          const rows = [
+            {
+              id: createNonce("pf-match"),
+              parserKey: "jsonl",
+              errorCode: "parse_error",
+              errorMessage: "json line parse failed",
+              sourcePath: `/tmp/${nonce}/a.jsonl`,
+              sourceOffset: 12,
+              failedAt: firstFailedAt,
+            },
+            {
+              id: createNonce("pf-non-match"),
+              parserKey: "native",
+              errorCode: "unsupported_format",
+              errorMessage: "native payload unknown",
+              sourcePath: `/tmp/${nonce}/b.log`,
+              sourceOffset: 24,
+              failedAt: secondFailedAt,
+            },
+          ];
+          for (const row of rows) {
+            await pool.query(
+              `INSERT INTO parse_failures (
+                 id,
+                 tenant_id,
+                 source_id,
+                 parser_key,
+                 error_code,
+                 error_message,
+                 source_path,
+                 source_offset,
+                 raw_hash,
+                 metadata,
+                 occurred_at,
+                 created_at
+               )
+               VALUES (
+                 $1,
+                 $2,
+                 $3,
+                 $4,
+                 $5,
+                 $6,
+                 $7,
+                 $8,
+                 $9,
+                 $10::jsonb,
+                 $11::timestamptz,
+                 $11::timestamptz
+               )`,
+              [
+                row.id,
+                tenantId,
+                source.id,
+                row.parserKey,
+                row.errorCode,
+                row.errorMessage,
+                row.sourcePath,
+                row.sourceOffset,
+                `hash-${row.id}`,
+                JSON.stringify({ parser: row.parserKey }),
+                row.failedAt,
+              ]
+            );
+            insertedIds.push(row.id);
+          }
+        } else if (Array.isArray(repository.memorySourceParseFailures)) {
+          const records: SourceParseFailure[] = [
+            {
+              id: createNonce("pf-memory-match"),
+              sourceId: source.id,
+              parserKey: "jsonl",
+              errorCode: "parse_error",
+              errorMessage: "json line parse failed",
+              sourcePath: `/tmp/${nonce}/a.jsonl`,
+              sourceOffset: 12,
+              rawHash: `hash-${nonce}-1`,
+              metadata: { parser: "jsonl" },
+              failedAt: firstFailedAt,
+              createdAt: firstFailedAt,
+            },
+            {
+              id: createNonce("pf-memory-non-match"),
+              sourceId: source.id,
+              parserKey: "native",
+              errorCode: "unsupported_format",
+              errorMessage: "native payload unknown",
+              sourcePath: `/tmp/${nonce}/b.log`,
+              sourceOffset: 24,
+              rawHash: `hash-${nonce}-2`,
+              metadata: { parser: "native" },
+              failedAt: secondFailedAt,
+              createdAt: secondFailedAt,
+            },
+          ];
+          for (const failure of records) {
+            repository.memorySourceParseFailures.push({
+              tenantId,
+              failure,
+            });
+            insertedMemoryIds.push(failure.id);
+          }
+        }
+      }
+
+      const query = new URLSearchParams({
+        from: new Date(now - 5 * 60_000).toISOString(),
+        to: new Date(now + 5 * 60_000).toISOString(),
+        parserKey: "jsonl",
+        errorCode: "parse_error",
+        limit: "1",
+      });
+      const response = await app.request(
+        `/api/v1/sources/${source.id}/parse-failures?${query.toString()}`,
+        {
+          headers: authHeaders,
+        }
+      );
+      const body = (await response.json()) as {
+        items: Array<{
+          sourceId: string;
+          parserKey: string;
+          errorCode: string;
+          failedAt: string;
+        }>;
+        total: number;
+        filters: {
+          from?: string;
+          to?: string;
+          parserKey?: string;
+          errorCode?: string;
+          limit?: number;
+        };
+      };
+
+      expect(response.status).toBe(200);
+      expect(Array.isArray(body.items)).toBe(true);
+      expect(body.items.length).toBe(1);
+      expect(body.total).toBeGreaterThanOrEqual(1);
+      expect(body.filters.parserKey).toBe("jsonl");
+      expect(body.filters.errorCode).toBe("parse_error");
+      expect(body.filters.limit).toBe(1);
+      expect(body.items[0]?.sourceId).toBe(source.id);
+      expect(body.items[0]?.parserKey).toBe("jsonl");
+      expect(body.items[0]?.errorCode).toBe("parse_error");
+      expect(typeof body.items[0]?.failedAt).toBe("string");
+
+      const invalidLimitResponse = await app.request(
+        `/api/v1/sources/${source.id}/parse-failures?limit=0`,
+        {
+          headers: authHeaders,
+        }
+      );
+      const invalidLimitBody = (await invalidLimitResponse.json()) as {
+        message: string;
+      };
+      expect(invalidLimitResponse.status).toBe(400);
+      expect(invalidLimitBody.message).toContain("limit");
+    } finally {
+      if (insertedIds.length > 0 && typeof repository.getPool === "function") {
+        const pool = await repository.getPool();
+        if (pool) {
+          await pool.query(
+            `DELETE FROM parse_failures
+             WHERE source_id = $1
+               AND id = ANY($2::text[])`,
+            [source.id, insertedIds]
+          );
+        }
+      }
+      if (insertedMemoryIds.length > 0 && Array.isArray(repository.memorySourceParseFailures)) {
+        for (let i = repository.memorySourceParseFailures.length - 1; i >= 0; i -= 1) {
+          const current = repository.memorySourceParseFailures[i];
+          if (current && insertedMemoryIds.includes(current.failure.id)) {
+            repository.memorySourceParseFailures.splice(i, 1);
+          }
+        }
+      }
+      await app.request(`/api/v1/sources/${source.id}`, {
+        method: "DELETE",
+        headers: authHeaders,
+      });
+    }
   });
 
   test("POST /api/v1/sources 会写入 source_created 审计且可按 sourceId 查询", async () => {
@@ -4401,6 +4644,41 @@ describe("Control Plane API", () => {
     }
   });
 
+  test("GET /api/v1/sessions/:id 与 /events 缺少认证时返回 401", async () => {
+    const detailResponse = await app.request("/api/v1/sessions/session-without-auth");
+    expect(detailResponse.status).toBe(401);
+
+    const eventsResponse = await app.request("/api/v1/sessions/session-without-auth/events");
+    expect(eventsResponse.status).toBe(401);
+  });
+
+  test("GET /api/v1/sessions/:id 与 /events 参数非法或不存在时返回 400/404", async () => {
+    const authHeaders = await resolveAuthHeaders();
+
+    const invalidDetailResponse = await app.request("/api/v1/sessions/%20", {
+      headers: authHeaders,
+    });
+    expect(invalidDetailResponse.status).toBe(400);
+
+    const missingDetailResponse = await app.request("/api/v1/sessions/session-not-found", {
+      headers: authHeaders,
+    });
+    expect(missingDetailResponse.status).toBe(404);
+
+    const invalidEventsResponse = await app.request("/api/v1/sessions/%20/events", {
+      headers: authHeaders,
+    });
+    expect(invalidEventsResponse.status).toBe(400);
+
+    const missingEventsResponse = await app.request(
+      "/api/v1/sessions/session-not-found/events",
+      {
+        headers: authHeaders,
+      }
+    );
+    expect(missingEventsResponse.status).toBe(404);
+  });
+
   test("POST /api/v1/sessions/search 参数非法时返回 400", async () => {
     const authHeaders = await resolveAuthHeaders();
     const response = await app.request("/api/v1/sessions/search", {
@@ -4481,6 +4759,440 @@ describe("Control Plane API", () => {
     expect(body.filters.from).toBe("2026-01-01T00:00:00.000Z");
     expect(body.filters.to).toBe("2026-12-31T23:59:59.999Z");
     expect(body.filters.limit).toBe(10);
+  });
+
+  test("POST /api/v1/sessions/search 对 ssh realtime source 走 puller realtime 并返回 sourceFreshness", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const nonce = createNonce("sessions-search-realtime-ok");
+    const originalFetch = globalThis.fetch;
+    const originalPullerBaseUrl = Bun.env.PULLER_BASE_URL;
+    const originalPullerSyncTimeout = Bun.env.PULLER_SYNC_TIMEOUT_MS;
+
+    const createSourceResponse = await app.request("/api/v1/sources", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        name: `实时检索源-${nonce}`,
+        type: "ssh",
+        location: `10.44.${Math.floor(Math.random() * 200) + 10}.${Math.floor(Math.random() * 200) + 10}`,
+        accessMode: "realtime",
+      }),
+    });
+    expect(createSourceResponse.status).toBe(201);
+    const source = (await createSourceResponse.json()) as Source;
+    const inserted = await insertSessionForSearch(source.id, {
+      provider: `provider-${nonce}`,
+      tool: "Codex CLI",
+      model: "gpt-5-codex",
+      tokens: 42,
+      cost: 0.042,
+    });
+
+    let pullerCalls = 0;
+    try {
+      Bun.env.PULLER_BASE_URL = "http://puller.mock";
+      Bun.env.PULLER_SYNC_TIMEOUT_MS = "not-a-number";
+      globalThis.fetch = (async (input) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        if (
+          url ===
+          `http://puller.mock/v1/sources/${encodeURIComponent(source.id)}/sync-now`
+        ) {
+          pullerCalls += 1;
+          return new Response(JSON.stringify({ accepted: true }), {
+            status: 202,
+            headers: {
+              "content-type": "application/json",
+            },
+          });
+        }
+        throw new Error(`unexpected fetch url in realtime test: ${url}`);
+      }) as typeof fetch;
+
+      const response = await app.request("/api/v1/sessions/search", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          sourceId: source.id,
+          limit: 20,
+        }),
+      });
+      const body = (await response.json()) as SessionSearchResponse & {
+        sourceFreshness?: {
+          fetchPath?: string;
+          freshnessMinutes?: number | null;
+          fallbackReason?: string | null;
+          accessMode?: string | null;
+        };
+      };
+
+      expect(response.status).toBe(200);
+      expect(pullerCalls).toBe(1);
+      expect(body.total).toBe(1);
+      expect(body.items.map((item) => item.id)).toEqual([inserted.id]);
+      expect(body.sourceFreshness?.fetchPath).toBe("realtime");
+      expect(body.sourceFreshness?.fallbackReason).toBeNull();
+      expect(body.sourceFreshness?.accessMode).toBe("realtime");
+      expect(
+        body.sourceFreshness?.freshnessMinutes === null ||
+          typeof body.sourceFreshness?.freshnessMinutes === "number"
+      ).toBe(true);
+    } finally {
+      await inserted.cleanup();
+      await app.request(`/api/v1/sources/${source.id}`, {
+        method: "DELETE",
+        headers: authHeaders,
+      });
+      if (originalPullerBaseUrl === undefined) {
+        delete Bun.env.PULLER_BASE_URL;
+      } else {
+        Bun.env.PULLER_BASE_URL = originalPullerBaseUrl;
+      }
+      if (originalPullerSyncTimeout === undefined) {
+        delete Bun.env.PULLER_SYNC_TIMEOUT_MS;
+      } else {
+        Bun.env.PULLER_SYNC_TIMEOUT_MS = originalPullerSyncTimeout;
+      }
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("POST /api/v1/sessions/search puller 失败时回退缓存并标注 sourceFreshness", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const nonce = createNonce("sessions-search-realtime-fallback");
+    const originalFetch = globalThis.fetch;
+    const originalPullerBaseUrl = Bun.env.PULLER_BASE_URL;
+    const originalRetryMaxAttempts = Bun.env.PULLER_SYNC_RETRY_MAX_ATTEMPTS;
+    const originalRetryBaseBackoffMs = Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS;
+    const originalRetryMaxBackoffMs = Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS;
+
+    const createSourceResponse = await app.request("/api/v1/sources", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        name: `回退检索源-${nonce}`,
+        type: "ssh",
+        location: `10.45.${Math.floor(Math.random() * 200) + 10}.${Math.floor(Math.random() * 200) + 10}`,
+        accessMode: "hybrid",
+      }),
+    });
+    expect(createSourceResponse.status).toBe(201);
+    const source = (await createSourceResponse.json()) as Source;
+    const inserted = await insertSessionForSearch(source.id, {
+      provider: `provider-${nonce}`,
+      tool: "Codex CLI",
+      model: "gpt-5-codex",
+      tokens: 51,
+      cost: 0.051,
+    });
+
+    let pullerCalls = 0;
+    try {
+      Bun.env.PULLER_BASE_URL = "http://puller.mock";
+      Bun.env.PULLER_SYNC_RETRY_MAX_ATTEMPTS = "2";
+      Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS = "1";
+      Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS = "1";
+      globalThis.fetch = (async () => {
+        pullerCalls += 1;
+        return new Response(JSON.stringify({ message: "upstream unavailable" }), {
+          status: 503,
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      }) as unknown as typeof fetch;
+
+      const response = await app.request("/api/v1/sessions/search", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          sourceId: source.id,
+          limit: 20,
+        }),
+      });
+      const body = (await response.json()) as SessionSearchResponse & {
+        sourceFreshness?: {
+          fetchPath?: string;
+          freshnessMinutes?: number | null;
+          fallbackReason?: string | null;
+          accessMode?: string | null;
+        };
+      };
+
+      expect(response.status).toBe(200);
+      expect(body.total).toBe(1);
+      expect(body.items.map((item) => item.id)).toEqual([inserted.id]);
+      expect(body.sourceFreshness?.fetchPath).toBe("fallback-cache");
+      expect(body.sourceFreshness?.fallbackReason).toBe("puller_http_503");
+      expect(body.sourceFreshness?.accessMode).toBe("hybrid");
+      expect(pullerCalls).toBe(2);
+    } finally {
+      await inserted.cleanup();
+      await app.request(`/api/v1/sources/${source.id}`, {
+        method: "DELETE",
+        headers: authHeaders,
+      });
+      if (originalPullerBaseUrl === undefined) {
+        delete Bun.env.PULLER_BASE_URL;
+      } else {
+        Bun.env.PULLER_BASE_URL = originalPullerBaseUrl;
+      }
+      if (originalRetryMaxAttempts === undefined) {
+        delete Bun.env.PULLER_SYNC_RETRY_MAX_ATTEMPTS;
+      } else {
+        Bun.env.PULLER_SYNC_RETRY_MAX_ATTEMPTS = originalRetryMaxAttempts;
+      }
+      if (originalRetryBaseBackoffMs === undefined) {
+        delete Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS;
+      } else {
+        Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS = originalRetryBaseBackoffMs;
+      }
+      if (originalRetryMaxBackoffMs === undefined) {
+        delete Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS;
+      } else {
+        Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS = originalRetryMaxBackoffMs;
+      }
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("POST /api/v1/sessions/search puller 短暂失败后重试成功", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const nonce = createNonce("sessions-search-retry-success");
+    const originalFetch = globalThis.fetch;
+    const originalPullerBaseUrl = Bun.env.PULLER_BASE_URL;
+    const originalRetryMaxAttempts = Bun.env.PULLER_SYNC_RETRY_MAX_ATTEMPTS;
+    const originalRetryBaseBackoffMs = Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS;
+    const originalRetryMaxBackoffMs = Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS;
+
+    const createSourceResponse = await app.request("/api/v1/sources", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        name: `重试成功检索源-${nonce}`,
+        type: "ssh",
+        location: `10.46.${Math.floor(Math.random() * 200) + 10}.${Math.floor(Math.random() * 200) + 10}`,
+        accessMode: "realtime",
+      }),
+    });
+    expect(createSourceResponse.status).toBe(201);
+    const source = (await createSourceResponse.json()) as Source;
+    const inserted = await insertSessionForSearch(source.id, {
+      provider: `provider-${nonce}`,
+      tool: "Codex CLI",
+      model: "gpt-5-codex",
+      tokens: 58,
+      cost: 0.058,
+    });
+
+    let pullerCalls = 0;
+    try {
+      Bun.env.PULLER_BASE_URL = "http://puller.mock";
+      Bun.env.PULLER_SYNC_RETRY_MAX_ATTEMPTS = "3";
+      Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS = "1";
+      Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS = "1";
+      globalThis.fetch = (async () => {
+        pullerCalls += 1;
+        if (pullerCalls < 3) {
+          return new Response(JSON.stringify({ message: "temporary unavailable" }), {
+            status: 503,
+            headers: {
+              "content-type": "application/json",
+            },
+          });
+        }
+        return new Response(JSON.stringify({ accepted: true }), {
+          status: 202,
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      }) as unknown as typeof fetch;
+
+      const response = await app.request("/api/v1/sessions/search", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          sourceId: source.id,
+          limit: 20,
+        }),
+      });
+      const body = (await response.json()) as SessionSearchResponse & {
+        sourceFreshness?: {
+          fetchPath?: string;
+          freshnessMinutes?: number | null;
+          fallbackReason?: string | null;
+          accessMode?: string | null;
+        };
+      };
+
+      expect(response.status).toBe(200);
+      expect(pullerCalls).toBe(3);
+      expect(body.total).toBe(1);
+      expect(body.items.map((item) => item.id)).toEqual([inserted.id]);
+      expect(body.sourceFreshness?.fetchPath).toBe("realtime");
+      expect(body.sourceFreshness?.fallbackReason).toBeNull();
+      expect(body.sourceFreshness?.accessMode).toBe("realtime");
+    } finally {
+      await inserted.cleanup();
+      await app.request(`/api/v1/sources/${source.id}`, {
+        method: "DELETE",
+        headers: authHeaders,
+      });
+      if (originalPullerBaseUrl === undefined) {
+        delete Bun.env.PULLER_BASE_URL;
+      } else {
+        Bun.env.PULLER_BASE_URL = originalPullerBaseUrl;
+      }
+      if (originalRetryMaxAttempts === undefined) {
+        delete Bun.env.PULLER_SYNC_RETRY_MAX_ATTEMPTS;
+      } else {
+        Bun.env.PULLER_SYNC_RETRY_MAX_ATTEMPTS = originalRetryMaxAttempts;
+      }
+      if (originalRetryBaseBackoffMs === undefined) {
+        delete Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS;
+      } else {
+        Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS = originalRetryBaseBackoffMs;
+      }
+      if (originalRetryMaxBackoffMs === undefined) {
+        delete Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS;
+      } else {
+        Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS = originalRetryMaxBackoffMs;
+      }
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("POST /api/v1/sessions/search puller 4xx 不重试且重试参数按边界夹取", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const nonce = createNonce("sessions-search-retry-clamp");
+    const originalFetch = globalThis.fetch;
+    const originalPullerBaseUrl = Bun.env.PULLER_BASE_URL;
+    const originalPullerSyncTimeout = Bun.env.PULLER_SYNC_TIMEOUT_MS;
+    const originalRetryMaxAttempts = Bun.env.PULLER_SYNC_RETRY_MAX_ATTEMPTS;
+    const originalRetryBaseBackoffMs = Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS;
+    const originalRetryMaxBackoffMs = Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS;
+
+    const createSourceResponse = await app.request("/api/v1/sources", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        name: `重试边界检索源-${nonce}`,
+        type: "ssh",
+        location: `10.47.${Math.floor(Math.random() * 200) + 10}.${Math.floor(Math.random() * 200) + 10}`,
+        accessMode: "realtime",
+      }),
+    });
+    expect(createSourceResponse.status).toBe(201);
+    const source = (await createSourceResponse.json()) as Source;
+    const inserted = await insertSessionForSearch(source.id, {
+      provider: `provider-${nonce}`,
+      tool: "Codex CLI",
+      model: "gpt-5-codex",
+      tokens: 61,
+      cost: 0.061,
+    });
+
+    let pullerCalls = 0;
+    try {
+      Bun.env.PULLER_BASE_URL = "http://puller.mock";
+      Bun.env.PULLER_SYNC_TIMEOUT_MS = "999999";
+      Bun.env.PULLER_SYNC_RETRY_MAX_ATTEMPTS = "999";
+      Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS = "500";
+      Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS = "1";
+      globalThis.fetch = (async () => {
+        pullerCalls += 1;
+        return new Response(JSON.stringify({ message: "bad request" }), {
+          status: 400,
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      }) as unknown as typeof fetch;
+
+      const response = await app.request("/api/v1/sessions/search", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          sourceId: source.id,
+          limit: 20,
+        }),
+      });
+      const body = (await response.json()) as SessionSearchResponse & {
+        sourceFreshness?: {
+          fetchPath?: string;
+          fallbackReason?: string | null;
+        };
+      };
+
+      expect(response.status).toBe(200);
+      expect(pullerCalls).toBe(1);
+      expect(body.total).toBe(1);
+      expect(body.items.map((item) => item.id)).toEqual([inserted.id]);
+      expect(body.sourceFreshness?.fetchPath).toBe("fallback-cache");
+      expect(body.sourceFreshness?.fallbackReason).toBe("puller_http_400");
+    } finally {
+      await inserted.cleanup();
+      await app.request(`/api/v1/sources/${source.id}`, {
+        method: "DELETE",
+        headers: authHeaders,
+      });
+      if (originalPullerBaseUrl === undefined) {
+        delete Bun.env.PULLER_BASE_URL;
+      } else {
+        Bun.env.PULLER_BASE_URL = originalPullerBaseUrl;
+      }
+      if (originalPullerSyncTimeout === undefined) {
+        delete Bun.env.PULLER_SYNC_TIMEOUT_MS;
+      } else {
+        Bun.env.PULLER_SYNC_TIMEOUT_MS = originalPullerSyncTimeout;
+      }
+      if (originalRetryMaxAttempts === undefined) {
+        delete Bun.env.PULLER_SYNC_RETRY_MAX_ATTEMPTS;
+      } else {
+        Bun.env.PULLER_SYNC_RETRY_MAX_ATTEMPTS = originalRetryMaxAttempts;
+      }
+      if (originalRetryBaseBackoffMs === undefined) {
+        delete Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS;
+      } else {
+        Bun.env.PULLER_SYNC_RETRY_BASE_BACKOFF_MS = originalRetryBaseBackoffMs;
+      }
+      if (originalRetryMaxBackoffMs === undefined) {
+        delete Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS;
+      } else {
+        Bun.env.PULLER_SYNC_RETRY_MAX_BACKOFF_MS = originalRetryMaxBackoffMs;
+      }
+      globalThis.fetch = originalFetch;
+    }
   });
 
   test("sessions/search 与 exports/sessions 支持 clientType/tool/host/model/project 过滤", async () => {
@@ -5257,6 +5969,7 @@ describe("Control Plane API", () => {
 
     const { alert, cleanup } = await createTestAlert(tenantId, "open", {
       budgetId: budget.id,
+      severity: "critical",
     });
     try {
       const ackResponse = await app.request(`/api/v1/alerts/${alert.id}/status`, {
@@ -5677,6 +6390,85 @@ describe("Control Plane API", () => {
     expect(third.record.callbackId).toBe(callbackId);
   });
 
+  test("POST /api/v1/integrations/callbacks/alerts warning 告警 ack 不冻结预算", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const originalCallbackSecret = Bun.env.INTEGRATION_CALLBACK_SECRET;
+    const callbackSecret = `integration-secret-${createNonce("cb-warning-no-freeze")}`;
+    const callbackHeaders = {
+      "content-type": "application/json",
+      "x-integration-callback-secret": callbackSecret,
+    };
+
+    const putBudgetResponse = await app.request("/api/v1/budgets", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        scope: "global",
+        period: "monthly",
+        tokenLimit: 1300,
+        costLimit: 0,
+        thresholds: {
+          warning: 0.6,
+          escalated: 0.8,
+          critical: 0.95,
+        },
+      }),
+    });
+    expect(putBudgetResponse.status).toBe(200);
+    const budget = (await putBudgetResponse.json()) as Budget;
+
+    const warningAlert = await createTestAlert(tenantId, "open", {
+      budgetId: budget.id,
+      severity: "warning",
+    });
+
+    try {
+      Bun.env.INTEGRATION_CALLBACK_SECRET = callbackSecret;
+
+      const ackResponse = await app.request("/api/v1/integrations/callbacks/alerts", {
+        method: "POST",
+        headers: callbackHeaders,
+        body: JSON.stringify({
+          callback_id: createNonce("cb-warning-ack"),
+          tenant_id: tenantId,
+          action: "ack",
+          alert_id: warningAlert.alert.id,
+        }),
+      });
+      const ackBody = (await ackResponse.json()) as {
+        duplicate: boolean;
+        result: {
+          alert?: Alert;
+          budget?: Budget;
+        };
+      };
+
+      expect(ackResponse.status).toBe(200);
+      expect(ackBody.duplicate).toBe(false);
+      expect(ackBody.result.alert?.status).toBe("acknowledged");
+      expect(ackBody.result.budget).toBeUndefined();
+
+      const listResponse = await app.request("/api/v1/budgets", {
+        headers: authHeaders,
+      });
+      const listBody = (await listResponse.json()) as { items: Budget[] };
+      const targetBudget = listBody.items.find((item) => item.id === budget.id);
+      expect(targetBudget?.governanceState).toBe("active");
+      expect(targetBudget?.frozenByAlertId).toBeUndefined();
+    } finally {
+      if (originalCallbackSecret === undefined) {
+        delete Bun.env.INTEGRATION_CALLBACK_SECRET;
+      } else {
+        Bun.env.INTEGRATION_CALLBACK_SECRET = originalCallbackSecret;
+      }
+      await warningAlert.cleanup();
+    }
+  });
+
   test("POST /api/v1/integrations/callbacks/alerts 支持全 action 与 callback_id 幂等", async () => {
     const authHeaders = await resolveAuthHeaders();
     const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
@@ -5723,6 +6515,7 @@ describe("Control Plane API", () => {
 
     const alertOne = await createTestAlert(tenantId, "open", {
       budgetId: budget.id,
+      severity: "critical",
     });
     let alertTwoCleanup: (() => Promise<void>) | null = null;
 
@@ -5888,6 +6681,7 @@ describe("Control Plane API", () => {
 
       const alertTwo = await createTestAlert(tenantId, "open", {
         budgetId: budget.id,
+        severity: "critical",
       });
       alertTwoCleanup = alertTwo.cleanup;
 
@@ -6078,6 +6872,86 @@ describe("Control Plane API", () => {
       expect(targetAudit).toBeDefined();
     } finally {
       await cleanup();
+    }
+  });
+
+  test("PATCH /api/v1/alerts/:id/status warning 告警 ack 不会冻结预算", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const nonce = createNonce("warning-alert-no-freeze");
+
+    const createSourceResponse = await app.request("/api/v1/sources", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        name: `warning-ack-no-freeze-${nonce}`,
+        type: "ssh",
+        location: `10.47.${Math.floor(Math.random() * 200) + 10}.${Math.floor(Math.random() * 200) + 10}`,
+      }),
+    });
+    expect(createSourceResponse.status).toBe(201);
+    const source = (await createSourceResponse.json()) as Source;
+
+    const putBudgetResponse = await app.request("/api/v1/budgets", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        scope: "source",
+        sourceId: source.id,
+        period: "monthly",
+        tokenLimit: 1600,
+        costLimit: 0,
+        thresholds: {
+          warning: 0.6,
+          escalated: 0.8,
+          critical: 0.95,
+        },
+      }),
+    });
+    expect(putBudgetResponse.status).toBe(200);
+    const budget = (await putBudgetResponse.json()) as Budget;
+
+    const { alert, cleanup } = await createTestAlert(tenantId, "open", {
+      budgetId: budget.id,
+      sourceId: source.id,
+      severity: "warning",
+    });
+
+    try {
+      const response = await app.request(`/api/v1/alerts/${alert.id}/status`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          status: "acknowledged",
+        }),
+      });
+      const body = (await response.json()) as Alert;
+
+      expect(response.status).toBe(200);
+      expect(body.status).toBe("acknowledged");
+
+      const listResponse = await app.request("/api/v1/budgets", {
+        headers: authHeaders,
+      });
+      const listBody = (await listResponse.json()) as { items: Budget[] };
+      const targetBudget = listBody.items.find((item) => item.id === budget.id);
+      expect(targetBudget?.governanceState).toBe("active");
+      expect(targetBudget?.frozenByAlertId).toBeUndefined();
+    } finally {
+      await cleanup();
+      await app.request(`/api/v1/sources/${source.id}`, {
+        method: "DELETE",
+        headers: authHeaders,
+      });
     }
   });
 

@@ -35,6 +35,8 @@ import type {
   SessionDetail,
   SessionDetailResponse,
   SessionEvent,
+  SessionSearchResponse,
+  SessionSourceFreshness,
   SessionSourceTrace,
   SessionTokenBreakdown,
   SessionExportJobCreateInput,
@@ -44,6 +46,9 @@ import type {
   Source,
   SourceHealth,
   SourceAccessMode,
+  SourceParseFailure,
+  SourceParseFailureListResponse,
+  SourceParseFailureQueryInput,
   SourceType,
   SyncJob,
   SyncJobStatus,
@@ -114,6 +119,8 @@ const USAGE_COST_MODE_SET = new Set<UsageCostMode>([
   "none",
 ]);
 const SESSION_LIMIT_MAX = 200;
+const SOURCE_PARSE_FAILURE_LIMIT_DEFAULT = 50;
+const SOURCE_PARSE_FAILURE_LIMIT_MAX = 500;
 const ALERT_LIMIT_MAX = 200;
 const AUDIT_LIMIT_MAX = 200;
 const PASSWORD_MIN_LENGTH = 8;
@@ -414,6 +421,54 @@ export function isSourceHealth(value: unknown): value is SourceHealth {
   );
 }
 
+export function isSourceParseFailure(value: unknown): value is SourceParseFailure {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const sourcePathOk =
+    value.sourcePath === undefined || value.sourcePath === null || isString(value.sourcePath);
+  const sourceOffsetOk =
+    value.sourceOffset === undefined ||
+    value.sourceOffset === null ||
+    (isNumber(value.sourceOffset) && Number.isInteger(value.sourceOffset) && value.sourceOffset >= 0);
+  const rawHashOk = value.rawHash === undefined || value.rawHash === null || isString(value.rawHash);
+
+  return (
+    isString(value.id) &&
+    isString(value.sourceId) &&
+    isString(value.parserKey) &&
+    isString(value.errorCode) &&
+    isString(value.errorMessage) &&
+    sourcePathOk &&
+    sourceOffsetOk &&
+    rawHashOk &&
+    isRecord(value.metadata) &&
+    isISODate(value.failedAt) &&
+    isISODate(value.createdAt)
+  );
+}
+
+export function isSourceParseFailureListResponse(
+  value: unknown
+): value is SourceParseFailureListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const filtersOk =
+    isRecord(value.filters) && validateSourceParseFailureQueryInput(value.filters).success;
+
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isSourceParseFailure(item)) &&
+    isNumber(value.total) &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    filtersOk
+  );
+}
+
 export function isSyncJob(value: unknown): value is SyncJob {
   if (!isRecord(value)) {
     return false;
@@ -429,6 +484,8 @@ export function isSyncJob(value: unknown): value is SyncJob {
     value.startedAt === undefined || value.startedAt === null || isISODate(value.startedAt);
   const endedAtOk =
     value.endedAt === undefined || value.endedAt === null || isISODate(value.endedAt);
+  const nextRunAtOk =
+    value.nextRunAt === undefined || value.nextRunAt === null || isISODate(value.nextRunAt);
   const durationMsOk =
     value.durationMs === undefined ||
     value.durationMs === null ||
@@ -452,6 +509,7 @@ export function isSyncJob(value: unknown): value is SyncJob {
     attemptOk &&
     startedAtOk &&
     endedAtOk &&
+    nextRunAtOk &&
     durationMsOk &&
     errorCodeOk &&
     errorDetailOk &&
@@ -572,6 +630,61 @@ export function isSessionSourceTrace(value: unknown): value is SessionSourceTrac
   const pathOk = value.path === undefined || value.path === null || isString(value.path);
 
   return isString(value.sourceId) && sourceNameOk && providerOk && pathOk;
+}
+
+export function isSessionSourceFreshness(value: unknown): value is SessionSourceFreshness {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const sourceNameOk = value.sourceName === undefined || value.sourceName === null || isString(value.sourceName);
+  const lastSuccessAtOk = value.lastSuccessAt === null || isISODate(value.lastSuccessAt);
+  const lastFailureAtOk = value.lastFailureAt === null || isISODate(value.lastFailureAt);
+  const avgLatencyOk =
+    value.avgLatencyMs === null ||
+    (isNumber(value.avgLatencyMs) && value.avgLatencyMs >= 0);
+  const freshnessOk =
+    value.freshnessMinutes === null ||
+    (isNumber(value.freshnessMinutes) &&
+      Number.isInteger(value.freshnessMinutes) &&
+      value.freshnessMinutes >= 0);
+
+  return (
+    isString(value.sourceId) &&
+    sourceNameOk &&
+    isSourceAccessMode(value.accessMode) &&
+    lastSuccessAtOk &&
+    lastFailureAtOk &&
+    isNumber(value.failureCount) &&
+    Number.isInteger(value.failureCount) &&
+    value.failureCount >= 0 &&
+    avgLatencyOk &&
+    freshnessOk
+  );
+}
+
+export function isSessionSearchResponse(value: unknown): value is SessionSearchResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const nextCursorOk = value.nextCursor === null || isString(value.nextCursor);
+  const filtersOk = isRecord(value.filters) && validateSessionSearchInput(value.filters).success;
+  const sourceFreshnessOk =
+    value.sourceFreshness === undefined ||
+    (Array.isArray(value.sourceFreshness) &&
+      value.sourceFreshness.every((item) => isSessionSourceFreshness(item)));
+
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isSession(item)) &&
+    isNumber(value.total) &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    nextCursorOk &&
+    filtersOk &&
+    sourceFreshnessOk
+  );
 }
 
 export function isSessionDetailResponse(value: unknown): value is SessionDetailResponse {
@@ -1235,6 +1348,59 @@ export function validateSessionSearchInput(input: unknown): ValidationResult<Ses
       from: from as string | undefined,
       to: to as string | undefined,
       limit: limit as number | undefined,
+    },
+  };
+}
+
+export function validateSourceParseFailureQueryInput(
+  input: unknown
+): ValidationResult<SourceParseFailureQueryInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "查询参数必须是对象。" };
+  }
+
+  const from = normalizeString(input.from);
+  const to = normalizeString(input.to);
+  const parserKey = normalizeString(input.parserKey);
+  const errorCode = normalizeString(input.errorCode);
+  const parsedLimit = toOptionalInteger(input.limit);
+
+  if (input.from !== undefined && !from) {
+    return { success: false, error: "from 必须为 ISO 日期字符串。" };
+  }
+  if (input.to !== undefined && !to) {
+    return { success: false, error: "to 必须为 ISO 日期字符串。" };
+  }
+  if (from && !isISODate(from)) {
+    return { success: false, error: "from 必须为 ISO 日期字符串。" };
+  }
+  if (to && !isISODate(to)) {
+    return { success: false, error: "to 必须为 ISO 日期字符串。" };
+  }
+  if (from && to && Date.parse(from) > Date.parse(to)) {
+    return { success: false, error: "from 不能晚于 to。" };
+  }
+  if (
+    input.limit !== undefined &&
+    (parsedLimit === undefined ||
+      !Number.isInteger(parsedLimit) ||
+      parsedLimit < 1 ||
+      parsedLimit > SOURCE_PARSE_FAILURE_LIMIT_MAX)
+  ) {
+    return {
+      success: false,
+      error: `limit 必须是 1 到 ${SOURCE_PARSE_FAILURE_LIMIT_MAX} 的整数。`,
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      from,
+      to,
+      parserKey,
+      errorCode,
+      limit: parsedLimit ?? SOURCE_PARSE_FAILURE_LIMIT_DEFAULT,
     },
   };
 }

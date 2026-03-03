@@ -146,9 +146,9 @@ integrationCallbackRoutes.post("/integrations/callbacks/alerts", async (c) => {
       callbackResult = {
         alert: updatedAlert,
       };
-      if (updatedAlert.status === "acknowledged") {
+      if (updatedAlert.status === "acknowledged" && updatedAlert.severity === "critical") {
         const budget = await repository.freezeBudget(tenantId, updatedAlert.budgetId, {
-          reason: result.data.reason ?? "集成回调确认告警，预算已冻结。",
+          reason: result.data.reason ?? "集成回调确认 critical 告警，预算已冻结。",
           alertId,
         });
         callbackResult.budget = budget;
