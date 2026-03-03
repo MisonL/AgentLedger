@@ -74,6 +74,83 @@ func TestParseLinesConcurrently(t *testing.T) {
 	}
 }
 
+func TestParseLinesConcurrently_ExtractsJSONTokenAndContentFields(t *testing.T) {
+	t.Parallel()
+
+	lines := []lineRecord{
+		{
+			No:   1,
+			Text: `{"session_id":"codex-s-1","event_type":"message","role":"assistant","content":[{"type":"text","text":"codex reply"}],"usage":{"input_tokens":11,"output_tokens":22},"model":"gpt-5-codex","cost_usd":0.12}`,
+		},
+		{
+			No:   2,
+			Text: `{"session":"claude-s-1","message":{"content":[{"type":"text","text":"claude reply"}]},"usage":{"prompt_tokens":33,"completion_tokens":44},"model_name":"claude-3-7-sonnet"}`,
+		},
+		{
+			No:   3,
+			Text: `{"session":"gemini-s-1","candidates":[{"content":{"parts":[{"text":"gemini reply"}]}}],"usageMetadata":{"promptTokenCount":55,"candidatesTokenCount":66},"model":"gemini-2.5-pro"}`,
+		},
+	}
+
+	outputs, err := parseLinesConcurrently(context.Background(), parseInput{
+		Source:      sourceRecord{ID: "source-json-rich"},
+		SourcePath:  "/tmp/rich.jsonl",
+		Lines:       lines,
+		JSONLStart:  0,
+		NativeStart: 0,
+	})
+	if err != nil {
+		t.Fatalf("parseLinesConcurrently() unexpected error: %v", err)
+	}
+
+	jsonOut, ok := outputs[parserKeyJSONL]
+	if !ok {
+		t.Fatalf("missing jsonl parser output")
+	}
+	if len(jsonOut.Events) != 3 {
+		t.Fatalf("json events = %d, want 3", len(jsonOut.Events))
+	}
+
+	event1 := jsonOut.Events[0].Event
+	if event1.SessionID != "codex-s-1" {
+		t.Fatalf("event1.session_id = %q, want codex-s-1", event1.SessionID)
+	}
+	if event1.Text != "codex reply" {
+		t.Fatalf("event1.text = %q, want codex reply", event1.Text)
+	}
+	if event1.Tokens.InputTokens != 11 || event1.Tokens.OutputTokens != 22 {
+		t.Fatalf("event1.tokens = %#v, want input=11 output=22", event1.Tokens)
+	}
+	if event1.CostUSD == nil || *event1.CostUSD != 0.12 {
+		t.Fatalf("event1.cost_usd = %v, want 0.12", event1.CostUSD)
+	}
+
+	event2 := jsonOut.Events[1].Event
+	if event2.SessionID != "claude-s-1" {
+		t.Fatalf("event2.session_id = %q, want claude-s-1", event2.SessionID)
+	}
+	if event2.Text != "claude reply" {
+		t.Fatalf("event2.text = %q, want claude reply", event2.Text)
+	}
+	if event2.Model != "claude-3-7-sonnet" {
+		t.Fatalf("event2.model = %q, want claude-3-7-sonnet", event2.Model)
+	}
+	if event2.Tokens.InputTokens != 33 || event2.Tokens.OutputTokens != 44 {
+		t.Fatalf("event2.tokens = %#v, want input=33 output=44", event2.Tokens)
+	}
+
+	event3 := jsonOut.Events[2].Event
+	if event3.SessionID != "gemini-s-1" {
+		t.Fatalf("event3.session_id = %q, want gemini-s-1", event3.SessionID)
+	}
+	if event3.Text != "gemini reply" {
+		t.Fatalf("event3.text = %q, want gemini reply", event3.Text)
+	}
+	if event3.Tokens.InputTokens != 55 || event3.Tokens.OutputTokens != 66 {
+		t.Fatalf("event3.tokens = %#v, want input=55 output=66", event3.Tokens)
+	}
+}
+
 func TestParseNativeLine(t *testing.T) {
 	t.Parallel()
 

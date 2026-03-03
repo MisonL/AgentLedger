@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -164,10 +165,53 @@ func parseJSONLLines(ctx context.Context, input parseInput) (parserOutput, error
 
 		event.SessionID = sessionID
 		event.EventType = firstNonEmpty(valueFromMap(data, "event_type", "eventType", "type"), "message")
-		event.Role = firstNonEmpty(valueFromMap(data, "role"))
-		event.Text = firstNonEmpty(valueFromMap(data, "text", "message", "content"))
-		event.Model = firstNonEmpty(valueFromMap(data, "model"))
+		event.Role = firstNonEmpty(
+			valueFromMap(data, "role"),
+			extractStringByPaths(data,
+				[]string{"author", "role"},
+				[]string{"message", "role"},
+			),
+		)
+		event.Text = firstNonEmpty(
+			valueFromMap(data, "text", "message", "content"),
+			extractStringByPaths(data,
+				[]string{"message", "text"},
+				[]string{"message", "content", "text"},
+				[]string{"content", "text"},
+				[]string{"content", "0", "text"},
+				[]string{"message", "content", "0", "text"},
+				[]string{"candidates", "0", "content", "parts", "0", "text"},
+			),
+			extractTextFromContent(pathValue(data, "content")),
+			extractTextFromContent(pathValue(data, "message", "content")),
+			extractTextFromContent(pathValue(data, "candidates", "0", "content", "parts")),
+		)
+		event.Model = firstNonEmpty(
+			valueFromMap(data, "model"),
+			extractStringByPaths(data,
+				[]string{"model_name"},
+				[]string{"modelName"},
+				[]string{"usage", "model"},
+				[]string{"metadata", "model"},
+			),
+		)
 		event.OccurredAt = occurredAt
+		event.Tokens = extractTokenUsageFromPayload(data)
+		event.CostUSD = extractFloatByPaths(data,
+			[]string{"cost_usd"},
+			[]string{"costUsd"},
+			[]string{"cost"},
+			[]string{"total_cost"},
+			[]string{"estimated_cost"},
+			[]string{"usage", "cost"},
+			[]string{"usage", "cost_usd"},
+			[]string{"usage", "total_cost"},
+		)
+		event.CostMode = firstNonEmpty(
+			valueFromMap(data, "cost_mode", "costMode"),
+			extractStringByPaths(data, []string{"usage", "cost_mode"}),
+			"reported",
+		)
 		event.SourcePath = input.SourcePath
 		event.SourceOffset = int64Ptr(line.No)
 		event.Metadata = map[string]string{
@@ -407,4 +451,264 @@ func stableID(prefix string, parts ...string) string {
 	joined := strings.Join(parts, "|")
 	sum := sha256.Sum256([]byte(joined))
 	return prefix + "_" + hex.EncodeToString(sum[:12])
+}
+
+func pathValue(root any, path ...string) any {
+	current := root
+	for _, segment := range path {
+		switch typed := current.(type) {
+		case map[string]any:
+			next, ok := typed[segment]
+			if !ok {
+				return nil
+			}
+			current = next
+		case []any:
+			index, err := strconv.Atoi(segment)
+			if err != nil || index < 0 || index >= len(typed) {
+				return nil
+			}
+			current = typed[index]
+		default:
+			return nil
+		}
+	}
+	return current
+}
+
+func extractStringByPaths(payload map[string]any, paths ...[]string) string {
+	for _, path := range paths {
+		if len(path) == 0 {
+			continue
+		}
+		if text := anyToString(pathValue(payload, path...)); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func extractTextFromContent(value any) string {
+	parts := collectTextParts(value)
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n")
+}
+
+func collectTextParts(value any) []string {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return nil
+		}
+		return []string{trimmed}
+	case []any:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			result = append(result, collectTextParts(item)...)
+		}
+		return result
+	case map[string]any:
+		if text := anyToString(typed["text"]); text != "" {
+			return []string{text}
+		}
+		if nested := collectTextParts(typed["content"]); len(nested) > 0 {
+			return nested
+		}
+		if nested := collectTextParts(typed["parts"]); len(nested) > 0 {
+			return nested
+		}
+		return nil
+	default:
+		if text := anyToString(typed); text != "" {
+			return []string{text}
+		}
+		return nil
+	}
+}
+
+func extractTokenUsageFromPayload(payload map[string]any) ingest.TokenUsage {
+	usage := ingest.TokenUsage{
+		InputTokens: firstInt64ByPaths(payload,
+			[]string{"input_tokens"},
+			[]string{"inputTokens"},
+			[]string{"prompt_tokens"},
+			[]string{"promptTokenCount"},
+			[]string{"usage", "input_tokens"},
+			[]string{"usage", "inputTokens"},
+			[]string{"usage", "prompt_tokens"},
+			[]string{"usage", "promptTokenCount"},
+			[]string{"usageMetadata", "promptTokenCount"},
+			[]string{"usage_metadata", "prompt_token_count"},
+		),
+		OutputTokens: firstInt64ByPaths(payload,
+			[]string{"output_tokens"},
+			[]string{"outputTokens"},
+			[]string{"completion_tokens"},
+			[]string{"candidatesTokenCount"},
+			[]string{"usage", "output_tokens"},
+			[]string{"usage", "outputTokens"},
+			[]string{"usage", "completion_tokens"},
+			[]string{"usage", "candidatesTokenCount"},
+			[]string{"usageMetadata", "candidatesTokenCount"},
+			[]string{"usage_metadata", "candidates_token_count"},
+		),
+		CacheReadTokens: firstInt64ByPaths(payload,
+			[]string{"cache_read_tokens"},
+			[]string{"cacheReadTokens"},
+			[]string{"cachedContentTokenCount"},
+			[]string{"usage", "cache_read_tokens"},
+			[]string{"usage", "cacheReadTokens"},
+			[]string{"usageMetadata", "cachedContentTokenCount"},
+			[]string{"usage_metadata", "cached_content_token_count"},
+		),
+		CacheWriteTokens: firstInt64ByPaths(payload,
+			[]string{"cache_write_tokens"},
+			[]string{"cacheWriteTokens"},
+			[]string{"usage", "cache_write_tokens"},
+			[]string{"usage", "cacheWriteTokens"},
+		),
+		ReasoningTokens: firstInt64ByPaths(payload,
+			[]string{"reasoning_tokens"},
+			[]string{"reasoningTokens"},
+			[]string{"usage", "reasoning_tokens"},
+			[]string{"usage", "reasoningTokens"},
+			[]string{"usageMetadata", "thoughtsTokenCount"},
+			[]string{"usage_metadata", "thoughts_token_count"},
+		),
+	}
+	return usage
+}
+
+func firstInt64ByPaths(payload map[string]any, paths ...[]string) int64 {
+	for _, path := range paths {
+		if len(path) == 0 {
+			continue
+		}
+		if value, ok := anyToInt64(pathValue(payload, path...)); ok {
+			return value
+		}
+	}
+	return 0
+}
+
+func extractFloatByPaths(payload map[string]any, paths ...[]string) *float64 {
+	for _, path := range paths {
+		if len(path) == 0 {
+			continue
+		}
+		if value, ok := anyToFloat64(pathValue(payload, path...)); ok {
+			return &value
+		}
+	}
+	return nil
+}
+
+func anyToInt64(value any) (int64, bool) {
+	switch typed := value.(type) {
+	case nil:
+		return 0, false
+	case int:
+		return int64(typed), true
+	case int8:
+		return int64(typed), true
+	case int16:
+		return int64(typed), true
+	case int32:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case uint:
+		return int64(typed), true
+	case uint8:
+		return int64(typed), true
+	case uint16:
+		return int64(typed), true
+	case uint32:
+		return int64(typed), true
+	case uint64:
+		if typed > uint64(^uint64(0)>>1) {
+			return 0, false
+		}
+		return int64(typed), true
+	case float32:
+		return int64(typed), true
+	case float64:
+		return int64(typed), true
+	case json.Number:
+		if parsed, err := typed.Int64(); err == nil {
+			return parsed, true
+		}
+		if parsed, err := typed.Float64(); err == nil {
+			return int64(parsed), true
+		}
+		return 0, false
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return 0, false
+		}
+		if parsed, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+			return parsed, true
+		}
+		if parsed, err := strconv.ParseFloat(trimmed, 64); err == nil {
+			return int64(parsed), true
+		}
+		return 0, false
+	default:
+		return 0, false
+	}
+}
+
+func anyToFloat64(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case nil:
+		return 0, false
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int8:
+		return float64(typed), true
+	case int16:
+		return float64(typed), true
+	case int32:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case uint:
+		return float64(typed), true
+	case uint8:
+		return float64(typed), true
+	case uint16:
+		return float64(typed), true
+	case uint32:
+		return float64(typed), true
+	case uint64:
+		return float64(typed), true
+	case json.Number:
+		parsed, err := typed.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return 0, false
+		}
+		parsed, err := strconv.ParseFloat(trimmed, 64)
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
+	default:
+		return 0, false
+	}
 }
