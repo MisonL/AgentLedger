@@ -92,6 +92,43 @@ describe("Web Console", () => {
         });
       }
 
+      if (url.endsWith("/api/v1/sources/source-1/health") && method === "GET") {
+        return mockJsonResponse({
+          sourceId: "source-1",
+          accessMode: "hybrid",
+          lastSuccessAt: "2026-03-02T09:30:00.000Z",
+          lastFailureAt: "2026-03-02T09:00:00.000Z",
+          failureCount: 0,
+          avgLatencyMs: 122,
+          freshnessMinutes: 6,
+        });
+      }
+
+      if (url.includes("/api/v1/sources/source-1/parse-failures") && method === "GET") {
+        return mockJsonResponse({
+          items: [
+            {
+              id: "failure-1",
+              sourceId: "source-1",
+              parserKey: "jsonl",
+              errorCode: "parse_error",
+              errorMessage: "json line parse failed",
+              sourcePath: "/var/log/codex.log",
+              sourceOffset: 128,
+              metadata: {
+                parser: "jsonl",
+              },
+              failedAt: "2026-03-02T08:59:00.000Z",
+              createdAt: "2026-03-02T08:59:00.000Z",
+            },
+          ],
+          total: 1,
+          filters: {
+            limit: 5,
+          },
+        });
+      }
+
       if (url.endsWith("/api/v1/sources") && method === "POST") {
         const payload = JSON.parse(String(init?.body ?? "{}")) as {
           name: string;
@@ -123,6 +160,9 @@ describe("Web Console", () => {
       await screen.findByRole("heading", { name: "Sources 管理", level: 1 })
     ).toBeInTheDocument();
     expect(await screen.findByText("devbox-shanghai")).toBeInTheDocument();
+    expect(await screen.findByText("健康状态与最近解析失败")).toBeInTheDocument();
+    expect(await screen.findByText(/^健康$/)).toBeInTheDocument();
+    expect(await screen.findByText("json line parse failed")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "build-node-02" } });
     fireEvent.change(screen.getByLabelText("类型"), { target: { value: "ssh" } });
@@ -138,6 +178,139 @@ describe("Web Console", () => {
         expect.objectContaining({ method: "POST" })
       );
     });
+  });
+
+  test("Sources 状态区块展示 loading 与 empty 态", async () => {
+    setAuthTokens({
+      accessToken: "access-token-test-source-loading",
+      refreshToken: "refresh-token-test-source-loading",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const sources = [
+      {
+        id: "source-loading",
+        name: "build-linux-01",
+        type: "ssh",
+        location: "10.0.0.31",
+        enabled: true,
+        createdAt: "2026-03-01T12:00:00.000Z",
+      },
+    ];
+
+    let resolveHealthRequest: ((value: Response) => void) | null = null;
+    const healthRequest = new Promise<Response>((resolve) => {
+      resolveHealthRequest = resolve;
+    });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/sources") && method === "GET") {
+        return mockJsonResponse({
+          items: sources,
+          total: sources.length,
+        });
+      }
+
+      if (url.endsWith("/api/v1/sources/source-loading/health") && method === "GET") {
+        return healthRequest;
+      }
+
+      if (url.includes("/api/v1/sources/source-loading/parse-failures") && method === "GET") {
+        return mockJsonResponse({
+          items: [],
+          total: 0,
+          filters: {
+            limit: 5,
+          },
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Sources" }));
+    expect(await screen.findByRole("heading", { name: "Sources 管理", level: 1 })).toBeInTheDocument();
+    expect(await screen.findByText("健康状态加载中...")).toBeInTheDocument();
+
+    resolveHealthRequest?.(
+      mockJsonResponse({
+        sourceId: "source-loading",
+        accessMode: "hybrid",
+        lastSuccessAt: "2026-03-02T10:00:00.000Z",
+        lastFailureAt: null,
+        failureCount: 0,
+        avgLatencyMs: 110,
+        freshnessMinutes: 4,
+      })
+    );
+
+    expect(await screen.findByText(/^健康$/)).toBeInTheDocument();
+    expect(await screen.findByText("最近暂无解析失败记录。")).toBeInTheDocument();
+  });
+
+  test("Sources 状态区块展示 error 态", async () => {
+    setAuthTokens({
+      accessToken: "access-token-test-source-error",
+      refreshToken: "refresh-token-test-source-error",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/sources") && method === "GET") {
+        return mockJsonResponse({
+          items: [
+            {
+              id: "source-error",
+              name: "broken-source",
+              type: "local",
+              location: "/workspace/.codex/sessions",
+              enabled: true,
+              createdAt: "2026-03-01T10:00:00.000Z",
+            },
+          ],
+          total: 1,
+        });
+      }
+
+      if (url.endsWith("/api/v1/sources/source-error/health") && method === "GET") {
+        return mockJsonResponse(
+          {
+            message: "health probe timeout",
+          },
+          500
+        );
+      }
+
+      if (url.includes("/api/v1/sources/source-error/parse-failures") && method === "GET") {
+        return mockJsonResponse(
+          {
+            message: "parse failures service unavailable",
+          },
+          500
+        );
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Sources" }));
+    expect(await screen.findByRole("heading", { name: "Sources 管理", level: 1 })).toBeInTheDocument();
+    expect(await screen.findByText("健康状态加载失败：health probe timeout")).toBeInTheDocument();
+    expect(
+      await screen.findByText("解析失败列表加载失败：parse failures service unavailable")
+    ).toBeInTheDocument();
   });
 
   test("Analytics 页面会请求 usage daily/monthly/models/sessions 并展示环比与趋势图", async () => {
@@ -331,6 +504,18 @@ describe("Web Console", () => {
           ],
           total: 1,
           nextCursor: null,
+          sourceFreshness: [
+            {
+              sourceId: "source-1",
+              sourceName: "devbox-shanghai",
+              accessMode: "hybrid",
+              lastSuccessAt: "2026-03-02T09:04:00.000Z",
+              lastFailureAt: null,
+              failureCount: 1,
+              avgLatencyMs: 120,
+              freshnessMinutes: 7,
+            },
+          ],
         });
       }
 
@@ -379,6 +564,9 @@ describe("Web Console", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
     expect(await screen.findByRole("heading", { name: "会话中心" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "会话详情" })).toBeInTheDocument();
+    const freshnessSummary = await screen.findByLabelText("来源新鲜度");
+    expect(freshnessSummary).toHaveTextContent("devbox-shanghai（hybrid）");
+    expect(freshnessSummary).toHaveTextContent("新鲜度 7 分钟");
     expect(await screen.findByText("Token 分解")).toBeInTheDocument();
     expect(await screen.findByText("来源追溯")).toBeInTheDocument();
     expect(await screen.findByText("provider：session-detail-test")).toBeInTheDocument();

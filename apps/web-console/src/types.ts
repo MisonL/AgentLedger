@@ -41,6 +41,44 @@ export interface CreateSourceInput {
   syncRetentionDays?: number;
 }
 
+export interface SourceHealth {
+  sourceId: string;
+  accessMode: SourceAccessMode;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  failureCount: number;
+  avgLatencyMs: number | null;
+  freshnessMinutes: number | null;
+}
+
+export interface SourceParseFailure {
+  id: string;
+  sourceId: string;
+  parserKey: string;
+  errorCode: string;
+  errorMessage: string;
+  sourcePath?: string;
+  sourceOffset?: number;
+  rawHash?: string;
+  metadata: Record<string, unknown>;
+  failedAt: string;
+  createdAt: string;
+}
+
+export interface SourceParseFailureQueryInput {
+  from?: string;
+  to?: string;
+  parserKey?: string;
+  errorCode?: string;
+  limit?: number;
+}
+
+export interface SourceParseFailureListResponse {
+  items: SourceParseFailure[];
+  total: number;
+  filters?: SourceParseFailureQueryInput;
+}
+
 export interface HeatmapCell {
   date: string;
   tokens: number;
@@ -86,6 +124,7 @@ export interface SessionSearchResponse {
   total: number;
   nextCursor?: string | null;
   filters?: SessionSearchInput;
+  sourceFreshness?: SessionSourceFreshness[];
 }
 
 export interface SessionDetail extends Session {
@@ -118,6 +157,17 @@ export interface SessionSourceTrace {
   sourceName?: string;
   provider?: string;
   path?: string;
+}
+
+export interface SessionSourceFreshness {
+  sourceId: string;
+  sourceName?: string;
+  accessMode: SourceAccessMode;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  failureCount: number;
+  avgLatencyMs: number | null;
+  freshnessMinutes: number | null;
 }
 
 export interface SessionDetailResponse extends SessionDetail {

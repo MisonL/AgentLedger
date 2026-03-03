@@ -9,6 +9,8 @@ import {
 import {
   ApiError,
   createSource,
+  fetchSourceHealth,
+  fetchSourceParseFailures,
   fetchHeatmap,
   fetchPricingCatalog,
   fetchSessionDetail,
@@ -35,7 +37,9 @@ import type {
   Session,
   SessionDetailResponse,
   SessionSearchInput,
+  SessionSourceFreshness,
   SourceConnectionTestResponse,
+  SourceHealth,
   SourceType,
   UsageAggregateFilters,
   UsageCostMode,
@@ -185,8 +189,52 @@ function formatDateTime(isoDate: string): string {
   });
 }
 
+function formatOptionalDateTime(isoDate: string | null): string {
+  return isoDate ? formatDateTime(isoDate) : "--";
+}
+
+function formatSourceFreshness(item: SessionSourceFreshness): string {
+  const sourceLabel = item.sourceName ?? item.sourceId;
+  const freshnessLabel =
+    item.freshnessMinutes === null ? "--" : `${item.freshnessMinutes.toLocaleString("zh-CN")} 分钟`;
+  const latencyLabel =
+    item.avgLatencyMs === null ? "--" : `${Math.round(item.avgLatencyMs).toLocaleString("zh-CN")} ms`;
+
+  return [
+    `${sourceLabel}（${item.accessMode}）`,
+    `新鲜度 ${freshnessLabel}`,
+    `最近成功 ${formatOptionalDateTime(item.lastSuccessAt)}`,
+    `最近失败 ${formatOptionalDateTime(item.lastFailureAt)}`,
+    `失败 ${item.failureCount.toLocaleString("zh-CN")} 次`,
+    `平均延迟 ${latencyLabel}`,
+  ].join(" | ");
+}
+
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "未知错误";
+}
+
+function toTimeMs(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function getSourceHealthStatus(health: SourceHealth): { label: string; className: string } {
+  const successTime = toTimeMs(health.lastSuccessAt);
+  const failureTime = toTimeMs(health.lastFailureAt);
+  const latestFailed =
+    failureTime !== null && (successTime === null || failureTime > successTime);
+
+  if (latestFailed || (successTime === null && health.failureCount > 0)) {
+    return { label: "异常", className: "is-error" };
+  }
+  if (successTime !== null) {
+    return { label: "健康", className: "is-success" };
+  }
+  return { label: "未知", className: "is-unknown" };
 }
 
 function toDateKey(isoDate: string): string {
@@ -778,6 +826,11 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
   });
 
   const sessions = sessionsQuery.data?.items ?? [];
+  const sourceFreshness = sessionsQuery.data?.sourceFreshness ?? [];
+  const sourceFreshnessText =
+    sourceFreshness.length > 0
+      ? `来源新鲜度：${sourceFreshness.map((item) => formatSourceFreshness(item)).join("；")}`
+      : "来源新鲜度：暂无数据";
 
   useEffect(() => {
     if (sessions.length === 0) {
@@ -842,6 +895,7 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
             共 {sessionsQuery.data?.total ?? 0} 条
             {hasAppliedFilters ? "（已应用筛选）" : ""}
           </p>
+          <p aria-label="来源新鲜度">{sourceFreshnessText}</p>
         </header>
 
         <form className="session-filter-form" onSubmit={handleFilterSubmit}>
@@ -1574,6 +1628,7 @@ function AnalyticsPage() {
 function SourcesPage() {
   const [sourceForm, setSourceForm] = useState<SourceFormState>(INITIAL_SOURCE_FORM);
   const [sourceFormError, setSourceFormError] = useState<string | null>(null);
+  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
   const [connectionResults, setConnectionResults] = useState<
     Record<string, { success: boolean; message: string }>
   >({});
@@ -1617,6 +1672,39 @@ function SourcesPage() {
   });
 
   const sourceItems = sourcesQuery.data?.items ?? [];
+  const selectedSource = sourceItems.find((item) => item.id === selectedSourceId) ?? null;
+
+  useEffect(() => {
+    if (sourceItems.length === 0) {
+      setSelectedSourceId(null);
+      return;
+    }
+    if (!selectedSourceId || !sourceItems.some((item) => item.id === selectedSourceId)) {
+      setSelectedSourceId(sourceItems[0].id);
+    }
+  }, [selectedSourceId, sourceItems]);
+
+  const sourceHealthQuery = useQuery({
+    queryKey: ["source-health", selectedSourceId],
+    enabled: Boolean(selectedSourceId),
+    queryFn: ({ signal }) => fetchSourceHealth(selectedSourceId!, signal),
+    staleTime: 20_000,
+    retry: false,
+  });
+
+  const parseFailureQuery = useQuery({
+    queryKey: ["source-parse-failures", selectedSourceId],
+    enabled: Boolean(selectedSourceId),
+    queryFn: ({ signal }) =>
+      fetchSourceParseFailures(selectedSourceId!, { limit: 5 }, signal),
+    staleTime: 20_000,
+    retry: false,
+  });
+
+  const sourceHealthStatus = sourceHealthQuery.data
+    ? getSourceHealthStatus(sourceHealthQuery.data)
+    : null;
+  const sourceParseFailureItems = parseFailureQuery.data?.items ?? [];
 
   function handleSourceSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1675,26 +1763,37 @@ function SourcesPage() {
                 <tbody>
                   {sourceItems.map((source) => {
                     const latestResult = connectionResults[source.id];
+                    const isSelected = source.id === selectedSourceId;
                     const isTesting =
                       testConnectionMutation.isPending &&
                       testConnectionMutation.variables === source.id;
 
                     return (
-                      <tr key={source.id}>
+                      <tr key={source.id} className={isSelected ? "is-selected-row" : ""}>
                         <td>{source.name}</td>
                         <td>{source.type}</td>
                         <td>{source.location}</td>
                         <td>{source.enabled ? "启用" : "停用"}</td>
                         <td>{formatDateTime(source.createdAt)}</td>
                         <td>
-                          <button
-                            type="button"
-                            className="table-action"
-                            disabled={isTesting}
-                            onClick={() => testConnectionMutation.mutate(source.id)}
-                          >
-                            {isTesting ? "测试中..." : "测试连接"}
-                          </button>
+                          <div className="source-action-row">
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() => setSelectedSourceId(source.id)}
+                              aria-pressed={isSelected}
+                            >
+                              {isSelected ? "已选中" : "选中查看"}
+                            </button>
+                            <button
+                              type="button"
+                              className="table-action"
+                              disabled={isTesting}
+                              onClick={() => testConnectionMutation.mutate(source.id)}
+                            >
+                              {isTesting ? "测试中..." : "测试连接"}
+                            </button>
+                          </div>
                           {latestResult ? (
                             <p
                               className={`tiny-feedback ${
@@ -1711,6 +1810,113 @@ function SourcesPage() {
                 </tbody>
               </table>
             </div>
+          ) : null}
+
+          {!sourcesQuery.isLoading && !sourcesQuery.isError ? (
+            <section className="source-insight-panel" aria-label="Source 健康状态与解析失败">
+              <header className="source-insight-header">
+                <h3>健康状态与最近解析失败</h3>
+                <p>{selectedSource ? `当前 Source：${selectedSource.name}` : "请先选择 Source"}</p>
+              </header>
+
+              <div className="source-insight-grid">
+                <article className="source-insight-card">
+                  <h4>健康状态</h4>
+                  {!selectedSourceId ? <p className="feedback empty">请先选中一个 Source。</p> : null}
+                  {selectedSourceId && sourceHealthQuery.isLoading ? (
+                    <p className="feedback info">健康状态加载中...</p>
+                  ) : null}
+                  {selectedSourceId && sourceHealthQuery.isError ? (
+                    <p className="feedback error">
+                      健康状态加载失败：{toErrorMessage(sourceHealthQuery.error)}
+                    </p>
+                  ) : null}
+                  {selectedSourceId && sourceHealthQuery.data ? (
+                    <dl className="source-health-list">
+                      <div className="source-health-row">
+                        <dt>健康状态</dt>
+                        <dd>
+                          <span className={`source-health-status ${sourceHealthStatus?.className ?? ""}`}>
+                            {sourceHealthStatus?.label ?? "--"}
+                          </span>
+                        </dd>
+                      </div>
+                      <div className="source-health-row">
+                        <dt>接入模式</dt>
+                        <dd>{sourceHealthQuery.data.accessMode}</dd>
+                      </div>
+                      <div className="source-health-row">
+                        <dt>最近成功</dt>
+                        <dd>{formatOptionalDateTime(sourceHealthQuery.data.lastSuccessAt)}</dd>
+                      </div>
+                      <div className="source-health-row">
+                        <dt>最近失败</dt>
+                        <dd>{formatOptionalDateTime(sourceHealthQuery.data.lastFailureAt)}</dd>
+                      </div>
+                      <div className="source-health-row">
+                        <dt>失败次数</dt>
+                        <dd>{sourceHealthQuery.data.failureCount.toLocaleString("zh-CN")}</dd>
+                      </div>
+                      <div className="source-health-row">
+                        <dt>平均延迟</dt>
+                        <dd>
+                          {sourceHealthQuery.data.avgLatencyMs === null
+                            ? "--"
+                            : `${Math.round(sourceHealthQuery.data.avgLatencyMs).toLocaleString(
+                                "zh-CN"
+                              )} ms`}
+                        </dd>
+                      </div>
+                      <div className="source-health-row">
+                        <dt>新鲜度</dt>
+                        <dd>
+                          {sourceHealthQuery.data.freshnessMinutes === null
+                            ? "--"
+                            : `${sourceHealthQuery.data.freshnessMinutes.toLocaleString("zh-CN")} 分钟`}
+                        </dd>
+                      </div>
+                    </dl>
+                  ) : null}
+                </article>
+
+                <article className="source-insight-card">
+                  <h4>最近解析失败</h4>
+                  {!selectedSourceId ? <p className="feedback empty">请先选中一个 Source。</p> : null}
+                  {selectedSourceId && parseFailureQuery.isLoading ? (
+                    <p className="feedback info">解析失败列表加载中...</p>
+                  ) : null}
+                  {selectedSourceId && parseFailureQuery.isError ? (
+                    <p className="feedback error">
+                      解析失败列表加载失败：{toErrorMessage(parseFailureQuery.error)}
+                    </p>
+                  ) : null}
+                  {selectedSourceId &&
+                  !parseFailureQuery.isLoading &&
+                  !parseFailureQuery.isError &&
+                  sourceParseFailureItems.length === 0 ? (
+                    <p className="feedback empty">最近暂无解析失败记录。</p>
+                  ) : null}
+                  {selectedSourceId && sourceParseFailureItems.length > 0 ? (
+                    <ul className="source-failure-list">
+                      {sourceParseFailureItems.map((item) => (
+                        <li key={item.id} className="source-failure-item">
+                          <header>
+                            <strong>{item.errorCode}</strong>
+                            <time dateTime={item.failedAt}>{formatDateTime(item.failedAt)}</time>
+                          </header>
+                          <p>{item.errorMessage}</p>
+                          <p>
+                            parser={item.parserKey}
+                            {item.sourcePath ? ` | path=${item.sourcePath}` : ""}
+                            {item.sourceOffset !== undefined ? ` | offset=${item.sourceOffset}` : ""}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </article>
+              </div>
+            </section>
           ) : null}
         </div>
 

@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   clearAuthTokens,
   fetchPricingCatalog,
+  fetchSourceHealth,
+  fetchSourceParseFailures,
   fetchSessionDetail,
   fetchSessionEvents,
   fetchHeatmap,
@@ -435,7 +437,7 @@ describe("api mock fallback gate", () => {
     );
   });
 
-  test("session detail/events/pricing/sources test-connection 接口请求方式正确", async () => {
+  test("session detail/events/pricing/source health/parse-failures/test-connection 接口请求方式正确", async () => {
     env.DEV = false;
     setAuthTokens({
       accessToken: "access-token-feature",
@@ -487,6 +489,46 @@ describe("api mock fallback gate", () => {
           },
         });
       }
+      if (url.endsWith("/api/v1/sources/source-1/health") && method === "GET") {
+        return mockJsonResponse({
+          sourceId: "source-1",
+          accessMode: "sync",
+          lastSuccessAt: "2026-03-02T09:10:00.000Z",
+          lastFailureAt: "2026-03-02T09:05:00.000Z",
+          failureCount: 1,
+          avgLatencyMs: 108,
+          freshnessMinutes: 4,
+        });
+      }
+      if (url.includes("/api/v1/sources/source-1/parse-failures?") && method === "GET") {
+        return mockJsonResponse({
+          items: [
+            {
+              id: "pf-1",
+              sourceId: "source-1",
+              parserKey: "jsonl",
+              errorCode: "parse_error",
+              errorMessage: "json line parse failed",
+              sourcePath: "/tmp/a.jsonl",
+              sourceOffset: 12,
+              rawHash: "hash-1",
+              metadata: {
+                parser: "jsonl",
+              },
+              failedAt: "2026-03-02T09:06:00.000Z",
+              createdAt: "2026-03-02T09:06:00.000Z",
+            },
+          ],
+          total: 1,
+          filters: {
+            from: "2026-03-02T00:00:00.000Z",
+            to: "2026-03-03T00:00:00.000Z",
+            parserKey: "jsonl",
+            errorCode: "parse_error",
+            limit: 10,
+          },
+        });
+      }
       if (url.endsWith("/api/v1/pricing/catalog") && method === "GET") {
         return mockJsonResponse({
           version: {
@@ -533,6 +575,27 @@ describe("api mock fallback gate", () => {
         tokenBreakdown: expect.objectContaining({ totalTokens: 100 }),
       })
     );
+    await expect(fetchSourceHealth("source-1")).resolves.toEqual(
+      expect.objectContaining({
+        sourceId: "source-1",
+        accessMode: "sync",
+        failureCount: 1,
+      })
+    );
+    await expect(
+      fetchSourceParseFailures("source-1", {
+        from: "2026-03-02T00:00:00.000Z",
+        to: "2026-03-03T00:00:00.000Z",
+        parserKey: "jsonl",
+        errorCode: "parse_error",
+        limit: 10,
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        total: 1,
+        items: expect.any(Array),
+      })
+    );
     await expect(fetchPricingCatalog()).resolves.toEqual(
       expect.objectContaining({
         version: expect.objectContaining({ id: "ver-1" }),
@@ -561,6 +624,25 @@ describe("api mock fallback gate", () => {
       fetchSpy.mock.calls.some(([url]) => toUrl(url).endsWith("/api/v1/sessions/session-1"))
     ).toBe(true);
     expect(
+      fetchSpy.mock.calls.some(([url]) => toUrl(url).endsWith("/api/v1/sources/source-1/health"))
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url]) =>
+        toUrl(url).includes("/api/v1/sources/source-1/parse-failures?")
+      )
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url]) =>
+        toUrl(url).includes("parserKey=jsonl")
+      )
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url]) =>
+        toUrl(url).includes("errorCode=parse_error")
+      )
+    ).toBe(true);
+    expect(fetchSpy.mock.calls.some(([url]) => toUrl(url).includes("limit=10"))).toBe(true);
+    expect(
       fetchSpy.mock.calls.some(([url, init]) => {
         const requestInit = init as RequestInit | undefined;
         return toUrl(url).endsWith("/api/v1/pricing/catalog") && requestInit?.method === "PUT";
@@ -575,5 +657,42 @@ describe("api mock fallback gate", () => {
         );
       })
     ).toBe(true);
+  });
+
+  test("source health 与 parse-failures 返回非法结构时抛错", async () => {
+    env.DEV = false;
+    setAuthTokens({
+      accessToken: "access-token-invalid-payload",
+      refreshToken: "refresh-token-invalid-payload",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/sources/source-invalid/health") && method === "GET") {
+        return mockJsonResponse({
+          sourceId: "source-invalid",
+          accessMode: "sync",
+        });
+      }
+      if (url.endsWith("/api/v1/sources/source-invalid/parse-failures") && method === "GET") {
+        return mockJsonResponse({
+          items: [{ id: "pf-invalid" }],
+          total: 1,
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    await expect(fetchSourceHealth("source-invalid")).rejects.toThrow(
+      "sources.health 返回结构不合法"
+    );
+    await expect(fetchSourceParseFailures("source-invalid")).rejects.toThrow(
+      "sources.parse-failures 返回结构不合法"
+    );
   });
 });

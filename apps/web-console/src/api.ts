@@ -12,6 +12,10 @@ import type {
   PricingCatalogUpsertInput,
   SourceAccessMode,
   SourceConnectionTestResponse,
+  SourceHealth,
+  SourceParseFailure,
+  SourceParseFailureListResponse,
+  SourceParseFailureQueryInput,
   Source,
   SourceListResponse,
   SourceType,
@@ -20,6 +24,7 @@ import type {
   SessionEventListResponse,
   SessionSearchInput,
   SessionSearchResponse,
+  SessionSourceFreshness,
   UsageAggregateFilters,
   UsageAggregateResponse,
   UsageDailyItem,
@@ -134,6 +139,28 @@ function buildMockSessions(input: SessionSearchInput): SessionSearchResponse {
     items,
     total: items.length,
     nextCursor: null,
+    sourceFreshness: [
+      {
+        sourceId: "devbox-shanghai",
+        sourceName: "上海开发机",
+        accessMode: "hybrid",
+        lastSuccessAt: `${dateKey}T02:10:00.000Z`,
+        lastFailureAt: null,
+        failureCount: 0,
+        avgLatencyMs: 118,
+        freshnessMinutes: 6,
+      },
+      {
+        sourceId: "macbook-pro-15",
+        sourceName: "设计组 Mac",
+        accessMode: "realtime",
+        lastSuccessAt: `${dateKey}T08:03:00.000Z`,
+        lastFailureAt: `${dateKey}T07:58:00.000Z`,
+        failureCount: 1,
+        avgLatencyMs: 156,
+        freshnessMinutes: 11,
+      },
+    ],
   };
 }
 
@@ -185,6 +212,203 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isISODateString(value: unknown): value is string {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
+function isSession(value: unknown): value is Session {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const endedAtOk =
+    value.endedAt === undefined ||
+    value.endedAt === null ||
+    (typeof value.endedAt === "string" && value.endedAt.trim().length > 0);
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.sourceId === "string" &&
+    typeof value.tool === "string" &&
+    typeof value.model === "string" &&
+    isISODateString(value.startedAt) &&
+    endedAtOk &&
+    typeof value.tokens === "number" &&
+    Number.isFinite(value.tokens) &&
+    typeof value.cost === "number" &&
+    Number.isFinite(value.cost)
+  );
+}
+
+function isSessionSourceFreshness(value: unknown): value is SessionSourceFreshness {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const sourceNameOk =
+    value.sourceName === undefined ||
+    value.sourceName === null ||
+    (typeof value.sourceName === "string" && value.sourceName.trim().length > 0);
+  const lastSuccessAtOk = value.lastSuccessAt === null || isISODateString(value.lastSuccessAt);
+  const lastFailureAtOk = value.lastFailureAt === null || isISODateString(value.lastFailureAt);
+  const avgLatencyOk =
+    value.avgLatencyMs === null ||
+    (typeof value.avgLatencyMs === "number" &&
+      Number.isFinite(value.avgLatencyMs) &&
+      value.avgLatencyMs >= 0);
+  const freshnessOk =
+    value.freshnessMinutes === null ||
+    (typeof value.freshnessMinutes === "number" &&
+      Number.isInteger(value.freshnessMinutes) &&
+      value.freshnessMinutes >= 0);
+
+  return (
+    typeof value.sourceId === "string" &&
+    sourceNameOk &&
+    isSourceAccessMode(value.accessMode) &&
+    lastSuccessAtOk &&
+    lastFailureAtOk &&
+    typeof value.failureCount === "number" &&
+    Number.isInteger(value.failureCount) &&
+    value.failureCount >= 0 &&
+    avgLatencyOk &&
+    freshnessOk
+  );
+}
+
+function isSourceHealth(value: unknown): value is SourceHealth {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const lastSuccessAtOk = value.lastSuccessAt === null || isISODateString(value.lastSuccessAt);
+  const lastFailureAtOk = value.lastFailureAt === null || isISODateString(value.lastFailureAt);
+  const avgLatencyOk =
+    value.avgLatencyMs === null ||
+    (typeof value.avgLatencyMs === "number" &&
+      Number.isFinite(value.avgLatencyMs) &&
+      value.avgLatencyMs >= 0);
+  const freshnessOk =
+    value.freshnessMinutes === null ||
+    (typeof value.freshnessMinutes === "number" &&
+      Number.isInteger(value.freshnessMinutes) &&
+      value.freshnessMinutes >= 0);
+
+  return (
+    typeof value.sourceId === "string" &&
+    isSourceAccessMode(value.accessMode) &&
+    lastSuccessAtOk &&
+    lastFailureAtOk &&
+    typeof value.failureCount === "number" &&
+    Number.isInteger(value.failureCount) &&
+    value.failureCount >= 0 &&
+    avgLatencyOk &&
+    freshnessOk
+  );
+}
+
+function isSourceParseFailure(value: unknown): value is SourceParseFailure {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const sourcePathOk =
+    value.sourcePath === undefined ||
+    value.sourcePath === null ||
+    typeof value.sourcePath === "string";
+  const sourceOffsetOk =
+    value.sourceOffset === undefined ||
+    value.sourceOffset === null ||
+    (typeof value.sourceOffset === "number" &&
+      Number.isInteger(value.sourceOffset) &&
+      value.sourceOffset >= 0);
+  const rawHashOk =
+    value.rawHash === undefined ||
+    value.rawHash === null ||
+    typeof value.rawHash === "string";
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.sourceId === "string" &&
+    typeof value.parserKey === "string" &&
+    typeof value.errorCode === "string" &&
+    typeof value.errorMessage === "string" &&
+    sourcePathOk &&
+    sourceOffsetOk &&
+    rawHashOk &&
+    isRecord(value.metadata) &&
+    isISODateString(value.failedAt) &&
+    isISODateString(value.createdAt)
+  );
+}
+
+function isSourceParseFailureQueryInput(
+  value: unknown
+): value is SourceParseFailureQueryInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const fromOk = value.from === undefined || isISODateString(value.from);
+  const toOk = value.to === undefined || isISODateString(value.to);
+  const parserKeyOk = value.parserKey === undefined || typeof value.parserKey === "string";
+  const errorCodeOk = value.errorCode === undefined || typeof value.errorCode === "string";
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" &&
+      Number.isInteger(value.limit) &&
+      value.limit > 0);
+
+  return fromOk && toOk && parserKeyOk && errorCodeOk && limitOk;
+}
+
+function isSourceParseFailureListResponse(
+  value: unknown
+): value is SourceParseFailureListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const filtersOk =
+    value.filters === undefined || isSourceParseFailureQueryInput(value.filters);
+
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isSourceParseFailure(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    filtersOk
+  );
+}
+
+function isSessionSearchResponse(value: unknown): value is SessionSearchResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const nextCursorOk =
+    value.nextCursor === undefined ||
+    value.nextCursor === null ||
+    typeof value.nextCursor === "string";
+  const filtersOk = value.filters === undefined || isRecord(value.filters);
+  const sourceFreshnessOk =
+    value.sourceFreshness === undefined ||
+    (Array.isArray(value.sourceFreshness) &&
+      value.sourceFreshness.every((item) => isSessionSourceFreshness(item)));
+
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isSession(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    nextCursorOk &&
+    filtersOk &&
+    sourceFreshnessOk
+  );
+}
+
 function buildUsageAggregateQuery(filters?: UsageAggregateFilters): string {
   if (!filters) {
     return "";
@@ -199,6 +423,32 @@ function buildUsageAggregateQuery(filters?: UsageAggregateFilters): string {
   }
   if (typeof filters.limit === "number" && Number.isInteger(filters.limit) && filters.limit > 0) {
     params.set("limit", String(filters.limit));
+  }
+
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildSourceParseFailureQuery(input?: SourceParseFailureQueryInput): string {
+  if (!input) {
+    return "";
+  }
+
+  const params = new URLSearchParams();
+  if (typeof input.from === "string" && input.from.trim().length > 0) {
+    params.set("from", input.from.trim());
+  }
+  if (typeof input.to === "string" && input.to.trim().length > 0) {
+    params.set("to", input.to.trim());
+  }
+  if (typeof input.parserKey === "string" && input.parserKey.trim().length > 0) {
+    params.set("parserKey", input.parserKey.trim());
+  }
+  if (typeof input.errorCode === "string" && input.errorCode.trim().length > 0) {
+    params.set("errorCode", input.errorCode.trim());
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit > 0) {
+    params.set("limit", String(input.limit));
   }
 
   const query = params.toString();
@@ -647,6 +897,47 @@ export async function fetchSources(signal?: AbortSignal): Promise<SourceListResp
   };
 }
 
+export async function fetchSourceHealth(
+  sourceId: string,
+  signal?: AbortSignal
+): Promise<SourceHealth> {
+  const normalizedSourceId = sourceId.trim();
+  if (!normalizedSourceId) {
+    throw new Error("sourceId 不能为空。");
+  }
+
+  const result = await requestJson<unknown>(
+    `/api/v1/sources/${encodeURIComponent(normalizedSourceId)}/health`,
+    undefined,
+    signal
+  );
+  if (!isSourceHealth(result)) {
+    throw new Error("sources.health 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchSourceParseFailures(
+  sourceId: string,
+  input?: SourceParseFailureQueryInput,
+  signal?: AbortSignal
+): Promise<SourceParseFailureListResponse> {
+  const normalizedSourceId = sourceId.trim();
+  if (!normalizedSourceId) {
+    throw new Error("sourceId 不能为空。");
+  }
+
+  const result = await requestJson<unknown>(
+    `/api/v1/sources/${encodeURIComponent(normalizedSourceId)}/parse-failures${buildSourceParseFailureQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isSourceParseFailureListResponse(result)) {
+    throw new Error("sources.parse-failures 返回结构不合法");
+  }
+  return result;
+}
+
 export async function createSource(
   input: CreateSourceInput,
   signal?: AbortSignal
@@ -684,7 +975,7 @@ export async function searchSessions(
   signal?: AbortSignal
 ): Promise<SessionSearchResponse> {
   try {
-    const result = await requestJson<SessionSearchResponse>(
+    const result = await requestJson<unknown>(
       "/api/v1/sessions/search",
       {
         method: "POST",
@@ -693,7 +984,7 @@ export async function searchSessions(
       signal
     );
 
-    if (!Array.isArray(result.items)) {
+    if (!isSessionSearchResponse(result)) {
       throw new Error("session 返回结构不合法");
     }
 
