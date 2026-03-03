@@ -17,6 +17,8 @@ coverage
 *.tsbuildinfo
 agent
 agent.exe
+!clients/agent/
+!clients/agent/**
 dist/agent/
 
 # Proto / Buf 生成产物
