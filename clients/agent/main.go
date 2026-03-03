@@ -40,6 +40,8 @@ func main() {
 	switch os.Args[1] {
 	case "run":
 		os.Exit(runCommand(os.Args[2:]))
+	case "collect":
+		os.Exit(collectCommand(os.Args[2:]))
 	case "oidc":
 		os.Exit(oidcCommand(os.Args[2:]))
 	case "doctor":
@@ -966,6 +968,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  agent <command> [flags]")
 	fmt.Fprintln(os.Stderr, "Commands:")
 	fmt.Fprintln(os.Stderr, "  run      运行采集占位流程")
+	fmt.Fprintln(os.Stderr, "  collect  采集本地会话并输出 agentEvent JSONL")
 	fmt.Fprintln(os.Stderr, "  oidc     OIDC 设备码登录")
 	fmt.Fprintln(os.Stderr, "  doctor   环境自检占位流程")
 	fmt.Fprintln(os.Stderr, "  version  输出版本信息")

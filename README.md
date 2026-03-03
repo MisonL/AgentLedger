@@ -19,6 +19,7 @@ AgentLedger 面向企业研发与平台团队，目标是把分散在 AI CLI 与
 | --- | --- |
 | 会话与使用量 | 使用热力图（usage heatmap）、daily/monthly/models/sessions 聚合、会话详情与事件列表 |
 | Source 管理 | source 新增/查询/删除、连通性测试、同步任务管理 |
+| Agent 自动采集（新增） | `agent collect` 自动采集本机会话并上报；默认目录：`~/.codex/sessions`、`~/.claude/projects`、`~/.gemini/tmp` |
 | 预算治理 | budgets 读写、阈值分级、告警与状态流转 |
 | 集成分发 | 支持 `alert/weekly` 双事件；`webhook` 原样转发，`wecom/dingtalk/feishu` 使用 `text` 模板消息 |
 | 回调链路 | governance -> integration -> control-plane callback 闭环 |
@@ -101,6 +102,21 @@ make build
 ```bash
 bun --cwd apps/control-plane run dev
 bun --cwd apps/web-console run dev
+```
+
+### 4.1 Agent 自动采集（新增）
+
+默认目录：
+
+- `~/.codex/sessions`
+- `~/.claude/projects`
+- `~/.gemini/tmp`
+
+典型命令：
+
+```bash
+agent collect
+agent collect --help
 ```
 
 如需启用 `sessions/search` 对 puller 的实时同步重试，可在启动 control-plane 前设置：
