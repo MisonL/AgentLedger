@@ -30,7 +30,7 @@ function splitMarkdownRow(row: string): string[] {
 }
 
 function parseP0Clients(markdown: string): string[] {
-  const tableBlocks = markdown.match(/\|.*\|\n\|(?:[-:\s|])+\|\n(?:\|.*\|\n?)+/g) ?? [];
+  const tableBlocks = markdown.match(/\|.*\|\r?\n\|(?:[-:\s|])+\|\r?\n(?:\|.*\|\r?\n?)+/g) ?? [];
   const p0Clients: string[] = [];
 
   for (const block of tableBlocks) {
