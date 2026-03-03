@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import {
+  type BudgetReleaseRequestStatus,
   validateBudgetUpsertInput,
   validateCreateBudgetReleaseRequestInput,
   validateRejectBudgetReleaseRequestInput,
@@ -11,6 +12,8 @@ import type { AppEnv } from "../types";
 
 export const budgetRoutes = new Hono<AppEnv>();
 const repository = getControlPlaneRepository();
+const DEFAULT_RELEASE_REQUEST_LIMIT = 50;
+const MAX_RELEASE_REQUEST_LIMIT = 200;
 
 async function appendAuditLogSafely(input: AppendAuditLogInput): Promise<void> {
   try {
@@ -45,6 +48,36 @@ function parseBooleanQuery(value: string | undefined): boolean | undefined | "in
     return false;
   }
   return "invalid";
+}
+
+function parseReleaseRequestStatusQuery(
+  value: string | undefined
+): BudgetReleaseRequestStatus | undefined | "invalid" {
+  if (value === undefined) {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "pending" || normalized === "rejected" || normalized === "executed") {
+    return normalized;
+  }
+  return "invalid";
+}
+
+function parseReleaseRequestLimitQuery(
+  value: string | undefined
+): { success: true; limit: number } | { success: false; error: string } {
+  if (value === undefined) {
+    return { success: true, limit: DEFAULT_RELEASE_REQUEST_LIMIT };
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return { success: false, error: "limit 必须是 1 到 200 的整数。" };
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_RELEASE_REQUEST_LIMIT) {
+    return { success: false, error: "limit 必须是 1 到 200 的整数。" };
+  }
+  return { success: true, limit: parsed };
 }
 
 budgetRoutes.get("/budgets", async (c) => {
@@ -182,6 +215,61 @@ budgetRoutes.put("/budgets", async (c) => {
   });
 
   return c.json(budget);
+});
+
+budgetRoutes.get("/budgets/:id/release-requests", async (c) => {
+  const auth = await requireAuthContext(c);
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const budgetId = c.req.param("id")?.trim();
+  if (!budgetId) {
+    return c.json({ message: "budgetId 必须为非空字符串。" }, 400);
+  }
+
+  const status = parseReleaseRequestStatusQuery(c.req.query("status"));
+  if (status === "invalid") {
+    return c.json({ message: "status 必须是 pending/rejected/executed 之一。" }, 400);
+  }
+  const limitResult = parseReleaseRequestLimitQuery(c.req.query("limit"));
+  if (!limitResult.success) {
+    return c.json({ message: limitResult.error }, 400);
+  }
+
+  const tenantId = auth.tenantId;
+  const budget = await repository.getBudgetById(tenantId, budgetId);
+  if (!budget) {
+    return c.json({ message: `未找到预算 ${budgetId}。` }, 404);
+  }
+
+  const items = await repository.listBudgetReleaseRequests(tenantId, budgetId, {
+    status,
+    limit: limitResult.limit,
+  });
+  const requestId = c.get("requestId");
+  await appendAuditLogSafely({
+    tenantId,
+    eventId: `cp:${requestId}`,
+    action: "control_plane.budget_release_requests_listed",
+    level: "info",
+    detail: `Listed budget release requests for budget ${budgetId}.`,
+    metadata: {
+      requestId,
+      tenantId,
+      budgetId,
+      status: status ?? null,
+      limit: limitResult.limit,
+      total: items.length,
+    },
+  });
+
+  return c.json({
+    items,
+    total: items.length,
+    status: status ?? null,
+    limit: limitResult.limit,
+  });
 });
 
 budgetRoutes.post("/budgets/:id/release-requests", async (c) => {

@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   mapClientToConnector,
+  parseCollectDefaultDirs,
   parseClientsByPriorities,
+  parseDeclaredCollectTools,
   parseDeclaredPullerConnectors,
   parseFeatureConnectorParserEntrypoints,
+  parseLocalSourceWhitelist,
   parseP0P1Clients,
   validateParserEntrypoints,
 } from "./check-support-matrix";
@@ -80,6 +83,39 @@ var defaultPullerConnectorRegistry = newConnectorRegistry(
 `;
 
     expect(parseDeclaredPullerConnectors(source)).toEqual(["codex", "trae-ide"]);
+  });
+});
+
+describe("collect and whitelist parser", () => {
+  test("可解析 collect 工具声明与默认目录", () => {
+    const source = `const (
+  collectToolAuto = "auto"
+  collectToolCodex = "codex"
+  collectToolQwenCode = "qwen-code"
+  defaultCollectCodexDir = "~/.codex/sessions"
+  defaultCollectQwenCodeDir = "~/.qwen-code/sessions"
+)
+`;
+
+    expect(parseDeclaredCollectTools(source)).toEqual(["codex", "qwen-code"]);
+    expect(parseCollectDefaultDirs(source)).toEqual([
+      "~/.codex/sessions",
+      "~/.qwen-code/sessions",
+    ]);
+  });
+
+  test("可解析 contracts local 源白名单目录", () => {
+    const source = `const LOCAL_SOURCE_WHITELIST = [
+  "~/.codex/sessions",
+  "~/.claude/projects",
+  "~/.qwen-code/sessions",
+];`;
+
+    expect(parseLocalSourceWhitelist(source)).toEqual([
+      "~/.codex/sessions",
+      "~/.claude/projects",
+      "~/.qwen-code/sessions",
+    ]);
   });
 });
 

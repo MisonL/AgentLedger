@@ -8,6 +8,7 @@ import type {
   AuthLogoutInput,
   AuthRefreshInput,
   AuthRegisterInput,
+  AuditExportQueryInput,
   AuditItem,
   AuditLevel,
   AuditListInput,
@@ -43,6 +44,9 @@ import type {
   SessionExportJobStatus,
   SessionExportQueryInput,
   SessionSearchInput,
+  SystemConfigBackupPayload,
+  SystemConfigBackupSource,
+  SystemConfigRestoreInput,
   Source,
   SourceHealth,
   SourceAccessMode,
@@ -126,7 +130,24 @@ const AUDIT_LIMIT_MAX = 200;
 const PASSWORD_MIN_LENGTH = 8;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const LOCAL_SOURCE_WHITELIST = ["~/.codex/sessions", "~/.claude/projects", "~/.gemini/tmp"];
+const LOCAL_SOURCE_WHITELIST = [
+  "~/.codex/sessions",
+  "~/.claude/projects",
+  "~/.gemini/tmp",
+  "~/.aider/sessions",
+  "~/.opencode/sessions",
+  "~/.qwen-code/sessions",
+  "~/.kimi-cli/sessions",
+  "~/.trae-cli/sessions",
+  "~/.codebuddy-cli/sessions",
+  "~/.cursor/sessions",
+  "~/.vscode/sessions",
+  "~/.trae-ide/sessions",
+  "~/.windsurf/sessions",
+  "~/.lingma/sessions",
+  "~/.codebuddy-ide/sessions",
+  "~/.zed/sessions",
+];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -1794,6 +1815,232 @@ export function validateAuditListInput(input: unknown): ValidationResult<AuditLi
       from,
       to,
       limit,
+    },
+  };
+}
+
+export function validateAuditExportQueryInput(
+  input: unknown
+): ValidationResult<AuditExportQueryInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "查询参数必须是对象。" };
+  }
+
+  const format = normalizeString(input.format);
+  const eventId = normalizeString(input.eventId);
+  const action = normalizeString(input.action);
+  const keyword = normalizeString(input.keyword);
+  const base = validateAuditListInput(input);
+
+  if (!base.success) {
+    return base;
+  }
+  if (!format || !isExportFormat(format)) {
+    return { success: false, error: "format 必填且必须是 json/csv 之一。" };
+  }
+  if (input.eventId !== undefined && !eventId) {
+    return { success: false, error: "eventId 必须为非空字符串。" };
+  }
+  if (input.action !== undefined && !action) {
+    return { success: false, error: "action 必须为非空字符串。" };
+  }
+  if (input.keyword !== undefined && !keyword) {
+    return { success: false, error: "keyword 必须为非空字符串。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      ...base.data,
+      format,
+      eventId,
+      action,
+      keyword,
+    },
+  };
+}
+
+function validateSystemConfigBackupSource(
+  input: unknown
+): ValidationResult<SystemConfigBackupSource> {
+  const sourceResult = validateCreateSourceInput(input);
+  if (!sourceResult.success) {
+    return sourceResult;
+  }
+
+  if (!isRecord(input)) {
+    return { success: false, error: "source 必须是对象。" };
+  }
+
+  const enabled = input.enabled ?? true;
+  if (typeof enabled !== "boolean") {
+    return { success: false, error: "source.enabled 必须为布尔值。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      name: sourceResult.data.name,
+      type: sourceResult.data.type,
+      location: sourceResult.data.location,
+      sshConfig: sourceResult.data.sshConfig,
+      accessMode: sourceResult.data.accessMode ?? "realtime",
+      syncCron: sourceResult.data.syncCron,
+      syncRetentionDays: sourceResult.data.syncRetentionDays,
+      enabled,
+    },
+  };
+}
+
+function validateSystemConfigBackupPayload(
+  input: unknown
+): ValidationResult<SystemConfigBackupPayload> {
+  if (!isRecord(input)) {
+    return { success: false, error: "backup 必须是对象。" };
+  }
+
+  const schemaVersion = normalizeString(input.schemaVersion);
+  const tenantId = normalizeString(input.tenantId);
+  const exportedAt = normalizeString(input.exportedAt);
+  const exportedBy = input.exportedBy;
+  const sources = input.sources;
+  const budgets = input.budgets;
+  const pricingCatalog = input.pricingCatalog;
+
+  if (!schemaVersion) {
+    return { success: false, error: "backup.schemaVersion 必填且必须为非空字符串。" };
+  }
+  if (!tenantId) {
+    return { success: false, error: "backup.tenantId 必填且必须为非空字符串。" };
+  }
+  if (!exportedAt || !isISODate(exportedAt)) {
+    return { success: false, error: "backup.exportedAt 必填且必须为 ISO 日期字符串。" };
+  }
+  if (!isRecord(exportedBy)) {
+    return { success: false, error: "backup.exportedBy 必填且必须是对象。" };
+  }
+
+  const exportedByUserId = normalizeString(exportedBy.userId);
+  const exportedByEmail = normalizeString(exportedBy.email);
+  if (!exportedByUserId) {
+    return {
+      success: false,
+      error: "backup.exportedBy.userId 必填且必须为非空字符串。",
+    };
+  }
+  if (
+    exportedBy.email !== undefined &&
+    (!exportedByEmail || !isEmail(exportedByEmail))
+  ) {
+    return { success: false, error: "backup.exportedBy.email 必须是合法邮箱地址。" };
+  }
+
+  if (!Array.isArray(sources)) {
+    return { success: false, error: "backup.sources 必须是数组。" };
+  }
+  const normalizedSources: SystemConfigBackupSource[] = [];
+  for (let index = 0; index < sources.length; index += 1) {
+    const sourceResult = validateSystemConfigBackupSource(sources[index]);
+    if (!sourceResult.success) {
+      return {
+        success: false,
+        error: `backup.sources[${index}] 非法：${sourceResult.error}`,
+      };
+    }
+    normalizedSources.push(sourceResult.data);
+  }
+
+  if (!Array.isArray(budgets)) {
+    return { success: false, error: "backup.budgets 必须是数组。" };
+  }
+  const normalizedBudgets: SystemConfigBackupPayload["budgets"] = [];
+  for (let index = 0; index < budgets.length; index += 1) {
+    const budgetResult = validateBudgetUpsertInput(budgets[index]);
+    if (!budgetResult.success) {
+      return {
+        success: false,
+        error: `backup.budgets[${index}] 非法：${budgetResult.error}`,
+      };
+    }
+    normalizedBudgets.push(budgetResult.data);
+  }
+
+  let normalizedPricingCatalog: SystemConfigBackupPayload["pricingCatalog"] | undefined;
+  if (pricingCatalog !== undefined) {
+    if (pricingCatalog === null || !isRecord(pricingCatalog)) {
+      return { success: false, error: "backup.pricingCatalog 必须是对象。" };
+    }
+    const pricingResult = validatePricingCatalogUpsertInput(pricingCatalog);
+    if (!pricingResult.success) {
+      return {
+        success: false,
+        error: `backup.pricingCatalog 非法：${pricingResult.error}`,
+      };
+    }
+    normalizedPricingCatalog = {
+      note: pricingResult.data.note,
+      entries: pricingResult.data.entries,
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      schemaVersion,
+      tenantId,
+      exportedAt,
+      exportedBy: {
+        userId: exportedByUserId,
+        email: exportedByEmail,
+      },
+      sources: normalizedSources,
+      budgets: normalizedBudgets,
+      pricingCatalog: normalizedPricingCatalog,
+    },
+  };
+}
+
+export function validateSystemConfigRestoreInput(
+  input: unknown
+): ValidationResult<SystemConfigRestoreInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const backupResult = validateSystemConfigBackupPayload(input.backup);
+  if (!backupResult.success) {
+    return { success: false, error: backupResult.error };
+  }
+
+  const dryRun = input.dryRun;
+  const restoreSources = input.restoreSources;
+  const restoreBudgets = input.restoreBudgets;
+  const restorePricingCatalog = input.restorePricingCatalog;
+
+  if (dryRun !== undefined && typeof dryRun !== "boolean") {
+    return { success: false, error: "dryRun 必须为布尔值。" };
+  }
+  if (restoreSources !== undefined && typeof restoreSources !== "boolean") {
+    return { success: false, error: "restoreSources 必须为布尔值。" };
+  }
+  if (restoreBudgets !== undefined && typeof restoreBudgets !== "boolean") {
+    return { success: false, error: "restoreBudgets 必须为布尔值。" };
+  }
+  if (
+    restorePricingCatalog !== undefined &&
+    typeof restorePricingCatalog !== "boolean"
+  ) {
+    return { success: false, error: "restorePricingCatalog 必须为布尔值。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      backup: backupResult.data,
+      dryRun,
+      restoreSources,
+      restoreBudgets,
+      restorePricingCatalog,
     },
   };
 }

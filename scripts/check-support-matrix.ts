@@ -6,6 +6,8 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const matrixDocPath = path.join(repoRoot, "docs/09-主流AI客户端支持矩阵.md");
 const connectorDeclPath = path.join(repoRoot, "services/puller/connectors.go");
 const parserDeclPath = path.join(repoRoot, "services/puller/parser.go");
+const collectDeclPath = path.join(repoRoot, "clients/agent/collect.go");
+const contractsValidatorPath = path.join(repoRoot, "packages/contracts/src/validators.ts");
 
 type ConnectorRule = {
   pattern: RegExp;
@@ -194,6 +196,51 @@ export function parseDeclaredPullerConnectors(source: string): string[] {
   return [...connectorSet].sort((a, b) => a.localeCompare(b));
 }
 
+export function parseDeclaredCollectTools(source: string): string[] {
+  const toolSet = new Set<string>();
+  const toolRegex = /^\s*collectTool[A-Za-z0-9_]+\s*=\s*"([^"]+)"/gm;
+  let match: RegExpExecArray | null;
+  while ((match = toolRegex.exec(source)) !== null) {
+    const value = match[1].trim().toLowerCase();
+    if (!value || value === "auto") {
+      continue;
+    }
+    toolSet.add(value);
+  }
+  return [...toolSet].sort((a, b) => a.localeCompare(b));
+}
+
+export function parseCollectDefaultDirs(source: string): string[] {
+  const dirSet = new Set<string>();
+  const dirRegex = /^\s*defaultCollect[A-Za-z0-9_]+Dir\s*=\s*"([^"]+)"/gm;
+  let match: RegExpExecArray | null;
+  while ((match = dirRegex.exec(source)) !== null) {
+    const value = match[1].trim();
+    if (value) {
+      dirSet.add(value);
+    }
+  }
+  return [...dirSet].sort((a, b) => a.localeCompare(b));
+}
+
+export function parseLocalSourceWhitelist(source: string): string[] {
+  const match = /const\s+LOCAL_SOURCE_WHITELIST\s*=\s*\[([\s\S]*?)\];?/.exec(source);
+  if (!match) {
+    return [];
+  }
+  const content = match[1];
+  const itemRegex = /"([^"]+)"/g;
+  const result: string[] = [];
+  let item: RegExpExecArray | null;
+  while ((item = itemRegex.exec(content)) !== null) {
+    const value = item[1].trim();
+    if (value) {
+      result.push(value);
+    }
+  }
+  return [...new Set(result)];
+}
+
 function parseDeclaredConnectorParsers(source: string): string[] {
   const parserSet = new Set<string>();
   const parserRegex =
@@ -312,6 +359,8 @@ function main(): void {
   const matrixDoc = readFileSync(matrixDocPath, "utf8");
   const connectorDecl = readFileSync(connectorDeclPath, "utf8");
   const parserDecl = readFileSync(parserDeclPath, "utf8");
+  const collectDecl = readFileSync(collectDeclPath, "utf8");
+  const contractsValidator = readFileSync(contractsValidatorPath, "utf8");
 
   const p0p1Clients = parseP0P1Clients(matrixDoc);
   if (p0p1Clients.length === 0) {
@@ -343,9 +392,19 @@ function main(): void {
   const declaredSet = new Set(declaredConnectors);
   const requiredConnectors = [...requiredByConnector.keys()].sort((a, b) => a.localeCompare(b));
   const requiredSet = new Set(requiredConnectors);
+  const declaredCollectTools = parseDeclaredCollectTools(collectDecl);
+  const declaredCollectToolSet = new Set(declaredCollectTools);
+  const collectDefaultDirs = parseCollectDefaultDirs(collectDecl);
+  const localSourceWhitelist = parseLocalSourceWhitelist(contractsValidator);
+  const whitelistSet = new Set(localSourceWhitelist);
 
   const missing = requiredConnectors.filter((connector) => !declaredSet.has(connector));
   const extra = declaredConnectors.filter((connector) => !requiredSet.has(connector));
+  const missingCollectTools = requiredConnectors.filter(
+    (connector) => !declaredCollectToolSet.has(connector),
+  );
+  const extraCollectTools = declaredCollectTools.filter((tool) => !requiredSet.has(tool));
+  const missingWhitelistEntries = collectDefaultDirs.filter((dir) => !whitelistSet.has(dir));
 
   const parserCheck = validateParserEntrypoints(connectorDecl, parserDecl);
 
@@ -353,6 +412,12 @@ function main(): void {
     `[support-matrix] P0/P1 clients in docs/09: ${p0p1Clients.length}, required connectors: ${requiredConnectors.length}`,
   );
   console.log(`[support-matrix] Declared puller connectors: ${declaredConnectors.join(", ") || "(none)"}`);
+  console.log(
+    `[support-matrix] Declared agent collect tools: ${declaredCollectTools.join(", ") || "(none)"}`,
+  );
+  console.log(
+    `[support-matrix] Agent collect default dirs: ${collectDefaultDirs.length}, local whitelist dirs: ${localSourceWhitelist.length}`,
+  );
   console.log(
     `[support-matrix] featureConnector parser entrypoints: ${parserCheck.entrypoints.join(", ") || "(none)"}`,
   );
@@ -376,6 +441,37 @@ function main(): void {
     for (const connector of extra) {
       console.error(`  - ${connector}`);
     }
+  }
+
+  if (missingCollectTools.length > 0) {
+    hasFailure = true;
+    console.error("[support-matrix] FAILED: missing collect tools for docs/09 P0/P1 clients:");
+    for (const tool of missingCollectTools) {
+      const clients = requiredByConnector.get(tool) ?? [];
+      console.error(`  - ${tool} <- ${clients.join(" | ")}`);
+    }
+  }
+
+  if (extraCollectTools.length > 0) {
+    hasFailure = true;
+    console.error("[support-matrix] FAILED: redundant collect tools not referenced by docs/09 P0/P1:");
+    for (const tool of extraCollectTools) {
+      console.error(`  - ${tool}`);
+    }
+  }
+
+  if (collectDefaultDirs.length < declaredCollectTools.length) {
+    hasFailure = true;
+    console.error(
+      `[support-matrix] FAILED: collect 默认目录定义数量不足（dirs=${collectDefaultDirs.length}, tools=${declaredCollectTools.length}）。`,
+    );
+  }
+
+  if (missingWhitelistEntries.length > 0) {
+    hasFailure = true;
+    console.error(
+      `[support-matrix] FAILED: packages/contracts local 白名单缺少 collect 默认目录: ${missingWhitelistEntries.join(", ")}`,
+    );
   }
 
   if (parserCheck.entrypoints.length === 0) {
@@ -409,7 +505,7 @@ function main(): void {
   }
 
   console.log(
-    "[support-matrix] PASSED: docs/09 P0/P1、puller connectors 与 parser 入口均严格一致。",
+    "[support-matrix] PASSED: docs/09 P0/P1、puller connectors、agent collect、local 白名单与 parser 入口均严格一致。",
   );
 }
 

@@ -10,6 +10,7 @@ import { integrationCallbackRoutes } from "./integration-callbacks";
 import { pricingRoutes } from "./pricing";
 import { sessionRoutes } from "./sessions";
 import { sourceRoutes } from "./sources";
+import { systemConfigRoutes } from "./system-config";
 import { usageRoutes } from "./usage";
 import type { AppEnv } from "../types";
 
@@ -21,6 +22,7 @@ apiV1Routes.route("/", sessionRoutes);
 apiV1Routes.route("/", exportRoutes);
 apiV1Routes.route("/", usageRoutes);
 apiV1Routes.route("/", pricingRoutes);
+apiV1Routes.route("/", systemConfigRoutes);
 apiV1Routes.route("/", budgetRoutes);
 apiV1Routes.route("/", alertRoutes);
 apiV1Routes.route("/", integrationCallbackRoutes);

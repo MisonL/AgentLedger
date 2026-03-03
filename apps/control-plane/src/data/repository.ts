@@ -359,6 +359,11 @@ export interface RejectBudgetReleaseRequestOptions {
   rejectedAt?: string;
 }
 
+export interface ListBudgetReleaseRequestsInput {
+  status?: BudgetReleaseRequestStatus;
+  limit?: number;
+}
+
 export interface LocalUser {
   id: string;
   email: string;
@@ -4350,6 +4355,76 @@ class ControlPlaneRepository {
         normalizedBudgetId,
         normalizedRequestId
       );
+    }
+  }
+
+  async listBudgetReleaseRequests(
+    tenantId: string,
+    budgetId: string,
+    input?: ListBudgetReleaseRequestsInput
+  ): Promise<BudgetReleaseRequest[]> {
+    const normalizedBudgetId = firstNonEmptyString(budgetId);
+    if (!normalizedBudgetId) {
+      return [];
+    }
+
+    const rawStatus = firstNonEmptyString(input?.status);
+    const status =
+      rawStatus && BUDGET_RELEASE_REQUEST_STATUSES.includes(rawStatus as BudgetReleaseRequestStatus)
+        ? (rawStatus as BudgetReleaseRequestStatus)
+        : undefined;
+    const limit = Math.min(
+      200,
+      Math.max(1, Number.isInteger(input?.limit) ? Number(input?.limit) : 50)
+    );
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listBudgetReleaseRequestsFromMemory(tenantId, normalizedBudgetId, {
+        status,
+        limit,
+      });
+    }
+
+    try {
+      const params: unknown[] = [tenantId, normalizedBudgetId];
+      let statusFilterSQL = "";
+      if (status) {
+        params.push(status);
+        statusFilterSQL = ` AND status = $${params.length}`;
+      }
+      params.push(limit);
+      const limitPlaceHolder = `$${params.length}`;
+
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                budget_id,
+                status,
+                requested_by_user_id,
+                requested_by_email,
+                requested_at,
+                approvals,
+                rejected_by_user_id,
+                rejected_by_email,
+                rejected_reason,
+                rejected_at,
+                executed_at,
+                updated_at
+         FROM budget_release_requests
+         WHERE tenant_id = $1
+           AND budget_id = $2${statusFilterSQL}
+         ORDER BY requested_at DESC, updated_at DESC
+         LIMIT ${limitPlaceHolder}`,
+        params
+      );
+      return result.rows.map(mapBudgetReleaseRequestRow);
+    } catch (error) {
+      this.disableDb(error, "查询预算释放申请列表失败");
+      return this.listBudgetReleaseRequestsFromMemory(tenantId, normalizedBudgetId, {
+        status,
+        limit,
+      });
     }
   }
 
@@ -9023,6 +9098,39 @@ class ControlPlaneRepository {
         record.request.id === requestId
     );
     return matched ? this.cloneReleaseRequest(matched.request) : null;
+  }
+
+  private listBudgetReleaseRequestsFromMemory(
+    tenantId: string,
+    budgetId: string,
+    input?: ListBudgetReleaseRequestsInput
+  ): BudgetReleaseRequest[] {
+    const limit = Math.min(
+      200,
+      Math.max(1, Number.isInteger(input?.limit) ? Number(input?.limit) : 50)
+    );
+    const status = input?.status;
+
+    const filtered = this.memoryBudgetReleaseRequests
+      .filter((record) => {
+        if (record.tenantId !== tenantId || record.request.budgetId !== budgetId) {
+          return false;
+        }
+        if (status && record.request.status !== status) {
+          return false;
+        }
+        return true;
+      })
+      .map((record) => this.cloneReleaseRequest(record.request))
+      .sort((left, right) => {
+        const requestedAtDelta = Date.parse(right.requestedAt) - Date.parse(left.requestedAt);
+        if (requestedAtDelta !== 0) {
+          return requestedAtDelta;
+        }
+        return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+      });
+
+    return filtered.slice(0, limit);
   }
 
   private getPendingBudgetReleaseRequestFromMemory(

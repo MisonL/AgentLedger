@@ -473,6 +473,13 @@ export interface AuditListInput {
   limit?: number;
 }
 
+export interface AuditExportQueryInput extends AuditListInput {
+  format: ExportFormat;
+  eventId?: string;
+  action?: string;
+  keyword?: string;
+}
+
 export interface AuditListResponse {
   items: AuditItem[];
   total: number;
@@ -500,6 +507,71 @@ export interface PricingCatalogVersion {
 export interface PricingCatalog {
   version: PricingCatalogVersion;
   entries: PricingCatalogEntry[];
+}
+
+export interface SystemConfigBackupSource {
+  name: string;
+  type: SourceType;
+  location: string;
+  sshConfig?: SSHConfig;
+  accessMode: SourceAccessMode;
+  syncCron?: string;
+  syncRetentionDays?: number;
+  enabled: boolean;
+}
+
+export interface SystemConfigBackupBudget extends BudgetUpsertInput {}
+
+export interface SystemConfigBackupPricingCatalog {
+  note?: string;
+  entries: PricingCatalogEntry[];
+}
+
+export interface SystemConfigBackupPayload {
+  schemaVersion: string;
+  tenantId: string;
+  exportedAt: string;
+  exportedBy: {
+    userId: string;
+    email?: string;
+  };
+  sources: SystemConfigBackupSource[];
+  budgets: SystemConfigBackupBudget[];
+  pricingCatalog?: SystemConfigBackupPricingCatalog;
+}
+
+export interface SystemConfigRestoreInput {
+  backup: SystemConfigBackupPayload;
+  dryRun?: boolean;
+  restoreSources?: boolean;
+  restoreBudgets?: boolean;
+  restorePricingCatalog?: boolean;
+}
+
+export interface SystemConfigRestoreSummary {
+  sources: {
+    total: number;
+    created: number;
+    skipped: number;
+  };
+  budgets: {
+    total: number;
+    upserted: number;
+    skipped: number;
+  };
+  pricingCatalog: {
+    included: boolean;
+    restored: boolean;
+    entryCount: number;
+  };
+}
+
+export interface SystemConfigRestoreResult {
+  tenantId: string;
+  dryRun: boolean;
+  restoredAt: string;
+  summary: SystemConfigRestoreSummary;
+  warnings: string[];
 }
 
 export interface AuthRegisterInput {

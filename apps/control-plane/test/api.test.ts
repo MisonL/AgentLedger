@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
+import { createServer, type Server, type Socket } from "node:net";
 import {
   validateAuthLoginInput,
   validateAuthLogoutInput,
@@ -1045,6 +1046,60 @@ describe("Control Plane API", () => {
 
   function createNonce(prefix: string): string {
     return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  async function startMockSshServer(options?: {
+    sendBanner?: boolean;
+    banner?: string;
+  }): Promise<{
+    host: string;
+    port: number;
+    stop: () => Promise<void>;
+  }> {
+    const sendBanner = options?.sendBanner ?? true;
+    const banner = options?.banner ?? "SSH-2.0-OpenSSH_9.0";
+    const sockets = new Set<Socket>();
+    const server: Server = createServer((socket) => {
+      sockets.add(socket);
+      socket.on("close", () => {
+        sockets.delete(socket);
+      });
+      if (sendBanner) {
+        socket.write(`${banner}\r\n`);
+      }
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("mock ssh server address unavailable");
+    }
+
+    return {
+      host: "127.0.0.1",
+      port: address.port,
+      stop: async () => {
+        for (const socket of sockets) {
+          socket.destroy();
+        }
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+            resolve();
+          });
+        });
+      },
+    };
   }
 
   function buildIntegrationCallbackSignedRequest(
@@ -3856,6 +3911,7 @@ describe("Control Plane API", () => {
   test("POST /api/v1/sources/:id/test-connection 返回结构正确并写入审计（action+sourceId）", async () => {
     const authHeaders = await resolveAuthHeaders();
     const nonce = createNonce("source-test-connection");
+    const mockSsh = await startMockSshServer();
     const createResponse = await app.request("/api/v1/sources", {
       method: "POST",
       headers: {
@@ -3865,7 +3921,7 @@ describe("Control Plane API", () => {
       body: JSON.stringify({
         name: `连通性数据源-${nonce}`,
         type: "ssh",
-        location: `192.168.2.${Math.floor(Math.random() * 200) + 10}`,
+        location: `ssh://tester@${mockSsh.host}:${mockSsh.port}/tmp/repo`,
       }),
     });
     const created = (await createResponse.json()) as Source;
@@ -3873,43 +3929,55 @@ describe("Control Plane API", () => {
     expect(createResponse.status).toBe(201);
     expect(typeof created.id).toBe("string");
 
-    const testConnectionResponse = await app.request(
-      `/api/v1/sources/${created.id}/test-connection`,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...authHeaders,
+    try {
+      const testConnectionResponse = await app.request(
+        `/api/v1/sources/${created.id}/test-connection`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...authHeaders,
+          },
+          body: JSON.stringify({}),
         },
-        body: JSON.stringify({}),
-      },
-    );
-    const testConnectionPayload = await readResponseAsUnknown(
-      testConnectionResponse,
-    );
-
-    expect(testConnectionResponse.status).toBe(200);
-    expect(hasSourceConnectionTestShape(testConnectionPayload)).toBe(true);
-
-    const audits = await queryAuditByAction(
-      "control_plane.source_connection_tested",
-      created.id,
-    );
-    const targetAudit = audits.items.find((item) => {
-      const resourceId = item.metadata.resourceId;
-      return (
-        item.action === "control_plane.source_connection_tested" &&
-        (resourceId === created.id ||
-          item.detail.includes(created.id) ||
-          JSON.stringify(item.metadata).includes(created.id))
       );
-    });
-    expect(targetAudit).toBeDefined();
+      const testConnectionPayload = await readResponseAsUnknown(
+        testConnectionResponse,
+      );
+
+      expect(testConnectionResponse.status).toBe(200);
+      expect(hasSourceConnectionTestShape(testConnectionPayload)).toBe(true);
+      expect(
+        collectPayloadCandidates(testConnectionPayload).some((candidate) => {
+          const detail = pickString(candidate, ["detail", "message"]) ?? "";
+          const success = pickBoolean(candidate, ["success", "ok"]);
+          return success === true && detail.includes("error_code=ok");
+        }),
+      ).toBe(true);
+
+      const audits = await queryAuditByAction(
+        "control_plane.source_connection_tested",
+        created.id,
+      );
+      const targetAudit = audits.items.find((item) => {
+        const resourceId = item.metadata.resourceId;
+        return (
+          item.action === "control_plane.source_connection_tested" &&
+          (resourceId === created.id ||
+            item.detail.includes(created.id) ||
+            JSON.stringify(item.metadata).includes(created.id))
+        );
+      });
+      expect(targetAudit).toBeDefined();
+    } finally {
+      await mockSsh.stop();
+    }
   });
 
   test("POST /api/v1/sources/test-connection 支持 sourceId 模式", async () => {
     const authHeaders = await resolveAuthHeaders();
     const nonce = createNonce("source-test-connection-entry-sourceid");
+    const mockSsh = await startMockSshServer();
     const createResponse = await app.request("/api/v1/sources", {
       method: "POST",
       headers: {
@@ -3919,7 +3987,7 @@ describe("Control Plane API", () => {
       body: JSON.stringify({
         name: `新入口 sourceId 数据源-${nonce}`,
         type: "ssh",
-        location: `10.31.${Math.floor(Math.random() * 200) + 10}.${Math.floor(Math.random() * 200) + 10}`,
+        location: `ssh://tester@${mockSsh.host}:${mockSsh.port}/tmp/repo`,
       }),
     });
     const source = (await createResponse.json()) as Source;
@@ -3944,6 +4012,15 @@ describe("Control Plane API", () => {
       expect(hasSourceConnectionTestShape(testConnectionResult.payload)).toBe(
         true,
       );
+      expect(
+        collectPayloadCandidates(testConnectionResult.payload).some(
+          (candidate) => {
+            const success = pickBoolean(candidate, ["success", "ok"]);
+            const detail = pickString(candidate, ["detail", "message"]) ?? "";
+            return success === true && detail.includes("error_code=ok");
+          },
+        ),
+      ).toBe(true);
 
       const payloadHasSourceId = collectPayloadCandidates(
         testConnectionResult.payload,
@@ -3953,6 +4030,7 @@ describe("Control Plane API", () => {
       );
       expect(payloadHasSourceId).toBe(true);
     } finally {
+      await mockSsh.stop();
       await app.request(`/api/v1/sources/${source.id}`, {
         method: "DELETE",
         headers: authHeaders,
@@ -3963,53 +4041,117 @@ describe("Control Plane API", () => {
   test("POST /api/v1/sources/test-connection 支持临时 source 模式", async () => {
     const authHeaders = await resolveAuthHeaders();
     const nonce = createNonce("source-test-connection-entry-temp");
+    const mockSsh = await startMockSshServer();
+    const location = `ssh://tester@${mockSsh.host}:${mockSsh.port}/tmp/repo`;
 
-    const testConnectionResult = await requestFirstSuccessful([
-      {
-        path: "/api/v1/sources/test-connection",
-        init: jsonRequest(
-          "POST",
-          {
-            source: {
+    try {
+      const testConnectionResult = await requestFirstSuccessful([
+        {
+          path: "/api/v1/sources/test-connection",
+          init: jsonRequest(
+            "POST",
+            {
+              source: {
+                name: `临时数据源-${nonce}`,
+                type: "ssh",
+                location,
+              },
+            },
+            authHeaders,
+          ),
+        },
+        {
+          path: "/api/v1/sources/test-connection",
+          init: jsonRequest(
+            "POST",
+            {
               name: `临时数据源-${nonce}`,
               type: "ssh",
-              location: "ssh://tester@127.0.0.1:22/tmp/repo",
+              location,
             },
+            authHeaders,
+          ),
+        },
+        {
+          path: "/api/v1/source/test-connection",
+          init: jsonRequest(
+            "POST",
+            {
+              source: {
+                name: `临时数据源-${nonce}`,
+                type: "ssh",
+                location,
+              },
+            },
+            authHeaders,
+          ),
+        },
+      ]);
+      assertApiStatus(testConnectionResult, [200]);
+      expect(hasSourceConnectionTestShape(testConnectionResult.payload)).toBe(
+        true,
+      );
+      expect(
+        collectPayloadCandidates(testConnectionResult.payload).some(
+          (candidate) => {
+            const success = pickBoolean(candidate, ["success", "ok"]);
+            const detail = pickString(candidate, ["detail", "message"]) ?? "";
+            return success === true && detail.includes("error_code=ok");
           },
-          authHeaders,
         ),
-      },
-      {
-        path: "/api/v1/sources/test-connection",
-        init: jsonRequest(
-          "POST",
-          {
-            name: `临时数据源-${nonce}`,
+      ).toBe(true);
+    } finally {
+      await mockSsh.stop();
+    }
+  });
+
+  test("POST /api/v1/sources/test-connection SSH 握手超时时返回明确 error_code", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const nonce = createNonce("source-test-connection-timeout");
+    const mockSsh = await startMockSshServer({ sendBanner: false });
+    const location = `ssh://tester@${mockSsh.host}:${mockSsh.port}/tmp/repo`;
+    const originalTimeout = Bun.env.SOURCE_TEST_CONNECTION_TIMEOUT_MS;
+    Bun.env.SOURCE_TEST_CONNECTION_TIMEOUT_MS = "120";
+
+    try {
+      const response = await app.request("/api/v1/sources/test-connection", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          source: {
+            name: `超时数据源-${nonce}`,
             type: "ssh",
-            location: "ssh://tester@127.0.0.1:22/tmp/repo",
+            location,
           },
-          authHeaders,
-        ),
-      },
-      {
-        path: "/api/v1/source/test-connection",
-        init: jsonRequest(
-          "POST",
-          {
-            source: {
-              name: `临时数据源-${nonce}`,
-              type: "ssh",
-              location: "ssh://tester@127.0.0.1:22/tmp/repo",
-            },
-          },
-          authHeaders,
-        ),
-      },
-    ]);
-    assertApiStatus(testConnectionResult, [200]);
-    expect(hasSourceConnectionTestShape(testConnectionResult.payload)).toBe(
-      true,
-    );
+        }),
+      });
+      const payload = await readResponseAsUnknown(response);
+
+      expect(response.status).toBe(200);
+      expect(hasSourceConnectionTestShape(payload)).toBe(true);
+      expect(
+        collectPayloadCandidates(payload).some((candidate) => {
+          const success = pickBoolean(candidate, ["success", "ok"]);
+          const errorCode = pickString(candidate, ["errorCode", "error_code"]);
+          const detail = pickString(candidate, ["detail", "message"]) ?? "";
+          return (
+            success === false &&
+            (errorCode === "ssh_handshake_timeout" ||
+              detail.includes("error_code=ssh_handshake_timeout"))
+          );
+        }),
+      ).toBe(true);
+    } finally {
+      if (originalTimeout === undefined) {
+        delete Bun.env.SOURCE_TEST_CONNECTION_TIMEOUT_MS;
+      } else {
+        Bun.env.SOURCE_TEST_CONNECTION_TIMEOUT_MS = originalTimeout;
+      }
+      await mockSsh.stop();
+    }
   });
 
   test("POST /api/v1/sources/:id/sync-jobs 创建成功，GET /api/v1/sources/:id/sync-jobs 可查询到", async () => {
@@ -7070,6 +7212,143 @@ describe("Control Plane API", () => {
     }
   });
 
+  test("GET /api/v1/budgets/:id/release-requests 支持 status/limit 过滤", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const reviewer = await registerAndLoginUser(
+      createNonce("budget-release-list-reviewer"),
+    );
+    const reviewerHeaders = await resolveAuthHeaders(
+      reviewer.accessToken,
+      reviewer.userId,
+    );
+
+    const putBudgetResponse = await app.request("/api/v1/budgets", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        scope: "global",
+        period: "monthly",
+        tokenLimit: 1400,
+        costLimit: 0,
+        thresholds: {
+          warning: 0.6,
+          escalated: 0.8,
+          critical: 0.95,
+        },
+      }),
+    });
+    const budget = (await putBudgetResponse.json()) as Budget;
+    expect(putBudgetResponse.status).toBe(200);
+
+    const { alert, cleanup } = await createTestAlert(tenantId, "open", {
+      budgetId: budget.id,
+      severity: "critical",
+    });
+
+    try {
+      const ackResponse = await app.request(
+        `/api/v1/alerts/${alert.id}/status`,
+        {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+            ...authHeaders,
+          },
+          body: JSON.stringify({
+            status: "acknowledged",
+          }),
+        },
+      );
+      expect(ackResponse.status).toBe(200);
+
+      const createReleaseResponse = await app.request(
+        `/api/v1/budgets/${budget.id}/release-requests`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...authHeaders,
+          },
+          body: JSON.stringify({
+            reason: "用于列表过滤测试。",
+          }),
+        },
+      );
+      const createdRelease = (await createReleaseResponse.json()) as {
+        id: string;
+        status: string;
+      };
+      expect(createReleaseResponse.status).toBe(201);
+      expect(createdRelease.status).toBe("pending");
+
+      const pendingListResponse = await app.request(
+        `/api/v1/budgets/${budget.id}/release-requests?status=pending&limit=1`,
+        {
+          headers: authHeaders,
+        },
+      );
+      const pendingListPayload = await readResponseAsUnknown(pendingListResponse);
+      expect(pendingListResponse.status).toBe(200);
+      const pendingItems = extractListItems(pendingListPayload);
+      expect(pendingItems.length).toBe(1);
+      expect(pickString(pendingItems[0], ["id"])).toBe(createdRelease.id);
+      expect(pickString(pendingItems[0], ["status"])).toBe("pending");
+
+      const firstApproveResponse = await app.request(
+        `/api/v1/budgets/${budget.id}/release-requests/${createdRelease.id}/approve`,
+        {
+          method: "POST",
+          headers: authHeaders,
+        },
+      );
+      expect(firstApproveResponse.status).toBe(200);
+
+      const secondApproveResponse = await app.request(
+        `/api/v1/budgets/${budget.id}/release-requests/${createdRelease.id}/approve`,
+        {
+          method: "POST",
+          headers: reviewerHeaders,
+        },
+      );
+      expect(secondApproveResponse.status).toBe(200);
+
+      const executedListResponse = await app.request(
+        `/api/v1/budgets/${budget.id}/release-requests?status=executed&limit=10`,
+        {
+          headers: authHeaders,
+        },
+      );
+      const executedListPayload = await readResponseAsUnknown(executedListResponse);
+      expect(executedListResponse.status).toBe(200);
+      const executedItems = extractListItems(executedListPayload);
+      expect(
+        executedItems.some(
+          (item) =>
+            pickString(item, ["id"]) === createdRelease.id &&
+            pickString(item, ["status"]) === "executed",
+        ),
+      ).toBe(true);
+
+      const invalidStatusResponse = await app.request(
+        `/api/v1/budgets/${budget.id}/release-requests?status=processing`,
+        {
+          headers: authHeaders,
+        },
+      );
+      const invalidStatusPayload = (await invalidStatusResponse.json()) as {
+        message: string;
+      };
+      expect(invalidStatusResponse.status).toBe(400);
+      expect(invalidStatusPayload.message).toContain("status");
+    } finally {
+      await cleanup();
+    }
+  });
+
   test("GET /api/v1/budgets 鉴权中间件边界：token/session 异常统一返回 401", async () => {
     const authContext = await getDefaultAuthContext();
     const userId =
@@ -8293,5 +8572,332 @@ describe("Control Plane API", () => {
 
     expect(response.status).toBe(400);
     expect(body.message).toContain("limit");
+  });
+
+  test("GET /api/v1/system/config/backup 返回租户配置快照并写入审计", async () => {
+    const nonce = createNonce("system-config-backup");
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+
+    const sourceResponse = await app.request(
+      "/api/v1/sources",
+      jsonRequest(
+        "POST",
+        {
+          name: `备份源-${nonce}`,
+          type: "local",
+          location: `~/.codex/sessions/${nonce}`,
+          accessMode: "sync",
+          syncCron: "0 */6 * * *",
+          syncRetentionDays: 14,
+          enabled: true,
+        },
+        authHeaders
+      )
+    );
+    expect(sourceResponse.status).toBe(201);
+
+    const budgetResponse = await app.request(
+      "/api/v1/budgets",
+      jsonRequest(
+        "PUT",
+        {
+          scope: "global",
+          period: "monthly",
+          tokenLimit: 120000,
+          costLimit: 120,
+          thresholds: {
+            warning: 0.5,
+            escalated: 0.8,
+            critical: 1,
+          },
+        },
+        authHeaders
+      )
+    );
+    expect(budgetResponse.status).toBe(200);
+
+    const pricingResponse = await app.request(
+      "/api/v1/pricing/catalog",
+      jsonRequest(
+        "PUT",
+        {
+          note: `backup-note-${nonce}`,
+          entries: [
+            {
+              model: `backup-model-${nonce}`,
+              inputPer1k: 0.1,
+              outputPer1k: 0.2,
+              cacheReadPer1k: 0.01,
+              cacheWritePer1k: 0.03,
+              reasoningPer1k: 0.05,
+              currency: "USD",
+            },
+          ],
+        },
+        authHeaders
+      )
+    );
+    expect(pricingResponse.status).toBe(200);
+
+    const backupResponse = await app.request("/api/v1/system/config/backup", {
+      headers: authHeaders,
+    });
+    const payload = (await backupResponse.json()) as {
+      schemaVersion: string;
+      tenantId: string;
+      exportedAt: string;
+      sources: Array<{ name: string; location: string }>;
+      budgets: Array<{ scope: string; tokenLimit: number; costLimit: number }>;
+      pricingCatalog?: {
+        note?: string;
+        entries: Array<{ model: string }>;
+      };
+    };
+
+    expect(backupResponse.status).toBe(200);
+    expect(payload.schemaVersion).toBe("system-config-backup.v1");
+    expect(payload.tenantId).toBe(tenantId);
+    expect(typeof payload.exportedAt).toBe("string");
+    expect(
+      payload.sources.some((item) => item.location.includes(nonce))
+    ).toBe(true);
+    expect(
+      payload.budgets.some(
+        (item) =>
+          item.scope === "global" &&
+          item.tokenLimit === 120000 &&
+          item.costLimit === 120
+      )
+    ).toBe(true);
+    expect(payload.pricingCatalog?.note).toBe(`backup-note-${nonce}`);
+    expect(
+      payload.pricingCatalog?.entries.some(
+        (item) => item.model === `backup-model-${nonce}`
+      )
+    ).toBe(true);
+
+    const audits = await queryAuditByAction(
+      "control_plane.system_config_backup_exported",
+      nonce
+    );
+    const targetAudit = audits.items.find(
+      (item) =>
+        item.action === "control_plane.system_config_backup_exported" &&
+        item.metadata.tenantId === tenantId
+    );
+    expect(targetAudit).toBeDefined();
+  });
+
+  test("POST /api/v1/system/config/restore 支持 dryRun + apply，并校验 tenant 边界", async () => {
+    const nonce = createNonce("system-config-restore");
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+
+    const backupPayload = {
+      schemaVersion: "system-config-backup.v1",
+      tenantId,
+      exportedAt: new Date().toISOString(),
+      exportedBy: {
+        userId: "backup-user",
+        email: "backup-user@example.com",
+      },
+      sources: [
+        {
+          name: `恢复源-${nonce}`,
+          type: "local" as const,
+          location: `~/.codex/sessions/${nonce}`,
+          accessMode: "hybrid" as const,
+          syncCron: "*/20 * * * *",
+          syncRetentionDays: 21,
+          enabled: true,
+        },
+      ],
+      budgets: [
+        {
+          scope: "global" as const,
+          period: "monthly" as const,
+          tokenLimit: 4096,
+          costLimit: 4.2,
+          thresholds: {
+            warning: 0.6,
+            escalated: 0.85,
+            critical: 1,
+          },
+        },
+      ],
+      pricingCatalog: {
+        note: `restore-note-${nonce}`,
+        entries: [
+          {
+            model: `restore-model-${nonce}`,
+            inputPer1k: 0.4,
+            outputPer1k: 0.7,
+            cacheReadPer1k: 0.02,
+            cacheWritePer1k: 0.04,
+            reasoningPer1k: 0.08,
+            currency: "USD",
+          },
+        ],
+      },
+    };
+
+    const dryRunResponse = await app.request(
+      "/api/v1/system/config/restore",
+      jsonRequest(
+        "POST",
+        {
+          backup: backupPayload,
+          dryRun: true,
+        },
+        authHeaders
+      )
+    );
+    const dryRunBody = (await dryRunResponse.json()) as {
+      tenantId: string;
+      dryRun: boolean;
+      summary: {
+        sources: { created: number };
+        budgets: { upserted: number };
+        pricingCatalog: { restored: boolean };
+      };
+      warnings: string[];
+    };
+
+    expect(dryRunResponse.status).toBe(200);
+    expect(dryRunBody.tenantId).toBe(tenantId);
+    expect(dryRunBody.dryRun).toBe(true);
+    expect(dryRunBody.summary.sources.created).toBe(1);
+    expect(dryRunBody.summary.budgets.upserted).toBe(1);
+    expect(dryRunBody.summary.pricingCatalog.restored).toBe(true);
+    expect(Array.isArray(dryRunBody.warnings)).toBe(true);
+
+    const sourceListAfterDryRun = await app.request("/api/v1/sources", {
+      headers: authHeaders,
+    });
+    const sourceListAfterDryRunBody =
+      (await sourceListAfterDryRun.json()) as SourceListResponse;
+    expect(
+      sourceListAfterDryRunBody.items.some((item) => item.location.includes(nonce))
+    ).toBe(false);
+
+    const applyResponse = await app.request(
+      "/api/v1/system/config/restore",
+      jsonRequest(
+        "POST",
+        {
+          backup: backupPayload,
+        },
+        authHeaders
+      )
+    );
+    const applyBody = (await applyResponse.json()) as {
+      tenantId: string;
+      dryRun: boolean;
+      summary: {
+        sources: { created: number };
+        budgets: { upserted: number };
+        pricingCatalog: { restored: boolean };
+      };
+    };
+    expect(applyResponse.status).toBe(200);
+    expect(applyBody.tenantId).toBe(tenantId);
+    expect(applyBody.dryRun).toBe(false);
+    expect(applyBody.summary.sources.created).toBe(1);
+    expect(applyBody.summary.budgets.upserted).toBe(1);
+    expect(applyBody.summary.pricingCatalog.restored).toBe(true);
+
+    const sourceListAfterApply = await app.request("/api/v1/sources", {
+      headers: authHeaders,
+    });
+    const sourceListAfterApplyBody =
+      (await sourceListAfterApply.json()) as SourceListResponse;
+    expect(
+      sourceListAfterApplyBody.items.some((item) => item.location.includes(nonce))
+    ).toBe(true);
+
+    const restoreAudits = await queryAuditByAction(
+      "control_plane.system_config_restore_applied",
+      nonce
+    );
+    const restoreAudit = restoreAudits.items.find(
+      (item) =>
+        item.action === "control_plane.system_config_restore_applied" &&
+        item.metadata.tenantId === tenantId
+    );
+    expect(restoreAudit).toBeDefined();
+
+    const crossTenantResponse = await app.request(
+      "/api/v1/system/config/restore",
+      jsonRequest(
+        "POST",
+        {
+          backup: {
+            ...backupPayload,
+            tenantId: `${tenantId}-other`,
+          },
+        },
+        authHeaders
+      )
+    );
+    expect(crossTenantResponse.status).toBe(403);
+  });
+
+  test("GET /api/v1/audits/export 支持 CSV 导出并写入 audit.export", async () => {
+    const nonce = createNonce("audit-export");
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const repositoryWithAudit = repository as {
+      appendAuditLog?: (input: {
+        tenantId: string;
+        eventId: string;
+        action: string;
+        level: string;
+        detail: string;
+        metadata: Record<string, unknown>;
+      }) => Promise<unknown>;
+    };
+
+    if (typeof repositoryWithAudit.appendAuditLog !== "function") {
+      throw new Error(
+        "repository.appendAuditLog 不可用，无法验证审计导出。",
+      );
+    }
+
+    await repositoryWithAudit.appendAuditLog({
+      tenantId,
+      eventId: `cp:audit-export-seed:${nonce}`,
+      action: "test.audit.exportable",
+      level: "warning",
+      detail: `audit export seed ${nonce}`,
+      metadata: {
+        nonce,
+        route: "/api/v1/audits/export",
+      },
+    });
+
+    const response = await app.request(
+      `/api/v1/audits/export?format=csv&action=test.audit.exportable&keyword=${encodeURIComponent(
+        nonce
+      )}&limit=20`,
+      {
+        headers: authHeaders,
+      }
+    );
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")?.includes("text/csv")).toBe(true);
+    expect(body).toContain("id,eventId,action,level,detail,createdAt,metadata");
+    expect(body).toContain("test.audit.exportable");
+    expect(body).toContain(nonce);
+
+    const exportAudits = await queryAuditByAction("audit.export", nonce);
+    const targetAudit = exportAudits.items.find(
+      (item) =>
+        item.action === "audit.export" &&
+        item.metadata.route === "/api/v1/audits/export"
+    );
+    expect(targetAudit).toBeDefined();
   });
 });

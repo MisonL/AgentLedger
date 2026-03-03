@@ -20,14 +20,40 @@ import (
 )
 
 const (
-	collectToolAuto   = "auto"
-	collectToolCodex  = "codex"
-	collectToolClaude = "claude"
-	collectToolGemini = "gemini"
+	collectToolAuto         = "auto"
+	collectToolCodex        = "codex"
+	collectToolClaude       = "claude"
+	collectToolGemini       = "gemini"
+	collectToolAider        = "aider"
+	collectToolOpenCode     = "opencode"
+	collectToolQwenCode     = "qwen-code"
+	collectToolKimiCLI      = "kimi-cli"
+	collectToolTRAECLI      = "trae-cli"
+	collectToolCodeBuddyCLI = "codebuddy-cli"
+	collectToolCursor       = "cursor"
+	collectToolVSCode       = "vscode"
+	collectToolTRAEIDE      = "trae-ide"
+	collectToolWindsurf     = "windsurf"
+	collectToolLingma       = "lingma"
+	collectToolCodeBuddyIDE = "codebuddy-ide"
+	collectToolZed          = "zed"
 
-	defaultCollectCodexDir  = "~/.codex/sessions"
-	defaultCollectClaudeDir = "~/.claude/projects"
-	defaultCollectGeminiDir = "~/.gemini/tmp"
+	defaultCollectCodexDir        = "~/.codex/sessions"
+	defaultCollectClaudeDir       = "~/.claude/projects"
+	defaultCollectGeminiDir       = "~/.gemini/tmp"
+	defaultCollectAiderDir        = "~/.aider/sessions"
+	defaultCollectOpenCodeDir     = "~/.opencode/sessions"
+	defaultCollectQwenCodeDir     = "~/.qwen-code/sessions"
+	defaultCollectKimiCLIDir      = "~/.kimi-cli/sessions"
+	defaultCollectTRAECLIDir      = "~/.trae-cli/sessions"
+	defaultCollectCodeBuddyCLIDir = "~/.codebuddy-cli/sessions"
+	defaultCollectCursorDir       = "~/.cursor/sessions"
+	defaultCollectVSCodeDir       = "~/.vscode/sessions"
+	defaultCollectTRAEIDEDir      = "~/.trae-ide/sessions"
+	defaultCollectWindsurfDir     = "~/.windsurf/sessions"
+	defaultCollectLingmaDir       = "~/.lingma/sessions"
+	defaultCollectCodeBuddyIDEDir = "~/.codebuddy-ide/sessions"
+	defaultCollectZedDir          = "~/.zed/sessions"
 
 	collectScannerMaxTokenBytes = 4 * 1024 * 1024
 	collectMaxFileSizeBytes     = 20 * 1024 * 1024
@@ -45,11 +71,150 @@ type collectFile struct {
 	Path string
 }
 
+type collectToolConfig struct {
+	Tool       string
+	DefaultDir string
+	Aliases    []string
+	PathHints  []string
+}
+
+var collectToolConfigs = []collectToolConfig{
+	{
+		Tool:       collectToolCodex,
+		DefaultDir: defaultCollectCodexDir,
+		Aliases:    []string{"codex", "codex-cli", "openai-codex", "openai codex"},
+		PathHints:  []string{"/.codex/", "/codex/"},
+	},
+	{
+		Tool:       collectToolClaude,
+		DefaultDir: defaultCollectClaudeDir,
+		Aliases:    []string{"claude", "claude-code", "claude code"},
+		PathHints:  []string{"/.claude/", "/claude/"},
+	},
+	{
+		Tool:       collectToolGemini,
+		DefaultDir: defaultCollectGeminiDir,
+		Aliases:    []string{"gemini", "gemini-cli", "gemini cli"},
+		PathHints:  []string{"/.gemini/", "/gemini/"},
+	},
+	{
+		Tool:       collectToolAider,
+		DefaultDir: defaultCollectAiderDir,
+		Aliases:    []string{"aider"},
+		PathHints:  []string{"/.aider/", "/aider/"},
+	},
+	{
+		Tool:       collectToolOpenCode,
+		DefaultDir: defaultCollectOpenCodeDir,
+		Aliases:    []string{"opencode", "open code", "opencode-ai"},
+		PathHints:  []string{"/.opencode/", "/opencode/"},
+	},
+	{
+		Tool:       collectToolQwenCode,
+		DefaultDir: defaultCollectQwenCodeDir,
+		Aliases:    []string{"qwen-code", "qwen code", "qwen"},
+		PathHints:  []string{"/.qwen-code/", "/qwen-code/", "/.qwen/", "/qwen/"},
+	},
+	{
+		Tool:       collectToolKimiCLI,
+		DefaultDir: defaultCollectKimiCLIDir,
+		Aliases:    []string{"kimi-cli", "kimi cli", "kimi"},
+		PathHints:  []string{"/.kimi-cli/", "/kimi-cli/", "/kimi/"},
+	},
+	{
+		Tool:       collectToolTRAECLI,
+		DefaultDir: defaultCollectTRAECLIDir,
+		Aliases:    []string{"trae-cli", "trae cli"},
+		PathHints:  []string{"/.trae-cli/", "/trae-cli/"},
+	},
+	{
+		Tool:       collectToolCodeBuddyCLI,
+		DefaultDir: defaultCollectCodeBuddyCLIDir,
+		Aliases:    []string{"codebuddy-cli", "codebuddy cli"},
+		PathHints:  []string{"/.codebuddy-cli/", "/codebuddy-cli/"},
+	},
+	{
+		Tool:       collectToolCursor,
+		DefaultDir: defaultCollectCursorDir,
+		Aliases:    []string{"cursor", "cursor-ide", "cursor ide"},
+		PathHints:  []string{"/.cursor/", "/cursor/"},
+	},
+	{
+		Tool:       collectToolVSCode,
+		DefaultDir: defaultCollectVSCodeDir,
+		Aliases:    []string{"vscode", "vs-code", "vs code"},
+		PathHints:  []string{"/.vscode/", "/vscode/", "/code/user/"},
+	},
+	{
+		Tool:       collectToolTRAEIDE,
+		DefaultDir: defaultCollectTRAEIDEDir,
+		Aliases:    []string{"trae-ide", "trae ide", "trae"},
+		PathHints:  []string{"/.trae-ide/", "/trae-ide/", "/.trae/"},
+	},
+	{
+		Tool:       collectToolWindsurf,
+		DefaultDir: defaultCollectWindsurfDir,
+		Aliases:    []string{"windsurf", "windsurf-ide", "windsurf ide"},
+		PathHints:  []string{"/.windsurf/", "/windsurf/"},
+	},
+	{
+		Tool:       collectToolLingma,
+		DefaultDir: defaultCollectLingmaDir,
+		Aliases:    []string{"lingma"},
+		PathHints:  []string{"/.lingma/", "/lingma/"},
+	},
+	{
+		Tool:       collectToolCodeBuddyIDE,
+		DefaultDir: defaultCollectCodeBuddyIDEDir,
+		Aliases:    []string{"codebuddy-ide", "codebuddy ide"},
+		PathHints:  []string{"/.codebuddy-ide/", "/codebuddy-ide/"},
+	},
+	{
+		Tool:       collectToolZed,
+		DefaultDir: defaultCollectZedDir,
+		Aliases:    []string{"zed", "zed-ai", "zed ai"},
+		PathHints:  []string{"/.zed/", "/zed/"},
+	},
+}
+
+var collectToolAliasToCanonical = buildCollectToolAliasMap()
+
+func buildCollectToolAliasMap() map[string]string {
+	aliasMap := make(map[string]string, len(collectToolConfigs)*4)
+	for _, config := range collectToolConfigs {
+		canonical := strings.ToLower(strings.TrimSpace(config.Tool))
+		if canonical == "" {
+			continue
+		}
+		aliasMap[canonical] = canonical
+		for _, alias := range config.Aliases {
+			normalizedAlias := strings.ToLower(strings.TrimSpace(alias))
+			if normalizedAlias == "" {
+				continue
+			}
+			aliasMap[normalizedAlias] = canonical
+		}
+	}
+	return aliasMap
+}
+
+func collectSupportedTools() []string {
+	tools := make([]string, 0, len(collectToolConfigs))
+	for _, config := range collectToolConfigs {
+		tools = append(tools, config.Tool)
+	}
+	return tools
+}
+
 func collectCommand(args []string) int {
 	fs := flag.NewFlagSet("collect", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
-	tool := fs.String("tool", collectToolAuto, "采集工具：auto|codex|claude|gemini")
+	tool := fs.String(
+		"tool",
+		collectToolAuto,
+		fmt.Sprintf("采集工具：auto|%s", strings.Join(collectSupportedTools(), "|")),
+	)
 	dir := fs.String("dir", "", "采集目录或文件（覆盖默认路径）")
 	output := fs.String("output", "", "输出 JSONL 文件（默认 stdout）")
 	maxEvents := fs.Int("max-events", 0, "最多输出事件数（<=0 表示不限制）")
@@ -121,54 +286,49 @@ func resolveCollectSources(tool, overrideDir string) ([]collectSource, error) {
 	}
 
 	if normalizedTool != collectToolAuto {
-		dir, err := resolveCollectPath(defaultCollectDirForTool(normalizedTool))
+		defaultDir := defaultCollectDirForTool(normalizedTool)
+		if defaultDir == "" {
+			return nil, fmt.Errorf("tool 缺少默认采集目录: %s", normalizedTool)
+		}
+		dir, err := resolveCollectPath(defaultDir)
 		if err != nil {
 			return nil, err
 		}
 		return []collectSource{{Tool: normalizedTool, Dir: dir}}, nil
 	}
 
-	defaultSources := []struct {
-		tool string
-		dir  string
-	}{
-		{tool: collectToolCodex, dir: defaultCollectCodexDir},
-		{tool: collectToolClaude, dir: defaultCollectClaudeDir},
-		{tool: collectToolGemini, dir: defaultCollectGeminiDir},
-	}
-
-	result := make([]collectSource, 0, len(defaultSources))
-	for _, item := range defaultSources {
-		resolved, err := resolveCollectPath(item.dir)
+	result := make([]collectSource, 0, len(collectToolConfigs))
+	for _, item := range collectToolConfigs {
+		resolved, err := resolveCollectPath(item.DefaultDir)
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, collectSource{Tool: item.tool, Dir: resolved})
+		result = append(result, collectSource{Tool: item.Tool, Dir: resolved})
 	}
 	return result, nil
 }
 
 func normalizeCollectTool(tool string) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(tool))
-	switch normalized {
-	case collectToolAuto, collectToolCodex, collectToolClaude, collectToolGemini:
-		return normalized, nil
-	default:
-		return "", fmt.Errorf("tool 仅支持 auto|codex|claude|gemini")
+	if normalized == "" {
+		normalized = collectToolAuto
 	}
+	if normalized == collectToolAuto {
+		return collectToolAuto, nil
+	}
+	if canonical, ok := collectToolAliasToCanonical[normalized]; ok {
+		return canonical, nil
+	}
+	return "", fmt.Errorf("tool 仅支持 auto|%s", strings.Join(collectSupportedTools(), "|"))
 }
 
 func defaultCollectDirForTool(tool string) string {
-	switch tool {
-	case collectToolCodex:
-		return defaultCollectCodexDir
-	case collectToolClaude:
-		return defaultCollectClaudeDir
-	case collectToolGemini:
-		return defaultCollectGeminiDir
-	default:
-		return ""
+	for _, config := range collectToolConfigs {
+		if config.Tool == tool {
+			return config.DefaultDir
+		}
 	}
+	return ""
 }
 
 func resolveCollectPath(raw string) (string, error) {
@@ -688,16 +848,18 @@ func inferCollectTool(defaultTool, sourcePath string) string {
 		return defaultTool
 	}
 	normalized := strings.ToLower(filepath.ToSlash(sourcePath))
-	switch {
-	case strings.Contains(normalized, ".codex/") || strings.Contains(normalized, "codex"):
-		return collectToolCodex
-	case strings.Contains(normalized, ".claude/") || strings.Contains(normalized, "claude"):
-		return collectToolClaude
-	case strings.Contains(normalized, ".gemini/") || strings.Contains(normalized, "gemini"):
-		return collectToolGemini
-	default:
-		return collectToolAuto
+	for _, config := range collectToolConfigs {
+		for _, hint := range config.PathHints {
+			normalizedHint := strings.ToLower(strings.TrimSpace(filepath.ToSlash(hint)))
+			if normalizedHint == "" {
+				continue
+			}
+			if strings.Contains(normalized, normalizedHint) {
+				return config.Tool
+			}
+		}
 	}
+	return collectToolAuto
 }
 
 func writeCollectEventsJSONL(writer io.Writer, events []agentEvent) error {

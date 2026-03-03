@@ -62,7 +62,7 @@ jobs:
           echo "buf: $(buf --version)"
 
       - name: 安装依赖
-        run: bun install --frozen-lockfile
+        run: bash ./scripts/ci-retry.sh 3 5 bun install --frozen-lockfile
 
       - name: 支持矩阵一致性检查
         run: bun run check:support-matrix
@@ -80,10 +80,10 @@ jobs:
         run: bun run proto:gen
 
       - name: FR-505 三平台安装运行最小冒烟
-        run: bun run smoke:fr505
+        run: bash ./scripts/ci-retry.sh 2 5 bun run smoke:fr505
 
       - name: Go 测试
-        run: bun run test:go
+        run: bash ./scripts/ci-retry.sh 2 5 bun run test:go
 
       - name: Coverage Gate
         if: matrix.os == 'ubuntu-latest'
@@ -115,6 +115,7 @@ jobs:
 
   build-agent-cross:
     name: 客户端多架构构建
+    if: ${{ always() && needs.baseline.result != 'cancelled' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: baseline

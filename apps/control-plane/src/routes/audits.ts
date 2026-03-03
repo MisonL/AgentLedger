@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
-import { validateAuditListInput } from "../contracts";
+import type { AuditItem } from "../contracts";
+import { validateAuditExportQueryInput, validateAuditListInput } from "../contracts";
 import {
   getControlPlaneRepository,
   type AppendAuditLogInput,
@@ -37,6 +38,45 @@ function normalizeOptionalQuery(value: string | undefined): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function escapeCsvCell(value: unknown): string {
+  const cell = value === undefined || value === null ? "" : String(value);
+  if (!/[",\n\r]/.test(cell)) {
+    return cell;
+  }
+  return `"${cell.replace(/"/g, "\"\"")}"`;
+}
+
+function buildAuditsCsv(items: AuditItem[]): string {
+  const headers = [
+    "id",
+    "eventId",
+    "action",
+    "level",
+    "detail",
+    "createdAt",
+    "metadata",
+  ];
+  const rows = items.map((item) =>
+    [
+      item.id,
+      item.eventId,
+      item.action,
+      item.level,
+      item.detail,
+      item.createdAt,
+      JSON.stringify(item.metadata),
+    ]
+      .map(escapeCsvCell)
+      .join(",")
+  );
+  return [headers.join(","), ...rows].join("\n");
+}
+
+function buildAuditExportFileName(format: "json" | "csv"): string {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `audits-${timestamp}.${format}`;
 }
 
 auditRoutes.get("/audits", async (c) => {
@@ -107,5 +147,75 @@ auditRoutes.get("/audits", async (c) => {
     total: payload.total,
     filters,
     nextCursor: null,
+  });
+});
+
+auditRoutes.get("/audits/export", async (c) => {
+  const auth = await requireAuthContext(c);
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const query = c.req.query();
+  const result = validateAuditExportQueryInput(query);
+  if (!result.success) {
+    return c.json({ message: result.error }, 400);
+  }
+
+  const filters = {
+    level: result.data.level,
+    from: result.data.from,
+    to: result.data.to,
+    limit: result.data.limit,
+    eventId: result.data.eventId,
+    action: result.data.action,
+    keyword: result.data.keyword,
+  };
+  const payload = await repository.listAudits(filters, auth.tenantId);
+  const requestId = c.get("requestId");
+
+  await appendAuditLogSafely({
+    tenantId: auth.tenantId,
+    eventId: `cp:${requestId}:audit-export`,
+    action: "audit.export",
+    level: "info",
+    detail: `导出审计日志（${result.data.format}）。`,
+    metadata: {
+      tenantId: auth.tenantId,
+      userId: auth.userId,
+      requestId,
+      route: "/api/v1/audits/export",
+      format: result.data.format,
+      eventId: filters.eventId,
+      actionFilter: filters.action,
+      levelFilter: filters.level,
+      keyword: filters.keyword,
+      from: filters.from,
+      to: filters.to,
+      limit: filters.limit,
+      resultCount: payload.items.length,
+      resultTotal: payload.total,
+    },
+  });
+
+  if (result.data.format === "csv") {
+    c.header("content-type", "text/csv; charset=utf-8");
+    c.header(
+      "content-disposition",
+      `attachment; filename="${buildAuditExportFileName("csv")}"`
+    );
+    return c.body(buildAuditsCsv(payload.items));
+  }
+
+  c.header(
+    "content-disposition",
+    `attachment; filename="${buildAuditExportFileName("json")}"`
+  );
+  return c.json({
+    format: "json",
+    exportedAt: new Date().toISOString(),
+    items: payload.items,
+    total: payload.total,
+    filters,
   });
 });

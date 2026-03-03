@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import { access, constants as fsConstants } from "node:fs/promises";
+import { Socket } from "node:net";
 import { isAbsolute } from "node:path";
 import type { CreateSourceInput, Source, SourceAccessMode, SourceHealth, SyncJob } from "../contracts";
 import { validateCreateSourceInput } from "../contracts";
@@ -17,6 +18,9 @@ const DEFAULT_SYNC_JOB_LIMIT = 20;
 const MAX_SYNC_JOB_LIMIT = 200;
 const DEFAULT_PARSE_FAILURE_LIMIT = 50;
 const MAX_PARSE_FAILURE_LIMIT = 500;
+const DEFAULT_SOURCE_TEST_CONNECTION_TIMEOUT_MS = 1200;
+const MIN_SOURCE_TEST_CONNECTION_TIMEOUT_MS = 100;
+const MAX_SOURCE_TEST_CONNECTION_TIMEOUT_MS = 30000;
 
 interface SourceConnectionTestResponse {
   sourceId: string;
@@ -24,7 +28,23 @@ interface SourceConnectionTestResponse {
   mode: Source["type"];
   latencyMs: number;
   detail: string;
+  errorCode?: string;
 }
+
+interface SourceConnectionCheckResult {
+  success: boolean;
+  detail: string;
+  errorCode?: string;
+}
+
+interface SshConnectionEndpoint {
+  host: string;
+  port: number;
+}
+
+type ResolveSshEndpointResult =
+  | { success: true; endpoint: SshConnectionEndpoint }
+  | { success: false; detail: string; errorCode: string };
 
 async function appendAuditLogSafely(input: AppendAuditLogInput): Promise<void> {
   try {
@@ -182,11 +202,210 @@ function isValidSshLocation(location: string): boolean {
   return scpLikePattern.test(location) || uriLikePattern.test(location);
 }
 
-async function runSourceConnectionTest(source: Source): Promise<Omit<SourceConnectionTestResponse, "sourceId" | "mode" | "latencyMs">> {
+function resolveSourceTestConnectionTimeoutMs(): number {
+  const raw = Bun.env.SOURCE_TEST_CONNECTION_TIMEOUT_MS?.trim();
+  if (!raw) {
+    return DEFAULT_SOURCE_TEST_CONNECTION_TIMEOUT_MS;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) {
+    return DEFAULT_SOURCE_TEST_CONNECTION_TIMEOUT_MS;
+  }
+  return Math.min(
+    MAX_SOURCE_TEST_CONNECTION_TIMEOUT_MS,
+    Math.max(MIN_SOURCE_TEST_CONNECTION_TIMEOUT_MS, parsed)
+  );
+}
+
+function resolveSshConnectionEndpoint(source: Source): ResolveSshEndpointResult {
+  const hostFromConfig = source.sshConfig?.host?.trim();
+  if (hostFromConfig) {
+    const port =
+      source.sshConfig?.port && Number.isInteger(source.sshConfig.port)
+        ? source.sshConfig.port
+        : 22;
+    if (port < 1 || port > 65535) {
+      return {
+        success: false,
+        errorCode: "ssh_location_invalid",
+        detail: `SSH 配置端口不合法（error_code=ssh_location_invalid, port=${port}）。`,
+      };
+    }
+    return {
+      success: true,
+      endpoint: {
+        host: hostFromConfig,
+        port,
+      },
+    };
+  }
+
+  const location = source.location.trim();
+  if (!location) {
+    return {
+      success: false,
+      errorCode: "ssh_location_invalid",
+      detail: "SSH location 为空（error_code=ssh_location_invalid）。",
+    };
+  }
+
+  if (location.toLowerCase().startsWith("ssh://")) {
+    try {
+      const parsed = new URL(location);
+      const host = parsed.hostname.trim();
+      const rawPort = parsed.port.trim();
+      const port = rawPort ? Number(rawPort) : 22;
+      if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
+        return {
+          success: false,
+          errorCode: "ssh_location_invalid",
+          detail:
+            "SSH location 格式不合法，应为 user@host:/path 或 ssh://user@host[:port]/path（error_code=ssh_location_invalid）。",
+        };
+      }
+      return {
+        success: true,
+        endpoint: {
+          host,
+          port,
+        },
+      };
+    } catch {
+      return {
+        success: false,
+        errorCode: "ssh_location_invalid",
+        detail:
+          "SSH location 格式不合法，应为 user@host:/path 或 ssh://user@host[:port]/path（error_code=ssh_location_invalid）。",
+      };
+    }
+  }
+
+  const scpLikePattern = /^([a-zA-Z0-9._-]+@)?([a-zA-Z0-9.-]+):\/[^\s]+$/;
+  const matched = scpLikePattern.exec(location);
+  if (!matched || !matched[2]) {
+    return {
+      success: false,
+      errorCode: "ssh_location_invalid",
+      detail:
+        "SSH location 格式不合法，应为 user@host:/path 或 ssh://user@host[:port]/path（error_code=ssh_location_invalid）。",
+    };
+  }
+
+  return {
+    success: true,
+    endpoint: {
+      host: matched[2],
+      port: 22,
+    },
+  };
+}
+
+function mapSshConnectErrorCode(error: NodeJS.ErrnoException): string {
+  const code = (error.code ?? "").toString();
+  switch (code) {
+    case "ENOTFOUND":
+      return "ssh_dns_error";
+    case "ECONNREFUSED":
+      return "ssh_connection_refused";
+    case "EHOSTUNREACH":
+    case "ENETUNREACH":
+      return "ssh_unreachable";
+    case "ETIMEDOUT":
+      return "ssh_timeout";
+    default:
+      return "ssh_connect_error";
+  }
+}
+
+async function checkSshConnectivity(
+  endpoint: SshConnectionEndpoint,
+  timeoutMs: number
+): Promise<SourceConnectionCheckResult> {
+  return await new Promise((resolve) => {
+    const socket = new Socket();
+    let settled = false;
+    let connected = false;
+    let buffer = "";
+
+    const finish = (result: SourceConnectionCheckResult) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(result);
+    };
+
+    socket.setTimeout(timeoutMs);
+
+    socket.once("connect", () => {
+      connected = true;
+      socket.write("SSH-2.0-AgentLedger-SourceTest\r\n");
+    });
+
+    socket.on("timeout", () => {
+      const errorCode = connected ? "ssh_handshake_timeout" : "ssh_timeout";
+      const action = connected ? "握手超时" : "连接超时";
+      finish({
+        success: false,
+        errorCode,
+        detail: `SSH ${action}（error_code=${errorCode}, host=${endpoint.host}, port=${endpoint.port}, timeout_ms=${timeoutMs}）。`,
+      });
+    });
+
+    socket.on("error", (error: NodeJS.ErrnoException) => {
+      const errorCode = mapSshConnectErrorCode(error);
+      finish({
+        success: false,
+        errorCode,
+        detail: `SSH 连通失败（error_code=${errorCode}, host=${endpoint.host}, port=${endpoint.port}, message=${error.message || "unknown"}）。`,
+      });
+    });
+
+    socket.on("close", () => {
+      if (settled) {
+        return;
+      }
+      const errorCode = connected ? "ssh_handshake_failed" : "ssh_connect_closed";
+      finish({
+        success: false,
+        errorCode,
+        detail: `SSH 连接异常关闭（error_code=${errorCode}, host=${endpoint.host}, port=${endpoint.port}）。`,
+      });
+    });
+
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? "";
+
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) {
+          continue;
+        }
+        if (line.startsWith("SSH-")) {
+          finish({
+            success: true,
+            errorCode: "ok",
+            detail: `SSH 连通成功（error_code=ok, host=${endpoint.host}, port=${endpoint.port}, banner=${line}）。`,
+          });
+          return;
+        }
+      }
+    });
+
+    socket.connect(endpoint.port, endpoint.host);
+  });
+}
+
+async function runSourceConnectionTest(source: Source): Promise<SourceConnectionCheckResult> {
   if (source.type === "local") {
     if (!isAbsolute(source.location)) {
       return {
         success: false,
+        errorCode: "local_location_invalid",
         detail: "local 模式下 location 必须是绝对路径。",
       };
     }
@@ -195,28 +414,41 @@ async function runSourceConnectionTest(source: Source): Promise<Omit<SourceConne
       await access(source.location, fsConstants.R_OK);
       return {
         success: true,
+        errorCode: "ok",
         detail: `本地路径可访问：${source.location}`,
       };
     } catch {
       return {
         success: false,
+        errorCode: "local_path_unreadable",
         detail: `本地路径不可访问或不存在：${source.location}`,
       };
     }
   }
 
   if (source.type === "ssh") {
-    const valid = isValidSshLocation(source.location);
-    return {
-      success: valid,
-      detail: valid
-        ? "SSH location 格式校验通过（未执行真实 SSH 连接）。"
-        : "SSH location 格式不合法，应为 user@host:/path 或 ssh://user@host[:port]/path。",
-    };
+    if (!isValidSshLocation(source.location) && !source.sshConfig?.host?.trim()) {
+      return {
+        success: false,
+        errorCode: "ssh_location_invalid",
+        detail:
+          "SSH location 格式不合法，应为 user@host:/path 或 ssh://user@host[:port]/path（error_code=ssh_location_invalid）。",
+      };
+    }
+
+    const endpointResult = resolveSshConnectionEndpoint(source);
+    if (!endpointResult.success) {
+      return endpointResult;
+    }
+    return await checkSshConnectivity(
+      endpointResult.endpoint,
+      resolveSourceTestConnectionTimeoutMs()
+    );
   }
 
   return {
     success: true,
+    errorCode: "skipped",
     detail: "sync-cache 模式无需连接测试，已直接通过。",
   };
 }
@@ -260,6 +492,7 @@ async function runSourceConnectionTestWithAudit(
     mode: source.type,
     latencyMs,
     detail: testResult.detail,
+    errorCode: testResult.errorCode,
   };
 
   const requestId = c.get("requestId");
@@ -277,6 +510,7 @@ async function runSourceConnectionTestWithAudit(
       success: testResult.success,
       latencyMs,
       detail: testResult.detail,
+      errorCode: testResult.errorCode,
       location: source.location,
       temporary,
     },

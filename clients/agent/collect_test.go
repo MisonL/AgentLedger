@@ -25,6 +25,19 @@ func TestResolveCollectSources_DefaultAndOverride(t *testing.T) {
 		{Tool: collectToolCodex, Dir: filepath.Join(homeDir, ".codex", "sessions")},
 		{Tool: collectToolClaude, Dir: filepath.Join(homeDir, ".claude", "projects")},
 		{Tool: collectToolGemini, Dir: filepath.Join(homeDir, ".gemini", "tmp")},
+		{Tool: collectToolAider, Dir: filepath.Join(homeDir, ".aider", "sessions")},
+		{Tool: collectToolOpenCode, Dir: filepath.Join(homeDir, ".opencode", "sessions")},
+		{Tool: collectToolQwenCode, Dir: filepath.Join(homeDir, ".qwen-code", "sessions")},
+		{Tool: collectToolKimiCLI, Dir: filepath.Join(homeDir, ".kimi-cli", "sessions")},
+		{Tool: collectToolTRAECLI, Dir: filepath.Join(homeDir, ".trae-cli", "sessions")},
+		{Tool: collectToolCodeBuddyCLI, Dir: filepath.Join(homeDir, ".codebuddy-cli", "sessions")},
+		{Tool: collectToolCursor, Dir: filepath.Join(homeDir, ".cursor", "sessions")},
+		{Tool: collectToolVSCode, Dir: filepath.Join(homeDir, ".vscode", "sessions")},
+		{Tool: collectToolTRAEIDE, Dir: filepath.Join(homeDir, ".trae-ide", "sessions")},
+		{Tool: collectToolWindsurf, Dir: filepath.Join(homeDir, ".windsurf", "sessions")},
+		{Tool: collectToolLingma, Dir: filepath.Join(homeDir, ".lingma", "sessions")},
+		{Tool: collectToolCodeBuddyIDE, Dir: filepath.Join(homeDir, ".codebuddy-ide", "sessions")},
+		{Tool: collectToolZed, Dir: filepath.Join(homeDir, ".zed", "sessions")},
 	}
 	if !reflect.DeepEqual(sources, wantAuto) {
 		t.Fatalf("resolveCollectSources(auto)=%#v, want=%#v", sources, wantAuto)
@@ -43,6 +56,76 @@ func TestResolveCollectSources_DefaultAndOverride(t *testing.T) {
 
 	if _, err := resolveCollectSources("unknown", ""); err == nil {
 		t.Fatalf("resolveCollectSources(unknown) expected error, got nil")
+	}
+}
+
+func TestNormalizeCollectTool_AliasesAndMatrixTools(t *testing.T) {
+	testCases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "auto", input: "auto", want: collectToolAuto},
+		{name: "codex alias", input: "codex-cli", want: collectToolCodex},
+		{name: "claude alias", input: "claude code", want: collectToolClaude},
+		{name: "gemini alias", input: "gemini-cli", want: collectToolGemini},
+		{name: "aider", input: "aider", want: collectToolAider},
+		{name: "opencode", input: "open code", want: collectToolOpenCode},
+		{name: "qwen", input: "qwen", want: collectToolQwenCode},
+		{name: "kimi", input: "kimi", want: collectToolKimiCLI},
+		{name: "trae cli", input: "trae cli", want: collectToolTRAECLI},
+		{name: "codebuddy cli", input: "codebuddy-cli", want: collectToolCodeBuddyCLI},
+		{name: "cursor", input: "cursor", want: collectToolCursor},
+		{name: "vscode", input: "vs code", want: collectToolVSCode},
+		{name: "trae ide", input: "trae", want: collectToolTRAEIDE},
+		{name: "windsurf", input: "windsurf", want: collectToolWindsurf},
+		{name: "lingma", input: "lingma", want: collectToolLingma},
+		{name: "codebuddy ide", input: "codebuddy ide", want: collectToolCodeBuddyIDE},
+		{name: "zed", input: "zed-ai", want: collectToolZed},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeCollectTool(tc.input)
+			if err != nil {
+				t.Fatalf("normalizeCollectTool(%q) unexpected error: %v", tc.input, err)
+			}
+			if got != tc.want {
+				t.Fatalf("normalizeCollectTool(%q)=%q, want=%q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestInferCollectTool_AutoPathHints(t *testing.T) {
+	testCases := []struct {
+		path string
+		want string
+	}{
+		{path: "/tmp/.codex/sessions/a.jsonl", want: collectToolCodex},
+		{path: "/tmp/.claude/projects/a.jsonl", want: collectToolClaude},
+		{path: "/tmp/.gemini/tmp/a.jsonl", want: collectToolGemini},
+		{path: "/tmp/.aider/sessions/a.jsonl", want: collectToolAider},
+		{path: "/tmp/.opencode/sessions/a.jsonl", want: collectToolOpenCode},
+		{path: "/tmp/.qwen-code/sessions/a.jsonl", want: collectToolQwenCode},
+		{path: "/tmp/.kimi-cli/sessions/a.jsonl", want: collectToolKimiCLI},
+		{path: "/tmp/.trae-cli/sessions/a.jsonl", want: collectToolTRAECLI},
+		{path: "/tmp/.codebuddy-cli/sessions/a.jsonl", want: collectToolCodeBuddyCLI},
+		{path: "/tmp/.cursor/sessions/a.jsonl", want: collectToolCursor},
+		{path: "/tmp/.vscode/sessions/a.jsonl", want: collectToolVSCode},
+		{path: "/tmp/.trae-ide/sessions/a.jsonl", want: collectToolTRAEIDE},
+		{path: "/tmp/.windsurf/sessions/a.jsonl", want: collectToolWindsurf},
+		{path: "/tmp/.lingma/sessions/a.jsonl", want: collectToolLingma},
+		{path: "/tmp/.codebuddy-ide/sessions/a.jsonl", want: collectToolCodeBuddyIDE},
+		{path: "/tmp/.zed/sessions/a.jsonl", want: collectToolZed},
+		{path: "/tmp/custom/unknown.jsonl", want: collectToolAuto},
+	}
+
+	for _, tc := range testCases {
+		got := inferCollectTool(collectToolAuto, tc.path)
+		if got != tc.want {
+			t.Fatalf("inferCollectTool(auto, %q)=%q, want=%q", tc.path, got, tc.want)
+		}
 	}
 }
 
