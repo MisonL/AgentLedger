@@ -367,6 +367,9 @@ budgetRoutes.post("/budgets/:id/release-requests/:requestId/approve", async (c) 
   if (currentRequest.status === "executed") {
     return c.json({ message: "该释放申请已执行完成，请勿重复审批。" }, 409);
   }
+  if (currentRequest.requestedByUserId === auth.userId) {
+    return c.json({ message: "申请人与审批人必须为不同用户。" }, 400);
+  }
   if (currentRequest.approvals.some((approval) => approval.userId === auth.userId)) {
     return c.json({ message: "同一用户不能完成两次审批。" }, 400);
   }

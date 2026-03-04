@@ -376,6 +376,9 @@ integrationCallbackRoutes.post("/integrations/callbacks/alerts", async (c) => {
       if (currentRequest.status === "executed") {
         return respondError(409, "该释放申请已执行完成，请勿重复审批。");
       }
+      if (currentRequest.requestedByUserId === actorUserId) {
+        return respondError(400, "申请人与审批人必须为不同用户。");
+      }
       if (currentRequest.approvals.some((approval) => approval.userId === actorUserId)) {
         return respondError(400, "同一用户不能完成两次审批。");
       }

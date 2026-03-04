@@ -4586,6 +4586,9 @@ class ControlPlaneRepository {
       if (!current || current.status !== "pending") {
         return current;
       }
+      if (current.requestedByUserId === actorUserId) {
+        return current;
+      }
 
       if (current.approvals.some((approval) => approval.userId === actorUserId)) {
         return current;
@@ -4647,6 +4650,9 @@ class ControlPlaneRepository {
         }
         const current = mapBudgetReleaseRequestRow(currentRow);
         if (current.status !== "pending") {
+          return current;
+        }
+        if (current.requestedByUserId === actorUserId) {
           return current;
         }
         if (current.approvals.some((approval) => approval.userId === actorUserId)) {
@@ -4758,6 +4764,9 @@ class ControlPlaneRepository {
         normalizedRequestId
       );
       if (!current || current.status !== "pending") {
+        return current;
+      }
+      if (current.requestedByUserId === actorUserId) {
         return current;
       }
       if (current.approvals.some((approval) => approval.userId === actorUserId)) {

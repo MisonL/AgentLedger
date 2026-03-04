@@ -8763,6 +8763,13 @@ describe("Control Plane API", () => {
       reviewer.accessToken,
       reviewer.userId,
     );
+    const secondReviewer = await registerAndLoginUser(
+      createNonce("budget-release-reviewer-2"),
+    );
+    const secondReviewerHeaders = await resolveAuthHeaders(
+      secondReviewer.accessToken,
+      secondReviewer.userId,
+    );
 
     const putBudgetResponse = await app.request("/api/v1/budgets", {
       method: "PUT",
@@ -8840,11 +8847,24 @@ describe("Control Plane API", () => {
       expect(Array.isArray(createdRelease.approvals)).toBe(true);
       expect(createdRelease.approvals.length).toBe(0);
 
-      const firstApproveResponse = await app.request(
+      const requesterApproveResponse = await app.request(
         `/api/v1/budgets/${budget.id}/release-requests/${createdRelease.id}/approve`,
         {
           method: "POST",
           headers: authHeaders,
+        },
+      );
+      const requesterApproveBody = (await requesterApproveResponse.json()) as {
+        message: string;
+      };
+      expect(requesterApproveResponse.status).toBe(400);
+      expect(requesterApproveBody.message).toContain("申请人");
+
+      const firstApproveResponse = await app.request(
+        `/api/v1/budgets/${budget.id}/release-requests/${createdRelease.id}/approve`,
+        {
+          method: "POST",
+          headers: reviewerHeaders,
         },
       );
       const firstApprove = (await firstApproveResponse.json()) as {
@@ -8859,7 +8879,7 @@ describe("Control Plane API", () => {
         `/api/v1/budgets/${budget.id}/release-requests/${createdRelease.id}/approve`,
         {
           method: "POST",
-          headers: authHeaders,
+          headers: reviewerHeaders,
         },
       );
       const duplicateApproveBody = (await duplicateApproveResponse.json()) as {
@@ -8872,7 +8892,7 @@ describe("Control Plane API", () => {
         `/api/v1/budgets/${budget.id}/release-requests/${createdRelease.id}/approve`,
         {
           method: "POST",
-          headers: reviewerHeaders,
+          headers: secondReviewerHeaders,
         },
       );
       const secondApprove = (await secondApproveResponse.json()) as {
@@ -8910,6 +8930,13 @@ describe("Control Plane API", () => {
     const reviewerHeaders = await resolveAuthHeaders(
       reviewer.accessToken,
       reviewer.userId,
+    );
+    const secondReviewer = await registerAndLoginUser(
+      createNonce("budget-release-list-reviewer-2"),
+    );
+    const secondReviewerHeaders = await resolveAuthHeaders(
+      secondReviewer.accessToken,
+      secondReviewer.userId,
     );
 
     const putBudgetResponse = await app.request("/api/v1/budgets", {
@@ -8991,7 +9018,7 @@ describe("Control Plane API", () => {
         `/api/v1/budgets/${budget.id}/release-requests/${createdRelease.id}/approve`,
         {
           method: "POST",
-          headers: authHeaders,
+          headers: reviewerHeaders,
         },
       );
       expect(firstApproveResponse.status).toBe(200);
@@ -9000,7 +9027,7 @@ describe("Control Plane API", () => {
         `/api/v1/budgets/${budget.id}/release-requests/${createdRelease.id}/approve`,
         {
           method: "POST",
-          headers: reviewerHeaders,
+          headers: secondReviewerHeaders,
         },
       );
       expect(secondApproveResponse.status).toBe(200);
@@ -9603,6 +9630,15 @@ describe("Control Plane API", () => {
     if (!reviewerUserId) {
       throw new Error("无法解析 callback 次审批人 userId。");
     }
+    const secondReviewer = await registerAndLoginUser(
+      createNonce("callback-reviewer-2"),
+    );
+    const secondReviewerUserId =
+      secondReviewer.userId ??
+      resolveUserIdFromAccessToken(secondReviewer.accessToken);
+    if (!secondReviewerUserId) {
+      throw new Error("无法解析 callback 第三审批人 userId。");
+    }
     const originalCallbackSecret = Bun.env.INTEGRATION_CALLBACK_SECRET;
     const callbackSecret = `integration-secret-${createNonce("cb-secret")}`;
 
@@ -9735,6 +9771,24 @@ describe("Control Plane API", () => {
       const requestIdOne = requestReleaseBody.result.releaseRequest?.id;
       expect(typeof requestIdOne).toBe("string");
 
+      const requesterApproveResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
+          callback_id: createNonce("cb-approve-release-requester"),
+          tenant_id: tenantId,
+          action: "approve_release",
+          budget_id: budget.id,
+          request_id: requestIdOne,
+          actor_user_id: actorUserId,
+          actor_email: "callback-owner@example.com",
+        },
+      );
+      const requesterApproveBody = (await requesterApproveResponse.json()) as {
+        message?: string;
+      };
+      expect(requesterApproveResponse.status).toBe(400);
+      expect(requesterApproveBody.message).toContain("申请人");
+
       const approveOneResponse = await postIntegrationAlertCallback(
         callbackSecret,
         {
@@ -9743,8 +9797,8 @@ describe("Control Plane API", () => {
           action: "approve_release",
           budget_id: budget.id,
           request_id: requestIdOne,
-          actor_user_id: actorUserId,
-          actor_email: "callback-owner@example.com",
+          actor_user_id: reviewerUserId,
+          actor_email: reviewer.email,
         },
       );
       const approveOneBody = (await approveOneResponse.json()) as {
@@ -9767,8 +9821,8 @@ describe("Control Plane API", () => {
           action: "approve_release",
           budget_id: budget.id,
           request_id: requestIdOne,
-          actor_user_id: reviewerUserId,
-          actor_email: reviewer.email,
+          actor_user_id: secondReviewerUserId,
+          actor_email: secondReviewer.email,
         },
       );
       const approveTwoBody = (await approveTwoResponse.json()) as {
