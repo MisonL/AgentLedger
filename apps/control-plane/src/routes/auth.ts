@@ -5,6 +5,7 @@ import {
   validateAuthRefreshInput,
   validateAuthRegisterInput,
 } from "../contracts";
+import type { AuthProviderItem, AuthProviderType } from "../contracts";
 import {
   getControlPlaneRepository,
   type AppendAuditLogInput,
@@ -25,6 +26,8 @@ import type { AppEnv } from "../types";
 export const authRoutes = new Hono<AppEnv>();
 const repository = getControlPlaneRepository();
 const DEFAULT_TENANT_ID = "default";
+const AUTH_DISABLE_LOCAL_LOGIN_ENV = "AUTH_DISABLE_LOCAL_LOGIN";
+const AUTH_EXTERNAL_PROVIDERS_JSON_ENV = "AUTH_EXTERNAL_PROVIDERS_JSON";
 
 interface PrimaryTenantAccess {
   tenantId: string;
@@ -83,6 +86,126 @@ function conflict(c: Context<AppEnv>, message: string) {
     },
     409
   );
+}
+
+function parseBooleanEnv(raw: string | undefined): boolean {
+  const normalized = (raw ?? "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeProviderId(value: unknown): string | undefined {
+  const normalized = normalizeOptionalString(value)?.toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (!/^[a-z0-9][a-z0-9_-]{1,63}$/.test(normalized)) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function normalizeProviderType(value: unknown): AuthProviderType | undefined {
+  const normalized = normalizeOptionalString(value)?.toLowerCase();
+  switch (normalized) {
+    case "local":
+    case "oauth2":
+    case "oidc":
+    case "sso":
+      return normalized;
+    default:
+      return undefined;
+  }
+}
+
+function normalizeExternalAuthProvider(value: unknown): AuthProviderItem | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const id = normalizeProviderId(record.id);
+  const type = normalizeProviderType(record.type);
+  const displayName = normalizeOptionalString(record.displayName);
+  if (!id || !type || !displayName) {
+    return undefined;
+  }
+
+  const issuer = normalizeOptionalString(record.issuer);
+  const authorizationUrl =
+    normalizeOptionalString(record.authorizationUrl) ?? normalizeOptionalString(record.authUrl);
+  const enabled = typeof record.enabled === "boolean" ? record.enabled : true;
+
+  return {
+    id,
+    type,
+    displayName,
+    enabled,
+    issuer,
+    authorizationUrl,
+  };
+}
+
+function resolveExternalAuthProvidersFromEnv(): AuthProviderItem[] {
+  const raw = (Bun.env[AUTH_EXTERNAL_PROVIDERS_JSON_ENV] ?? "").trim();
+  if (!raw) {
+    return [];
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    console.warn(
+      `[control-plane] ${AUTH_EXTERNAL_PROVIDERS_JSON_ENV} 不是合法 JSON，已忽略。`,
+      error
+    );
+    return [];
+  }
+
+  if (!Array.isArray(parsed)) {
+    console.warn(
+      `[control-plane] ${AUTH_EXTERNAL_PROVIDERS_JSON_ENV} 必须是数组，当前值已忽略。`
+    );
+    return [];
+  }
+
+  const providers: AuthProviderItem[] = [];
+  const seen = new Set<string>();
+  for (const item of parsed) {
+    const normalized = normalizeExternalAuthProvider(item);
+    if (!normalized) {
+      continue;
+    }
+    if (seen.has(normalized.id)) {
+      continue;
+    }
+    seen.add(normalized.id);
+    providers.push(normalized);
+  }
+
+  return providers;
+}
+
+function resolveAuthProviders(): AuthProviderItem[] {
+  const providers: AuthProviderItem[] = [];
+  if (!parseBooleanEnv(Bun.env[AUTH_DISABLE_LOCAL_LOGIN_ENV])) {
+    providers.push({
+      id: "local",
+      type: "local",
+      displayName: "邮箱密码",
+      enabled: true,
+    });
+  }
+  providers.push(...resolveExternalAuthProvidersFromEnv());
+  return providers;
 }
 
 async function appendAuditLogSafely(input: AppendAuditLogInput): Promise<void> {
@@ -287,6 +410,14 @@ async function verifyRefreshSession(
     session,
   };
 }
+
+authRoutes.get("/providers", (c) => {
+  const items = resolveAuthProviders();
+  return c.json({
+    items,
+    total: items.length,
+  });
+});
 
 authRoutes.post("/register", async (c) => {
   const body = await c.req.json().catch(() => undefined);

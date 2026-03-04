@@ -593,6 +593,22 @@ export interface AuthLogoutInput {
   refreshToken: string;
 }
 
+export type AuthProviderType = "local" | "oauth2" | "oidc" | "sso";
+
+export interface AuthProviderItem {
+  id: string;
+  type: AuthProviderType;
+  displayName: string;
+  enabled: boolean;
+  issuer?: string;
+  authorizationUrl?: string;
+}
+
+export interface AuthProviderListResponse {
+  items: AuthProviderItem[];
+  total: number;
+}
+
 export interface AuthTokens {
   accessToken: string;
   refreshToken: string;

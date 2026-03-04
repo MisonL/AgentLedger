@@ -9,6 +9,9 @@ import type {
   AlertStatusUpdateInput,
   AuthLoginInput,
   AuthLogoutInput,
+  AuthProviderItem,
+  AuthProviderListResponse,
+  AuthProviderType,
   AuthRefreshInput,
   AuthRegisterInput,
   AuditExportQueryInput,
@@ -122,6 +125,12 @@ const SESSION_EXPORT_JOB_STATUS_SET = new Set<SessionExportJobStatus>([
   "running",
   "completed",
   "failed",
+]);
+const AUTH_PROVIDER_TYPE_SET = new Set<AuthProviderType>([
+  "local",
+  "oauth2",
+  "oidc",
+  "sso",
 ]);
 const SYNC_JOB_STATUS_SET = new Set<SyncJobStatus>([
   "pending",
@@ -300,6 +309,13 @@ export function isSessionExportJobStatus(value: unknown): value is SessionExport
   return (
     typeof value === "string" &&
     SESSION_EXPORT_JOB_STATUS_SET.has(value as SessionExportJobStatus)
+  );
+}
+
+export function isAuthProviderType(value: unknown): value is AuthProviderType {
+  return (
+    typeof value === "string" &&
+    AUTH_PROVIDER_TYPE_SET.has(value as AuthProviderType)
   );
 }
 
@@ -1173,6 +1189,44 @@ export function isSourceBindingListResponse(
     Number.isInteger(value.total) &&
     value.total >= 0 &&
     filtersOk
+  );
+}
+
+export function isAuthProviderItem(value: unknown): value is AuthProviderItem {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const issuerOk =
+    value.issuer === undefined || value.issuer === null || isString(value.issuer);
+  const authorizationUrlOk =
+    value.authorizationUrl === undefined ||
+    value.authorizationUrl === null ||
+    isString(value.authorizationUrl);
+
+  return (
+    isString(value.id) &&
+    isAuthProviderType(value.type) &&
+    isString(value.displayName) &&
+    typeof value.enabled === "boolean" &&
+    issuerOk &&
+    authorizationUrlOk
+  );
+}
+
+export function isAuthProviderListResponse(
+  value: unknown
+): value is AuthProviderListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isAuthProviderItem(item)) &&
+    isNumber(value.total) &&
+    Number.isInteger(value.total) &&
+    value.total >= 0
   );
 }
 

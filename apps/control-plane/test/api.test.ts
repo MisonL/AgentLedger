@@ -2576,6 +2576,122 @@ describe("Control Plane API", () => {
     expect(targetAudit).toBeDefined();
   });
 
+  test("GET /api/v1/auth/providers 默认返回 local provider", async () => {
+    const originalDisableLocal = Bun.env.AUTH_DISABLE_LOCAL_LOGIN;
+    const originalExternalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+    delete Bun.env.AUTH_DISABLE_LOCAL_LOGIN;
+    delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+
+    try {
+      const result = await requestFirstAvailable([
+        {
+          path: "/api/v1/auth/providers",
+        },
+      ]);
+      expect(result.response.status).toBe(200);
+
+      if (!isRecord(result.payload) || !Array.isArray(result.payload.items)) {
+        throw new Error(
+          `auth/providers 响应结构异常：${JSON.stringify(result.payload)}`,
+        );
+      }
+      const providers = result.payload.items;
+      const hasLocalProvider = providers.some((item) => {
+        if (!isRecord(item)) {
+          return false;
+        }
+        return (
+          pickString(item, ["id"]) === "local" &&
+          pickString(item, ["type"]) === "local" &&
+          pickString(item, ["displayName"]) === "邮箱密码"
+        );
+      });
+      expect(hasLocalProvider).toBe(true);
+    } finally {
+      if (originalDisableLocal === undefined) {
+        delete Bun.env.AUTH_DISABLE_LOCAL_LOGIN;
+      } else {
+        Bun.env.AUTH_DISABLE_LOCAL_LOGIN = originalDisableLocal;
+      }
+      if (originalExternalProviders === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+      } else {
+        Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = originalExternalProviders;
+      }
+    }
+  });
+
+  test("GET /api/v1/auth/providers 支持 external providers JSON 并过滤非法项", async () => {
+    const originalDisableLocal = Bun.env.AUTH_DISABLE_LOCAL_LOGIN;
+    const originalExternalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+    Bun.env.AUTH_DISABLE_LOCAL_LOGIN = "true";
+    Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = JSON.stringify([
+      {
+        id: "github",
+        type: "oauth2",
+        displayName: "GitHub OAuth",
+        authorizationUrl: "https://github.com/login/oauth/authorize",
+        enabled: true,
+      },
+      {
+        id: "corp-oidc",
+        type: "oidc",
+        displayName: "企业 OIDC",
+        issuer: "https://idp.example.com/",
+        authorizationUrl: "https://idp.example.com/auth",
+      },
+      {
+        id: "corp-oidc",
+        type: "oidc",
+        displayName: "重复ID应被忽略",
+      },
+      {
+        id: "bad provider id",
+        type: "oidc",
+        displayName: "非法ID",
+      },
+      {
+        id: "no-type",
+        displayName: "缺少类型",
+      },
+    ]);
+
+    try {
+      const result = await requestFirstAvailable([
+        {
+          path: "/api/v1/auth/providers",
+        },
+      ]);
+      expect(result.response.status).toBe(200);
+
+      if (!isRecord(result.payload) || !Array.isArray(result.payload.items)) {
+        throw new Error(
+          `auth/providers 响应结构异常：${JSON.stringify(result.payload)}`,
+        );
+      }
+
+      const providers = result.payload.items.filter(isRecord);
+      const providerIds = providers
+        .map((item) => pickString(item, ["id"]))
+        .filter((id): id is string => typeof id === "string");
+
+      expect(providerIds.includes("local")).toBe(false);
+      expect(providerIds).toEqual(["github", "corp-oidc"]);
+      expect(result.payload.total).toBe(2);
+    } finally {
+      if (originalDisableLocal === undefined) {
+        delete Bun.env.AUTH_DISABLE_LOCAL_LOGIN;
+      } else {
+        Bun.env.AUTH_DISABLE_LOCAL_LOGIN = originalDisableLocal;
+      }
+      if (originalExternalProviders === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+      } else {
+        Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = originalExternalProviders;
+      }
+    }
+  });
+
   test("Identity 正常流：tenant/org/member 创建与查询", async () => {
     const nonce = createNonce("identity-normal");
     const owner = await registerAndLoginUser(`${nonce}-owner`);
