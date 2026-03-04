@@ -637,6 +637,14 @@ export interface AuthExternalLoginInput {
   signature: string;
 }
 
+export interface AuthExternalExchangeInput {
+  providerId: string;
+  code: string;
+  redirectUri: string;
+  codeVerifier?: string;
+  state?: string;
+}
+
 export type AuthProviderType = "local" | "oauth2" | "oidc" | "sso";
 
 export interface AuthProviderItem {

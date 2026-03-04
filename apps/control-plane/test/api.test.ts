@@ -2878,6 +2878,374 @@ describe("Control Plane API", () => {
     }
   });
 
+  test("POST /api/v1/auth/external/exchange 成功换取会话（token + userinfo）", async () => {
+    const nonce = createNonce("auth-external-exchange-success");
+    const providerId = "corp-oidc";
+    const tokenEndpoint = `https://idp.example.com/oauth/token/${nonce}`;
+    const userinfoEndpoint = `https://idp.example.com/oidc/userinfo/${nonce}`;
+    const idpAccessToken = `idp-access-token-${nonce}`;
+    const originalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+    const originalFetch = globalThis.fetch;
+    Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = JSON.stringify([
+      {
+        id: providerId,
+        type: "oidc",
+        displayName: "企业 OIDC",
+        enabled: true,
+        issuer: "https://idp.example.com",
+        authorizationUrl: "https://idp.example.com/oauth/authorize",
+        tokenEndpoint,
+        tokenUrl: tokenEndpoint,
+        accessTokenUrl: tokenEndpoint,
+        userInfoEndpoint: userinfoEndpoint,
+        userinfoEndpoint,
+        userinfoUrl: userinfoEndpoint,
+        clientId: `client-${nonce}`,
+        clientSecret: `secret-${nonce}`,
+      },
+    ]);
+
+    let tokenCalls = 0;
+    let userinfoCalls = 0;
+
+    try {
+      globalThis.fetch = (async (
+        input: Parameters<typeof fetch>[0],
+        init?: Parameters<typeof fetch>[1],
+      ) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        if (url.startsWith(tokenEndpoint)) {
+          tokenCalls += 1;
+          return new Response(
+            JSON.stringify({
+              access_token: idpAccessToken,
+              token_type: "Bearer",
+              expires_in: 3600,
+              id_token: `id-token-${nonce}`,
+            }),
+            {
+              status: 200,
+              headers: {
+                "content-type": "application/json",
+              },
+            },
+          );
+        }
+        if (url.startsWith(userinfoEndpoint)) {
+          userinfoCalls += 1;
+          const authorization = new Headers(init?.headers).get("authorization");
+          expect(authorization).toBe(`Bearer ${idpAccessToken}`);
+          return new Response(
+            JSON.stringify({
+              sub: `oidc-user-${nonce}`,
+              email: `exchange-${nonce}@example.com`,
+              name: `换会话用户-${nonce}`,
+            }),
+            {
+              status: 200,
+              headers: {
+                "content-type": "application/json",
+              },
+            },
+          );
+        }
+        throw new Error(`unexpected fetch url in external/exchange success test: ${url}`);
+      }) as unknown as typeof fetch;
+
+      const response = await app.request("/api/v1/auth/external/exchange", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          providerId,
+          code: `authorization-code-${nonce}`,
+          redirectUri: `https://console.example.com/callback/${nonce}`,
+          codeVerifier: `code-verifier-${nonce}`,
+        }),
+      });
+      const body = await readResponseAsUnknown(response);
+
+      expect(response.status).toBe(200);
+      expect(tokenCalls).toBeGreaterThan(0);
+      expect(userinfoCalls).toBeGreaterThan(0);
+      if (!isRecord(body)) {
+        throw new Error(
+          `auth/external/exchange 响应结构异常：${JSON.stringify(body)}`,
+        );
+      }
+      expect(pickString(body.provider, ["id"])).toBe(providerId);
+      expect(pickString(body.user, ["email"])).toBe(
+        `exchange-${nonce}@example.com`,
+      );
+      expect(typeof pickString(body.tokens, ["accessToken"])).toBe("string");
+      expect(typeof pickString(body.tokens, ["refreshToken"])).toBe("string");
+    } finally {
+      if (originalProviders === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+      } else {
+        Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = originalProviders;
+      }
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("POST /api/v1/auth/external/exchange provider 未启用或不存在返回 401", async () => {
+    const nonce = createNonce("auth-external-exchange-provider-401");
+    const originalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+    const originalFetch = globalThis.fetch;
+    Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = JSON.stringify([
+      {
+        id: "corp-oidc",
+        type: "oidc",
+        displayName: "企业 OIDC",
+        enabled: false,
+      },
+    ]);
+
+    let upstreamCalls = 0;
+
+    try {
+      globalThis.fetch = (async () => {
+        upstreamCalls += 1;
+        return new Response("unexpected upstream call", {
+          status: 500,
+        });
+      }) as unknown as typeof fetch;
+
+      const disabledProviderResponse = await app.request(
+        "/api/v1/auth/external/exchange",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            providerId: "corp-oidc",
+            code: `authorization-code-${nonce}-disabled`,
+            redirectUri: `https://console.example.com/callback/${nonce}/disabled`,
+          }),
+        },
+      );
+      const missingProviderResponse = await app.request(
+        "/api/v1/auth/external/exchange",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            providerId: "missing-provider",
+            code: `authorization-code-${nonce}-missing`,
+            redirectUri: `https://console.example.com/callback/${nonce}/missing`,
+          }),
+        },
+      );
+
+      expect(disabledProviderResponse.status).toBe(401);
+      expect(missingProviderResponse.status).toBe(401);
+      expect(upstreamCalls).toBe(0);
+    } finally {
+      if (originalProviders === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+      } else {
+        Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = originalProviders;
+      }
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("POST /api/v1/auth/external/exchange 上游 token 或 userinfo 失败返回 502", async () => {
+    const nonce = createNonce("auth-external-exchange-upstream-502");
+    const providerId = "corp-oidc";
+    const tokenEndpoint = `https://idp.example.com/oauth/token/${nonce}`;
+    const userinfoEndpoint = `https://idp.example.com/oidc/userinfo/${nonce}`;
+    const originalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+    const originalFetch = globalThis.fetch;
+    Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = JSON.stringify([
+      {
+        id: providerId,
+        type: "oidc",
+        displayName: "企业 OIDC",
+        enabled: true,
+        tokenEndpoint,
+        userinfoEndpoint,
+        clientId: `client-${nonce}`,
+        clientSecret: `secret-${nonce}`,
+      },
+    ]);
+
+    try {
+      const scenarios = [
+        {
+          name: "token_failed",
+          tokenStatus: 500,
+          userinfoStatus: 200,
+        },
+        {
+          name: "userinfo_failed",
+          tokenStatus: 200,
+          userinfoStatus: 500,
+        },
+      ] as const;
+
+      for (const scenario of scenarios) {
+        let tokenCalls = 0;
+        let userinfoCalls = 0;
+        globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+          const url =
+            typeof input === "string"
+              ? input
+              : input instanceof URL
+                ? input.toString()
+                : input.url;
+          if (url.startsWith(tokenEndpoint)) {
+            tokenCalls += 1;
+            if (scenario.tokenStatus >= 400) {
+              return new Response(
+                JSON.stringify({ message: `token endpoint failed: ${scenario.name}` }),
+                {
+                  status: scenario.tokenStatus,
+                  headers: {
+                    "content-type": "application/json",
+                  },
+                },
+              );
+            }
+            return new Response(
+              JSON.stringify({
+                access_token: `idp-access-token-${nonce}-${scenario.name}`,
+                token_type: "Bearer",
+                expires_in: 3600,
+              }),
+              {
+                status: 200,
+                headers: {
+                  "content-type": "application/json",
+                },
+              },
+            );
+          }
+          if (url.startsWith(userinfoEndpoint)) {
+            userinfoCalls += 1;
+            if (scenario.userinfoStatus >= 400) {
+              return new Response(
+                JSON.stringify({
+                  message: `userinfo endpoint failed: ${scenario.name}`,
+                }),
+                {
+                  status: scenario.userinfoStatus,
+                  headers: {
+                    "content-type": "application/json",
+                  },
+                },
+              );
+            }
+            return new Response(
+              JSON.stringify({
+                sub: `oidc-user-${nonce}-${scenario.name}`,
+                email: `exchange-${nonce}-${scenario.name}@example.com`,
+                name: `换会话失败场景-${scenario.name}`,
+              }),
+              {
+                status: 200,
+                headers: {
+                  "content-type": "application/json",
+                },
+              },
+            );
+          }
+          throw new Error(
+            `unexpected fetch url in external/exchange 502 test: ${url}`,
+          );
+        }) as unknown as typeof fetch;
+
+        const response = await app.request("/api/v1/auth/external/exchange", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            providerId,
+            code: `authorization-code-${nonce}-${scenario.name}`,
+            redirectUri: `https://console.example.com/callback/${nonce}/${scenario.name}`,
+          }),
+        });
+
+        expect(response.status).toBe(502);
+        expect(tokenCalls).toBeGreaterThan(0);
+        if (scenario.name === "token_failed") {
+          expect(userinfoCalls).toBe(0);
+        } else {
+          expect(userinfoCalls).toBeGreaterThan(0);
+        }
+      }
+    } finally {
+      if (originalProviders === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+      } else {
+        Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = originalProviders;
+      }
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("POST /api/v1/auth/external/exchange 参数非法返回 400", async () => {
+    const nonce = createNonce("auth-external-exchange-invalid-400");
+    const originalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+    const originalFetch = globalThis.fetch;
+    Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = JSON.stringify([
+      {
+        id: "corp-oidc",
+        type: "oidc",
+        displayName: "企业 OIDC",
+        enabled: true,
+      },
+    ]);
+
+    let upstreamCalls = 0;
+
+    try {
+      globalThis.fetch = (async () => {
+        upstreamCalls += 1;
+        return new Response("unexpected upstream call", {
+          status: 500,
+        });
+      }) as unknown as typeof fetch;
+
+      const response = await app.request("/api/v1/auth/external/exchange", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          providerId: "corp-oidc",
+          code: "",
+          redirectUri: `https://console.example.com/callback/${nonce}`,
+        }),
+      });
+      const body = await readResponseAsUnknown(response);
+
+      expect(response.status).toBe(400);
+      expect(upstreamCalls).toBe(0);
+      if (isRecord(body)) {
+        expect(typeof body.message).toBe("string");
+      }
+    } finally {
+      if (originalProviders === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+      } else {
+        Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = originalProviders;
+      }
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("Identity 正常流：tenant/org/member 创建与查询", async () => {
     const nonce = createNonce("identity-normal");
     const owner = await registerAndLoginUser(`${nonce}-owner`);

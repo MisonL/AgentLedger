@@ -7,6 +7,7 @@ import type {
   AlertMutableStatus,
   AlertListInput,
   AlertStatusUpdateInput,
+  AuthExternalExchangeInput,
   AuthExternalLoginInput,
   AuthLoginInput,
   AuthLogoutInput,
@@ -1459,6 +1460,50 @@ export function validateAuthLogoutInput(input: unknown): ValidationResult<AuthLo
     success: true,
     data: {
       refreshToken,
+    },
+  };
+}
+
+export function validateAuthExternalExchangeInput(
+  input: unknown
+): ValidationResult<AuthExternalExchangeInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const providerId = normalizeString(input.providerId)?.toLowerCase();
+  const code = normalizeString(input.code);
+  const redirectUri = normalizeString(input.redirectUri);
+  const codeVerifier = normalizeString(input.codeVerifier);
+  const state = normalizeString(input.state);
+
+  if (!providerId || !/^[a-z0-9][a-z0-9_-]{1,63}$/.test(providerId)) {
+    return {
+      success: false,
+      error: "providerId 必填且仅支持小写字母、数字、下划线、连字符（2-64 长度）。",
+    };
+  }
+  if (!code) {
+    return { success: false, error: "code 必填且必须为非空字符串。" };
+  }
+  if (!redirectUri) {
+    return { success: false, error: "redirectUri 必填且必须为非空字符串。" };
+  }
+  if (input.codeVerifier !== undefined && !codeVerifier) {
+    return { success: false, error: "codeVerifier 必须为非空字符串。" };
+  }
+  if (input.state !== undefined && !state) {
+    return { success: false, error: "state 必须为非空字符串。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      providerId,
+      code,
+      redirectUri,
+      codeVerifier,
+      state,
     },
   };
 }

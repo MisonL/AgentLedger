@@ -1,6 +1,7 @@
 import { Hono, type Context } from "hono";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
+  validateAuthExternalExchangeInput,
   validateAuthExternalLoginInput,
   validateAuthLoginInput,
   validateAuthLogoutInput,
@@ -36,6 +37,7 @@ const DEFAULT_AUTH_EXTERNAL_ASSERTION_TTL_SECONDS = 300;
 const MAX_AUTH_EXTERNAL_ASSERTION_TTL_SECONDS = 3600;
 const MAX_EXTERNAL_ASSERTION_NONCE_CACHE_SIZE = 20_000;
 const externalAssertionNonceCache = new Map<string, number>();
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface PrimaryTenantAccess {
   tenantId: string;
@@ -64,6 +66,20 @@ interface ExternalLoginFailureAuditContext {
 
 interface VerifyRefreshSessionOptions {
   onFailure?: (context: RefreshFailureAuditContext) => Promise<void> | void;
+}
+
+interface ExternalAuthProviderConfig extends AuthProviderItem {
+  tokenUrl?: string;
+  userInfoUrl?: string;
+  clientId?: string;
+  clientSecret?: string;
+  scopes?: string[];
+}
+
+interface ExternalUserInfoProfile {
+  externalUserId: string;
+  email: string;
+  displayName?: string;
 }
 
 function isExpired(expiresAt: string): boolean {
@@ -104,6 +120,16 @@ function conflict(c: Context<AppEnv>, message: string) {
   );
 }
 
+function badGateway(c: Context<AppEnv>, message: string) {
+  return c.json(
+    {
+      message,
+      requestId: c.get("requestId"),
+    },
+    502
+  );
+}
+
 function parseBooleanEnv(raw: string | undefined): boolean {
   const normalized = (raw ?? "").trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
@@ -115,6 +141,10 @@ function normalizeOptionalString(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function normalizeProviderId(value: unknown): string | undefined {
@@ -141,12 +171,40 @@ function normalizeProviderType(value: unknown): AuthProviderType | undefined {
   }
 }
 
-function normalizeExternalAuthProvider(value: unknown): AuthProviderItem | undefined {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+function normalizeProviderScopes(value: unknown): string[] | undefined {
+  const scopes: string[] = [];
+
+  if (typeof value === "string") {
+    for (const item of value.split(/[,\s]+/)) {
+      const scope = normalizeOptionalString(item);
+      if (scope) {
+        scopes.push(scope);
+      }
+    }
+  } else if (Array.isArray(value)) {
+    for (const item of value) {
+      const scope = normalizeOptionalString(item);
+      if (scope) {
+        scopes.push(scope);
+      }
+    }
+  } else {
     return undefined;
   }
 
-  const record = value as Record<string, unknown>;
+  if (scopes.length === 0) {
+    return undefined;
+  }
+
+  return Array.from(new Set(scopes));
+}
+
+function normalizeExternalAuthProvider(value: unknown): ExternalAuthProviderConfig | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const record = value;
   const id = normalizeProviderId(record.id);
   const type = normalizeProviderType(record.type);
   const displayName = normalizeOptionalString(record.displayName);
@@ -158,6 +216,15 @@ function normalizeExternalAuthProvider(value: unknown): AuthProviderItem | undef
   const authorizationUrl =
     normalizeOptionalString(record.authorizationUrl) ?? normalizeOptionalString(record.authUrl);
   const enabled = typeof record.enabled === "boolean" ? record.enabled : true;
+  const tokenUrl =
+    normalizeOptionalString(record.tokenUrl) ?? normalizeOptionalString(record.tokenEndpoint);
+  const userInfoUrl =
+    normalizeOptionalString(record.userInfoUrl) ??
+    normalizeOptionalString(record.userinfoUrl) ??
+    normalizeOptionalString(record.userinfoEndpoint);
+  const clientId = normalizeOptionalString(record.clientId);
+  const clientSecret = normalizeOptionalString(record.clientSecret);
+  const scopes = normalizeProviderScopes(record.scopes);
 
   return {
     id,
@@ -166,10 +233,26 @@ function normalizeExternalAuthProvider(value: unknown): AuthProviderItem | undef
     enabled,
     issuer,
     authorizationUrl,
+    tokenUrl,
+    userInfoUrl,
+    clientId,
+    clientSecret,
+    scopes,
   };
 }
 
-function resolveExternalAuthProvidersFromEnv(): AuthProviderItem[] {
+function toPublicAuthProviderItem(provider: ExternalAuthProviderConfig): AuthProviderItem {
+  return {
+    id: provider.id,
+    type: provider.type,
+    displayName: provider.displayName,
+    enabled: provider.enabled,
+    issuer: provider.issuer,
+    authorizationUrl: provider.authorizationUrl,
+  };
+}
+
+function resolveExternalAuthProvidersFromEnv(): ExternalAuthProviderConfig[] {
   const raw = (Bun.env[AUTH_EXTERNAL_PROVIDERS_JSON_ENV] ?? "").trim();
   if (!raw) {
     return [];
@@ -193,7 +276,7 @@ function resolveExternalAuthProvidersFromEnv(): AuthProviderItem[] {
     return [];
   }
 
-  const providers: AuthProviderItem[] = [];
+  const providers: ExternalAuthProviderConfig[] = [];
   const seen = new Set<string>();
   for (const item of parsed) {
     const normalized = normalizeExternalAuthProvider(item);
@@ -220,7 +303,7 @@ function resolveAuthProviders(): AuthProviderItem[] {
       enabled: true,
     });
   }
-  providers.push(...resolveExternalAuthProvidersFromEnv());
+  providers.push(...resolveExternalAuthProvidersFromEnv().map((item) => toPublicAuthProviderItem(item)));
   return providers;
 }
 
@@ -245,6 +328,201 @@ function findEnabledExternalProvider(providerId: string): AuthProviderItem | und
   return providers.find(
     (item) => item.id === providerId && item.enabled && item.type !== "local"
   );
+}
+
+function isExternalExchangeProviderType(type: AuthProviderType): boolean {
+  return type === "oauth2" || type === "oidc" || type === "sso";
+}
+
+function findEnabledExternalExchangeProvider(
+  providerId: string
+): ExternalAuthProviderConfig | undefined {
+  const providers = resolveExternalAuthProvidersFromEnv();
+  return providers.find(
+    (item) =>
+      item.id === providerId &&
+      item.enabled &&
+      isExternalExchangeProviderType(item.type) &&
+      typeof item.tokenUrl === "string" &&
+      typeof item.userInfoUrl === "string" &&
+      typeof item.clientId === "string"
+  );
+}
+
+async function parseJSONRecordSafely(
+  response: Response
+): Promise<Record<string, unknown> | undefined> {
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    return undefined;
+  }
+  return isRecord(payload) ? payload : undefined;
+}
+
+function buildUpstreamFailureDetail(
+  status: number,
+  payload: Record<string, unknown> | undefined
+): string {
+  const upstreamErrorCode = normalizeOptionalString(payload?.error);
+  const upstreamErrorMessage =
+    normalizeOptionalString(payload?.error_description) ??
+    normalizeOptionalString(payload?.message);
+
+  if (upstreamErrorCode && upstreamErrorMessage) {
+    return `HTTP ${status} ${upstreamErrorCode}: ${upstreamErrorMessage}`;
+  }
+  if (upstreamErrorCode) {
+    return `HTTP ${status} ${upstreamErrorCode}`;
+  }
+  if (upstreamErrorMessage) {
+    return `HTTP ${status}: ${upstreamErrorMessage}`;
+  }
+  return `HTTP ${status}`;
+}
+
+async function exchangeExternalAuthorizationCode(
+  provider: ExternalAuthProviderConfig,
+  input: {
+    code: string;
+    redirectUri: string;
+    codeVerifier?: string;
+  }
+): Promise<{ success: true; accessToken: string } | { success: false; reason: string }> {
+  if (!provider.tokenUrl || !provider.clientId) {
+    return {
+      success: false,
+      reason: "provider token 配置缺失。",
+    };
+  }
+
+  const form = new URLSearchParams();
+  form.set("grant_type", "authorization_code");
+  form.set("code", input.code);
+  form.set("redirect_uri", input.redirectUri);
+  form.set("client_id", provider.clientId);
+  if (provider.clientSecret) {
+    form.set("client_secret", provider.clientSecret);
+  }
+  if (input.codeVerifier) {
+    form.set("code_verifier", input.codeVerifier);
+  }
+  if (provider.scopes && provider.scopes.length > 0) {
+    form.set("scope", provider.scopes.join(" "));
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(provider.tokenUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: form.toString(),
+    });
+  } catch (error) {
+    return {
+      success: false,
+      reason: `调用 token endpoint 失败：${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  const payload = await parseJSONRecordSafely(response);
+  if (!response.ok) {
+    return {
+      success: false,
+      reason: `token endpoint 响应异常：${buildUpstreamFailureDetail(response.status, payload)}`,
+    };
+  }
+
+  const accessToken = normalizeOptionalString(payload?.access_token);
+  if (!accessToken) {
+    return {
+      success: false,
+      reason: "token endpoint 响应缺少 access_token。",
+    };
+  }
+
+  return {
+    success: true,
+    accessToken,
+  };
+}
+
+function normalizeExternalUserDisplayName(payload: Record<string, unknown>): string | undefined {
+  return (
+    normalizeOptionalString(payload.name) ??
+    normalizeOptionalString(payload.preferred_username) ??
+    normalizeOptionalString(payload.nickname)
+  );
+}
+
+async function fetchExternalUserInfo(
+  provider: ExternalAuthProviderConfig,
+  accessToken: string
+): Promise<{ success: true; profile: ExternalUserInfoProfile } | { success: false; reason: string }> {
+  if (!provider.userInfoUrl) {
+    return {
+      success: false,
+      reason: "provider userInfo 配置缺失。",
+    };
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(provider.userInfoUrl, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+  } catch (error) {
+    return {
+      success: false,
+      reason: `调用 userinfo endpoint 失败：${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  const payload = await parseJSONRecordSafely(response);
+  if (!response.ok) {
+    return {
+      success: false,
+      reason: `userinfo endpoint 响应异常：${buildUpstreamFailureDetail(response.status, payload)}`,
+    };
+  }
+  if (!payload) {
+    return {
+      success: false,
+      reason: "userinfo endpoint 响应不是合法 JSON 对象。",
+    };
+  }
+
+  const externalUserId = normalizeOptionalString(payload.sub);
+  const email = normalizeOptionalString(payload.email)?.toLowerCase();
+  if (!externalUserId) {
+    return {
+      success: false,
+      reason: "userinfo 响应缺少 sub。",
+    };
+  }
+  if (!email || !EMAIL_PATTERN.test(email)) {
+    return {
+      success: false,
+      reason: "userinfo 响应缺少合法 email。",
+    };
+  }
+
+  return {
+    success: true,
+    profile: {
+      externalUserId,
+      email,
+      displayName: normalizeExternalUserDisplayName(payload),
+    },
+  };
 }
 
 function buildExternalAssertionCanonicalPayload(input: {
@@ -635,6 +913,91 @@ authRoutes.post("/login", async (c) => {
       displayName: user.displayName,
       tenantId: tenantAccess.tenantId,
       tenantRole: tenantAccess.tenantRole,
+    },
+    tokens,
+  });
+});
+
+authRoutes.post("/external/exchange", async (c) => {
+  const body = await c.req.json().catch(() => undefined);
+  const result = validateAuthExternalExchangeInput(body);
+  if (!result.success) {
+    return badRequest(c, result.error);
+  }
+
+  const provider = findEnabledExternalExchangeProvider(result.data.providerId);
+  if (!provider) {
+    return unauthorized(c, "外部登录提供方不可用或未启用授权码交换。");
+  }
+
+  const tokenResult = await exchangeExternalAuthorizationCode(provider, {
+    code: result.data.code,
+    redirectUri: result.data.redirectUri,
+    codeVerifier: result.data.codeVerifier,
+  });
+  if (!tokenResult.success) {
+    console.warn(
+      `[control-plane] 外部授权码交换 token 失败(provider=${provider.id})：${tokenResult.reason}`
+    );
+    return badGateway(c, "外部身份提供方响应异常，请稍后重试。");
+  }
+
+  const userInfoResult = await fetchExternalUserInfo(provider, tokenResult.accessToken);
+  if (!userInfoResult.success) {
+    console.warn(
+      `[control-plane] 外部授权码交换 userinfo 失败(provider=${provider.id})：${userInfoResult.reason}`
+    );
+    return badGateway(c, "外部身份提供方响应异常，请稍后重试。");
+  }
+
+  let user = await repository.getLocalUserByEmail(userInfoResult.profile.email);
+  if (!user) {
+    const passwordHash = await Bun.password.hash(
+      `external:${provider.id}:${userInfoResult.profile.externalUserId}:${crypto.randomUUID()}`
+    );
+    user = await repository.createLocalUser({
+      email: userInfoResult.profile.email,
+      passwordHash,
+      displayName:
+        userInfoResult.profile.displayName ??
+        `${provider.id}:${userInfoResult.profile.externalUserId}`,
+    });
+  }
+
+  const tenantAccess = await resolvePrimaryTenantAccess(user.id);
+  const session = await createSessionForUser(user.id, tenantAccess.tenantId);
+  const tokens = issueAuthTokens(user.id, tenantAccess.tenantId, session);
+  const requestId = c.get("requestId");
+
+  await appendAuditLogSafely({
+    tenantId: tenantAccess.tenantId,
+    eventId: `cp:${requestId}:auth-external-exchange`,
+    action: "auth.external_exchange",
+    level: "info",
+    detail: `外部授权码登录成功(provider=${provider.id}, user=${user.id})`,
+    metadata: {
+      requestId,
+      providerId: provider.id,
+      providerType: provider.type,
+      externalUserId: userInfoResult.profile.externalUserId,
+      userId: user.id,
+      tenantId: tenantAccess.tenantId,
+      state: result.data.state,
+    },
+  });
+
+  return c.json({
+    user: {
+      userId: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      tenantId: tenantAccess.tenantId,
+      tenantRole: tenantAccess.tenantRole,
+    },
+    provider: {
+      id: provider.id,
+      type: provider.type,
+      displayName: provider.displayName,
     },
     tokens,
   });
