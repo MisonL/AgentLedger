@@ -1,6 +1,9 @@
 import type {
+  AuthExternalExchangeInput,
   AuthLoginInput,
   AuthLoginResponse,
+  AuthProviderItem,
+  AuthProviderListResponse,
   AuthRefreshInput,
   AuthRefreshResponse,
   AuthTokens,
@@ -597,6 +600,39 @@ function isAuthUserProfile(value: unknown): value is AuthUserProfile {
   );
 }
 
+function isAuthProviderItem(value: unknown): value is AuthProviderItem {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const issuerOk = value.issuer === undefined || typeof value.issuer === "string";
+  const authorizationUrlOk =
+    value.authorizationUrl === undefined || typeof value.authorizationUrl === "string";
+  return (
+    typeof value.id === "string" &&
+    typeof value.type === "string" &&
+    typeof value.displayName === "string" &&
+    typeof value.enabled === "boolean" &&
+    issuerOk &&
+    authorizationUrlOk
+  );
+}
+
+function isAuthProviderListResponse(value: unknown): value is AuthProviderListResponse {
+  if (!isRecord(value) || !Array.isArray(value.items)) {
+    return false;
+  }
+
+  if (
+    value.total !== undefined &&
+    (typeof value.total !== "number" || !Number.isFinite(value.total))
+  ) {
+    return false;
+  }
+
+  return value.items.every((item) => isAuthProviderItem(item));
+}
+
 function isAuthLoginResponse(value: unknown): value is AuthLoginResponse {
   if (!value || typeof value !== "object") {
     return false;
@@ -859,6 +895,72 @@ export async function login(
 
   if (!isAuthLoginResponse(result)) {
     throw new Error("auth.login 返回结构不合法");
+  }
+
+  setAuthTokens(result.tokens);
+  return result;
+}
+
+export async function fetchAuthProviders(
+  signal?: AbortSignal
+): Promise<AuthProviderListResponse> {
+  const result = await requestJson<unknown>(
+    "/api/v1/auth/providers",
+    undefined,
+    signal,
+    { skipAuth: true, skipUnauthorizedHandling: true }
+  );
+
+  if (!isAuthProviderListResponse(result)) {
+    throw new Error("auth.providers 返回结构不合法");
+  }
+
+  return {
+    items: result.items,
+    total: typeof result.total === "number" ? result.total : result.items.length,
+  };
+}
+
+export async function exchangeExternalAuthCode(
+  input: AuthExternalExchangeInput,
+  signal?: AbortSignal
+): Promise<AuthLoginResponse> {
+  const providerId = input.providerId.trim().toLowerCase();
+  const code = input.code.trim();
+  const redirectUri = input.redirectUri.trim();
+  const codeVerifier = input.codeVerifier?.trim();
+  const state = input.state?.trim();
+
+  if (!providerId) {
+    throw new Error("providerId 不能为空。");
+  }
+  if (!code) {
+    throw new Error("code 不能为空。");
+  }
+  if (!redirectUri) {
+    throw new Error("redirectUri 不能为空。");
+  }
+
+  const payload = {
+    providerId,
+    code,
+    redirectUri,
+    ...(codeVerifier ? { codeVerifier } : {}),
+    ...(state ? { state } : {}),
+  };
+
+  const result = await requestJson<unknown>(
+    "/api/v1/auth/external/exchange",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    signal,
+    { skipAuth: true, skipUnauthorizedHandling: true }
+  );
+
+  if (!isAuthLoginResponse(result)) {
+    throw new Error("auth.external.exchange 返回结构不合法");
   }
 
   setAuthTokens(result.tokens);

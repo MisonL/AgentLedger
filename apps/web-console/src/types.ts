@@ -305,6 +305,30 @@ export interface AuthLoginInput {
   password: string;
 }
 
+export type AuthProviderType = "local" | "oauth2" | "oidc" | "sso";
+
+export interface AuthProviderItem {
+  id: string;
+  type: AuthProviderType;
+  displayName: string;
+  enabled: boolean;
+  issuer?: string;
+  authorizationUrl?: string;
+}
+
+export interface AuthProviderListResponse {
+  items: AuthProviderItem[];
+  total: number;
+}
+
+export interface AuthExternalExchangeInput {
+  providerId: string;
+  code: string;
+  redirectUri: string;
+  codeVerifier?: string;
+  state?: string;
+}
+
 export interface AuthRefreshInput {
   refreshToken: string;
 }

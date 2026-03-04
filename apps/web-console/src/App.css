@@ -58,6 +58,46 @@
   color: var(--text-primary);
 }
 
+.external-login {
+  margin-top: 16px;
+  border-top: 1px solid rgba(183, 201, 220, 0.75);
+  padding-top: 14px;
+}
+
+.external-login-title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #35506a;
+}
+
+.external-provider-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.external-provider-button {
+  border: 1px solid #b8cbde;
+  border-radius: 10px;
+  background: #fff;
+  color: #134566;
+  padding: 9px 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease;
+}
+
+.external-provider-button:hover:enabled {
+  transform: translateY(-1px);
+  border-color: #0c7fc9;
+}
+
+.external-provider-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 .header-band {
   display: flex;
   justify-content: space-between;
@@ -763,6 +803,10 @@
   }
 
   .session-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .external-provider-list {
     grid-template-columns: 1fr;
   }
 }

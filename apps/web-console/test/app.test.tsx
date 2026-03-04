@@ -25,9 +25,31 @@ function mockJsonResponse(data: unknown, status = 200): Response {
   } as Response;
 }
 
+function mockAuthProvidersResponse() {
+  return mockJsonResponse({
+    items: [
+      {
+        id: "local",
+        type: "local",
+        displayName: "邮箱密码登录",
+        enabled: true,
+      },
+      {
+        id: "corp-oidc",
+        type: "oidc",
+        displayName: "企业 OIDC",
+        enabled: true,
+        authorizationUrl: "https://idp.example.com/oauth/authorize",
+      },
+    ],
+    total: 2,
+  });
+}
+
 describe("Web Console", () => {
   afterEach(() => {
     window.location.hash = "";
+    window.sessionStorage.removeItem("agentledger.web-console.auth.external.pending");
     clearAuthTokens();
     vi.restoreAllMocks();
   });
@@ -870,6 +892,10 @@ describe("Web Console", () => {
       const url = toUrl(input);
       const method = (init?.method ?? "GET").toUpperCase();
 
+      if (url.endsWith("/api/v1/auth/providers") && method === "GET") {
+        return mockAuthProvidersResponse();
+      }
+
       if (url.endsWith("/api/v1/auth/login") && method === "POST") {
         return mockJsonResponse({
           user: {
@@ -923,6 +949,10 @@ describe("Web Console", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = toUrl(input);
       const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/auth/providers") && method === "GET") {
+        return mockAuthProvidersResponse();
+      }
 
       if (url.endsWith("/api/v1/auth/login") && method === "POST") {
         loggedIn = true;
@@ -991,5 +1021,68 @@ describe("Web Console", () => {
     fireEvent.click(screen.getByRole("button", { name: "登录" }));
 
     expect(await screen.findByRole("heading", { name: "AI 使用热力图" })).toBeInTheDocument();
+  });
+
+  test("外部登录回调可自动 exchange 并进入控制台", async () => {
+    const originalHash = window.location.hash;
+    window.location.hash = "#/auth/callback?code=authorization-code-1&state=corp-oidc:nonce-1";
+    window.sessionStorage.setItem(
+      "agentledger.web-console.auth.external.pending",
+      JSON.stringify({
+        providerId: "corp-oidc",
+        state: "corp-oidc:nonce-1",
+        redirectUri: "http://localhost:5173/#/auth/callback",
+        createdAt: Date.now(),
+      })
+    );
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/auth/providers") && method === "GET") {
+        return mockAuthProvidersResponse();
+      }
+
+      if (url.endsWith("/api/v1/auth/external/exchange") && method === "POST") {
+        const payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        expect(payload.providerId).toBe("corp-oidc");
+        expect(payload.code).toBe("authorization-code-1");
+        expect(payload.state).toBe("corp-oidc:nonce-1");
+        return mockJsonResponse({
+          user: {
+            userId: "user-external-1",
+            email: "owner@example.com",
+            displayName: "Owner",
+            tenantId: "default",
+            tenantRole: "owner",
+          },
+          tokens: {
+            accessToken: "access-token-external",
+            refreshToken: "refresh-token-external",
+            expiresIn: 1800,
+            tokenType: "Bearer",
+          },
+        });
+      }
+
+      if (url.endsWith("/api/v1/sources") && method === "GET") {
+        return mockJsonResponse({ items: [], total: 0 });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "AI 使用热力图" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.stringContaining("/api/v1/auth/external/exchange"),
+        expect.objectContaining({ method: "POST" })
+      );
+    });
+
+    window.location.hash = originalHash;
   });
 });

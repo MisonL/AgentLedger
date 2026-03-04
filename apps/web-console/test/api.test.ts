@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   clearAuthTokens,
+  exchangeExternalAuthCode,
+  fetchAuthProviders,
   fetchPricingCatalog,
   fetchSourceHealth,
   fetchSourceParseFailures,
@@ -710,5 +712,114 @@ describe("api mock fallback gate", () => {
     await expect(fetchSourceParseFailures("source-invalid")).rejects.toThrow(
       "sources.parse-failures 返回结构不合法"
     );
+  });
+
+  test("fetchAuthProviders 返回登录提供方列表", async () => {
+    env.DEV = false;
+    clearAuthTokens();
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/auth/providers") && method === "GET") {
+        const headers = new Headers(init?.headers);
+        expect(headers.get("authorization")).toBeNull();
+        return mockJsonResponse({
+          items: [
+            {
+              id: "local",
+              type: "local",
+              displayName: "邮箱密码登录",
+              enabled: true,
+            },
+            {
+              id: "corp-oidc",
+              type: "oidc",
+              displayName: "企业 OIDC",
+              enabled: true,
+              authorizationUrl: "https://idp.example.com/oauth/authorize",
+            },
+          ],
+          total: 2,
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    await expect(fetchAuthProviders()).resolves.toEqual({
+      items: [
+        {
+          id: "local",
+          type: "local",
+          displayName: "邮箱密码登录",
+          enabled: true,
+        },
+        {
+          id: "corp-oidc",
+          type: "oidc",
+          displayName: "企业 OIDC",
+          enabled: true,
+          authorizationUrl: "https://idp.example.com/oauth/authorize",
+        },
+      ],
+      total: 2,
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("exchangeExternalAuthCode 成功后写入本地 token", async () => {
+    env.DEV = false;
+    clearAuthTokens();
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/auth/external/exchange") && method === "POST") {
+        const payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        expect(payload.providerId).toBe("corp-oidc");
+        expect(payload.code).toBe("authorization-code-1");
+        expect(payload.redirectUri).toContain("#/auth/callback");
+        expect(payload.state).toBe("corp-oidc:nonce-1");
+        return mockJsonResponse({
+          user: {
+            userId: "user-ext-1",
+            email: "owner@example.com",
+            displayName: "Owner",
+            tenantId: "default",
+            tenantRole: "owner",
+          },
+          tokens: {
+            accessToken: "access-token-external",
+            refreshToken: "refresh-token-external",
+            expiresIn: 1800,
+            tokenType: "Bearer",
+          },
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    await expect(
+      exchangeExternalAuthCode({
+        providerId: "corp-oidc",
+        code: "authorization-code-1",
+        redirectUri: "http://localhost:5173/#/auth/callback",
+        state: "corp-oidc:nonce-1",
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        user: expect.objectContaining({
+          userId: "user-ext-1",
+        }),
+      })
+    );
+
+    expect(hasAccessToken()).toBe(true);
+    expect(getAccessToken()).toBe("access-token-external");
   });
 });

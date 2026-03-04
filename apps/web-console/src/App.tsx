@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   useInfiniteQuery,
   QueryClient,
@@ -10,6 +10,8 @@ import {
 import {
   ApiError,
   createSource,
+  exchangeExternalAuthCode,
+  fetchAuthProviders,
   fetchSourceHealth,
   fetchSourceParseFailures,
   fetchHeatmap,
@@ -29,6 +31,7 @@ import {
   upsertPricingCatalog,
 } from "./api";
 import type {
+  AuthProviderItem,
   AuthLoginInput,
   CreateSourceInput,
   HeatmapCell,
@@ -94,6 +97,22 @@ const ROUTE_ITEMS: Array<{
 ];
 
 const DEFAULT_ROUTE: ConsoleRoute = "dashboard";
+const AUTH_CALLBACK_HASH_ROUTE = "/auth/callback";
+const AUTH_EXTERNAL_PENDING_STORAGE_KEY =
+  "agentledger.web-console.auth.external.pending";
+const FALLBACK_LOCAL_PROVIDER: AuthProviderItem = {
+  id: "local",
+  type: "local",
+  displayName: "邮箱密码登录",
+  enabled: true,
+};
+
+interface ExternalAuthPendingState {
+  providerId: string;
+  state: string;
+  redirectUri: string;
+  createdAt: number;
+}
 
 interface SourceFormState {
   name: string;
@@ -174,6 +193,147 @@ function writeRouteToHash(route: ConsoleRoute) {
   if (window.location.hash !== nextHash) {
     window.location.hash = nextHash;
   }
+}
+
+function buildExternalAuthRedirectUri(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return `${window.location.origin}${window.location.pathname}#${AUTH_CALLBACK_HASH_ROUTE}`;
+}
+
+function createExternalAuthState(providerId: string): string {
+  const nonce =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+  return `${providerId}:${nonce}`;
+}
+
+function saveExternalAuthPendingState(state: ExternalAuthPendingState) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(
+      AUTH_EXTERNAL_PENDING_STORAGE_KEY,
+      JSON.stringify(state)
+    );
+  } catch {
+    // ignore storage failures to keep login flow available
+  }
+}
+
+function readExternalAuthPendingState(): ExternalAuthPendingState | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(AUTH_EXTERNAL_PENDING_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as Partial<ExternalAuthPendingState>;
+    if (
+      typeof parsed.providerId !== "string" ||
+      typeof parsed.state !== "string" ||
+      typeof parsed.redirectUri !== "string" ||
+      typeof parsed.createdAt !== "number" ||
+      !Number.isFinite(parsed.createdAt)
+    ) {
+      return null;
+    }
+    return {
+      providerId: parsed.providerId,
+      state: parsed.state,
+      redirectUri: parsed.redirectUri,
+      createdAt: parsed.createdAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function clearExternalAuthPendingState() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.sessionStorage.removeItem(AUTH_EXTERNAL_PENDING_STORAGE_KEY);
+  } catch {
+    // ignore storage failures
+  }
+}
+
+interface AuthCallbackPayload {
+  code: string;
+  state?: string;
+  providerId?: string;
+  error?: string;
+  errorDescription?: string;
+}
+
+function parseAuthCallbackPayloadFromHash(hash: string): AuthCallbackPayload | null {
+  const normalized = hash.replace(/^#/, "");
+  const [path, query = ""] = normalized.split("?", 2);
+  if (path !== AUTH_CALLBACK_HASH_ROUTE) {
+    return null;
+  }
+
+  const params = new URLSearchParams(query);
+  const code = params.get("code")?.trim() ?? "";
+  const state = params.get("state")?.trim() ?? undefined;
+  const providerId =
+    params.get("providerId")?.trim() ??
+    params.get("provider")?.trim() ??
+    undefined;
+  const error = params.get("error")?.trim() ?? undefined;
+  const errorDescription =
+    params.get("error_description")?.trim() ??
+    params.get("errorDescription")?.trim() ??
+    undefined;
+
+  return {
+    code,
+    state,
+    providerId,
+    error,
+    errorDescription,
+  };
+}
+
+function buildExternalAuthAuthorizeUrl(
+  provider: AuthProviderItem,
+  redirectUri: string,
+  state: string
+): string {
+  if (!provider.authorizationUrl) {
+    throw new Error("该登录提供方未配置 authorizationUrl。");
+  }
+
+  let url: URL;
+  try {
+    url = new URL(provider.authorizationUrl, window.location.origin);
+  } catch {
+    throw new Error("登录提供方 authorizationUrl 非法。");
+  }
+
+  if (!url.searchParams.has("response_type")) {
+    url.searchParams.set("response_type", "code");
+  }
+  if (!url.searchParams.has("redirect_uri")) {
+    url.searchParams.set("redirect_uri", redirectUri);
+  }
+  if (!url.searchParams.has("state")) {
+    url.searchParams.set("state", state);
+  }
+  if (!url.searchParams.has("provider")) {
+    url.searchParams.set("provider", provider.id);
+  }
+
+  return url.toString();
 }
 
 function formatDateTime(isoDate: string): string {
@@ -536,6 +696,36 @@ interface LoginPageProps {
 function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
   const [loginForm, setLoginForm] = useState<LoginFormState>(INITIAL_LOGIN_FORM);
   const [formError, setFormError] = useState<string | null>(null);
+  const callbackHandledRef = useRef<string | null>(null);
+  const [authCallback, setAuthCallback] = useState<AuthCallbackPayload | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+    return parseAuthCallbackPayloadFromHash(window.location.hash);
+  });
+
+  const providersQuery = useQuery({
+    queryKey: ["auth-providers"],
+    queryFn: ({ signal }) => fetchAuthProviders(signal),
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  const providers = useMemo(() => {
+    const items = providersQuery.data?.items ?? [];
+    return items.length > 0 ? items : [FALLBACK_LOCAL_PROVIDER];
+  }, [providersQuery.data?.items]);
+
+  const localProviderEnabled = providers.some(
+    (provider) => provider.id === "local" && provider.enabled
+  );
+  const externalProviders = providers.filter(
+    (provider) =>
+      provider.id !== "local" &&
+      provider.enabled &&
+      typeof provider.authorizationUrl === "string" &&
+      provider.authorizationUrl.trim().length > 0
+  );
 
   const loginMutation = useMutation({
     mutationFn: (input: AuthLoginInput) => login(input),
@@ -546,8 +736,127 @@ function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
     },
   });
 
+  const externalExchangeMutation = useMutation({
+    mutationFn: ({
+      providerId,
+      code,
+      redirectUri,
+      state,
+    }: {
+      providerId: string;
+      code: string;
+      redirectUri: string;
+      state?: string;
+    }) =>
+      exchangeExternalAuthCode({
+        providerId,
+        code,
+        redirectUri,
+        state,
+      }),
+    onSuccess: () => {
+      clearExternalAuthPendingState();
+      setFormError(null);
+      onLoggedIn();
+    },
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const handleHashChange = () => {
+      setAuthCallback(parseAuthCallbackPayloadFromHash(window.location.hash));
+    };
+
+    window.addEventListener("hashchange", handleHashChange);
+    handleHashChange();
+
+    return () => {
+      window.removeEventListener("hashchange", handleHashChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authCallback) {
+      return;
+    }
+
+    const callbackKey = [
+      authCallback.code,
+      authCallback.state ?? "",
+      authCallback.providerId ?? "",
+      authCallback.error ?? "",
+    ].join("|");
+    if (callbackHandledRef.current === callbackKey) {
+      return;
+    }
+    callbackHandledRef.current = callbackKey;
+
+    if (authCallback.error) {
+      const message = authCallback.errorDescription ?? authCallback.error;
+      setFormError(`外部登录失败：${message}`);
+      clearExternalAuthPendingState();
+      return;
+    }
+
+    if (!authCallback.code) {
+      setFormError("外部登录回调缺少授权码，请重试。");
+      clearExternalAuthPendingState();
+      return;
+    }
+
+    const pending = readExternalAuthPendingState();
+    const providerId = authCallback.providerId ?? pending?.providerId;
+    if (!providerId) {
+      setFormError("无法识别外部登录提供方，请重新发起登录。");
+      clearExternalAuthPendingState();
+      return;
+    }
+
+    if (pending?.state && authCallback.state && pending.state !== authCallback.state) {
+      setFormError("外部登录 state 校验失败，请重新发起登录。");
+      clearExternalAuthPendingState();
+      return;
+    }
+
+    externalExchangeMutation.mutate({
+      providerId,
+      code: authCallback.code,
+      redirectUri: pending?.redirectUri ?? buildExternalAuthRedirectUri(),
+      state: authCallback.state ?? pending?.state,
+    });
+  }, [authCallback, externalExchangeMutation]);
+
+  function handleExternalLoginStart(provider: AuthProviderItem) {
+    setFormError(null);
+
+    try {
+      const redirectUri = buildExternalAuthRedirectUri();
+      const state = createExternalAuthState(provider.id);
+      saveExternalAuthPendingState({
+        providerId: provider.id,
+        state,
+        redirectUri,
+        createdAt: Date.now(),
+      });
+
+      const authorizeUrl = buildExternalAuthAuthorizeUrl(provider, redirectUri, state);
+      window.location.assign(authorizeUrl);
+    } catch (error) {
+      setFormError(`发起外部登录失败：${toErrorMessage(error)}`);
+      clearExternalAuthPendingState();
+    }
+  }
+
   function handleLoginSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (!localProviderEnabled) {
+      setFormError("当前环境未启用本地账号登录。");
+      return;
+    }
 
     const email = loginForm.email.trim();
     const password = loginForm.password.trim();
@@ -576,46 +885,92 @@ function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
 
         {authMessage ? <p className="feedback error">{authMessage}</p> : null}
 
-        <form className="login-form" onSubmit={handleLoginSubmit}>
-          <label htmlFor="login-email">邮箱</label>
-          <input
-            id="login-email"
-            type="email"
-            autoComplete="email"
-            placeholder="例如：owner@example.com"
-            value={loginForm.email}
-            onChange={(event) =>
-              setLoginForm((prev) => ({
-                ...prev,
-                email: event.target.value,
-              }))
-            }
-          />
+        {providersQuery.isLoading ? <p className="feedback info">正在加载登录方式...</p> : null}
+        {providersQuery.isError ? (
+          <p className="feedback error">
+            登录方式加载失败：{toErrorMessage(providersQuery.error)}
+          </p>
+        ) : null}
 
-          <label htmlFor="login-password">密码</label>
-          <input
-            id="login-password"
-            type="password"
-            autoComplete="current-password"
-            placeholder="请输入密码"
-            value={loginForm.password}
-            onChange={(event) =>
-              setLoginForm((prev) => ({
-                ...prev,
-                password: event.target.value,
-              }))
-            }
-          />
+        {localProviderEnabled ? (
+          <form className="login-form" onSubmit={handleLoginSubmit}>
+            <label htmlFor="login-email">邮箱</label>
+            <input
+              id="login-email"
+              type="email"
+              autoComplete="email"
+              placeholder="例如：owner@example.com"
+              value={loginForm.email}
+              onChange={(event) =>
+                setLoginForm((prev) => ({
+                  ...prev,
+                  email: event.target.value,
+                }))
+              }
+            />
 
-          <button type="submit" className="submit-button" disabled={loginMutation.isPending}>
-            {loginMutation.isPending ? "登录中..." : "登录"}
-          </button>
+            <label htmlFor="login-password">密码</label>
+            <input
+              id="login-password"
+              type="password"
+              autoComplete="current-password"
+              placeholder="请输入密码"
+              value={loginForm.password}
+              onChange={(event) =>
+                setLoginForm((prev) => ({
+                  ...prev,
+                  password: event.target.value,
+                }))
+              }
+            />
 
-          {formError ? <p className="feedback error">{formError}</p> : null}
-          {loginMutation.isError ? (
-            <p className="feedback error">登录失败：{toErrorMessage(loginMutation.error)}</p>
-          ) : null}
-        </form>
+            <button
+              type="submit"
+              className="submit-button"
+              disabled={loginMutation.isPending || externalExchangeMutation.isPending}
+            >
+              {loginMutation.isPending ? "登录中..." : "登录"}
+            </button>
+          </form>
+        ) : (
+          <p className="feedback info">当前环境未启用本地账号登录，请使用企业登录。</p>
+        )}
+
+        {externalProviders.length > 0 ? (
+          <section className="external-login">
+            <p className="external-login-title">或使用企业身份提供方</p>
+            <div className="external-provider-list">
+              {externalProviders.map((provider) => (
+                <button
+                  key={provider.id}
+                  type="button"
+                  className="external-provider-button"
+                  onClick={() => handleExternalLoginStart(provider)}
+                  disabled={
+                    loginMutation.isPending ||
+                    externalExchangeMutation.isPending ||
+                    providersQuery.isLoading
+                  }
+                >
+                  {provider.displayName}
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {externalExchangeMutation.isPending ? (
+          <p className="feedback info">正在完成外部登录回调，请稍候...</p>
+        ) : null}
+        {formError ? <p className="feedback error">{formError}</p> : null}
+        {loginMutation.isError ? (
+          <p className="feedback error">登录失败：{toErrorMessage(loginMutation.error)}</p>
+        ) : null}
+        {externalExchangeMutation.isError ? (
+          <p className="feedback error">
+            外部登录失败：{toErrorMessage(externalExchangeMutation.error)}
+          </p>
+        ) : null}
       </section>
     </main>
   );
