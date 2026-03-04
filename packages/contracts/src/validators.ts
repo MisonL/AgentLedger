@@ -79,6 +79,8 @@ import type {
   PricingCatalog,
   PricingCatalogEntry,
   UsageDailyItem,
+  UsageHeatmapDrilldownResponse,
+  UsageHeatmapMetric,
   UsageModelItem,
   UsageMonthlyItem,
   UsageSessionBreakdownItem,
@@ -147,6 +149,11 @@ const USAGE_COST_MODE_SET = new Set<UsageCostMode>([
   "reported",
   "mixed",
   "none",
+]);
+const USAGE_HEATMAP_METRIC_SET = new Set<UsageHeatmapMetric>([
+  "tokens",
+  "cost",
+  "sessions",
 ]);
 const SESSION_LIMIT_MAX = 200;
 const SOURCE_PARSE_FAILURE_LIMIT_DEFAULT = 50;
@@ -777,6 +784,13 @@ export function isUsageCostMode(value: unknown): value is UsageCostMode {
   return typeof value === "string" && USAGE_COST_MODE_SET.has(value as UsageCostMode);
 }
 
+export function isUsageHeatmapMetric(value: unknown): value is UsageHeatmapMetric {
+  return (
+    typeof value === "string" &&
+    USAGE_HEATMAP_METRIC_SET.has(value as UsageHeatmapMetric)
+  );
+}
+
 function isUsageCostSourceRecord(value: Record<string, unknown>): boolean {
   return (
     isNumber(value.costRaw) &&
@@ -861,6 +875,41 @@ export function isUsageSessionBreakdownItem(
     isNumber(value.cost) &&
     value.cost >= 0 &&
     isUsageCostSourceRecord(value)
+  );
+}
+
+export function isUsageHeatmapDrilldownResponse(
+  value: unknown
+): value is UsageHeatmapDrilldownResponse {
+  if (!isRecord(value) || !isRecord(value.filters) || !isRecord(value.summary)) {
+    return false;
+  }
+
+  const filters = value.filters;
+  const summary = value.summary;
+  const dateOk = typeof filters.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(filters.date);
+  const fromOk = filters.from === undefined || filters.from === null || isISODate(filters.from);
+  const toOk = filters.to === undefined || filters.to === null || isISODate(filters.to);
+  const limitOk =
+    isNumber(filters.limit) && Number.isInteger(filters.limit) && filters.limit > 0;
+
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isUsageSessionBreakdownItem(item)) &&
+    isNumber(value.total) &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    dateOk &&
+    isUsageHeatmapMetric(filters.metric) &&
+    fromOk &&
+    toOk &&
+    limitOk &&
+    isNumber(summary.tokens) &&
+    summary.tokens >= 0 &&
+    isNumber(summary.cost) &&
+    summary.cost >= 0 &&
+    isNumber(summary.sessions) &&
+    summary.sessions >= 0
   );
 }
 

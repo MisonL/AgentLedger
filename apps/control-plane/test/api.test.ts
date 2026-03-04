@@ -20,6 +20,7 @@ import type {
   SourceHealth,
   SourceListResponse,
   UsageDailyItem,
+  UsageHeatmapDrilldownResponse,
   UsageHeatmapResponse,
 } from "../src/contracts";
 import { createApp } from "../src/app";
@@ -3466,6 +3467,42 @@ describe("Control Plane API", () => {
     expect(typeof body.summary.tokens).toBe("number");
     expect(typeof body.summary.cost).toBe("number");
     expect(typeof body.summary.sessions).toBe("number");
+  });
+
+  test("GET /api/v1/usage/heatmap/drilldown 支持按日期与指标下钻", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const date = new Date().toISOString().slice(0, 10);
+    const response = await app.request(
+      `/api/v1/usage/heatmap/drilldown?date=${encodeURIComponent(date)}&metric=tokens&limit=20`,
+      {
+        headers: authHeaders,
+      },
+    );
+    const body = (await response.json()) as UsageHeatmapDrilldownResponse;
+
+    expect(response.status).toBe(200);
+    expect(Array.isArray(body.items)).toBe(true);
+    expect(typeof body.total).toBe("number");
+    expect(body.filters.date).toBe(date);
+    expect(body.filters.metric).toBe("tokens");
+    expect(body.filters.limit).toBe(20);
+    expect(typeof body.summary.tokens).toBe("number");
+    expect(typeof body.summary.cost).toBe("number");
+    expect(typeof body.summary.sessions).toBe("number");
+  });
+
+  test("GET /api/v1/usage/heatmap/drilldown 参数非法返回 400", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const response = await app.request(
+      "/api/v1/usage/heatmap/drilldown?metric=invalid",
+      {
+        headers: authHeaders,
+      },
+    );
+    const payload = (await response.json()) as { message?: string };
+
+    expect(response.status).toBe(400);
+    expect(typeof payload.message).toBe("string");
   });
 
   test("GET /api/v1/usage/heatmap 代理成功时返回 analytics 数据", async () => {

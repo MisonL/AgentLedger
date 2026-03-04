@@ -347,6 +347,26 @@ export interface UsageListResponse<TItem> {
   filters: UsageAggregateFilters;
 }
 
+export type UsageHeatmapMetric = "tokens" | "cost" | "sessions";
+
+export interface UsageHeatmapDrilldownFilters extends UsageAggregateFilters {
+  date: string;
+  metric: UsageHeatmapMetric;
+}
+
+export interface UsageHeatmapDrilldownSummary {
+  tokens: number;
+  cost: number;
+  sessions: number;
+}
+
+export interface UsageHeatmapDrilldownResponse {
+  items: UsageSessionBreakdownItem[];
+  total: number;
+  filters: UsageHeatmapDrilldownFilters;
+  summary: UsageHeatmapDrilldownSummary;
+}
+
 export interface UsageMonthlyItem extends UsageCostSource {
   month: string;
   tokens: number;

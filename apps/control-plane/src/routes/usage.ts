@@ -4,6 +4,8 @@ import {
   type HeatmapCell,
   type UsageAggregateFilters,
   type UsageDailyItem,
+  type UsageHeatmapDrilldownResponse,
+  type UsageHeatmapMetric,
   type UsageHeatmapResponse,
   type UsageListResponse,
   type UsageModelItem,
@@ -26,6 +28,8 @@ const MIN_ANALYTICS_PROXY_TIMEOUT_MS = 100;
 const MAX_ANALYTICS_PROXY_TIMEOUT_MS = 60_000;
 const DEFAULT_USAGE_AGGREGATE_LIMIT = 50;
 const MAX_USAGE_AGGREGATE_LIMIT = 2_000;
+const DEFAULT_USAGE_HEATMAP_DRILLDOWN_LIMIT = 50;
+const MAX_USAGE_HEATMAP_DRILLDOWN_LIMIT = 500;
 
 class analyticsProxyClientError extends Error {
   readonly statusCode: number;
@@ -188,6 +192,149 @@ function parseUsageAggregateQuery(
   };
 }
 
+function parseUsageHeatmapMetric(value: string | undefined): UsageHeatmapMetric | undefined {
+  const normalized = (value ?? "").trim().toLowerCase();
+  switch (normalized) {
+    case "tokens":
+    case "cost":
+    case "sessions":
+      return normalized;
+    default:
+      return undefined;
+  }
+}
+
+function parseUsageHeatmapDrilldownDateRange(
+  rawDate: string
+): { date: string; from: string; to: string } | null {
+  const trimmed = rawDate.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const fromDate = new Date(`${trimmed}T00:00:00.000Z`);
+    if (Number.isNaN(fromDate.getTime())) {
+      return null;
+    }
+    const toDate = new Date(fromDate.getTime() + (24 * 60 * 60 * 1000) - 1);
+    return {
+      date: trimmed,
+      from: fromDate.toISOString(),
+      to: toDate.toISOString(),
+    };
+  }
+
+  const timestamp = Date.parse(trimmed);
+  if (Number.isNaN(timestamp)) {
+    return null;
+  }
+  const date = new Date(timestamp);
+  const fromDate = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0)
+  );
+  const toDate = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999)
+  );
+  return {
+    date: fromDate.toISOString().slice(0, 10),
+    from: fromDate.toISOString(),
+    to: toDate.toISOString(),
+  };
+}
+
+function parseUsageHeatmapDrilldownQuery(
+  query: Record<string, string | undefined>
+):
+  | {
+      success: true;
+      data: {
+        date: string;
+        metric: UsageHeatmapMetric;
+        from: string;
+        to: string;
+        limit: number;
+      };
+    }
+  | { success: false; error: string } {
+  const rawDate = toOptionalQueryString(query.date ?? null);
+  if (!rawDate) {
+    return { success: false, error: "date 必填，格式需为 YYYY-MM-DD 或 ISO 日期时间。" };
+  }
+  const dateRange = parseUsageHeatmapDrilldownDateRange(rawDate);
+  if (!dateRange) {
+    return { success: false, error: "date 必须为 YYYY-MM-DD 或合法 ISO 日期时间。" };
+  }
+
+  const metric = parseUsageHeatmapMetric(query.metric) ?? "tokens";
+  if (query.metric !== undefined && !parseUsageHeatmapMetric(query.metric)) {
+    return { success: false, error: "metric 仅支持 tokens/cost/sessions。" };
+  }
+
+  let limit = DEFAULT_USAGE_HEATMAP_DRILLDOWN_LIMIT;
+  if (query.limit !== undefined) {
+    const trimmed = query.limit.trim();
+    if (!/^\d+$/.test(trimmed)) {
+      return {
+        success: false,
+        error: `limit 必须是 1 到 ${MAX_USAGE_HEATMAP_DRILLDOWN_LIMIT} 的整数。`,
+      };
+    }
+    const parsed = Number(trimmed);
+    if (
+      !Number.isInteger(parsed) ||
+      parsed < 1 ||
+      parsed > MAX_USAGE_HEATMAP_DRILLDOWN_LIMIT
+    ) {
+      return {
+        success: false,
+        error: `limit 必须是 1 到 ${MAX_USAGE_HEATMAP_DRILLDOWN_LIMIT} 的整数。`,
+      };
+    }
+    limit = parsed;
+  }
+
+  return {
+    success: true,
+    data: {
+      date: dateRange.date,
+      metric,
+      from: dateRange.from,
+      to: dateRange.to,
+      limit,
+    },
+  };
+}
+
+function sortUsageSessionItemsByMetric(
+  items: UsageSessionBreakdownItem[],
+  metric: UsageHeatmapMetric
+): UsageSessionBreakdownItem[] {
+  const sorted = [...items];
+  sorted.sort((left, right) => {
+    if (metric === "cost") {
+      return (
+        right.cost - left.cost ||
+        right.totalTokens - left.totalTokens ||
+        right.startedAt.localeCompare(left.startedAt)
+      );
+    }
+    if (metric === "sessions") {
+      return (
+        right.startedAt.localeCompare(left.startedAt) ||
+        right.totalTokens - left.totalTokens ||
+        right.cost - left.cost
+      );
+    }
+    return (
+      right.totalTokens - left.totalTokens ||
+      right.cost - left.cost ||
+      right.startedAt.localeCompare(left.startedAt)
+    );
+  });
+  return sorted;
+}
+
 function parseUsageHeatmapQuery(url: URL): UsageHeatmapQueryInput {
   return {
     tenantId: toOptionalQueryString(url.searchParams.get("tenant_id"))
@@ -332,6 +479,57 @@ usageRoutes.get("/usage/heatmap", async (c) => {
       tokens: summary.tokens,
       cost: Number(summary.cost.toFixed(2)),
       sessions: summary.sessions,
+    },
+  };
+
+  return c.json(payload);
+});
+
+usageRoutes.get("/usage/heatmap/drilldown", async (c) => {
+  const auth = await requireAuthContext(c);
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const queryResult = parseUsageHeatmapDrilldownQuery(c.req.query());
+  if (!queryResult.success) {
+    return c.json({ message: queryResult.error }, 400);
+  }
+
+  const fullItems = await repository.listUsageSessionBreakdown({
+    tenantId: auth.tenantId,
+    from: queryResult.data.from,
+    to: queryResult.data.to,
+    limit: MAX_USAGE_AGGREGATE_LIMIT,
+  });
+  const items = sortUsageSessionItemsByMetric(fullItems, queryResult.data.metric).slice(
+    0,
+    queryResult.data.limit
+  );
+
+  const summary = fullItems.reduce(
+    (acc, item) => {
+      acc.tokens += item.totalTokens;
+      acc.cost += item.cost;
+      return acc;
+    },
+    { tokens: 0, cost: 0 }
+  );
+
+  const payload: UsageHeatmapDrilldownResponse = {
+    items,
+    total: fullItems.length,
+    filters: {
+      date: queryResult.data.date,
+      metric: queryResult.data.metric,
+      from: queryResult.data.from,
+      to: queryResult.data.to,
+      limit: queryResult.data.limit,
+    },
+    summary: {
+      tokens: summary.tokens,
+      cost: Number(summary.cost.toFixed(2)),
+      sessions: fullItems.length,
     },
   };
 
