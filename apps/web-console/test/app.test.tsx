@@ -1324,6 +1324,7 @@ describe("Web Console", () => {
           items: [],
           total: 0,
           filters: {},
+          nextCursor: null,
         });
       }
       if (url.includes("/api/v1/usage/weekly-summary") && method === "GET") {
@@ -1433,6 +1434,7 @@ describe("Web Console", () => {
             ...(severity ? { severity } : {}),
             ...(status ? { status } : {}),
           },
+          nextCursor: null,
         });
       }
       if (url.includes("/api/v1/usage/weekly-summary") && method === "GET") {
@@ -1517,6 +1519,10 @@ describe("Web Console", () => {
             },
           ],
           total: 1,
+          filters: {
+            limit: 50,
+          },
+          nextCursor: null,
         });
       }
       if (url.includes("/api/v1/usage/weekly-summary") && method === "GET") {
@@ -1616,6 +1622,10 @@ describe("Web Console", () => {
         return mockJsonResponse({
           items: alerts,
           total: alerts.length,
+          filters: {
+            limit: 50,
+          },
+          nextCursor: null,
         });
       }
       if (url.includes("/api/v1/usage/weekly-summary") && method === "GET") {
@@ -1696,7 +1706,14 @@ describe("Web Console", () => {
       const method = (init?.method ?? "GET").toUpperCase();
 
       if (url.includes("/api/v1/alerts") && method === "GET") {
-        return mockJsonResponse({ items: [], total: 0 });
+        return mockJsonResponse({
+          items: [],
+          total: 0,
+          filters: {
+            limit: 50,
+          },
+          nextCursor: null,
+        });
       }
       if (url.includes("/api/v1/usage/weekly-summary") && method === "GET") {
         return mockJsonResponse({

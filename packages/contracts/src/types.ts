@@ -514,10 +514,18 @@ export interface AlertListInput {
   from?: string;
   to?: string;
   limit?: number;
+  cursor?: string;
 }
 
 export interface AlertStatusUpdateInput {
   status: AlertMutableStatus;
+}
+
+export interface AlertListResponse {
+  items: Alert[];
+  total: number;
+  filters: AlertListInput;
+  nextCursor: string | null;
 }
 
 export interface AuditListInput {
@@ -525,6 +533,7 @@ export interface AuditListInput {
   from?: string;
   to?: string;
   limit?: number;
+  cursor?: string;
 }
 
 export interface AuditExportQueryInput extends AuditListInput {
@@ -538,6 +547,7 @@ export interface AuditListResponse {
   items: AuditItem[];
   total: number;
   filters: AuditListInput;
+  nextCursor: string | null;
 }
 
 export interface PricingCatalogEntry {

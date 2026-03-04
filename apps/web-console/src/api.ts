@@ -453,6 +453,7 @@ function isAlertListInput(value: unknown): value is AlertListInput {
     (typeof value.limit === "number" &&
       Number.isInteger(value.limit) &&
       value.limit > 0);
+  const cursorOk = value.cursor === undefined || typeof value.cursor === "string";
 
   return (
     statusOk &&
@@ -462,7 +463,8 @@ function isAlertListInput(value: unknown): value is AlertListInput {
     budgetIdOk &&
     fromOk &&
     toOk &&
-    limitOk
+    limitOk &&
+    cursorOk
   );
 }
 
@@ -494,13 +496,15 @@ function isAlertListResponse(value: unknown): value is AlertListResponse {
   if (!isRecord(value) || !Array.isArray(value.items)) {
     return false;
   }
-  const filtersOk = value.filters === undefined || isAlertListInput(value.filters);
+  const filtersOk = isAlertListInput(value.filters);
+  const nextCursorOk = value.nextCursor === null || typeof value.nextCursor === "string";
   return (
     value.items.every((item) => isAlertItem(item)) &&
     typeof value.total === "number" &&
     Number.isInteger(value.total) &&
     value.total >= 0 &&
-    filtersOk
+    filtersOk &&
+    nextCursorOk
   );
 }
 
@@ -593,7 +597,6 @@ function buildSourceParseFailureQuery(input?: SourceParseFailureQueryInput): str
   if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit > 0) {
     params.set("limit", String(input.limit));
   }
-
   const query = params.toString();
   return query.length > 0 ? `?${query}` : "";
 }
@@ -627,6 +630,9 @@ function buildAlertListQuery(input?: AlertListInput): string {
   }
   if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit > 0) {
     params.set("limit", String(input.limit));
+  }
+  if (typeof input.cursor === "string" && input.cursor.trim().length > 0) {
+    params.set("cursor", input.cursor.trim());
   }
 
   const query = params.toString();
@@ -1443,16 +1449,47 @@ export async function fetchAlerts(
   input?: AlertListInput,
   signal?: AbortSignal
 ): Promise<AlertListResponse> {
-  const result = await requestJson<unknown>(
-    `/api/v1/alerts${buildAlertListQuery(input)}`,
-    undefined,
-    signal
-  );
+  const baseInput = input ? { ...input } : {};
+  const dedupedItems: AlertItem[] = [];
+  const seenIds = new Set<string>();
+  let cursor = baseInput.cursor;
+  let total = 0;
+  let firstPageFilters: AlertListInput | null = null;
 
-  if (!isAlertListResponse(result)) {
-    throw new Error("alerts 返回结构不合法");
+  for (let page = 0; page < 200; page += 1) {
+    const result = await requestJson<unknown>(
+      `/api/v1/alerts${buildAlertListQuery({ ...baseInput, cursor })}`,
+      undefined,
+      signal
+    );
+    if (!isAlertListResponse(result)) {
+      throw new Error("alerts 返回结构不合法");
+    }
+    if (page === 0) {
+      total = result.total;
+      firstPageFilters = result.filters;
+    }
+
+    for (const item of result.items) {
+      if (seenIds.has(item.id)) {
+        continue;
+      }
+      seenIds.add(item.id);
+      dedupedItems.push(item);
+    }
+
+    if (!result.nextCursor) {
+      return {
+        items: dedupedItems,
+        total,
+        filters: firstPageFilters ?? result.filters,
+        nextCursor: null,
+      };
+    }
+    cursor = result.nextCursor;
   }
-  return result;
+
+  throw new Error("alerts 分页超过安全上限，请收窄筛选条件后重试。");
 }
 
 export async function updateAlertStatus(

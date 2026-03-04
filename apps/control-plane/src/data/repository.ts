@@ -161,6 +161,13 @@ export interface SourceParseFailureListResult {
 export interface AuditListResult {
   items: AuditItem[];
   total: number;
+  nextCursor: string | null;
+}
+
+export interface AlertListResult {
+  items: Alert[];
+  total: number;
+  nextCursor: string | null;
 }
 
 export interface AuditListQueryInput extends AuditListInput {
@@ -282,6 +289,7 @@ interface NormalizedAlertListInput {
   from?: string;
   to?: string;
   limit: number;
+  cursor?: string;
 }
 
 interface NormalizedAuditListInput {
@@ -293,6 +301,7 @@ interface NormalizedAuditListInput {
   from?: string;
   to?: string;
   limit: number;
+  cursor?: string;
 }
 
 interface NormalizedUsageHeatmapInput {
@@ -1634,6 +1643,7 @@ function normalizeAlertListInput(input: AlertListInput): NormalizedAlertListInpu
     from: input.from,
     to: input.to,
     limit: input.limit ?? DEFAULT_ALERT_LIMIT,
+    cursor: firstNonEmptyString(input.cursor) ?? undefined,
   };
 }
 
@@ -1650,6 +1660,7 @@ function normalizeAuditListInput(
     from: input.from,
     to: input.to,
     limit: input.limit ?? DEFAULT_AUDIT_LIMIT,
+    cursor: firstNonEmptyString(input.cursor) ?? undefined,
   };
 }
 
@@ -5181,7 +5192,7 @@ class ControlPlaneRepository {
     }
   }
 
-  async listAlerts(tenantId: string, input: AlertListInput): Promise<Alert[]> {
+  async listAlerts(tenantId: string, input: AlertListInput): Promise<AlertListResult> {
     const normalized = normalizeAlertListInput(input);
     const pool = await this.getPool();
     if (!pool) {
@@ -5191,6 +5202,7 @@ class ControlPlaneRepository {
     try {
       const params: unknown[] = [tenantId];
       const whereClauses: string[] = ["tenant_id = $1"];
+      const cursor = decodeTimePaginationCursor(normalized.cursor);
 
       if (normalized.status) {
         params.push(normalized.status);
@@ -5217,7 +5229,29 @@ class ControlPlaneRepository {
         whereClauses.push(`created_at <= $${params.length}::timestamptz`);
       }
 
-      const listParams = [...params, normalized.limit];
+      const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+      const countResult = await pool.query(
+        `SELECT COUNT(*)::int AS total
+         FROM governance_alerts
+         ${whereSql}`,
+        params
+      );
+
+      const listParams = [...params];
+      const listWhereClauses = [...whereClauses];
+      if (cursor) {
+        listParams.push(cursor.timestamp);
+        const timestampToken = `$${listParams.length}`;
+        listParams.push(cursor.id);
+        const idToken = `$${listParams.length}`;
+        listWhereClauses.push(
+          `(created_at < ${timestampToken}::timestamptz
+            OR (created_at = ${timestampToken}::timestamptz AND id::text < ${idToken}))`
+        );
+      }
+      const listWhereSql =
+        listWhereClauses.length > 0 ? `WHERE ${listWhereClauses.join(" AND ")}` : "";
+      listParams.push(normalized.limit + 1);
       const result = await pool.query(
         `SELECT id,
                 tenant_id,
@@ -5234,15 +5268,42 @@ class ControlPlaneRepository {
                 status,
                 severity,
                 updated_at,
-                created_at
+                created_at,
+                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+                  AS created_at_cursor
          FROM governance_alerts
-         WHERE ${whereClauses.join(" AND ")}
-         ORDER BY created_at DESC, updated_at DESC
+         ${listWhereSql}
+         ORDER BY created_at DESC, id::text DESC
          LIMIT $${listParams.length}`,
         listParams
       );
 
-      return result.rows.map(mapAlertRow);
+      const mappedItems = result.rows.map(mapAlertRow);
+      const hasMore = mappedItems.length > normalized.limit;
+      const items = hasMore ? mappedItems.slice(0, normalized.limit) : mappedItems;
+      const cursorRows = hasMore ? result.rows.slice(0, normalized.limit) : result.rows;
+      const lastItem = items[items.length - 1];
+      const lastCursorRow = cursorRows[cursorRows.length - 1];
+      const cursorTimestamp =
+        firstNonEmptyString((lastCursorRow as DbRow | undefined)?.created_at_cursor) ??
+        toIsoString((lastCursorRow as DbRow | undefined)?.created_at);
+      const nextCursor =
+        hasMore &&
+        lastItem &&
+        typeof cursorTimestamp === "string" &&
+        Number.isFinite(Date.parse(cursorTimestamp)) &&
+        lastItem.id.trim().length > 0
+          ? encodeTimePaginationCursor({
+              timestamp: cursorTimestamp,
+              id: lastItem.id,
+            })
+          : null;
+
+      return {
+        items,
+        total: Math.max(0, Math.trunc(toNumber(countResult.rows[0]?.total, 0))),
+        nextCursor,
+      };
     } catch (error) {
       this.disableDb(error, "查询 alerts 失败");
       return this.listAlertsFromMemory(tenantId, normalized);
@@ -5449,6 +5510,7 @@ class ControlPlaneRepository {
     try {
       const params: unknown[] = [];
       const whereClauses: string[] = [];
+      const cursor = decodeTimePaginationCursor(normalized.cursor);
 
       if (normalized.tenantId) {
         params.push(normalized.tenantId);
@@ -5501,7 +5563,21 @@ class ControlPlaneRepository {
         params
       );
 
-      const listParams = [...params, normalized.limit];
+      const listParams = [...params];
+      const listWhereClauses = [...whereClauses];
+      if (cursor) {
+        listParams.push(cursor.timestamp);
+        const timestampToken = `$${listParams.length}`;
+        listParams.push(cursor.id);
+        const idToken = `$${listParams.length}`;
+        listWhereClauses.push(
+          `(created_at < ${timestampToken}::timestamptz
+            OR (created_at = ${timestampToken}::timestamptz AND id::text < ${idToken}))`
+        );
+      }
+      const listWhereSql =
+        listWhereClauses.length > 0 ? `WHERE ${listWhereClauses.join(" AND ")}` : "";
+      listParams.push(normalized.limit + 1);
       const result = await pool.query(
         `SELECT id,
                 event_id,
@@ -5509,17 +5585,41 @@ class ControlPlaneRepository {
                 level,
                 detail,
                 metadata,
-                created_at
+                created_at,
+                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+                  AS created_at_cursor
          FROM audit_logs
-         ${whereSql}
-         ORDER BY created_at DESC, id DESC
+         ${listWhereSql}
+         ORDER BY created_at DESC, id::text DESC
          LIMIT $${listParams.length}`,
         listParams
       );
 
+      const mappedItems = result.rows.map(mapAuditRow);
+      const hasMore = mappedItems.length > normalized.limit;
+      const items = hasMore ? mappedItems.slice(0, normalized.limit) : mappedItems;
+      const cursorRows = hasMore ? result.rows.slice(0, normalized.limit) : result.rows;
+      const lastItem = items[items.length - 1];
+      const lastCursorRow = cursorRows[cursorRows.length - 1];
+      const cursorTimestamp =
+        firstNonEmptyString((lastCursorRow as DbRow | undefined)?.created_at_cursor) ??
+        toIsoString((lastCursorRow as DbRow | undefined)?.created_at);
+      const nextCursor =
+        hasMore &&
+        lastItem &&
+        typeof cursorTimestamp === "string" &&
+        Number.isFinite(Date.parse(cursorTimestamp)) &&
+        lastItem.id.trim().length > 0
+          ? encodeTimePaginationCursor({
+              timestamp: cursorTimestamp,
+              id: lastItem.id,
+            })
+          : null;
+
       return {
-        items: result.rows.map(mapAuditRow),
+        items,
         total: Math.max(0, Math.trunc(toNumber(countResult.rows[0]?.total, 0))),
+        nextCursor,
       };
     } catch (error) {
       this.disableDb(error, "查询 audit_logs 失败");
@@ -10176,9 +10276,10 @@ class ControlPlaneRepository {
   private listAlertsFromMemory(
     tenantId: string,
     input: NormalizedAlertListInput
-  ): Alert[] {
+  ): AlertListResult {
     const fromTimestamp = input.from ? Date.parse(input.from) : undefined;
     const toTimestamp = input.to ? Date.parse(input.to) : undefined;
+    const cursor = decodeTimePaginationCursor(input.cursor);
 
     let items = this.memoryAlerts.filter((alert) => {
       if (alert.tenantId !== tenantId) {
@@ -10204,8 +10305,51 @@ class ControlPlaneRepository {
       return true;
     });
 
-    items = items.sort((a, b) => b.triggeredAt.localeCompare(a.triggeredAt));
-    return items.slice(0, input.limit).map((alert) => ({ ...alert }));
+    items = items.sort(
+      (a, b) => b.triggeredAt.localeCompare(a.triggeredAt) || b.id.localeCompare(a.id)
+    );
+    const total = items.length;
+    if (cursor) {
+      const cursorTimestamp = Date.parse(cursor.timestamp);
+      items = items.filter((alert) => {
+        const triggeredAtTimestamp = Date.parse(alert.triggeredAt);
+        if (Number.isFinite(triggeredAtTimestamp) && Number.isFinite(cursorTimestamp)) {
+          if (triggeredAtTimestamp < cursorTimestamp) {
+            return true;
+          }
+          if (triggeredAtTimestamp > cursorTimestamp) {
+            return false;
+          }
+          return alert.id < cursor.id;
+        }
+
+        const triggeredAtCompare = alert.triggeredAt.localeCompare(cursor.timestamp);
+        if (triggeredAtCompare < 0) {
+          return true;
+        }
+        if (triggeredAtCompare > 0) {
+          return false;
+        }
+        return alert.id < cursor.id;
+      });
+    }
+
+    const hasMore = items.length > input.limit;
+    const pagedItems = (hasMore ? items.slice(0, input.limit) : items).map((alert) => ({ ...alert }));
+    const lastItem = pagedItems[pagedItems.length - 1];
+    const nextCursor =
+      hasMore && lastItem
+        ? encodeTimePaginationCursor({
+            timestamp: lastItem.triggeredAt,
+            id: lastItem.id,
+          })
+        : null;
+
+    return {
+      items: pagedItems,
+      total,
+      nextCursor,
+    };
   }
 
   private getAlertByIdFromMemory(tenantId: string, alertId: string): Alert | null {
@@ -10253,8 +10397,9 @@ class ControlPlaneRepository {
     const keyword = input.keyword?.toLowerCase();
     const fromTimestamp = input.from ? Date.parse(input.from) : undefined;
     const toTimestamp = input.to ? Date.parse(input.to) : undefined;
+    const cursor = decodeTimePaginationCursor(input.cursor);
 
-    const filtered = this.memoryAudits.filter((audit) => {
+    let items = this.memoryAudits.filter((audit) => {
       if (input.tenantId) {
         const metadataTenantId = firstNonEmptyString(
           audit.metadata.tenant_id,
@@ -10296,23 +10441,52 @@ class ControlPlaneRepository {
       return true;
     });
 
-    const items = [...filtered]
-      .sort((a, b) => {
-        const createdAtDiff = b.createdAt.localeCompare(a.createdAt);
-        if (createdAtDiff !== 0) {
-          return createdAtDiff;
+    items = items.sort(
+      (a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)
+    );
+    const total = items.length;
+    if (cursor) {
+      const cursorTimestamp = Date.parse(cursor.timestamp);
+      items = items.filter((audit) => {
+        const createdAtTimestamp = Date.parse(audit.createdAt);
+        if (Number.isFinite(createdAtTimestamp) && Number.isFinite(cursorTimestamp)) {
+          if (createdAtTimestamp < cursorTimestamp) {
+            return true;
+          }
+          if (createdAtTimestamp > cursorTimestamp) {
+            return false;
+          }
+          return audit.id < cursor.id;
         }
-        return b.id.localeCompare(a.id);
-      })
-      .slice(0, input.limit)
-      .map((audit) => ({
-        ...audit,
-        metadata: { ...audit.metadata },
-      }));
+
+        const createdAtCompare = audit.createdAt.localeCompare(cursor.timestamp);
+        if (createdAtCompare < 0) {
+          return true;
+        }
+        if (createdAtCompare > 0) {
+          return false;
+        }
+        return audit.id < cursor.id;
+      });
+    }
+    const hasMore = items.length > input.limit;
+    const pagedItems = (hasMore ? items.slice(0, input.limit) : items).map((audit) => ({
+      ...audit,
+      metadata: { ...audit.metadata },
+    }));
+    const lastItem = pagedItems[pagedItems.length - 1];
+    const nextCursor =
+      hasMore && lastItem
+        ? encodeTimePaginationCursor({
+            timestamp: lastItem.createdAt,
+            id: lastItem.id,
+          })
+        : null;
 
     return {
-      items,
-      total: filtered.length,
+      items: pagedItems,
+      total,
+      nextCursor,
     };
   }
 

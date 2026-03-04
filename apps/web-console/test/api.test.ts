@@ -950,6 +950,7 @@ describe("api mock fallback gate", () => {
           filters: {
             severity: "critical",
           },
+          nextCursor: null,
         });
       }
 

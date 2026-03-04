@@ -3,6 +3,7 @@ import { validateAlertListInput, validateAlertStatusUpdateInput } from "../contr
 import type { AppendAuditLogInput } from "../data/repository";
 import { getControlPlaneRepository } from "../data/repository";
 import { authMiddleware } from "../middleware/auth";
+import { parseOptionalTimePaginationCursor } from "./pagination-cursor";
 import type { AppEnv } from "../types";
 
 export const alertRoutes = new Hono<AppEnv>();
@@ -44,14 +45,25 @@ alertRoutes.get("/alerts", async (c) => {
       400
     );
   }
+  const cursorResult = parseOptionalTimePaginationCursor(result.data.cursor);
+  if (!cursorResult.success) {
+    return c.json({ message: cursorResult.error }, 400);
+  }
 
   const tenantId = auth.tenantId;
-  const items = await repository.listAlerts(tenantId, result.data);
+  const payload = await repository.listAlerts(tenantId, {
+    ...result.data,
+    cursor: cursorResult.cursor,
+  });
 
   return c.json({
-    items,
-    total: items.length,
-    filters: result.data,
+    items: payload.items,
+    total: payload.total,
+    filters: {
+      ...result.data,
+      cursor: cursorResult.cursor,
+    },
+    nextCursor: payload.nextCursor,
   });
 });
 

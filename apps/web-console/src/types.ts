@@ -190,6 +190,7 @@ export interface AlertListInput {
   from?: string;
   to?: string;
   limit?: number;
+  cursor?: string;
 }
 
 export interface AlertItem {
@@ -211,7 +212,8 @@ export interface AlertItem {
 export interface AlertListResponse {
   items: AlertItem[];
   total: number;
-  filters?: AlertListInput;
+  filters: AlertListInput;
+  nextCursor: string | null;
 }
 
 export interface SessionEvent {

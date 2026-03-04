@@ -38,6 +38,7 @@ import {
   verifyAccessToken,
   verifyRefreshToken,
 } from "../src/security/tokens";
+import { verifyEvidenceBundle } from "../src/security/evidence-bundle";
 
 describe("Control Plane API", () => {
   const app = createApp();
@@ -601,10 +602,11 @@ describe("Control Plane API", () => {
       budgetId?: string;
       sourceId?: string;
       severity?: Alert["severity"];
+      createdAt?: string;
     },
   ): Promise<{ alert: Alert; cleanup: () => Promise<void> }> {
     const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const now = new Date().toISOString();
+    const now = options?.createdAt ?? new Date().toISOString();
     const budgetId = options?.budgetId ?? `budget-${nonce}`;
     const sourceId = options?.sourceId ?? `source-${nonce}`;
     const severity = options?.severity ?? "warning";
@@ -10171,18 +10173,22 @@ describe("Control Plane API", () => {
       items: Alert[];
       total: number;
       filters: AlertListInput;
+      nextCursor: string | null;
     };
 
     expect(response.status).toBe(200);
     expect(Array.isArray(body.items)).toBe(true);
     expect(typeof body.total).toBe("number");
-    expect(body.total).toBe(body.items.length);
+    expect(body.total).toBeGreaterThanOrEqual(body.items.length);
     expect(body.filters.status).toBe("open");
     expect(body.filters.severity).toBe("warning");
     expect(body.filters.sourceId).toBe("source-default-budget");
     expect(body.filters.from).toBe("2026-01-01T00:00:00.000Z");
     expect(body.filters.to).toBe("2026-12-31T23:59:59.999Z");
     expect(body.filters.limit).toBe(20);
+    expect(body.nextCursor === null || typeof body.nextCursor === "string").toBe(
+      true,
+    );
   });
 
   test("GET /api/v1/alerts 参数非法时返回 400", async () => {
@@ -10196,6 +10202,88 @@ describe("Control Plane API", () => {
 
     expect(response.status).toBe(400);
     expect(body.message).toContain("limit");
+  });
+
+  test("GET /api/v1/alerts cursor 非法时返回 400", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const response = await app.request("/api/v1/alerts?cursor=invalid-cursor", {
+      headers: authHeaders,
+    });
+    const body = (await response.json()) as {
+      message: string;
+    };
+
+    expect(response.status).toBe(400);
+    expect(body.message).toContain("cursor");
+  });
+
+  test("GET /api/v1/alerts 支持 cursor 分页并返回 nextCursor", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const nonce = createNonce("alerts-pagination");
+    const sourceId = `source-pagination-${nonce}`;
+
+    const alertOne = await createTestAlert(tenantId, "open", {
+      sourceId,
+      severity: "warning",
+      createdAt: "2026-03-01T00:00:00.000Z",
+    });
+    const alertTwo = await createTestAlert(tenantId, "open", {
+      sourceId,
+      severity: "warning",
+      createdAt: "2026-03-02T00:00:00.000Z",
+    });
+    const alertThree = await createTestAlert(tenantId, "open", {
+      sourceId,
+      severity: "warning",
+      createdAt: "2026-03-03T00:00:00.000Z",
+    });
+
+    try {
+      const firstResponse = await app.request(
+        `/api/v1/alerts?status=open&severity=warning&sourceId=${encodeURIComponent(
+          sourceId,
+        )}&limit=2`,
+        {
+          headers: authHeaders,
+        },
+      );
+      const firstBody = (await firstResponse.json()) as {
+        items: Alert[];
+        total: number;
+        nextCursor: string | null;
+      };
+      expect(firstResponse.status).toBe(200);
+      expect(firstBody.total).toBe(3);
+      expect(firstBody.items).toHaveLength(2);
+      expect(typeof firstBody.nextCursor).toBe("string");
+
+      const secondResponse = await app.request(
+        `/api/v1/alerts?status=open&severity=warning&sourceId=${encodeURIComponent(
+          sourceId,
+        )}&limit=2&cursor=${encodeURIComponent(firstBody.nextCursor as string)}`,
+        {
+          headers: authHeaders,
+        },
+      );
+      const secondBody = (await secondResponse.json()) as {
+        items: Alert[];
+        total: number;
+        nextCursor: string | null;
+      };
+      expect(secondResponse.status).toBe(200);
+      expect(secondBody.total).toBe(3);
+      expect(secondBody.items).toHaveLength(1);
+      expect(secondBody.nextCursor).toBeNull();
+
+      const firstIds = new Set(firstBody.items.map((item) => item.id));
+      const duplicated = secondBody.items.some((item) => firstIds.has(item.id));
+      expect(duplicated).toBe(false);
+    } finally {
+      await alertOne.cleanup();
+      await alertTwo.cleanup();
+      await alertThree.cleanup();
+    }
   });
 
   test("PATCH /api/v1/alerts/:id/status 更新成功并返回最新告警", async () => {
@@ -10403,6 +10491,9 @@ describe("Control Plane API", () => {
     expect(body.total).toBeGreaterThanOrEqual(body.items.length);
     expect(typeof body.filters).toBe("object");
     expect(body.filters).not.toBeNull();
+    expect(body.nextCursor === null || typeof body.nextCursor === "string").toBe(
+      true,
+    );
   });
 
   test("GET /api/v1/audits 查询成功会写入 audit.query 审计", async () => {
@@ -10498,6 +10589,7 @@ describe("Control Plane API", () => {
       items: unknown[];
       total: number;
       filters: AuditListInput;
+      nextCursor: string | null;
     };
 
     expect(response.status).toBe(200);
@@ -10507,6 +10599,9 @@ describe("Control Plane API", () => {
     expect(body.filters.from).toBe("2026-01-01T00:00:00.000Z");
     expect(body.filters.to).toBe("2026-12-31T23:59:59.999Z");
     expect(body.filters.limit).toBe(20);
+    expect(body.nextCursor === null || typeof body.nextCursor === "string").toBe(
+      true,
+    );
   });
 
   test("GET /api/v1/audits 参数非法（from 晚于 to）时返回 400", async () => {
@@ -10536,6 +10631,103 @@ describe("Control Plane API", () => {
 
     expect(response.status).toBe(400);
     expect(body.message).toContain("limit");
+  });
+
+  test("GET /api/v1/audits cursor 非法时返回 400", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const response = await app.request("/api/v1/audits?cursor=invalid-cursor", {
+      headers: authHeaders,
+    });
+    const body = (await response.json()) as {
+      message: string;
+    };
+
+    expect(response.status).toBe(400);
+    expect(body.message).toContain("cursor");
+  });
+
+  test("GET /api/v1/audits 支持 cursor 分页并返回 nextCursor", async () => {
+    const nonce = createNonce("audit-cursor-pagination");
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const repositoryWithAudit = repository as {
+      appendAuditLog?: (input: {
+        tenantId: string;
+        eventId: string;
+        action: string;
+        level: string;
+        detail: string;
+        metadata: Record<string, unknown>;
+      }) => Promise<unknown>;
+    };
+    if (typeof repositoryWithAudit.appendAuditLog !== "function") {
+      throw new Error("repository.appendAuditLog 不可用，无法验证 cursor 分页。");
+    }
+
+    await repositoryWithAudit.appendAuditLog({
+      tenantId,
+      eventId: `cp:audit-cursor:${nonce}:1`,
+      action: "test.audit.cursor",
+      level: "info",
+      detail: `cursor page one ${nonce}`,
+      metadata: { nonce, order: 1 },
+    });
+    await repositoryWithAudit.appendAuditLog({
+      tenantId,
+      eventId: `cp:audit-cursor:${nonce}:2`,
+      action: "test.audit.cursor",
+      level: "info",
+      detail: `cursor page two ${nonce}`,
+      metadata: { nonce, order: 2 },
+    });
+    await repositoryWithAudit.appendAuditLog({
+      tenantId,
+      eventId: `cp:audit-cursor:${nonce}:3`,
+      action: "test.audit.cursor",
+      level: "info",
+      detail: `cursor page three ${nonce}`,
+      metadata: { nonce, order: 3 },
+    });
+
+    const firstResponse = await app.request(
+      `/api/v1/audits?action=test.audit.cursor&keyword=${encodeURIComponent(
+        nonce,
+      )}&limit=2`,
+      {
+        headers: authHeaders,
+      },
+    );
+    const firstBody = (await firstResponse.json()) as {
+      items: Array<{ id: string }>;
+      total: number;
+      nextCursor: string | null;
+    };
+    expect(firstResponse.status).toBe(200);
+    expect(firstBody.total).toBe(3);
+    expect(firstBody.items).toHaveLength(2);
+    expect(typeof firstBody.nextCursor).toBe("string");
+
+    const secondResponse = await app.request(
+      `/api/v1/audits?action=test.audit.cursor&keyword=${encodeURIComponent(
+        nonce,
+      )}&limit=2&cursor=${encodeURIComponent(firstBody.nextCursor as string)}`,
+      {
+        headers: authHeaders,
+      },
+    );
+    const secondBody = (await secondResponse.json()) as {
+      items: Array<{ id: string }>;
+      total: number;
+      nextCursor: string | null;
+    };
+    expect(secondResponse.status).toBe(200);
+    expect(secondBody.total).toBe(3);
+    expect(secondBody.items).toHaveLength(1);
+    expect(secondBody.nextCursor).toBeNull();
+
+    const firstIds = new Set(firstBody.items.map((item) => item.id));
+    const duplicated = secondBody.items.some((item) => firstIds.has(item.id));
+    expect(duplicated).toBe(false);
   });
 
   test("GET /api/v1/system/config/backup 返回租户配置快照并写入审计", async () => {
@@ -10863,5 +11055,217 @@ describe("Control Plane API", () => {
         item.metadata.route === "/api/v1/audits/export"
     );
     expect(targetAudit).toBeDefined();
+  });
+
+  test("GET /api/v1/audits/evidence-bundle 未配置签名密钥返回 500", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const originalSigningKey = Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY;
+    delete Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY;
+
+    try {
+      const response = await app.request("/api/v1/audits/evidence-bundle", {
+        headers: authHeaders,
+      });
+      const body = (await response.json()) as {
+        message: string;
+      };
+      expect(response.status).toBe(500);
+      expect(body.message).toContain("EVIDENCE_BUNDLE_SIGNING_KEY");
+    } finally {
+      if (originalSigningKey === undefined) {
+        delete Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY;
+      } else {
+        Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY = originalSigningKey;
+      }
+    }
+  });
+
+  test("GET /api/v1/audits/evidence-bundle 返回可验证取证包并写入审计", async () => {
+    const nonce = createNonce("audit-evidence-bundle");
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const signingKey = `evidence-signing-key-${nonce}`;
+    const originalSigningKey = Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY;
+    Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY = signingKey;
+
+    const repositoryWithAudit = repository as {
+      appendAuditLog?: (input: {
+        tenantId: string;
+        eventId: string;
+        action: string;
+        level: string;
+        detail: string;
+        metadata: Record<string, unknown>;
+      }) => Promise<unknown>;
+    };
+    if (typeof repositoryWithAudit.appendAuditLog !== "function") {
+      throw new Error("repository.appendAuditLog 不可用，无法验证取证包导出。");
+    }
+
+    try {
+      await repositoryWithAudit.appendAuditLog({
+        tenantId,
+        eventId: `cp:audit-evidence-seed:${nonce}:1`,
+        action: "test.audit.evidence_seed",
+        level: "info",
+        detail: `audit evidence seed 1 ${nonce}`,
+        metadata: {
+          nonce,
+          route: "/api/v1/audits/evidence-bundle",
+          sequence: 1,
+        },
+      });
+      await repositoryWithAudit.appendAuditLog({
+        tenantId,
+        eventId: `cp:audit-evidence-seed:${nonce}:2`,
+        action: "test.audit.evidence_seed",
+        level: "info",
+        detail: `audit evidence seed 2 ${nonce}`,
+        metadata: {
+          nonce,
+          route: "/api/v1/audits/evidence-bundle",
+          sequence: 2,
+        },
+      });
+      await repositoryWithAudit.appendAuditLog({
+        tenantId,
+        eventId: `cp:audit-evidence-seed:${nonce}:3`,
+        action: "test.audit.evidence_seed",
+        level: "info",
+        detail: `audit evidence seed 3 ${nonce}`,
+        metadata: {
+          nonce,
+          route: "/api/v1/audits/evidence-bundle",
+          sequence: 3,
+        },
+      });
+
+      const response = await app.request(
+        `/api/v1/audits/evidence-bundle?action=test.audit.evidence_seed&keyword=${encodeURIComponent(
+          nonce
+        )}&limit=2`,
+        {
+          headers: authHeaders,
+        }
+      );
+      const body = (await response.json()) as {
+        manifest: {
+          schemaVersion: string;
+          tenantId: string;
+          recordCount: number;
+        };
+        records: Array<{
+          index: number;
+          recordHash: string;
+          chainHash: string;
+        }>;
+        rootHash: string;
+        signature: string;
+      };
+
+      expect(response.status).toBe(200);
+      expect(
+        response.headers.get("content-disposition")?.includes("audit-evidence-bundle-")
+      ).toBe(true);
+      expect(body.manifest.schemaVersion).toBe("evidence-bundle.v1");
+      expect(body.manifest.tenantId).toBe(tenantId);
+      expect(body.manifest.recordCount).toBe(body.records.length);
+      expect(body.records.length).toBe(3);
+      expect(typeof body.rootHash).toBe("string");
+      expect(typeof body.signature).toBe("string");
+
+      const verifyResult = verifyEvidenceBundle(body, signingKey);
+      expect(verifyResult.success).toBe(true);
+
+      const tampered = structuredClone(body);
+      tampered.records[0]!.chainHash = "deadbeef";
+      const tamperedResult = verifyEvidenceBundle(tampered, signingKey);
+      expect(tamperedResult.success).toBe(false);
+
+      const exportAudits = await queryAuditByAction(
+        "audit.evidence_bundle.export",
+        nonce,
+      );
+      const targetAudit = exportAudits.items.find(
+        (item) =>
+          item.action === "audit.evidence_bundle.export" &&
+          item.metadata.route === "/api/v1/audits/evidence-bundle" &&
+          item.metadata.tenantId === tenantId
+      );
+      expect(targetAudit).toBeDefined();
+    } finally {
+      if (originalSigningKey === undefined) {
+        delete Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY;
+      } else {
+        Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY = originalSigningKey;
+      }
+    }
+  });
+
+  test("GET /api/v1/audits/evidence-bundle 审计写入失败时返回 500", async () => {
+    const nonce = createNonce("audit-evidence-bundle-audit-fail");
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const signingKey = `evidence-signing-key-${nonce}`;
+    const originalSigningKey = Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY;
+    Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY = signingKey;
+
+    const repositoryWithAudit = repository as {
+      appendAuditLog?: (input: {
+        tenantId: string;
+        eventId: string;
+        action: string;
+        level: string;
+        detail: string;
+        metadata: Record<string, unknown>;
+      }) => Promise<unknown>;
+    };
+    if (typeof repositoryWithAudit.appendAuditLog !== "function") {
+      throw new Error("repository.appendAuditLog 不可用，无法验证审计写入失败场景。");
+    }
+
+    const rawAppendAuditLog = repositoryWithAudit.appendAuditLog;
+    const originalAppendAuditLog = rawAppendAuditLog.bind(repositoryWithAudit);
+    try {
+      await originalAppendAuditLog({
+        tenantId,
+        eventId: `cp:audit-evidence-seed:${nonce}`,
+        action: "test.audit.evidence_seed",
+        level: "info",
+        detail: `audit evidence seed ${nonce}`,
+        metadata: {
+          nonce,
+          route: "/api/v1/audits/evidence-bundle",
+        },
+      });
+
+      repositoryWithAudit.appendAuditLog = async (input) => {
+        if (input.action === "audit.evidence_bundle.export") {
+          throw new Error("forced audit write failure");
+        }
+        return originalAppendAuditLog(input);
+      };
+
+      const response = await app.request(
+        `/api/v1/audits/evidence-bundle?action=test.audit.evidence_seed&keyword=${encodeURIComponent(
+          nonce
+        )}&limit=20`,
+        {
+          headers: authHeaders,
+        }
+      );
+      const body = (await response.json()) as {
+        message: string;
+      };
+      expect(response.status).toBe(500);
+      expect(body.message).toContain("审计写入失败");
+    } finally {
+      repositoryWithAudit.appendAuditLog = rawAppendAuditLog;
+      if (originalSigningKey === undefined) {
+        delete Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY;
+      } else {
+        Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY = originalSigningKey;
+      }
+    }
   });
 });

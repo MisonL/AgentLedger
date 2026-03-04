@@ -21,6 +21,7 @@ AgentLedger 面向企业研发与平台团队，目标是把分散在 AI CLI 与
 | Source 管理 | source 新增/查询/删除、连通性测试、同步任务管理 |
 | Agent 自动采集（新增） | `agent collect` 按 docs/09 的 P0/P1 客户端矩阵自动采集本机会话并上报；支持 `--tool=auto` 和显式 `--tool=<client-key>`。 |
 | 预算治理 | budgets 读写、阈值分级、告警与状态流转 |
+| 审计取证（新增） | 审计取证包导出（链式哈希 + HMAC 签名）与本地验签命令 |
 | 集成分发 | 支持 `alert/weekly` 双事件；`webhook` 原样转发，`wecom/dingtalk/feishu` 使用 `text` 模板消息 |
 | 回调链路 | governance -> integration -> control-plane callback 闭环 |
 | Web Console | Dashboard / Sessions / Analytics / Sources / Pricing 最小可用页面 |
@@ -159,6 +160,18 @@ bun run test:e2e-governance-callback-chain
 ```
 
 关键变量：`INTEGRATION_CALLBACK_STREAM`、`INTEGRATION_CALLBACK_SUBJECT`（或 `INTEGRATION_CALLBACK_TOPIC`）、`INTEGRATION_CALLBACK_DURABLE`、`CONTROL_PLANE_BASE_URL`、`INTEGRATION_CALLBACK_PATH`、`INTEGRATION_CALLBACK_SECRET`。详细说明见 `docs/13-环境变量参考.md`。
+
+### 6. 审计取证包导出与校验（新增）
+
+```bash
+# 导出（需配置 EVIDENCE_BUNDLE_SIGNING_KEY）
+curl -H "Authorization: Bearer <token>" \
+  "http://127.0.0.1:8081/api/v1/audits/evidence-bundle?limit=200" \
+  -o evidence-bundle.v1.json
+
+# 本地验签
+bun run evidence:verify -- --file ./evidence-bundle.v1.json --signing-key <your-secret>
+```
 
 ## 质量门禁
 

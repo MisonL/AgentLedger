@@ -2616,6 +2616,7 @@ export function validateAlertListInput(input: unknown): ValidationResult<AlertLi
   const from = normalizeString(input.from);
   const to = normalizeString(input.to);
   const limit = toOptionalInteger(input.limit);
+  const cursor = normalizeString(input.cursor);
 
   if (input.status !== undefined && (!status || !isAlertStatus(status))) {
     return { success: false, error: "status 必须是 open/acknowledged/resolved 之一。" };
@@ -2638,6 +2639,9 @@ export function validateAlertListInput(input: unknown): ValidationResult<AlertLi
   ) {
     return { success: false, error: `limit 必须是 1 到 ${ALERT_LIMIT_MAX} 的整数。` };
   }
+  if (input.cursor !== undefined && !cursor) {
+    return { success: false, error: "cursor 必须为非空字符串。" };
+  }
   if (from && to && Date.parse(from) > Date.parse(to)) {
     return { success: false, error: "from 不能晚于 to。" };
   }
@@ -2651,6 +2655,7 @@ export function validateAlertListInput(input: unknown): ValidationResult<AlertLi
       from,
       to,
       limit,
+      cursor,
     },
   };
 }
@@ -2687,6 +2692,7 @@ export function validateAuditListInput(input: unknown): ValidationResult<AuditLi
   const from = normalizeString(input.from);
   const to = normalizeString(input.to);
   const limit = toOptionalInteger(input.limit);
+  const cursor = normalizeString(input.cursor);
 
   if (input.level !== undefined && (!level || !isAuditLevel(level))) {
     return { success: false, error: "level 必须是 info/warning/error/critical 之一。" };
@@ -2703,6 +2709,9 @@ export function validateAuditListInput(input: unknown): ValidationResult<AuditLi
   ) {
     return { success: false, error: `limit 必须是 1 到 ${AUDIT_LIMIT_MAX} 的整数。` };
   }
+  if (input.cursor !== undefined && !cursor) {
+    return { success: false, error: "cursor 必须为非空字符串。" };
+  }
   if (from && to && Date.parse(from) > Date.parse(to)) {
     return { success: false, error: "from 不能晚于 to。" };
   }
@@ -2714,6 +2723,7 @@ export function validateAuditListInput(input: unknown): ValidationResult<AuditLi
       from,
       to,
       limit,
+      cursor,
     },
   };
 }
