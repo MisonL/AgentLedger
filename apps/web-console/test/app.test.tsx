@@ -1032,6 +1032,7 @@ describe("Web Console", () => {
         providerId: "corp-oidc",
         state: "corp-oidc:nonce-1",
         redirectUri: "http://localhost:5173/#/auth/callback",
+        codeVerifier: "pkce-code-verifier-1",
         createdAt: Date.now(),
       })
     );
@@ -1049,6 +1050,7 @@ describe("Web Console", () => {
         expect(payload.providerId).toBe("corp-oidc");
         expect(payload.code).toBe("authorization-code-1");
         expect(payload.state).toBe("corp-oidc:nonce-1");
+        expect(payload.codeVerifier).toBe("pkce-code-verifier-1");
         return mockJsonResponse({
           user: {
             userId: "user-external-1",

@@ -111,6 +111,7 @@ interface ExternalAuthPendingState {
   providerId: string;
   state: string;
   redirectUri: string;
+  codeVerifier?: string;
   createdAt: number;
 }
 
@@ -210,6 +211,38 @@ function createExternalAuthState(providerId: string): string {
   return `${providerId}:${nonce}`;
 }
 
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index]);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function createCodeVerifier(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const random = new Uint8Array(48);
+    crypto.getRandomValues(random);
+    return bytesToBase64Url(random);
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 18)}`;
+}
+
+async function createCodeChallenge(codeVerifier: string): Promise<string> {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.subtle !== "undefined" &&
+    typeof crypto.subtle.digest === "function"
+  ) {
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(codeVerifier)
+    );
+    return bytesToBase64Url(new Uint8Array(digest));
+  }
+  return codeVerifier;
+}
+
 function saveExternalAuthPendingState(state: ExternalAuthPendingState) {
   if (typeof window === "undefined") {
     return;
@@ -240,6 +273,7 @@ function readExternalAuthPendingState(): ExternalAuthPendingState | null {
       typeof parsed.providerId !== "string" ||
       typeof parsed.state !== "string" ||
       typeof parsed.redirectUri !== "string" ||
+      (parsed.codeVerifier !== undefined && typeof parsed.codeVerifier !== "string") ||
       typeof parsed.createdAt !== "number" ||
       !Number.isFinite(parsed.createdAt)
     ) {
@@ -249,6 +283,7 @@ function readExternalAuthPendingState(): ExternalAuthPendingState | null {
       providerId: parsed.providerId,
       state: parsed.state,
       redirectUri: parsed.redirectUri,
+      codeVerifier: parsed.codeVerifier,
       createdAt: parsed.createdAt,
     };
   } catch {
@@ -307,7 +342,8 @@ function parseAuthCallbackPayloadFromHash(hash: string): AuthCallbackPayload | n
 function buildExternalAuthAuthorizeUrl(
   provider: AuthProviderItem,
   redirectUri: string,
-  state: string
+  state: string,
+  codeChallenge?: string
 ): string {
   if (!provider.authorizationUrl) {
     throw new Error("该登录提供方未配置 authorizationUrl。");
@@ -328,6 +364,12 @@ function buildExternalAuthAuthorizeUrl(
   }
   if (!url.searchParams.has("state")) {
     url.searchParams.set("state", state);
+  }
+  if (codeChallenge && !url.searchParams.has("code_challenge")) {
+    url.searchParams.set("code_challenge", codeChallenge);
+  }
+  if (codeChallenge && !url.searchParams.has("code_challenge_method")) {
+    url.searchParams.set("code_challenge_method", "S256");
   }
   if (!url.searchParams.has("provider")) {
     url.searchParams.set("provider", provider.id);
@@ -742,17 +784,20 @@ function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
       code,
       redirectUri,
       state,
+      codeVerifier,
     }: {
       providerId: string;
       code: string;
       redirectUri: string;
       state?: string;
+      codeVerifier?: string;
     }) =>
       exchangeExternalAuthCode({
         providerId,
         code,
         redirectUri,
         state,
+        codeVerifier,
       }),
     onSuccess: () => {
       clearExternalAuthPendingState();
@@ -826,23 +871,32 @@ function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
       code: authCallback.code,
       redirectUri: pending?.redirectUri ?? buildExternalAuthRedirectUri(),
       state: authCallback.state ?? pending?.state,
+      codeVerifier: pending?.codeVerifier,
     });
   }, [authCallback, externalExchangeMutation]);
 
-  function handleExternalLoginStart(provider: AuthProviderItem) {
+  async function handleExternalLoginStart(provider: AuthProviderItem) {
     setFormError(null);
 
     try {
       const redirectUri = buildExternalAuthRedirectUri();
       const state = createExternalAuthState(provider.id);
+      const codeVerifier = createCodeVerifier();
+      const codeChallenge = await createCodeChallenge(codeVerifier);
       saveExternalAuthPendingState({
         providerId: provider.id,
         state,
         redirectUri,
+        codeVerifier,
         createdAt: Date.now(),
       });
 
-      const authorizeUrl = buildExternalAuthAuthorizeUrl(provider, redirectUri, state);
+      const authorizeUrl = buildExternalAuthAuthorizeUrl(
+        provider,
+        redirectUri,
+        state,
+        codeChallenge
+      );
       window.location.assign(authorizeUrl);
     } catch (error) {
       setFormError(`发起外部登录失败：${toErrorMessage(error)}`);
