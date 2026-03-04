@@ -95,6 +95,7 @@ jobs:
         with:
           name: coverage-${{ github.sha }}
           path: .coverage/
+          include-hidden-files: true
           if-no-files-found: warn
 
       - name: 全量测试（M1 DoD）

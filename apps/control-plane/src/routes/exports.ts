@@ -89,6 +89,28 @@ const USAGE_SESSION_EXPORT_CSV_HEADERS = [
   "costMode",
 ];
 const USAGE_HEATMAP_EXPORT_CSV_HEADERS = ["date", "tokens", "cost", "sessions"];
+const ANALYTICS_WEEKLY_SUMMARY_PROXY_PATH = "/v1/usage/weekly-summary";
+const DEFAULT_ANALYTICS_BASE_URL = "http://127.0.0.1:8083";
+const DEFAULT_ANALYTICS_PROXY_TIMEOUT_MS = 1_500;
+const MIN_ANALYTICS_PROXY_TIMEOUT_MS = 100;
+const MAX_ANALYTICS_PROXY_TIMEOUT_MS = 60_000;
+
+class AnalyticsProxyClientError extends Error {
+  readonly statusCode: number;
+
+  constructor(statusCode: number) {
+    super(`analytics 请求参数错误: ${statusCode}`);
+    this.name = "AnalyticsProxyClientError";
+    this.statusCode = statusCode;
+  }
+}
+
+class AnalyticsProxyUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AnalyticsProxyUnavailableError";
+  }
+}
 
 interface SessionExportJobResult {
   items: Session[];
@@ -166,77 +188,255 @@ function buildCsvRows(headers: string[], rows: Array<Array<unknown>>): string {
   return [headers.join(","), ...bodyRows].join("\n");
 }
 
-function toUtcWeekStart(value: string): Date | null {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
+function isAnalyticsProxyEnabled(): boolean {
+  const rawValue = Bun.env.ANALYTICS_PROXY_ENABLED;
+  if (rawValue === undefined) {
+    return true;
+  }
+
+  const normalized = rawValue.trim().toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+
+  return !["0", "false", "off", "no"].includes(normalized);
+}
+
+function getAnalyticsBaseUrl(): string {
+  const rawValue = (Bun.env.ANALYTICS_BASE_URL ?? "").trim();
+  const baseUrl = rawValue.length > 0 ? rawValue : DEFAULT_ANALYTICS_BASE_URL;
+  return baseUrl.replace(/\/+$/, "");
+}
+
+function getAnalyticsProxyTimeoutMs(): number {
+  const rawValue = (Bun.env.ANALYTICS_PROXY_TIMEOUT_MS ?? "").trim();
+  if (!rawValue) {
+    return DEFAULT_ANALYTICS_PROXY_TIMEOUT_MS;
+  }
+  if (!/^\d+$/.test(rawValue)) {
+    return DEFAULT_ANALYTICS_PROXY_TIMEOUT_MS;
+  }
+
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_ANALYTICS_PROXY_TIMEOUT_MS;
+  }
+  if (parsed < MIN_ANALYTICS_PROXY_TIMEOUT_MS) {
+    return MIN_ANALYTICS_PROXY_TIMEOUT_MS;
+  }
+  if (parsed > MAX_ANALYTICS_PROXY_TIMEOUT_MS) {
+    return MAX_ANALYTICS_PROXY_TIMEOUT_MS;
+  }
+
+  return parsed;
+}
+
+type UsageHeatmapMetric = "tokens" | "cost" | "sessions";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function readStringField(
+  value: Record<string, unknown>,
+  keys: string[]
+): string | undefined {
+  for (const key of keys) {
+    const candidate = value[key];
+    if (typeof candidate === "string") {
+      const trimmed = candidate.trim();
+      if (trimmed.length > 0) {
+        return trimmed;
+      }
+    }
+  }
+  return undefined;
+}
+
+function parseUsageHeatmapMetric(
+  value: string | undefined
+): UsageHeatmapMetric | undefined {
+  const normalized = (value ?? "").trim().toLowerCase();
+  switch (normalized) {
+    case "tokens":
+    case "cost":
+    case "sessions":
+      return normalized;
+    default:
+      return undefined;
+  }
+}
+
+function normalizeWeekItem(value: unknown): UsageWeekItem | null {
+  if (!isRecord(value)) {
     return null;
   }
 
-  const date = new Date(
-    Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate())
-  );
-  const weekday = date.getUTCDay();
-  const diffToMonday = weekday === 0 ? -6 : 1 - weekday;
-  date.setUTCDate(date.getUTCDate() + diffToMonday);
-  return date;
+  const weekStart = readStringField(value, ["weekStart", "week_start"]);
+  const weekEnd = readStringField(value, ["weekEnd", "week_end"]);
+  const tokensValue = value.tokens;
+  const costValue = value.cost;
+  const sessionsValue = value.sessions;
+
+  if (!weekStart || !weekEnd) {
+    return null;
+  }
+  if (Number.isNaN(Date.parse(weekStart)) || Number.isNaN(Date.parse(weekEnd))) {
+    return null;
+  }
+  if (
+    typeof tokensValue !== "number" ||
+    !Number.isInteger(tokensValue) ||
+    tokensValue < 0
+  ) {
+    return null;
+  }
+  if (
+    typeof costValue !== "number" ||
+    !Number.isFinite(costValue) ||
+    costValue < 0
+  ) {
+    return null;
+  }
+  if (
+    typeof sessionsValue !== "number" ||
+    !Number.isInteger(sessionsValue) ||
+    sessionsValue < 0
+  ) {
+    return null;
+  }
+
+  return {
+    weekStart,
+    weekEnd,
+    tokens: tokensValue,
+    cost: costValue,
+    sessions: sessionsValue,
+  };
 }
 
-function aggregateUsageWeeklyItems(
-  items: UsageDailyItem[],
-  limit?: number
-): UsageWeekItem[] {
-  const bucket = new Map<
-    string,
-    {
-      weekStart: Date;
-      tokens: number;
-      cost: number;
-      sessions: number;
-    }
-  >();
-
-  for (const item of items) {
-    const weekStart = toUtcWeekStart(item.date);
-    if (!weekStart) {
-      continue;
-    }
-
-    const key = weekStart.toISOString().slice(0, 10);
-    const current = bucket.get(key);
-    if (current) {
-      current.tokens += item.tokens;
-      current.cost += item.cost;
-      current.sessions += item.sessions;
-      continue;
-    }
-
-    bucket.set(key, {
-      weekStart,
-      tokens: item.tokens,
-      cost: item.cost,
-      sessions: item.sessions,
-    });
+function parseAnalyticsWeeklySummaryWeeks(payload: unknown): UsageWeekItem[] | null {
+  if (!isRecord(payload)) {
+    return null;
   }
 
-  const weeklyItems = Array.from(bucket.values())
-    .sort((left, right) => left.weekStart.getTime() - right.weekStart.getTime())
-    .map((item) => {
-      const weekEnd = new Date(item.weekStart);
-      weekEnd.setUTCDate(weekEnd.getUTCDate() + 6);
-      weekEnd.setUTCHours(23, 59, 59, 999);
-      return {
-        weekStart: item.weekStart.toISOString(),
-        weekEnd: weekEnd.toISOString(),
-        tokens: item.tokens,
-        cost: Number(item.cost.toFixed(6)),
-        sessions: item.sessions,
-      };
-    });
-
-  if (typeof limit === "number" && limit > 0 && weeklyItems.length > limit) {
-    return weeklyItems.slice(weeklyItems.length - limit);
+  const metric = parseUsageHeatmapMetric(readStringField(payload, ["metric"]));
+  const timezone = readStringField(payload, ["timezone"]);
+  if (!metric || !timezone) {
+    return null;
   }
-  return weeklyItems;
+
+  const summary = payload.summary;
+  if (!isRecord(summary)) {
+    return null;
+  }
+  const summaryTokens = summary.tokens;
+  const summaryCost = summary.cost;
+  const summarySessions = summary.sessions;
+  if (
+    typeof summaryTokens !== "number" ||
+    !Number.isInteger(summaryTokens) ||
+    summaryTokens < 0 ||
+    typeof summaryCost !== "number" ||
+    !Number.isFinite(summaryCost) ||
+    summaryCost < 0 ||
+    typeof summarySessions !== "number" ||
+    !Number.isInteger(summarySessions) ||
+    summarySessions < 0
+  ) {
+    return null;
+  }
+
+  if (!Array.isArray(payload.weeks)) {
+    return null;
+  }
+
+  const weeks: UsageWeekItem[] = [];
+  for (const item of payload.weeks) {
+    const normalized = normalizeWeekItem(item);
+    if (!normalized) {
+      return null;
+    }
+    weeks.push(normalized);
+  }
+  return weeks;
+}
+
+function buildWeeklySummaryAnalyticsQueryString(input: {
+  tenantId: string;
+  from?: string;
+  to?: string;
+  timezone?: string;
+}): string {
+  const params = new URLSearchParams();
+  params.set("tenant_id", input.tenantId);
+
+  if (input.from) {
+    params.set("from", input.from);
+  }
+  if (input.to) {
+    params.set("to", input.to);
+  }
+  if (input.timezone) {
+    params.set("tz", input.timezone);
+  }
+
+  const encoded = params.toString();
+  return encoded ? `?${encoded}` : "";
+}
+
+async function listUsageWeeklyFromAnalytics(input: {
+  tenantId: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  timezone?: string;
+}): Promise<UsageWeekItem[]> {
+  if (!isAnalyticsProxyEnabled()) {
+    throw new AnalyticsProxyUnavailableError(
+      "ANALYTICS_PROXY_ENABLED=false 时无法查询 weekly summary。"
+    );
+  }
+
+  const analyticsQueryString = buildWeeklySummaryAnalyticsQueryString({
+    tenantId: input.tenantId,
+    from: input.from,
+    to: input.to,
+    timezone: input.timezone,
+  });
+  const analyticsUrl = `${getAnalyticsBaseUrl()}${ANALYTICS_WEEKLY_SUMMARY_PROXY_PATH}${analyticsQueryString}`;
+  const timeoutMs = getAnalyticsProxyTimeoutMs();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(analyticsUrl, {
+      method: "GET",
+      headers: {
+        accept: "application/json",
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      if (response.status >= 400 && response.status < 500) {
+        throw new AnalyticsProxyClientError(response.status);
+      }
+      throw new Error(`analytics 返回状态异常: ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const weeks = parseAnalyticsWeeklySummaryWeeks(payload);
+    if (!weeks) {
+      throw new Error("analytics weekly-summary 返回结构不合法");
+    }
+
+    if (typeof input.limit === "number" && input.limit > 0 && weeks.length > input.limit) {
+      return weeks.slice(weeks.length - input.limit);
+    }
+    return weeks;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function buildUsageCsv(
@@ -380,14 +580,7 @@ async function listUsageExportItems(input: {
     case "daily":
       return repository.listUsageDaily(baseQuery);
     case "weekly":
-      {
-        const dailyItems = await repository.listUsageDaily({
-          tenantId: input.tenantId,
-          from: input.from,
-          to: input.to,
-        });
-        return aggregateUsageWeeklyItems(dailyItems, input.limit);
-      }
+      return listUsageWeeklyFromAnalytics(input);
     case "monthly":
       return repository.listUsageMonthly(baseQuery);
     case "models":
@@ -717,10 +910,43 @@ exportRoutes.get("/exports/usage", async (c) => {
     limit: result.data.limit,
     timezone: result.data.timezone,
   };
-  const items = await listUsageExportItems({
-    tenantId: auth.tenantId,
-    ...filters,
-  });
+  let items: UsageExportItems;
+  try {
+    items = await listUsageExportItems({
+      tenantId: auth.tenantId,
+      ...filters,
+    });
+  } catch (error) {
+    if (error instanceof AnalyticsProxyClientError) {
+      return c.json(
+        {
+          error: "analytics 请求参数不合法",
+          status: error.statusCode,
+        },
+        400
+      );
+    }
+    if (error instanceof AnalyticsProxyUnavailableError) {
+      return c.json(
+        {
+          message: error.message,
+        },
+        503
+      );
+    }
+    if (filters.dimension === "weekly") {
+      console.warn("[control-plane] usage weekly export 代理失败。", {
+        error,
+      });
+      return c.json(
+        {
+          message: "query usage weekly summary failed",
+        },
+        502
+      );
+    }
+    throw error;
+  }
   const requestId = c.get("requestId");
 
   await appendAuditLogSafely({

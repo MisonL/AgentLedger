@@ -4037,7 +4037,7 @@ describe("Control Plane API", () => {
     try {
       Bun.env.ANALYTICS_PROXY_ENABLED = "true";
       Bun.env.ANALYTICS_BASE_URL = proxyBaseUrl;
-      globalThis.fetch = (async (input) => {
+      globalThis.fetch = (async (input: unknown) => {
         const url = input instanceof Request ? input.url : String(input);
         fetchCalls.push(url);
         return new Response(
@@ -4071,7 +4071,7 @@ describe("Control Plane API", () => {
             headers: { "content-type": "application/json" },
           },
         );
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
 
       const response = await app.request(
         `/api/v1/usage/weekly-summary${queryString}`,
@@ -4149,14 +4149,14 @@ describe("Control Plane API", () => {
     try {
       Bun.env.ANALYTICS_PROXY_ENABLED = "true";
       Bun.env.ANALYTICS_BASE_URL = proxyBaseUrl;
-      globalThis.fetch = (async (input) => {
+      globalThis.fetch = (async (input: unknown) => {
         const url = input instanceof Request ? input.url : String(input);
         fetchCalls.push(url);
         return new Response(JSON.stringify({ message: "invalid weekly query" }), {
           status: 400,
           headers: { "content-type": "application/json" },
         });
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
 
       const response = await app.request(
         "/api/v1/usage/weekly-summary?tenant_id=tenant-4xx&from=bad-date",
@@ -4256,14 +4256,14 @@ describe("Control Plane API", () => {
     try {
       Bun.env.ANALYTICS_PROXY_ENABLED = "true";
       Bun.env.ANALYTICS_BASE_URL = proxyBaseUrl;
-      globalThis.fetch = (async (input) => {
+      globalThis.fetch = (async (input: unknown) => {
         const url = input instanceof Request ? input.url : String(input);
         fetchCalls.push(url);
         return new Response(JSON.stringify({ cells: proxyCells }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
 
       const response = await app.request(
         `/api/v1/usage/heatmap${queryString}`,
@@ -4325,14 +4325,14 @@ describe("Control Plane API", () => {
     try {
       Bun.env.ANALYTICS_PROXY_ENABLED = "true";
       Bun.env.ANALYTICS_BASE_URL = proxyBaseUrl;
-      globalThis.fetch = (async (input) => {
+      globalThis.fetch = (async (input: unknown) => {
         const url = input instanceof Request ? input.url : String(input);
         fetchCalls.push(url);
         return new Response(JSON.stringify({ cells: [] }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
 
       const response = await app.request("/api/v1/usage/heatmap", {
         headers: authHeaders,
@@ -4396,13 +4396,13 @@ describe("Control Plane API", () => {
         );
       }
 
-      repository.listUsageHeatmap = async (input) => {
+      repository.listUsageHeatmap = async (input?: UsageHeatmapQueryInput) => {
         repoQueryCalls.push(input);
         return repoCells;
       };
       Bun.env.ANALYTICS_PROXY_ENABLED = "true";
       Bun.env.ANALYTICS_BASE_URL = proxyBaseUrl;
-      globalThis.fetch = (async (input) => {
+      globalThis.fetch = (async (input: unknown) => {
         const url = input instanceof Request ? input.url : String(input);
         fetchCalls.push(url);
         return new Response(
@@ -4412,7 +4412,7 @@ describe("Control Plane API", () => {
             headers: { "content-type": "application/json" },
           },
         );
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
 
       const fallbackResponse = await app.request(
         `/api/v1/usage/heatmap${queryString}`,
@@ -4503,14 +4503,14 @@ describe("Control Plane API", () => {
       };
       Bun.env.ANALYTICS_PROXY_ENABLED = "true";
       Bun.env.ANALYTICS_BASE_URL = proxyBaseUrl;
-      globalThis.fetch = (async (input) => {
+      globalThis.fetch = (async (input: unknown) => {
         const url = input instanceof Request ? input.url : String(input);
         fetchCalls.push(url);
         return new Response(JSON.stringify({ message: "invalid query" }), {
           status: 400,
           headers: { "content-type": "application/json" },
         });
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
 
       const response = await app.request(
         "/api/v1/usage/heatmap?tenant_id=tenant-4xx&from=bad-date",
@@ -4572,7 +4572,7 @@ describe("Control Plane API", () => {
       Bun.env.ANALYTICS_BASE_URL = proxyBaseUrl;
       Bun.env.ANALYTICS_PROXY_TIMEOUT_MS = "20";
 
-      globalThis.fetch = ((input, init) => {
+      globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
         const url = input instanceof Request ? input.url : String(input);
         fetchCalls.push(url);
         return new Promise<Response>((_resolve, reject) => {
@@ -4594,7 +4594,7 @@ describe("Control Plane API", () => {
           }
           signal?.addEventListener("abort", onAbort, { once: true });
         });
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
 
       const response = await app.request("/api/v1/usage/heatmap", {
         headers: authHeaders,
@@ -4665,7 +4665,7 @@ describe("Control Plane API", () => {
       Bun.env.ANALYTICS_PROXY_ENABLED = "true";
       Bun.env.ANALYTICS_BASE_URL = proxyBaseUrl;
       Bun.env.ANALYTICS_PROXY_TIMEOUT_MS = "1e3";
-      globalThis.fetch = ((input, init) => {
+      globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
         const url = input instanceof Request ? input.url : String(input);
         fetchCalls.push(url);
         const startedAt = Date.now();
@@ -4694,7 +4694,7 @@ describe("Control Plane API", () => {
             );
           }, 130);
         });
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
 
       const response = await app.request("/api/v1/usage/heatmap", {
         headers: authHeaders,
@@ -4758,7 +4758,7 @@ describe("Control Plane API", () => {
       };
       Bun.env.ANALYTICS_PROXY_ENABLED = "true";
       Bun.env.ANALYTICS_BASE_URL = proxyBaseUrl;
-      globalThis.fetch = (async (input) => {
+      globalThis.fetch = (async (input: unknown) => {
         const url = input instanceof Request ? input.url : String(input);
         fetchCalls.push(url);
         return new Response(
@@ -4789,7 +4789,7 @@ describe("Control Plane API", () => {
             headers: { "content-type": "application/json" },
           },
         );
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
 
       const response = await app.request("/api/v1/usage/heatmap", {
         headers: authHeaders,
@@ -4912,7 +4912,7 @@ describe("Control Plane API", () => {
         );
       }
 
-      repository.listUsageHeatmap = async (input) => {
+      repository.listUsageHeatmap = async (input?: UsageHeatmapQueryInput) => {
         repoQueryCalls.push(input);
         return [];
       };
@@ -5392,7 +5392,7 @@ describe("Control Plane API", () => {
         );
       }
 
-      repository.listUsageDaily = async (input) => {
+      repository.listUsageDaily = async (input: unknown) => {
         calls.push(input ?? {});
         return [];
       };
@@ -7240,13 +7240,15 @@ describe("Control Plane API", () => {
     try {
       Bun.env.PULLER_BASE_URL = "http://puller.mock";
       Bun.env.PULLER_SYNC_TIMEOUT_MS = "not-a-number";
-      globalThis.fetch = (async (input) => {
+      globalThis.fetch = (async (input: RequestInfo | URL) => {
         const url =
           typeof input === "string"
             ? input
             : input instanceof URL
               ? input.toString()
-              : input.url;
+              : input instanceof Request
+                ? input.url
+                : String(input);
         if (
           url ===
           `http://puller.mock/v1/sources/${encodeURIComponent(source.id)}/sync-now`
@@ -7260,7 +7262,7 @@ describe("Control Plane API", () => {
           });
         }
         throw new Error(`unexpected fetch url in realtime test: ${url}`);
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
 
       const response = await app.request("/api/v1/sessions/search", {
         method: "POST",
@@ -7939,80 +7941,249 @@ describe("Control Plane API", () => {
 
   test("GET /api/v1/exports/usage 支持 daily/weekly 的 json/csv 导出", async () => {
     const authHeaders = await resolveAuthHeaders();
-    const from = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const to = new Date().toISOString();
+    const authTenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const from = "2026-02-24T00:00:00.000Z";
+    const to = "2026-03-09T00:00:00.000Z";
+    const originalProxyEnabled = Bun.env.ANALYTICS_PROXY_ENABLED;
+    const originalBaseUrl = Bun.env.ANALYTICS_BASE_URL;
+    const originalFetch = globalThis.fetch;
+    const proxyBaseUrl = "http://127.0.0.1:19120";
+    const fetchCalls: string[] = [];
 
-    const jsonResponse = await app.request(
-      `/api/v1/exports/usage?format=json&dimension=daily&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=30`,
-      {
-        headers: authHeaders,
-      },
-    );
-    const jsonBody = (await jsonResponse.json()) as {
-      items: UsageDailyItem[];
-      total: number;
-      filters: {
-        dimension: string;
-        from?: string;
-        to?: string;
-        limit?: number;
+    try {
+      Bun.env.ANALYTICS_PROXY_ENABLED = "true";
+      Bun.env.ANALYTICS_BASE_URL = proxyBaseUrl;
+      globalThis.fetch = (async (input: unknown) => {
+        const url = input instanceof Request ? input.url : String(input);
+        fetchCalls.push(url);
+        return new Response(
+          JSON.stringify({
+            metric: "tokens",
+            timezone: "Asia/Shanghai",
+            weeks: [
+              {
+                week_start: "2026-02-24",
+                week_end: "2026-03-02",
+                tokens: 3200,
+                cost: 1.23,
+                sessions: 4,
+              },
+              {
+                weekStart: "2026-03-03",
+                weekEnd: "2026-03-09",
+                tokens: 1800,
+                cost: 0.88,
+                sessions: 3,
+              },
+            ],
+            summary: {
+              tokens: 5000,
+              cost: 2.11,
+              sessions: 7,
+            },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }) as unknown as typeof fetch;
+
+      const jsonResponse = await app.request(
+        `/api/v1/exports/usage?format=json&dimension=daily&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=30`,
+        {
+          headers: authHeaders,
+        },
+      );
+      const jsonBody = (await jsonResponse.json()) as {
+        items: UsageDailyItem[];
+        total: number;
+        filters: {
+          dimension: string;
+          from?: string;
+          to?: string;
+          limit?: number;
+        };
       };
-    };
 
-    expect(jsonResponse.status).toBe(200);
-    expect(Array.isArray(jsonBody.items)).toBe(true);
-    expect(typeof jsonBody.total).toBe("number");
-    expect(jsonBody.filters.dimension).toBe("daily");
-    expect(jsonBody.filters.limit).toBe(30);
+      expect(jsonResponse.status).toBe(200);
+      expect(Array.isArray(jsonBody.items)).toBe(true);
+      expect(typeof jsonBody.total).toBe("number");
+      expect(jsonBody.filters.dimension).toBe("daily");
+      expect(jsonBody.filters.limit).toBe(30);
 
-    const csvResponse = await app.request(
-      "/api/v1/exports/usage?format=csv&dimension=weekly&limit=20",
-      {
-        headers: authHeaders,
-      },
-    );
-    const csvBody = await csvResponse.text();
+      const csvResponse = await app.request(
+        `/api/v1/exports/usage?format=csv&dimension=weekly&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&timezone=${encodeURIComponent("Asia/Shanghai")}&limit=1`,
+        {
+          headers: authHeaders,
+        },
+      );
+      const csvBody = await csvResponse.text();
 
-    expect(csvResponse.status).toBe(200);
-    expect(csvResponse.headers.get("content-type")).toContain("text/csv");
-    expect(csvResponse.headers.get("content-disposition")).toContain(
-      'attachment; filename="usage-weekly-',
-    );
-    expect(csvBody.split("\n")[0]).toBe(
-      "weekStart,weekEnd,tokens,cost,sessions",
-    );
+      expect(fetchCalls.length).toBe(1);
+      const forwardedUrl = new URL(fetchCalls[0]);
+      expect(`${forwardedUrl.origin}${forwardedUrl.pathname}`).toBe(
+        `${proxyBaseUrl}/v1/usage/weekly-summary`,
+      );
+      expect(forwardedUrl.searchParams.get("tenant_id")).toBe(authTenantId);
+      expect(forwardedUrl.searchParams.get("from")).toBe(from);
+      expect(forwardedUrl.searchParams.get("to")).toBe(to);
+      expect(forwardedUrl.searchParams.get("tz")).toBe("Asia/Shanghai");
+      expect(forwardedUrl.searchParams.has("limit")).toBe(false);
 
-    const auditResponse = await app.request(
-      "/api/v1/audits?action=control_plane.export_requested&limit=200",
-      {
-        headers: authHeaders,
-      },
-    );
-    const audits = (await auditResponse.json()) as {
-      items: Array<{
-        action: string;
-        metadata: Record<string, unknown>;
-      }>;
-    };
-    expect(auditResponse.status).toBe(200);
-    expect(
-      audits.items.some(
-        (item) =>
-          item.action === "control_plane.export_requested" &&
-          item.metadata.target === "usage" &&
-          item.metadata.dimension === "daily" &&
-          item.metadata.format === "json",
-      ),
-    ).toBe(true);
-    expect(
-      audits.items.some(
-        (item) =>
-          item.action === "control_plane.export_requested" &&
-          item.metadata.target === "usage" &&
-          item.metadata.dimension === "weekly" &&
-          item.metadata.format === "csv",
-      ),
-    ).toBe(true);
+      expect(csvResponse.status).toBe(200);
+      expect(csvResponse.headers.get("content-type")).toContain("text/csv");
+      expect(csvResponse.headers.get("content-disposition")).toContain(
+        'attachment; filename="usage-weekly-',
+      );
+      expect(csvBody.split("\n")[0]).toBe(
+        "weekStart,weekEnd,tokens,cost,sessions",
+      );
+      expect(csvBody.split("\n")[1]).toBe("2026-03-03,2026-03-09,1800,0.88,3");
+
+      const auditResponse = await app.request(
+        "/api/v1/audits?action=control_plane.export_requested&limit=200",
+        {
+          headers: authHeaders,
+        },
+      );
+      const audits = (await auditResponse.json()) as {
+        items: Array<{
+          action: string;
+          metadata: Record<string, unknown>;
+        }>;
+      };
+      expect(auditResponse.status).toBe(200);
+      expect(
+        audits.items.some(
+          (item) =>
+            item.action === "control_plane.export_requested" &&
+            item.metadata.target === "usage" &&
+            item.metadata.dimension === "daily" &&
+            item.metadata.format === "json",
+        ),
+      ).toBe(true);
+      expect(
+        audits.items.some(
+          (item) =>
+            item.action === "control_plane.export_requested" &&
+            item.metadata.target === "usage" &&
+            item.metadata.dimension === "weekly" &&
+            item.metadata.format === "csv",
+        ),
+      ).toBe(true);
+    } finally {
+      if (originalProxyEnabled === undefined) {
+        delete Bun.env.ANALYTICS_PROXY_ENABLED;
+      } else {
+        Bun.env.ANALYTICS_PROXY_ENABLED = originalProxyEnabled;
+      }
+      if (originalBaseUrl === undefined) {
+        delete Bun.env.ANALYTICS_BASE_URL;
+      } else {
+        Bun.env.ANALYTICS_BASE_URL = originalBaseUrl;
+      }
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("GET /api/v1/exports/usage weekly 代理关闭时返回 503", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const originalProxyEnabled = Bun.env.ANALYTICS_PROXY_ENABLED;
+    const originalBaseUrl = Bun.env.ANALYTICS_BASE_URL;
+    const originalFetch = globalThis.fetch;
+    let fetchCount = 0;
+
+    try {
+      Bun.env.ANALYTICS_PROXY_ENABLED = "false";
+      Bun.env.ANALYTICS_BASE_URL = "http://127.0.0.1:19121";
+      globalThis.fetch = (async () => {
+        fetchCount += 1;
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as unknown as typeof fetch;
+
+      const response = await app.request(
+        "/api/v1/exports/usage?format=json&dimension=weekly&from=2026-02-24T00%3A00%3A00.000Z&to=2026-03-09T00%3A00%3A00.000Z",
+        {
+          headers: authHeaders,
+        },
+      );
+      const body = (await response.json()) as {
+        message?: string;
+      };
+
+      expect(fetchCount).toBe(0);
+      expect(response.status).toBe(503);
+      expect(body.message).toBe(
+        "ANALYTICS_PROXY_ENABLED=false 时无法查询 weekly summary。",
+      );
+    } finally {
+      if (originalProxyEnabled === undefined) {
+        delete Bun.env.ANALYTICS_PROXY_ENABLED;
+      } else {
+        Bun.env.ANALYTICS_PROXY_ENABLED = originalProxyEnabled;
+      }
+      if (originalBaseUrl === undefined) {
+        delete Bun.env.ANALYTICS_BASE_URL;
+      } else {
+        Bun.env.ANALYTICS_BASE_URL = originalBaseUrl;
+      }
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("GET /api/v1/exports/usage weekly 代理失败时返回 502", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const authTenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const originalProxyEnabled = Bun.env.ANALYTICS_PROXY_ENABLED;
+    const originalBaseUrl = Bun.env.ANALYTICS_BASE_URL;
+    const originalFetch = globalThis.fetch;
+    const proxyBaseUrl = "http://127.0.0.1:19122";
+    const fetchCalls: string[] = [];
+
+    try {
+      Bun.env.ANALYTICS_PROXY_ENABLED = "true";
+      Bun.env.ANALYTICS_BASE_URL = proxyBaseUrl;
+      globalThis.fetch = (async (input: unknown) => {
+        const url = input instanceof Request ? input.url : String(input);
+        fetchCalls.push(url);
+        return new Response(JSON.stringify({ message: "upstream down" }), {
+          status: 502,
+          headers: { "content-type": "application/json" },
+        });
+      }) as unknown as typeof fetch;
+
+      const response = await app.request(
+        "/api/v1/exports/usage?format=json&dimension=weekly&from=2026-02-24T00%3A00%3A00.000Z&to=2026-03-09T00%3A00%3A00.000Z&timezone=Asia%2FShanghai",
+        {
+          headers: authHeaders,
+        },
+      );
+      const body = (await response.json()) as {
+        message?: string;
+      };
+
+      expect(fetchCalls).toEqual([
+        `${proxyBaseUrl}/v1/usage/weekly-summary?tenant_id=${encodeURIComponent(authTenantId)}&from=2026-02-24T00%3A00%3A00.000Z&to=2026-03-09T00%3A00%3A00.000Z&tz=Asia%2FShanghai`,
+      ]);
+      expect(response.status).toBe(502);
+      expect(body.message).toBe("query usage weekly summary failed");
+    } finally {
+      if (originalProxyEnabled === undefined) {
+        delete Bun.env.ANALYTICS_PROXY_ENABLED;
+      } else {
+        Bun.env.ANALYTICS_PROXY_ENABLED = originalProxyEnabled;
+      }
+      if (originalBaseUrl === undefined) {
+        delete Bun.env.ANALYTICS_BASE_URL;
+      } else {
+        Bun.env.ANALYTICS_BASE_URL = originalBaseUrl;
+      }
+      globalThis.fetch = originalFetch;
+    }
   });
 
   test("GET /api/v1/exports/usage 参数非法返回 400", async () => {
@@ -9836,6 +10007,19 @@ describe("Control Plane API", () => {
       expect(approveTwoResponse.status).toBe(200);
       expect(approveTwoBody.result.releaseRequest?.status).toBe("executed");
       expect(approveTwoBody.result.releaseRequest?.approvals.length).toBe(2);
+      const postApproveBudgetListResponse = await app.request("/api/v1/budgets", {
+        headers: authHeaders,
+      });
+      const postApproveBudgetList = (await postApproveBudgetListResponse.json()) as {
+        items: Budget[];
+      };
+      const postApproveBudget = postApproveBudgetList.items.find(
+        (item) => item.id === budget.id,
+      );
+      expect(postApproveBudget?.governanceState).toBe("active");
+      expect(postApproveBudget?.freezeReason).toBeUndefined();
+      expect(postApproveBudget?.frozenAt).toBeUndefined();
+      expect(postApproveBudget?.frozenByAlertId).toBeUndefined();
 
       const alertTwo = await createTestAlert(tenantId, "open", {
         budgetId: budget.id,
