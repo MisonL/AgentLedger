@@ -64,6 +64,32 @@ func TestMapLocalFetchErrorCode_MappingBranches(t *testing.T) {
 	}
 }
 
+func TestIsRetryEligibleMode(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		mode string
+		want bool
+	}{
+		{name: "sync", mode: "sync", want: true},
+		{name: "hybrid", mode: "hybrid", want: true},
+		{name: "realtime", mode: "realtime", want: false},
+		{name: "empty", mode: "", want: false},
+		{name: "invalid", mode: "manual", want: false},
+	}
+
+	for _, tt := range cases {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isRetryEligibleMode(tt.mode); got != tt.want {
+				t.Fatalf("isRetryEligibleMode(%q) = %v, want %v", tt.mode, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExecuteJob_UnsupportedSourceType_FailsWithCode(t *testing.T) {
 	var (
 		gotStatus string
@@ -621,6 +647,7 @@ func TestFailJob_FirstFailureSchedulesRetry(t *testing.T) {
 	job := syncJob{
 		ID:       "job-retry-1",
 		SourceID: "source-1",
+		Mode:     "sync",
 		Attempt:  1,
 	}
 	start := time.Now().UTC()
@@ -675,6 +702,7 @@ func TestFailJob_ParseFailedSchedulesRetry(t *testing.T) {
 	err := svc.failJob(syncJob{
 		ID:       "job-retry-parse-1",
 		SourceID: "source-1",
+		Mode:     "sync",
 		Attempt:  1,
 	}, errCodeParseFailed, originalErr)
 	if !errors.Is(err, originalErr) {
@@ -688,6 +716,54 @@ func TestFailJob_ParseFailedSchedulesRetry(t *testing.T) {
 	}
 	if gotCode != errCodeParseFailed {
 		t.Fatalf("scheduleJobRetry errorCode = %q, want %q", gotCode, errCodeParseFailed)
+	}
+}
+
+func TestFailJob_RetryableErrorInRealtimeModeDoesNotRetry(t *testing.T) {
+	var (
+		scheduled    bool
+		finishCalled bool
+		gotStatus    string
+		gotCode      string
+	)
+
+	svc := &pullerService{
+		runtime: pullerRuntimeConfig{
+			JobMaxRetries:     3,
+			JobRetryBaseDelay: 2 * time.Second,
+		},
+		deps: &pullerServiceDeps{
+			scheduleJobRetry: func(context.Context, syncJob, string, string, time.Time) error {
+				scheduled = true
+				return nil
+			},
+			finishJobStatus: func(_ context.Context, _ syncJob, status, errorCode, _ string) error {
+				finishCalled = true
+				gotStatus = status
+				gotCode = errorCode
+				return nil
+			},
+		},
+	}
+
+	originalErr := errors.New("temporary ingest failure")
+	err := svc.failJob(syncJob{
+		ID:       "job-retry-realtime-1",
+		SourceID: "source-1",
+		Mode:     "realtime",
+		Attempt:  1,
+	}, errCodeIngestFailed, originalErr)
+	if !errors.Is(err, originalErr) {
+		t.Fatalf("failJob() error = %v, want original error", err)
+	}
+	if scheduled {
+		t.Fatalf("scheduleJobRetry() should not be called in realtime mode")
+	}
+	if !finishCalled {
+		t.Fatalf("finishJobStatus() should be called in realtime mode")
+	}
+	if gotStatus != "failed" || gotCode != errCodeIngestFailed {
+		t.Fatalf("finishJobStatus = (%q, %q), want (failed, %q)", gotStatus, gotCode, errCodeIngestFailed)
 	}
 }
 
@@ -722,6 +798,7 @@ func TestFailJob_OverMaxRetriesMarksFailed(t *testing.T) {
 	err := svc.failJob(syncJob{
 		ID:       "job-retry-2",
 		SourceID: "source-1",
+		Mode:     "sync",
 		Attempt:  4,
 	}, errCodeIngestFailed, originalErr)
 	if !errors.Is(err, originalErr) {
@@ -769,6 +846,7 @@ func TestFailJob_NonRetryableErrorDoesNotRetry(t *testing.T) {
 	err := svc.failJob(syncJob{
 		ID:       "job-retry-3",
 		SourceID: "source-1",
+		Mode:     "sync",
 		Attempt:  1,
 	}, errCodeSourceNotFound, originalErr)
 	if !errors.Is(err, originalErr) {

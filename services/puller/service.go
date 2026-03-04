@@ -492,7 +492,19 @@ func shouldRetrySyncJobFailure(job syncJob, code string, maxRetries int) bool {
 	if !isRetryableSyncJobError(code) {
 		return false
 	}
+	if !isRetryEligibleMode(job.Mode) {
+		return false
+	}
 	return job.Attempt > 0 && job.Attempt <= maxRetries
+}
+
+func isRetryEligibleMode(mode string) bool {
+	switch normalizeSyncJobMode(mode) {
+	case "sync", "hybrid":
+		return true
+	default:
+		return false
+	}
 }
 
 func isRetryableSyncJobError(code string) bool {

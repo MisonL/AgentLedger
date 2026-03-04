@@ -1,4 +1,7 @@
 import type {
+  AgentItem,
+  AgentListInput,
+  AgentListResponse,
   AddTenantMemberInput,
   Alert,
   AlertMutableStatus,
@@ -20,10 +23,19 @@ import type {
   BudgetReleaseRequestStatus,
   BudgetThresholds,
   BudgetUpsertInput,
+  CreateAgentInput,
   CreateBudgetReleaseRequestInput,
+  CreateDeviceInput,
   CreateOrganizationInput,
   CreateSourceInput,
+  CreateSourceBindingInput,
   CreateTenantInput,
+  DeleteAgentInput,
+  DeleteDeviceInput,
+  DeleteSourceBindingInput,
+  DeviceItem,
+  DeviceListInput,
+  DeviceListResponse,
   ExportFormat,
   HeatmapCell,
   IntegrationAlertCallbackAction,
@@ -44,6 +56,10 @@ import type {
   SessionExportJobStatus,
   SessionExportQueryInput,
   SessionSearchInput,
+  SourceBindingItem,
+  SourceBindingListInput,
+  SourceBindingListResponse,
+  SourceBindingMethod,
   SystemConfigBackupPayload,
   SystemConfigBackupSource,
   SystemConfigRestoreInput,
@@ -73,6 +89,7 @@ export type ValidationResult<T> =
 const SOURCE_TYPE_SET = new Set<SourceType>(["local", "ssh", "sync-cache"]);
 const SOURCE_ACCESS_MODE_SET = new Set<SourceAccessMode>(["realtime", "sync", "hybrid"]);
 const SSH_AUTH_TYPE_SET = new Set<SSHAuthType>(["key", "agent"]);
+const SOURCE_BINDING_METHOD_SET = new Set<SourceBindingMethod>(["ssh-pull", "agent-push"]);
 const BUDGET_SCOPE_SET = new Set(["global", "source", "org", "user", "model"]);
 const BUDGET_GOVERNANCE_STATE_SET = new Set<BudgetGovernanceState>([
   "active",
@@ -127,6 +144,7 @@ const SOURCE_PARSE_FAILURE_LIMIT_DEFAULT = 50;
 const SOURCE_PARSE_FAILURE_LIMIT_MAX = 500;
 const ALERT_LIMIT_MAX = 200;
 const AUDIT_LIMIT_MAX = 200;
+const IDENTITY_BINDING_LIST_LIMIT_MAX = 200;
 const PASSWORD_MIN_LENGTH = 8;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -293,6 +311,13 @@ export function isSourceAccessMode(value: unknown): value is SourceAccessMode {
   return (
     typeof value === "string" &&
     SOURCE_ACCESS_MODE_SET.has(value as SourceAccessMode)
+  );
+}
+
+export function isSourceBindingMethod(value: unknown): value is SourceBindingMethod {
+  return (
+    typeof value === "string" &&
+    SOURCE_BINDING_METHOD_SET.has(value as SourceBindingMethod)
   );
 }
 
@@ -1007,6 +1032,150 @@ export function isAuditItem(value: unknown): value is AuditItem {
   );
 }
 
+export function isDeviceItem(value: unknown): value is DeviceItem {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const organizationIdOk =
+    value.organizationId === undefined ||
+    value.organizationId === null ||
+    isString(value.organizationId);
+  const platformOk =
+    value.platform === undefined || value.platform === null || isString(value.platform);
+  const lastSeenAtOk =
+    value.lastSeenAt === undefined || value.lastSeenAt === null || isISODate(value.lastSeenAt);
+
+  return (
+    isString(value.id) &&
+    isString(value.tenantId) &&
+    organizationIdOk &&
+    isString(value.userId) &&
+    isString(value.hostname) &&
+    isString(value.fingerprint) &&
+    platformOk &&
+    typeof value.active === "boolean" &&
+    lastSeenAtOk &&
+    isISODate(value.createdAt) &&
+    isISODate(value.updatedAt)
+  );
+}
+
+export function isAgentItem(value: unknown): value is AgentItem {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const organizationIdOk =
+    value.organizationId === undefined ||
+    value.organizationId === null ||
+    isString(value.organizationId);
+  const userIdOk = value.userId === undefined || value.userId === null || isString(value.userId);
+  const versionOk =
+    value.version === undefined || value.version === null || isString(value.version);
+  const lastSeenAtOk =
+    value.lastSeenAt === undefined || value.lastSeenAt === null || isISODate(value.lastSeenAt);
+
+  return (
+    isString(value.id) &&
+    isString(value.tenantId) &&
+    organizationIdOk &&
+    userIdOk &&
+    isString(value.deviceId) &&
+    isString(value.hostname) &&
+    versionOk &&
+    typeof value.active === "boolean" &&
+    lastSeenAtOk &&
+    isISODate(value.createdAt) &&
+    isISODate(value.updatedAt)
+  );
+}
+
+export function isSourceBindingItem(value: unknown): value is SourceBindingItem {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const organizationIdOk =
+    value.organizationId === undefined ||
+    value.organizationId === null ||
+    isString(value.organizationId);
+  const userIdOk = value.userId === undefined || value.userId === null || isString(value.userId);
+  const deviceId = normalizeString(value.deviceId);
+  const agentId = normalizeString(value.agentId);
+  const identityRefOk = Boolean(deviceId) || Boolean(agentId);
+
+  return (
+    isString(value.id) &&
+    isString(value.tenantId) &&
+    organizationIdOk &&
+    userIdOk &&
+    isString(value.sourceId) &&
+    (value.deviceId === undefined || value.deviceId === null || Boolean(deviceId)) &&
+    (value.agentId === undefined || value.agentId === null || Boolean(agentId)) &&
+    identityRefOk &&
+    isSourceBindingMethod(value.method) &&
+    isSourceAccessMode(value.accessMode) &&
+    typeof value.active === "boolean" &&
+    isISODate(value.createdAt) &&
+    isISODate(value.updatedAt)
+  );
+}
+
+export function isDeviceListResponse(value: unknown): value is DeviceListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const filtersOk = isRecord(value.filters) && validateDeviceListInput(value.filters).success;
+
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isDeviceItem(item)) &&
+    isNumber(value.total) &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    filtersOk
+  );
+}
+
+export function isAgentListResponse(value: unknown): value is AgentListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const filtersOk = isRecord(value.filters) && validateAgentListInput(value.filters).success;
+
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isAgentItem(item)) &&
+    isNumber(value.total) &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    filtersOk
+  );
+}
+
+export function isSourceBindingListResponse(
+  value: unknown
+): value is SourceBindingListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const filtersOk =
+    isRecord(value.filters) && validateSourceBindingListInput(value.filters).success;
+
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isSourceBindingItem(item)) &&
+    isNumber(value.total) &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    filtersOk
+  );
+}
+
 export function validateCreateSourceInput(input: unknown): ValidationResult<CreateSourceInput> {
   if (!isRecord(input)) {
     return { success: false, error: "请求体必须是对象。" };
@@ -1296,6 +1465,426 @@ export function validateAddTenantMemberInput(
       tenantRole: tenantRole as TenantRole,
       organizationId,
       orgRole: orgRole as OrgRole | undefined,
+    },
+  };
+}
+
+export function validateDeviceListInput(input: unknown): ValidationResult<DeviceListInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const tenantId = normalizeString(input.tenantId);
+  const organizationId = normalizeString(input.organizationId);
+  const userId = normalizeString(input.userId);
+  const keyword = normalizeString(input.keyword);
+  const cursor = normalizeString(input.cursor);
+  const limit = toOptionalInteger(input.limit);
+
+  if (!tenantId) {
+    return { success: false, error: "tenantId 必填且必须为非空字符串。" };
+  }
+  if (input.organizationId !== undefined && !organizationId) {
+    return { success: false, error: "organizationId 必须为非空字符串。" };
+  }
+  if (input.userId !== undefined && !userId) {
+    return { success: false, error: "userId 必须为非空字符串。" };
+  }
+  if (input.keyword !== undefined && !keyword) {
+    return { success: false, error: "keyword 必须为非空字符串。" };
+  }
+  if (input.cursor !== undefined && !cursor) {
+    return { success: false, error: "cursor 必须为非空字符串。" };
+  }
+  if (
+    input.limit !== undefined &&
+    (limit === undefined ||
+      !Number.isInteger(limit) ||
+      limit <= 0 ||
+      limit > IDENTITY_BINDING_LIST_LIMIT_MAX)
+  ) {
+    return {
+      success: false,
+      error: `limit 必须是 1 到 ${IDENTITY_BINDING_LIST_LIMIT_MAX} 的整数。`,
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId,
+      organizationId,
+      userId,
+      keyword,
+      limit,
+      cursor,
+    },
+  };
+}
+
+export function validateAgentListInput(input: unknown): ValidationResult<AgentListInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const tenantId = normalizeString(input.tenantId);
+  const organizationId = normalizeString(input.organizationId);
+  const userId = normalizeString(input.userId);
+  const deviceId = normalizeString(input.deviceId);
+  const keyword = normalizeString(input.keyword);
+  const cursor = normalizeString(input.cursor);
+  const limit = toOptionalInteger(input.limit);
+
+  if (!tenantId) {
+    return { success: false, error: "tenantId 必填且必须为非空字符串。" };
+  }
+  if (input.organizationId !== undefined && !organizationId) {
+    return { success: false, error: "organizationId 必须为非空字符串。" };
+  }
+  if (input.userId !== undefined && !userId) {
+    return { success: false, error: "userId 必须为非空字符串。" };
+  }
+  if (input.deviceId !== undefined && !deviceId) {
+    return { success: false, error: "deviceId 必须为非空字符串。" };
+  }
+  if (input.keyword !== undefined && !keyword) {
+    return { success: false, error: "keyword 必须为非空字符串。" };
+  }
+  if (input.cursor !== undefined && !cursor) {
+    return { success: false, error: "cursor 必须为非空字符串。" };
+  }
+  if (
+    input.limit !== undefined &&
+    (limit === undefined ||
+      !Number.isInteger(limit) ||
+      limit <= 0 ||
+      limit > IDENTITY_BINDING_LIST_LIMIT_MAX)
+  ) {
+    return {
+      success: false,
+      error: `limit 必须是 1 到 ${IDENTITY_BINDING_LIST_LIMIT_MAX} 的整数。`,
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId,
+      organizationId,
+      userId,
+      deviceId,
+      keyword,
+      limit,
+      cursor,
+    },
+  };
+}
+
+export function validateSourceBindingListInput(
+  input: unknown
+): ValidationResult<SourceBindingListInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const tenantId = normalizeString(input.tenantId);
+  const organizationId = normalizeString(input.organizationId);
+  const userId = normalizeString(input.userId);
+  const sourceId = normalizeString(input.sourceId);
+  const deviceId = normalizeString(input.deviceId);
+  const agentId = normalizeString(input.agentId);
+  const method = normalizeString(input.method);
+  const accessMode = normalizeString(input.accessMode);
+  const cursor = normalizeString(input.cursor);
+  const limit = toOptionalInteger(input.limit);
+
+  if (!tenantId) {
+    return { success: false, error: "tenantId 必填且必须为非空字符串。" };
+  }
+  if (input.organizationId !== undefined && !organizationId) {
+    return { success: false, error: "organizationId 必须为非空字符串。" };
+  }
+  if (input.userId !== undefined && !userId) {
+    return { success: false, error: "userId 必须为非空字符串。" };
+  }
+  if (input.sourceId !== undefined && !sourceId) {
+    return { success: false, error: "sourceId 必须为非空字符串。" };
+  }
+  if (input.deviceId !== undefined && !deviceId) {
+    return { success: false, error: "deviceId 必须为非空字符串。" };
+  }
+  if (input.agentId !== undefined && !agentId) {
+    return { success: false, error: "agentId 必须为非空字符串。" };
+  }
+  if (input.method !== undefined && !method) {
+    return { success: false, error: "method 必须是 ssh-pull/agent-push 之一。" };
+  }
+  if (method && !isSourceBindingMethod(method)) {
+    return { success: false, error: "method 必须是 ssh-pull/agent-push 之一。" };
+  }
+  if (input.accessMode !== undefined && !accessMode) {
+    return { success: false, error: "accessMode 必须是 realtime/sync/hybrid 之一。" };
+  }
+  if (accessMode && !isSourceAccessMode(accessMode)) {
+    return { success: false, error: "accessMode 必须是 realtime/sync/hybrid 之一。" };
+  }
+  if (input.active !== undefined && typeof input.active !== "boolean") {
+    return { success: false, error: "active 必须为布尔值。" };
+  }
+  if (input.cursor !== undefined && !cursor) {
+    return { success: false, error: "cursor 必须为非空字符串。" };
+  }
+  if (
+    input.limit !== undefined &&
+    (limit === undefined ||
+      !Number.isInteger(limit) ||
+      limit <= 0 ||
+      limit > IDENTITY_BINDING_LIST_LIMIT_MAX)
+  ) {
+    return {
+      success: false,
+      error: `limit 必须是 1 到 ${IDENTITY_BINDING_LIST_LIMIT_MAX} 的整数。`,
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId,
+      organizationId,
+      userId,
+      sourceId,
+      deviceId,
+      agentId,
+      method: method as SourceBindingMethod | undefined,
+      accessMode: accessMode as SourceAccessMode | undefined,
+      active: input.active as boolean | undefined,
+      limit,
+      cursor,
+    },
+  };
+}
+
+export function validateCreateDeviceInput(input: unknown): ValidationResult<CreateDeviceInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const tenantId = normalizeString(input.tenantId);
+  const organizationId = normalizeString(input.organizationId);
+  const userId = normalizeString(input.userId);
+  const hostname = normalizeString(input.hostname);
+  const fingerprint = normalizeString(input.fingerprint);
+  const platform = normalizeString(input.platform);
+
+  if (!tenantId) {
+    return { success: false, error: "tenantId 必填且必须为非空字符串。" };
+  }
+  if (input.organizationId !== undefined && !organizationId) {
+    return { success: false, error: "organizationId 必须为非空字符串。" };
+  }
+  if (!userId) {
+    return { success: false, error: "userId 必填且必须为非空字符串。" };
+  }
+  if (!hostname) {
+    return { success: false, error: "hostname 必填且必须为非空字符串。" };
+  }
+  if (!fingerprint) {
+    return { success: false, error: "fingerprint 必填且必须为非空字符串。" };
+  }
+  if (input.platform !== undefined && !platform) {
+    return { success: false, error: "platform 必须为非空字符串。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId,
+      organizationId,
+      userId,
+      hostname,
+      fingerprint,
+      platform,
+    },
+  };
+}
+
+export function validateCreateAgentInput(input: unknown): ValidationResult<CreateAgentInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const tenantId = normalizeString(input.tenantId);
+  const organizationId = normalizeString(input.organizationId);
+  const userId = normalizeString(input.userId);
+  const deviceId = normalizeString(input.deviceId);
+  const hostname = normalizeString(input.hostname);
+  const version = normalizeString(input.version);
+
+  if (!tenantId) {
+    return { success: false, error: "tenantId 必填且必须为非空字符串。" };
+  }
+  if (input.organizationId !== undefined && !organizationId) {
+    return { success: false, error: "organizationId 必须为非空字符串。" };
+  }
+  if (input.userId !== undefined && !userId) {
+    return { success: false, error: "userId 必须为非空字符串。" };
+  }
+  if (!deviceId) {
+    return { success: false, error: "deviceId 必填且必须为非空字符串。" };
+  }
+  if (!hostname) {
+    return { success: false, error: "hostname 必填且必须为非空字符串。" };
+  }
+  if (input.version !== undefined && !version) {
+    return { success: false, error: "version 必须为非空字符串。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId,
+      organizationId,
+      userId,
+      deviceId,
+      hostname,
+      version,
+    },
+  };
+}
+
+export function validateCreateSourceBindingInput(
+  input: unknown
+): ValidationResult<CreateSourceBindingInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const tenantId = normalizeString(input.tenantId);
+  const organizationId = normalizeString(input.organizationId);
+  const userId = normalizeString(input.userId);
+  const sourceId = normalizeString(input.sourceId);
+  const deviceId = normalizeString(input.deviceId);
+  const agentId = normalizeString(input.agentId);
+  const method = normalizeString(input.method);
+  const accessMode = normalizeString(input.accessMode) ?? "realtime";
+
+  if (!tenantId) {
+    return { success: false, error: "tenantId 必填且必须为非空字符串。" };
+  }
+  if (input.organizationId !== undefined && !organizationId) {
+    return { success: false, error: "organizationId 必须为非空字符串。" };
+  }
+  if (input.userId !== undefined && !userId) {
+    return { success: false, error: "userId 必须为非空字符串。" };
+  }
+  if (!sourceId) {
+    return { success: false, error: "sourceId 必填且必须为非空字符串。" };
+  }
+  if (input.deviceId !== undefined && !deviceId) {
+    return { success: false, error: "deviceId 必须为非空字符串。" };
+  }
+  if (input.agentId !== undefined && !agentId) {
+    return { success: false, error: "agentId 必须为非空字符串。" };
+  }
+  if (!deviceId && !agentId) {
+    return { success: false, error: "deviceId 与 agentId 不能同时为空，至少提供一个。" };
+  }
+  if (!method || !isSourceBindingMethod(method)) {
+    return { success: false, error: "method 必须是 ssh-pull/agent-push 之一。" };
+  }
+  if (input.accessMode !== undefined && !normalizeString(input.accessMode)) {
+    return { success: false, error: "accessMode 必须是 realtime/sync/hybrid 之一。" };
+  }
+  if (!isSourceAccessMode(accessMode)) {
+    return { success: false, error: "accessMode 必须是 realtime/sync/hybrid 之一。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId,
+      organizationId,
+      userId,
+      sourceId,
+      deviceId,
+      agentId,
+      method: method as SourceBindingMethod,
+      accessMode,
+    },
+  };
+}
+
+export function validateDeleteDeviceInput(input: unknown): ValidationResult<DeleteDeviceInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const tenantId = normalizeString(input.tenantId);
+  const deviceId = normalizeString(input.deviceId);
+
+  if (!tenantId) {
+    return { success: false, error: "tenantId 必填且必须为非空字符串。" };
+  }
+  if (!deviceId) {
+    return { success: false, error: "deviceId 必填且必须为非空字符串。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId,
+      deviceId,
+    },
+  };
+}
+
+export function validateDeleteAgentInput(input: unknown): ValidationResult<DeleteAgentInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const tenantId = normalizeString(input.tenantId);
+  const agentId = normalizeString(input.agentId);
+
+  if (!tenantId) {
+    return { success: false, error: "tenantId 必填且必须为非空字符串。" };
+  }
+  if (!agentId) {
+    return { success: false, error: "agentId 必填且必须为非空字符串。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId,
+      agentId,
+    },
+  };
+}
+
+export function validateDeleteSourceBindingInput(
+  input: unknown
+): ValidationResult<DeleteSourceBindingInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const tenantId = normalizeString(input.tenantId);
+  const bindingId = normalizeString(input.bindingId);
+
+  if (!tenantId) {
+    return { success: false, error: "tenantId 必填且必须为非空字符串。" };
+  }
+  if (!bindingId) {
+    return { success: false, error: "bindingId 必填且必须为非空字符串。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId,
+      bindingId,
     },
   };
 }

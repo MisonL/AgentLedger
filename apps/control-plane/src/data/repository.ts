@@ -26,6 +26,7 @@ import type {
   SessionSearchInput,
   Source,
   SourceAccessMode,
+  SourceBindingMethod,
   SourceHealth,
   SSHConfig,
   SourceWatermark,
@@ -422,6 +423,62 @@ export interface AddTenantMemberInput {
   orgRole?: OrgRole;
 }
 
+export interface DeviceBinding {
+  id: string;
+  tenantId: string;
+  deviceId: string;
+  displayName?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateDeviceBindingInput {
+  deviceId: string;
+  displayName?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AgentBinding {
+  id: string;
+  tenantId: string;
+  agentId: string;
+  deviceId?: string;
+  displayName?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateAgentBindingInput {
+  agentId: string;
+  deviceId?: string;
+  displayName?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SourceBinding {
+  id: string;
+  tenantId: string;
+  sourceId: string;
+  deviceId?: string;
+  agentId?: string;
+  bindingType: SourceBindingMethod;
+  accessMode: SourceAccessMode;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSourceBindingInput {
+  sourceId: string;
+  deviceId?: string;
+  agentId?: string;
+  bindingType?: SourceBindingMethod;
+  accessMode?: SourceAccessMode;
+  metadata?: Record<string, unknown>;
+}
+
 export interface BudgetScopeBindingValidationError {
   field: "organizationId" | "userId";
   message: string;
@@ -495,6 +552,13 @@ function toSourceAccessMode(value: unknown): SourceAccessMode {
     return value as SourceAccessMode;
   }
   return "realtime";
+}
+
+function toSourceBindingMethod(value: unknown): SourceBindingMethod {
+  if (value === "agent-push" || value === "ssh-pull") {
+    return value;
+  }
+  return "ssh-pull";
 }
 
 function toSyncJobStatus(value: unknown): SyncJobStatus {
@@ -1417,6 +1481,74 @@ function mapAuthSessionRow(row: DbRow): AuthSession {
   };
 }
 
+function mapDeviceBindingRow(row: DbRow): DeviceBinding {
+  const displayName = firstNonEmptyString(row.display_name);
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    deviceId: firstNonEmptyString(row.device_id) ?? "",
+    displayName: displayName ?? undefined,
+    metadata: toDbRow(row.metadata) ?? {},
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapAgentBindingRow(row: DbRow): AgentBinding {
+  const deviceId = firstNonEmptyString(row.device_id);
+  const displayName = firstNonEmptyString(row.display_name);
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    agentId: firstNonEmptyString(row.agent_id) ?? "",
+    deviceId: deviceId ?? undefined,
+    displayName: displayName ?? undefined,
+    metadata: toDbRow(row.metadata) ?? {},
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapSourceBindingRow(row: DbRow): SourceBinding {
+  const deviceId = firstNonEmptyString(row.device_id);
+  const agentId = firstNonEmptyString(row.agent_id);
+  const bindingType = toSourceBindingMethod(firstNonEmptyString(row.binding_type));
+  const accessMode = toSourceAccessMode(firstNonEmptyString(row.access_mode));
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    sourceId: firstNonEmptyString(row.source_id) ?? "",
+    deviceId: deviceId ?? undefined,
+    agentId: agentId ?? undefined,
+    bindingType,
+    accessMode,
+    metadata: toDbRow(row.metadata) ?? {},
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function cloneDeviceBinding(binding: DeviceBinding): DeviceBinding {
+  return {
+    ...binding,
+    metadata: { ...binding.metadata },
+  };
+}
+
+function cloneAgentBinding(binding: AgentBinding): AgentBinding {
+  return {
+    ...binding,
+    metadata: { ...binding.metadata },
+  };
+}
+
+function cloneSourceBinding(binding: SourceBinding): SourceBinding {
+  return {
+    ...binding,
+    metadata: { ...binding.metadata },
+  };
+}
+
 interface TimePaginationCursor {
   timestamp: string;
   id: string;
@@ -1836,6 +1968,9 @@ class ControlPlaneRepository {
   private readonly memoryTenants: Tenant[] = [];
   private readonly memoryOrganizations: Organization[] = [];
   private readonly memoryTenantMembers: TenantMember[] = [];
+  private readonly memoryDeviceBindings: DeviceBinding[] = [];
+  private readonly memoryAgentBindings: AgentBinding[] = [];
+  private readonly memorySourceBindings: SourceBinding[] = [];
   private readonly memoryAuthSessions: AuthSession[] = [];
   private pool: PgPool | null = null;
   private initPromise: Promise<void> | null = null;
@@ -6060,6 +6195,537 @@ class ControlPlaneRepository {
     }
   }
 
+  async listDeviceBindings(tenantId: string): Promise<DeviceBinding[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listDeviceBindingsFromMemory(normalizedTenantId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                device_id,
+                display_name,
+                metadata,
+                created_at,
+                updated_at
+         FROM identity_device_bindings
+         WHERE tenant_id = $1
+         ORDER BY created_at ASC, id ASC`,
+        [normalizedTenantId]
+      );
+      return result.rows.map(mapDeviceBindingRow);
+    } catch (error) {
+      this.disableDb(error, "查询 identity_device_bindings 失败");
+      return this.listDeviceBindingsFromMemory(normalizedTenantId);
+    }
+  }
+
+  async createDeviceBinding(
+    tenantId: string,
+    input: CreateDeviceBindingInput
+  ): Promise<DeviceBinding> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedDeviceId = firstNonEmptyString(input.deviceId);
+    if (!normalizedDeviceId) {
+      throw new Error("device_binding_device_id_required");
+    }
+
+    const now = new Date().toISOString();
+    const binding: DeviceBinding = {
+      id: crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      deviceId: normalizedDeviceId,
+      displayName: firstNonEmptyString(input.displayName) ?? undefined,
+      metadata: toDbRow(input.metadata) ?? {},
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.createDeviceBindingInMemory(binding);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO identity_device_bindings (
+           id,
+           tenant_id,
+           device_id,
+           display_name,
+           metadata,
+           created_at,
+           updated_at
+         )
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5::jsonb,
+           $6::timestamptz,
+           $6::timestamptz
+         )
+         ON CONFLICT (tenant_id, device_id)
+         DO NOTHING
+         RETURNING id,
+                   tenant_id,
+                   device_id,
+                   display_name,
+                   metadata,
+                   created_at,
+                   updated_at`,
+        [
+          binding.id,
+          binding.tenantId,
+          binding.deviceId,
+          binding.displayName ?? "",
+          JSON.stringify(binding.metadata),
+          binding.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        throw new Error(
+          `device_binding_already_exists:${binding.tenantId}:${binding.deviceId}`
+        );
+      }
+      return mapDeviceBindingRow(row);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.startsWith("device_binding_already_exists:")
+      ) {
+        throw error;
+      }
+      if (isPgUniqueViolation(error)) {
+        throw new Error(
+          `device_binding_already_exists:${binding.tenantId}:${binding.deviceId}`
+        );
+      }
+      if (isPgForeignKeyViolation(error)) {
+        throw error;
+      }
+      this.disableDb(error, "写入 identity_device_bindings 失败");
+      return this.createDeviceBindingInMemory(binding);
+    }
+  }
+
+  async deleteDeviceBinding(tenantId: string, deviceId: string): Promise<boolean> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedDeviceId = firstNonEmptyString(deviceId);
+    if (!normalizedDeviceId) {
+      return false;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.deleteDeviceBindingFromMemory(normalizedTenantId, normalizedDeviceId);
+    }
+
+    try {
+      const result = await pool.query(
+        `DELETE FROM identity_device_bindings
+         WHERE tenant_id = $1
+           AND device_id = $2
+         RETURNING id`,
+        [normalizedTenantId, normalizedDeviceId]
+      );
+      return Boolean(result.rows[0]);
+    } catch (error) {
+      this.disableDb(error, "删除 identity_device_bindings 失败");
+      return this.deleteDeviceBindingFromMemory(normalizedTenantId, normalizedDeviceId);
+    }
+  }
+
+  async listAgentBindings(tenantId: string): Promise<AgentBinding[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listAgentBindingsFromMemory(normalizedTenantId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                agent_id,
+                device_id,
+                display_name,
+                metadata,
+                created_at,
+                updated_at
+         FROM identity_agent_bindings
+         WHERE tenant_id = $1
+         ORDER BY created_at ASC, id ASC`,
+        [normalizedTenantId]
+      );
+      return result.rows.map(mapAgentBindingRow);
+    } catch (error) {
+      this.disableDb(error, "查询 identity_agent_bindings 失败");
+      return this.listAgentBindingsFromMemory(normalizedTenantId);
+    }
+  }
+
+  async createAgentBinding(
+    tenantId: string,
+    input: CreateAgentBindingInput
+  ): Promise<AgentBinding> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAgentId = firstNonEmptyString(input.agentId);
+    if (!normalizedAgentId) {
+      throw new Error("agent_binding_agent_id_required");
+    }
+
+    const normalizedDeviceId = firstNonEmptyString(input.deviceId) ?? undefined;
+    const now = new Date().toISOString();
+    const binding: AgentBinding = {
+      id: crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      agentId: normalizedAgentId,
+      deviceId: normalizedDeviceId,
+      displayName: firstNonEmptyString(input.displayName) ?? undefined,
+      metadata: toDbRow(input.metadata) ?? {},
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.createAgentBindingInMemory(binding);
+    }
+
+    try {
+      if (binding.deviceId) {
+        const deviceResult = await pool.query(
+          `SELECT 1
+           FROM identity_device_bindings
+           WHERE tenant_id = $1
+             AND device_id = $2
+           LIMIT 1`,
+          [binding.tenantId, binding.deviceId]
+        );
+        if (!deviceResult.rows[0]) {
+          throw new Error(
+            `agent_binding_device_not_found:${binding.tenantId}:${binding.deviceId}`
+          );
+        }
+      }
+
+      const result = await pool.query(
+        `INSERT INTO identity_agent_bindings (
+           id,
+           tenant_id,
+           agent_id,
+           device_id,
+           display_name,
+           metadata,
+           created_at,
+           updated_at
+         )
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6::jsonb,
+           $7::timestamptz,
+           $7::timestamptz
+         )
+         ON CONFLICT (tenant_id, agent_id)
+         DO NOTHING
+         RETURNING id,
+                   tenant_id,
+                   agent_id,
+                   device_id,
+                   display_name,
+                   metadata,
+                   created_at,
+                   updated_at`,
+        [
+          binding.id,
+          binding.tenantId,
+          binding.agentId,
+          binding.deviceId ?? null,
+          binding.displayName ?? "",
+          JSON.stringify(binding.metadata),
+          binding.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        throw new Error(
+          `agent_binding_already_exists:${binding.tenantId}:${binding.agentId}`
+        );
+      }
+      return mapAgentBindingRow(row);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.message.startsWith("agent_binding_already_exists:") ||
+          error.message.startsWith("agent_binding_device_not_found:"))
+      ) {
+        throw error;
+      }
+      if (isPgUniqueViolation(error)) {
+        throw new Error(
+          `agent_binding_already_exists:${binding.tenantId}:${binding.agentId}`
+        );
+      }
+      if (isPgForeignKeyViolation(error)) {
+        throw error;
+      }
+      this.disableDb(error, "写入 identity_agent_bindings 失败");
+      return this.createAgentBindingInMemory(binding);
+    }
+  }
+
+  async deleteAgentBinding(tenantId: string, agentId: string): Promise<boolean> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAgentId = firstNonEmptyString(agentId);
+    if (!normalizedAgentId) {
+      return false;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.deleteAgentBindingFromMemory(normalizedTenantId, normalizedAgentId);
+    }
+
+    try {
+      const result = await pool.query(
+        `DELETE FROM identity_agent_bindings
+         WHERE tenant_id = $1
+           AND agent_id = $2
+         RETURNING id`,
+        [normalizedTenantId, normalizedAgentId]
+      );
+      return Boolean(result.rows[0]);
+    } catch (error) {
+      this.disableDb(error, "删除 identity_agent_bindings 失败");
+      return this.deleteAgentBindingFromMemory(normalizedTenantId, normalizedAgentId);
+    }
+  }
+
+  async listSourceBindings(tenantId: string): Promise<SourceBinding[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listSourceBindingsFromMemory(normalizedTenantId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                source_id,
+                device_id,
+                agent_id,
+                binding_type,
+                access_mode,
+                metadata,
+                created_at,
+                updated_at
+         FROM identity_source_bindings
+         WHERE tenant_id = $1
+         ORDER BY created_at ASC, id ASC`,
+        [normalizedTenantId]
+      );
+      return result.rows.map(mapSourceBindingRow);
+    } catch (error) {
+      this.disableDb(error, "查询 identity_source_bindings 失败");
+      return this.listSourceBindingsFromMemory(normalizedTenantId);
+    }
+  }
+
+  async createSourceBinding(
+    tenantId: string,
+    input: CreateSourceBindingInput
+  ): Promise<SourceBinding> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedSourceId = firstNonEmptyString(input.sourceId);
+    if (!normalizedSourceId) {
+      throw new Error("source_binding_source_id_required");
+    }
+
+    const normalizedDeviceId = firstNonEmptyString(input.deviceId) ?? undefined;
+    const normalizedAgentId = firstNonEmptyString(input.agentId) ?? undefined;
+    const now = new Date().toISOString();
+    const binding: SourceBinding = {
+      id: crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      sourceId: normalizedSourceId,
+      deviceId: normalizedDeviceId,
+      agentId: normalizedAgentId,
+      bindingType: toSourceBindingMethod(input.bindingType),
+      accessMode: toSourceAccessMode(input.accessMode),
+      metadata: toDbRow(input.metadata) ?? {},
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.createSourceBindingInMemory(binding);
+    }
+
+    try {
+      const sourceResult = await pool.query(
+        `SELECT 1
+         FROM sources
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [binding.tenantId, binding.sourceId]
+      );
+      if (!sourceResult.rows[0]) {
+        throw new Error(
+          `source_binding_source_not_found:${binding.tenantId}:${binding.sourceId}`
+        );
+      }
+
+      if (binding.deviceId) {
+        const deviceResult = await pool.query(
+          `SELECT 1
+           FROM identity_device_bindings
+           WHERE tenant_id = $1
+             AND device_id = $2
+           LIMIT 1`,
+          [binding.tenantId, binding.deviceId]
+        );
+        if (!deviceResult.rows[0]) {
+          throw new Error(
+            `source_binding_device_not_found:${binding.tenantId}:${binding.deviceId}`
+          );
+        }
+      }
+
+      if (binding.agentId) {
+        const agentResult = await pool.query(
+          `SELECT 1
+           FROM identity_agent_bindings
+           WHERE tenant_id = $1
+             AND agent_id = $2
+           LIMIT 1`,
+          [binding.tenantId, binding.agentId]
+        );
+        if (!agentResult.rows[0]) {
+          throw new Error(
+            `source_binding_agent_not_found:${binding.tenantId}:${binding.agentId}`
+          );
+        }
+      }
+
+      const result = await pool.query(
+        `INSERT INTO identity_source_bindings (
+           id,
+           tenant_id,
+           source_id,
+           device_id,
+           agent_id,
+           binding_type,
+           access_mode,
+           metadata,
+           created_at,
+           updated_at
+         )
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6,
+           $7,
+           $8::jsonb,
+           $9::timestamptz,
+           $9::timestamptz
+         )
+         ON CONFLICT (tenant_id, source_id)
+         DO NOTHING
+         RETURNING id,
+                   tenant_id,
+                   source_id,
+                   device_id,
+                   agent_id,
+                   binding_type,
+                   access_mode,
+                   metadata,
+                   created_at,
+                   updated_at`,
+        [
+          binding.id,
+          binding.tenantId,
+          binding.sourceId,
+          binding.deviceId ?? null,
+          binding.agentId ?? null,
+          binding.bindingType,
+          binding.accessMode,
+          JSON.stringify(binding.metadata),
+          binding.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        throw new Error(
+          `source_binding_already_exists:${binding.tenantId}:${binding.sourceId}`
+        );
+      }
+      return mapSourceBindingRow(row);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.message.startsWith("source_binding_already_exists:") ||
+          error.message.startsWith("source_binding_source_not_found:") ||
+          error.message.startsWith("source_binding_device_not_found:") ||
+          error.message.startsWith("source_binding_agent_not_found:"))
+      ) {
+        throw error;
+      }
+      if (isPgUniqueViolation(error)) {
+        throw new Error(
+          `source_binding_already_exists:${binding.tenantId}:${binding.sourceId}`
+        );
+      }
+      if (isPgForeignKeyViolation(error)) {
+        throw error;
+      }
+      this.disableDb(error, "写入 identity_source_bindings 失败");
+      return this.createSourceBindingInMemory(binding);
+    }
+  }
+
+  async deleteSourceBinding(tenantId: string, bindingId: string): Promise<boolean> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedBindingId = firstNonEmptyString(bindingId);
+    if (!normalizedBindingId) {
+      return false;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.deleteSourceBindingFromMemory(normalizedTenantId, normalizedBindingId);
+    }
+
+    try {
+      const result = await pool.query(
+        `DELETE FROM identity_source_bindings
+         WHERE tenant_id = $1
+           AND id = $2
+         RETURNING id`,
+        [normalizedTenantId, normalizedBindingId]
+      );
+      return Boolean(result.rows[0]);
+    } catch (error) {
+      this.disableDb(error, "删除 identity_source_bindings 失败");
+      return this.deleteSourceBindingFromMemory(normalizedTenantId, normalizedBindingId);
+    }
+  }
+
   private async getPool(): Promise<PgPool | null> {
     await this.ensureInitialized();
     return this.pool;
@@ -7905,6 +8571,230 @@ class ControlPlaneRepository {
       `CREATE INDEX IF NOT EXISTS idx_auth_sessions_tenant_updated_at
        ON auth_sessions (tenant_id, updated_at DESC)`
     );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS identity_device_bindings (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+         device_id TEXT NOT NULL,
+         display_name TEXT NOT NULL DEFAULT '',
+         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE identity_device_bindings
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS device_id TEXT,
+         ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT '',
+         ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE identity_device_bindings
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), $1),
+           device_id = COALESCE(NULLIF(device_id, ''), id),
+           display_name = COALESCE(display_name, ''),
+           metadata = COALESCE(metadata, '{}'::jsonb),
+           created_at = COALESCE(created_at, NOW()),
+           updated_at = COALESCE(updated_at, created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR device_id IS NULL
+          OR device_id = ''
+          OR display_name IS NULL
+          OR metadata IS NULL
+          OR created_at IS NULL
+          OR updated_at IS NULL`,
+      [DEFAULT_TENANT_ID]
+    );
+
+    await pool.query(
+      `ALTER TABLE identity_device_bindings
+         ALTER COLUMN tenant_id SET DEFAULT '${DEFAULT_TENANT_ID}',
+         ALTER COLUMN tenant_id SET NOT NULL,
+         ALTER COLUMN device_id SET NOT NULL,
+         ALTER COLUMN display_name SET DEFAULT '',
+         ALTER COLUMN display_name SET NOT NULL,
+         ALTER COLUMN metadata SET DEFAULT '{}'::jsonb,
+         ALTER COLUMN metadata SET NOT NULL,
+         ALTER COLUMN created_at SET DEFAULT NOW(),
+         ALTER COLUMN created_at SET NOT NULL,
+         ALTER COLUMN updated_at SET DEFAULT NOW(),
+         ALTER COLUMN updated_at SET NOT NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_identity_device_bindings_tenant_device_uni
+       ON identity_device_bindings (tenant_id, device_id)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_identity_device_bindings_tenant_updated_at
+       ON identity_device_bindings (tenant_id, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS identity_agent_bindings (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+         agent_id TEXT NOT NULL,
+         device_id TEXT,
+         display_name TEXT NOT NULL DEFAULT '',
+         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE identity_agent_bindings
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS agent_id TEXT,
+         ADD COLUMN IF NOT EXISTS device_id TEXT,
+         ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT '',
+         ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE identity_agent_bindings
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), $1),
+           agent_id = COALESCE(NULLIF(agent_id, ''), id),
+           device_id = NULLIF(device_id, ''),
+           display_name = COALESCE(display_name, ''),
+           metadata = COALESCE(metadata, '{}'::jsonb),
+           created_at = COALESCE(created_at, NOW()),
+           updated_at = COALESCE(updated_at, created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR agent_id IS NULL
+          OR agent_id = ''
+          OR display_name IS NULL
+          OR metadata IS NULL
+          OR created_at IS NULL
+          OR updated_at IS NULL`,
+      [DEFAULT_TENANT_ID]
+    );
+
+    await pool.query(
+      `ALTER TABLE identity_agent_bindings
+         ALTER COLUMN tenant_id SET DEFAULT '${DEFAULT_TENANT_ID}',
+         ALTER COLUMN tenant_id SET NOT NULL,
+         ALTER COLUMN agent_id SET NOT NULL,
+         ALTER COLUMN display_name SET DEFAULT '',
+         ALTER COLUMN display_name SET NOT NULL,
+         ALTER COLUMN metadata SET DEFAULT '{}'::jsonb,
+         ALTER COLUMN metadata SET NOT NULL,
+         ALTER COLUMN created_at SET DEFAULT NOW(),
+         ALTER COLUMN created_at SET NOT NULL,
+         ALTER COLUMN updated_at SET DEFAULT NOW(),
+         ALTER COLUMN updated_at SET NOT NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_identity_agent_bindings_tenant_agent_uni
+       ON identity_agent_bindings (tenant_id, agent_id)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_identity_agent_bindings_tenant_device_updated_at
+       ON identity_agent_bindings (tenant_id, device_id, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS identity_source_bindings (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+         source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+         device_id TEXT,
+         agent_id TEXT,
+         binding_type TEXT NOT NULL DEFAULT 'ssh-pull',
+         access_mode TEXT NOT NULL DEFAULT 'realtime',
+         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE identity_source_bindings
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS source_id TEXT,
+         ADD COLUMN IF NOT EXISTS device_id TEXT,
+         ADD COLUMN IF NOT EXISTS agent_id TEXT,
+         ADD COLUMN IF NOT EXISTS binding_type TEXT NOT NULL DEFAULT 'ssh-pull',
+         ADD COLUMN IF NOT EXISTS access_mode TEXT NOT NULL DEFAULT 'realtime',
+         ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE identity_source_bindings
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), $1),
+           source_id = COALESCE(NULLIF(source_id, ''), id),
+           device_id = NULLIF(device_id, ''),
+           agent_id = NULLIF(agent_id, ''),
+           binding_type = CASE
+             WHEN NULLIF(binding_type, '') IS NULL THEN 'ssh-pull'
+             WHEN binding_type = 'manual' THEN 'ssh-pull'
+             ELSE binding_type
+           END,
+           access_mode = COALESCE(NULLIF(access_mode, ''), 'realtime'),
+           metadata = COALESCE(metadata, '{}'::jsonb),
+           created_at = COALESCE(created_at, NOW()),
+           updated_at = COALESCE(updated_at, created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR source_id IS NULL
+          OR source_id = ''
+          OR binding_type IS NULL
+          OR binding_type = ''
+          OR access_mode IS NULL
+          OR access_mode = ''
+          OR metadata IS NULL
+          OR created_at IS NULL
+          OR updated_at IS NULL`,
+      [DEFAULT_TENANT_ID]
+    );
+
+    await pool.query(
+      `ALTER TABLE identity_source_bindings
+         ALTER COLUMN tenant_id SET DEFAULT '${DEFAULT_TENANT_ID}',
+         ALTER COLUMN tenant_id SET NOT NULL,
+         ALTER COLUMN source_id SET NOT NULL,
+         ALTER COLUMN binding_type SET DEFAULT 'ssh-pull',
+         ALTER COLUMN binding_type SET NOT NULL,
+         ALTER COLUMN access_mode SET DEFAULT 'realtime',
+         ALTER COLUMN access_mode SET NOT NULL,
+         ALTER COLUMN metadata SET DEFAULT '{}'::jsonb,
+         ALTER COLUMN metadata SET NOT NULL,
+         ALTER COLUMN created_at SET DEFAULT NOW(),
+         ALTER COLUMN created_at SET NOT NULL,
+         ALTER COLUMN updated_at SET DEFAULT NOW(),
+         ALTER COLUMN updated_at SET NOT NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_identity_source_bindings_tenant_source_uni
+       ON identity_source_bindings (tenant_id, source_id)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_identity_source_bindings_tenant_agent_updated_at
+       ON identity_source_bindings (tenant_id, agent_id, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_identity_source_bindings_tenant_device_updated_at
+       ON identity_source_bindings (tenant_id, device_id, updated_at DESC)`
+    );
   }
 
   private disableDb(error: unknown, reason: string): void {
@@ -9602,6 +10492,140 @@ class ControlPlaneRepository {
       (membership) => membership.tenantId === tenantId && membership.userId === userId
     );
     return matched ? { ...matched } : null;
+  }
+
+  private listDeviceBindingsFromMemory(tenantId: string): DeviceBinding[] {
+    return this.memoryDeviceBindings
+      .filter((binding) => binding.tenantId === tenantId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .map(cloneDeviceBinding);
+  }
+
+  private createDeviceBindingInMemory(binding: DeviceBinding): DeviceBinding {
+    const existing = this.memoryDeviceBindings.find(
+      (item) => item.tenantId === binding.tenantId && item.deviceId === binding.deviceId
+    );
+    if (existing) {
+      throw new Error(
+        `device_binding_already_exists:${binding.tenantId}:${binding.deviceId}`
+      );
+    }
+
+    this.memoryDeviceBindings.push(cloneDeviceBinding(binding));
+    return cloneDeviceBinding(binding);
+  }
+
+  private deleteDeviceBindingFromMemory(tenantId: string, deviceId: string): boolean {
+    const index = this.memoryDeviceBindings.findIndex(
+      (binding) => binding.tenantId === tenantId && binding.deviceId === deviceId
+    );
+    if (index < 0) {
+      return false;
+    }
+    this.memoryDeviceBindings.splice(index, 1);
+    return true;
+  }
+
+  private listAgentBindingsFromMemory(tenantId: string): AgentBinding[] {
+    return this.memoryAgentBindings
+      .filter((binding) => binding.tenantId === tenantId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .map(cloneAgentBinding);
+  }
+
+  private createAgentBindingInMemory(binding: AgentBinding): AgentBinding {
+    if (
+      binding.deviceId &&
+      !this.memoryDeviceBindings.some(
+        (item) => item.tenantId === binding.tenantId && item.deviceId === binding.deviceId
+      )
+    ) {
+      throw new Error(`agent_binding_device_not_found:${binding.tenantId}:${binding.deviceId}`);
+    }
+
+    const existing = this.memoryAgentBindings.find(
+      (item) => item.tenantId === binding.tenantId && item.agentId === binding.agentId
+    );
+    if (existing) {
+      throw new Error(`agent_binding_already_exists:${binding.tenantId}:${binding.agentId}`);
+    }
+
+    this.memoryAgentBindings.push(cloneAgentBinding(binding));
+    return cloneAgentBinding(binding);
+  }
+
+  private deleteAgentBindingFromMemory(tenantId: string, agentId: string): boolean {
+    const index = this.memoryAgentBindings.findIndex(
+      (binding) => binding.tenantId === tenantId && binding.agentId === agentId
+    );
+    if (index < 0) {
+      return false;
+    }
+    this.memoryAgentBindings.splice(index, 1);
+    return true;
+  }
+
+  private hasSourceInTenantFromMemory(tenantId: string, sourceId: string): boolean {
+    return this.memorySources.some(
+      (source) =>
+        source.id === sourceId && this.resolveSourceTenantIdFromMemory(source) === tenantId
+    );
+  }
+
+  private listSourceBindingsFromMemory(tenantId: string): SourceBinding[] {
+    return this.memorySourceBindings
+      .filter((binding) => binding.tenantId === tenantId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .map(cloneSourceBinding);
+  }
+
+  private createSourceBindingInMemory(binding: SourceBinding): SourceBinding {
+    if (!this.hasSourceInTenantFromMemory(binding.tenantId, binding.sourceId)) {
+      throw new Error(
+        `source_binding_source_not_found:${binding.tenantId}:${binding.sourceId}`
+      );
+    }
+
+    if (
+      binding.deviceId &&
+      !this.memoryDeviceBindings.some(
+        (item) => item.tenantId === binding.tenantId && item.deviceId === binding.deviceId
+      )
+    ) {
+      throw new Error(`source_binding_device_not_found:${binding.tenantId}:${binding.deviceId}`);
+    }
+
+    if (
+      binding.agentId &&
+      !this.memoryAgentBindings.some(
+        (item) => item.tenantId === binding.tenantId && item.agentId === binding.agentId
+      )
+    ) {
+      throw new Error(`source_binding_agent_not_found:${binding.tenantId}:${binding.agentId}`);
+    }
+
+    const existing = this.memorySourceBindings.find(
+      (item) => item.tenantId === binding.tenantId && item.sourceId === binding.sourceId
+    );
+    if (existing) {
+      throw new Error(
+        `source_binding_already_exists:${binding.tenantId}:${binding.sourceId}`
+      );
+    }
+
+    this.memorySourceBindings.push(cloneSourceBinding(binding));
+    return cloneSourceBinding(binding);
+  }
+
+  private deleteSourceBindingFromMemory(tenantId: string, bindingId: string): boolean {
+    const index = this.memorySourceBindings.findIndex(
+      (binding) => binding.tenantId === tenantId && binding.id === bindingId
+    );
+    if (index < 0) {
+      return false;
+    }
+    this.memorySourceBindings.splice(index, 1);
+    return true;
   }
 
   private listUsageHeatmapFromMemory(input: NormalizedUsageHeatmapInput): HeatmapCell[] {

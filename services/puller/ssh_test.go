@@ -110,9 +110,10 @@ func TestFetchSSHSourceContents_DirectoryFiltersAndSort(t *testing.T) {
 		"z.md":      "# z\n",
 		"a.json":    `{"k":"v"}` + "\n",
 		"b.jsonl":   `{"id":1}` + "\n",
-		"skip.txt":  "skip\n",
+		"e.ndjson":  `{"id":2}` + "\n",
+		"skip.txt":  "take txt\n",
 		"sub/c.md":  "nested\n",
-		"sub/d.log": "skip log\n",
+		"sub/d.log": "take log\n",
 	}
 	for relativePath, body := range files {
 		filePath := filepath.Join(remoteDir, relativePath)
@@ -148,7 +149,10 @@ func TestFetchSSHSourceContents_DirectoryFiltersAndSort(t *testing.T) {
 	wantPaths := []string{
 		filepath.Join(remoteDir, "a.json"),
 		filepath.Join(remoteDir, "b.jsonl"),
+		filepath.Join(remoteDir, "e.ndjson"),
+		filepath.Join(remoteDir, "skip.txt"),
 		filepath.Join(remoteDir, "sub", "c.md"),
+		filepath.Join(remoteDir, "sub", "d.log"),
 		filepath.Join(remoteDir, "z.md"),
 	}
 	if !reflect.DeepEqual(gotPaths, wantPaths) {

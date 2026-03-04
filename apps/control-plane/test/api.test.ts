@@ -2193,6 +2193,227 @@ describe("Control Plane API", () => {
     ]);
   }
 
+  async function createTenantDeviceByAuth(
+    accessToken: string | undefined,
+    input: {
+      tenantId: string;
+      name: string;
+      slug?: string;
+      hostname?: string;
+      deviceId?: string;
+    },
+    userId?: string,
+  ): Promise<ApiCallResult> {
+    const tenantIdSegment = encodeURIComponent(input.tenantId);
+    const headers = buildAuthHeaders(accessToken, userId);
+    return requestFirstAvailable([
+      {
+        path: `/api/v1/tenants/${tenantIdSegment}/devices`,
+        init: jsonRequest("POST", input, headers),
+      },
+    ]);
+  }
+
+  async function listTenantDevicesByAuth(
+    accessToken: string | undefined,
+    tenantId: string,
+    userId?: string,
+  ): Promise<ApiCallResult> {
+    const tenantIdSegment = encodeURIComponent(tenantId);
+    const headers = buildAuthHeaders(accessToken, userId);
+    return requestFirstAvailable([
+      {
+        path: `/api/v1/tenants/${tenantIdSegment}/devices`,
+        init: {
+          headers,
+        },
+      },
+    ]);
+  }
+
+  async function deleteTenantDeviceByAuth(
+    accessToken: string | undefined,
+    tenantId: string,
+    deviceId: string,
+    userId?: string,
+  ): Promise<ApiCallResult> {
+    const tenantIdSegment = encodeURIComponent(tenantId);
+    const deviceIdSegment = encodeURIComponent(deviceId);
+    const headers = buildAuthHeaders(accessToken, userId);
+    return requestFirstAvailable([
+      {
+        path: `/api/v1/tenants/${tenantIdSegment}/devices/${deviceIdSegment}`,
+        init: {
+          method: "DELETE",
+          headers,
+        },
+      },
+    ]);
+  }
+
+  async function createTenantAgentByAuth(
+    accessToken: string | undefined,
+    input: {
+      tenantId: string;
+      name: string;
+      slug?: string;
+      agentId?: string;
+      deviceId?: string;
+    },
+    userId?: string,
+  ): Promise<ApiCallResult> {
+    const tenantIdSegment = encodeURIComponent(input.tenantId);
+    const headers = buildAuthHeaders(accessToken, userId);
+    return requestFirstAvailable([
+      {
+        path: `/api/v1/tenants/${tenantIdSegment}/agents`,
+        init: jsonRequest("POST", input, headers),
+      },
+    ]);
+  }
+
+  async function listTenantAgentsByAuth(
+    accessToken: string | undefined,
+    tenantId: string,
+    userId?: string,
+  ): Promise<ApiCallResult> {
+    const tenantIdSegment = encodeURIComponent(tenantId);
+    const headers = buildAuthHeaders(accessToken, userId);
+    return requestFirstAvailable([
+      {
+        path: `/api/v1/tenants/${tenantIdSegment}/agents`,
+        init: {
+          headers,
+        },
+      },
+    ]);
+  }
+
+  async function deleteTenantAgentByAuth(
+    accessToken: string | undefined,
+    tenantId: string,
+    agentId: string,
+    userId?: string,
+  ): Promise<ApiCallResult> {
+    const tenantIdSegment = encodeURIComponent(tenantId);
+    const agentIdSegment = encodeURIComponent(agentId);
+    const headers = buildAuthHeaders(accessToken, userId);
+    return requestFirstAvailable([
+      {
+        path: `/api/v1/tenants/${tenantIdSegment}/agents/${agentIdSegment}`,
+        init: {
+          method: "DELETE",
+          headers,
+        },
+      },
+    ]);
+  }
+
+  async function createTenantSourceBindingByAuth(
+    accessToken: string | undefined,
+    input: {
+      tenantId: string;
+      name?: string;
+      slug?: string;
+      sourceId: string;
+      deviceId?: string;
+      agentId?: string;
+      bindingId?: string;
+    },
+    userId?: string,
+  ): Promise<ApiCallResult> {
+    const tenantIdSegment = encodeURIComponent(input.tenantId);
+    const headers = buildAuthHeaders(accessToken, userId);
+    return requestFirstAvailable([
+      {
+        path: `/api/v1/tenants/${tenantIdSegment}/source-bindings`,
+        init: jsonRequest("POST", input, headers),
+      },
+    ]);
+  }
+
+  async function listTenantSourceBindingsByAuth(
+    accessToken: string | undefined,
+    tenantId: string,
+    userId?: string,
+  ): Promise<ApiCallResult> {
+    const tenantIdSegment = encodeURIComponent(tenantId);
+    const headers = buildAuthHeaders(accessToken, userId);
+    return requestFirstAvailable([
+      {
+        path: `/api/v1/tenants/${tenantIdSegment}/source-bindings`,
+        init: {
+          headers,
+        },
+      },
+    ]);
+  }
+
+  async function deleteTenantSourceBindingByAuth(
+    accessToken: string | undefined,
+    tenantId: string,
+    bindingId: string,
+    userId?: string,
+  ): Promise<ApiCallResult> {
+    const tenantIdSegment = encodeURIComponent(tenantId);
+    const bindingIdSegment = encodeURIComponent(bindingId);
+    const headers = buildAuthHeaders(accessToken, userId);
+    return requestFirstAvailable([
+      {
+        path: `/api/v1/tenants/${tenantIdSegment}/source-bindings/${bindingIdSegment}`,
+        init: {
+          method: "DELETE",
+          headers,
+        },
+      },
+    ]);
+  }
+
+  async function createIdentitySourceByAuth(
+    accessToken: string | undefined,
+    input: {
+      tenantId: string;
+      name: string;
+      location: string;
+      accessMode?: "realtime" | "sync" | "hybrid";
+    },
+    userId?: string,
+  ): Promise<ApiCallResult> {
+    void accessToken;
+    void userId;
+    const repo = repository as unknown as {
+      createSource?: (
+        tenantId: string,
+        input: {
+          name: string;
+          type: "local" | "ssh" | "sync-cache";
+          location: string;
+          accessMode?: "realtime" | "sync" | "hybrid";
+        },
+      ) => Promise<Source>;
+    };
+    if (!repo.createSource) {
+      throw new Error("repository.createSource 不可用，无法准备 identity source 测试数据。");
+    }
+
+    const source = await repo.createSource(input.tenantId, {
+      name: input.name,
+      type: "local",
+      location: input.location,
+      accessMode: input.accessMode ?? "realtime",
+    });
+    return {
+      path: "repository.createSource",
+      response: new Response(JSON.stringify(source), {
+        status: 201,
+        headers: {
+          "content-type": "application/json",
+        },
+      }),
+      payload: source,
+    };
+  }
+
   async function registerAndLoginUser(nonce: string): Promise<{
     email: string;
     password: string;
@@ -2597,6 +2818,506 @@ describe("Control Plane API", () => {
       plainMember.userId,
     );
     expect(memberWriteResult.response.status).toBe(403);
+  });
+
+  test("Identity 扩展正常流：device/agent/source-binding 创建查询删除", async () => {
+    const nonce = createNonce("identity-binding-normal");
+    const owner = await registerAndLoginUser(`${nonce}-owner`);
+    if (!owner.userId) {
+      throw new Error("无法解析 owner userId，无法继续执行 identity 扩展正常流测试。");
+    }
+
+    const createTenantResult = await createTenantByAuth(
+      owner.accessToken,
+      {
+        name: `扩展租户-${nonce}`,
+        slug: `tenant-binding-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(createTenantResult, [201]);
+
+    const tenantId = extractEntityId(createTenantResult.payload);
+    if (!tenantId) {
+      throw new Error("扩展正常流：租户创建响应缺少 tenantId。");
+    }
+
+    const createSourceResult = await createIdentitySourceByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        name: `Identity Source-${nonce}`,
+        location: `~/.codex/sessions/identity-normal-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(createSourceResult, [201]);
+    const sourceId = extractEntityId(createSourceResult.payload);
+    if (!sourceId) {
+      throw new Error("扩展正常流：source 创建响应缺少 sourceId。");
+    }
+
+    const createDeviceResult = await createTenantDeviceByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        name: `设备-${nonce}`,
+        slug: `device-${nonce}`,
+        hostname: `host-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(createDeviceResult, [201]);
+    const deviceId = extractEntityId(createDeviceResult.payload);
+    if (!deviceId) {
+      throw new Error("扩展正常流：设备创建响应缺少 deviceId。");
+    }
+
+    const listDevicesResult = await listTenantDevicesByAuth(
+      owner.accessToken,
+      tenantId,
+      owner.userId,
+    );
+    assertApiStatus(listDevicesResult, [200]);
+    const devices = extractListItems(listDevicesResult.payload);
+    expect(
+      devices.some((item) => {
+        const id = pickString(item, ["id", "deviceId"]);
+        return id === deviceId;
+      }),
+    ).toBe(true);
+
+    const createAgentResult = await createTenantAgentByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        name: `Agent-${nonce}`,
+        slug: `agent-${nonce}`,
+        deviceId,
+      },
+      owner.userId,
+    );
+    assertApiStatus(createAgentResult, [201]);
+    const agentId = extractEntityId(createAgentResult.payload);
+    if (!agentId) {
+      throw new Error("扩展正常流：agent 创建响应缺少 agentId。");
+    }
+
+    const listAgentsResult = await listTenantAgentsByAuth(
+      owner.accessToken,
+      tenantId,
+      owner.userId,
+    );
+    assertApiStatus(listAgentsResult, [200]);
+    const agents = extractListItems(listAgentsResult.payload);
+    expect(
+      agents.some((item) => {
+        const id = pickString(item, ["id", "agentId"]);
+        return id === agentId;
+      }),
+    ).toBe(true);
+
+    const createBindingResult = await createTenantSourceBindingByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        sourceId,
+        deviceId,
+        agentId,
+        name: `绑定-${nonce}`,
+        slug: `binding-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(createBindingResult, [201]);
+    const bindingId = extractEntityId(createBindingResult.payload);
+    if (!bindingId) {
+      throw new Error("扩展正常流：source-binding 创建响应缺少 bindingId。");
+    }
+
+    const listBindingsResult = await listTenantSourceBindingsByAuth(
+      owner.accessToken,
+      tenantId,
+      owner.userId,
+    );
+    assertApiStatus(listBindingsResult, [200]);
+    const bindings = extractListItems(listBindingsResult.payload);
+    expect(
+      bindings.some((item) => {
+        const id = pickString(item, ["id", "bindingId"]);
+        return id === bindingId;
+      }),
+    ).toBe(true);
+
+    const deleteBindingResult = await deleteTenantSourceBindingByAuth(
+      owner.accessToken,
+      tenantId,
+      bindingId,
+      owner.userId,
+    );
+    assertApiStatus(deleteBindingResult, [204]);
+
+    const deleteAgentResult = await deleteTenantAgentByAuth(
+      owner.accessToken,
+      tenantId,
+      agentId,
+      owner.userId,
+    );
+    assertApiStatus(deleteAgentResult, [204]);
+
+    const deleteDeviceResult = await deleteTenantDeviceByAuth(
+      owner.accessToken,
+      tenantId,
+      deviceId,
+      owner.userId,
+    );
+    assertApiStatus(deleteDeviceResult, [204]);
+  });
+
+  test("Identity 扩展权限：跨租户访问 device/agent/source-binding 返回 403", async () => {
+    const nonce = createNonce("identity-binding-cross-tenant");
+    const ownerA = await registerAndLoginUser(`${nonce}-owner-a`);
+    const ownerB = await registerAndLoginUser(`${nonce}-owner-b`);
+    if (!ownerA.userId || !ownerB.userId) {
+      throw new Error("无法解析 owner userId，无法执行跨租户扩展权限测试。");
+    }
+
+    const tenantAResult = await createTenantByAuth(
+      ownerA.accessToken,
+      {
+        name: `扩展租户A-${nonce}`,
+        slug: `tenant-binding-a-${nonce}`,
+      },
+      ownerA.userId,
+    );
+    assertApiStatus(tenantAResult, [201]);
+
+    const tenantBResult = await createTenantByAuth(
+      ownerB.accessToken,
+      {
+        name: `扩展租户B-${nonce}`,
+        slug: `tenant-binding-b-${nonce}`,
+      },
+      ownerB.userId,
+    );
+    assertApiStatus(tenantBResult, [201]);
+
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error("跨租户扩展权限：租户 B 创建响应缺少 tenantId。");
+    }
+
+    const createSourceResult = await createIdentitySourceByAuth(
+      ownerB.accessToken,
+      {
+        tenantId: tenantBId,
+        name: `Identity Source-B-${nonce}`,
+        location: `~/.codex/sessions/identity-cross-${nonce}`,
+      },
+      ownerB.userId,
+    );
+    assertApiStatus(createSourceResult, [201]);
+    const sourceId = extractEntityId(createSourceResult.payload);
+    if (!sourceId) {
+      throw new Error("跨租户扩展权限：source 创建响应缺少 sourceId。");
+    }
+
+    const createDeviceResult = await createTenantDeviceByAuth(
+      ownerB.accessToken,
+      {
+        tenantId: tenantBId,
+        name: `设备-B-${nonce}`,
+        slug: `device-b-${nonce}`,
+      },
+      ownerB.userId,
+    );
+    assertApiStatus(createDeviceResult, [201]);
+    const deviceId = extractEntityId(createDeviceResult.payload);
+    if (!deviceId) {
+      throw new Error("跨租户扩展权限：设备创建响应缺少 deviceId。");
+    }
+
+    const createAgentResult = await createTenantAgentByAuth(
+      ownerB.accessToken,
+      {
+        tenantId: tenantBId,
+        name: `Agent-B-${nonce}`,
+        slug: `agent-b-${nonce}`,
+        deviceId,
+      },
+      ownerB.userId,
+    );
+    assertApiStatus(createAgentResult, [201]);
+    const agentId = extractEntityId(createAgentResult.payload);
+    if (!agentId) {
+      throw new Error("跨租户扩展权限：agent 创建响应缺少 agentId。");
+    }
+
+    const createBindingResult = await createTenantSourceBindingByAuth(
+      ownerB.accessToken,
+      {
+        tenantId: tenantBId,
+        sourceId,
+        deviceId,
+        agentId,
+      },
+      ownerB.userId,
+    );
+    assertApiStatus(createBindingResult, [201]);
+
+    const crossTenantDeviceList = await listTenantDevicesByAuth(
+      ownerA.accessToken,
+      tenantBId,
+      ownerA.userId,
+    );
+    expect(crossTenantDeviceList.response.status).toBe(403);
+
+    const crossTenantAgentList = await listTenantAgentsByAuth(
+      ownerA.accessToken,
+      tenantBId,
+      ownerA.userId,
+    );
+    expect(crossTenantAgentList.response.status).toBe(403);
+
+    const crossTenantBindingList = await listTenantSourceBindingsByAuth(
+      ownerA.accessToken,
+      tenantBId,
+      ownerA.userId,
+    );
+    expect(crossTenantBindingList.response.status).toBe(403);
+  });
+
+  test("Identity 扩展权限：非 owner/maintainer 写 device/agent/source-binding 返回 403", async () => {
+    const nonce = createNonce("identity-binding-write-forbidden");
+    const owner = await registerAndLoginUser(`${nonce}-owner`);
+    const member = await registerAndLoginUser(`${nonce}-member`);
+    if (!owner.userId) {
+      throw new Error("无法解析 owner userId，无法执行扩展写权限测试。");
+    }
+
+    const createTenantResult = await createTenantByAuth(
+      owner.accessToken,
+      {
+        name: `扩展写权限租户-${nonce}`,
+        slug: `tenant-binding-write-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(createTenantResult, [201]);
+
+    const tenantId = extractEntityId(createTenantResult.payload);
+    if (!tenantId) {
+      throw new Error("扩展写权限测试：租户创建响应缺少 tenantId。");
+    }
+
+    const addMemberResult = await addTenantMemberByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        ...(member.userId ? { userId: member.userId } : { email: member.email }),
+        tenantRole: "member",
+      },
+      owner.userId,
+    );
+    assertApiStatus(addMemberResult, [201]);
+
+    const ownerCreateDeviceResult = await createTenantDeviceByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        name: `设备-owner-${nonce}`,
+        slug: `device-owner-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(ownerCreateDeviceResult, [201]);
+    const deviceId = extractEntityId(ownerCreateDeviceResult.payload);
+    if (!deviceId) {
+      throw new Error("扩展写权限测试：owner 设备创建响应缺少 deviceId。");
+    }
+
+    const ownerCreateAgentResult = await createTenantAgentByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        name: `Agent-owner-${nonce}`,
+        slug: `agent-owner-${nonce}`,
+        deviceId,
+      },
+      owner.userId,
+    );
+    assertApiStatus(ownerCreateAgentResult, [201]);
+    const agentId = extractEntityId(ownerCreateAgentResult.payload);
+    if (!agentId) {
+      throw new Error("扩展写权限测试：owner agent 创建响应缺少 agentId。");
+    }
+
+    const ownerCreateSourceResult = await createIdentitySourceByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        name: `Identity Source-owner-${nonce}`,
+        location: `~/.codex/sessions/identity-write-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(ownerCreateSourceResult, [201]);
+    const sourceId = extractEntityId(ownerCreateSourceResult.payload);
+    if (!sourceId) {
+      throw new Error("扩展写权限测试：owner source 创建响应缺少 sourceId。");
+    }
+
+    const memberCreateDeviceResult = await createTenantDeviceByAuth(
+      member.accessToken,
+      {
+        tenantId,
+        name: `设备-member-${nonce}`,
+        slug: `device-member-${nonce}`,
+      },
+      member.userId,
+    );
+    expect(memberCreateDeviceResult.response.status).toBe(403);
+
+    const memberCreateAgentResult = await createTenantAgentByAuth(
+      member.accessToken,
+      {
+        tenantId,
+        name: `Agent-member-${nonce}`,
+        slug: `agent-member-${nonce}`,
+        deviceId,
+      },
+      member.userId,
+    );
+    expect(memberCreateAgentResult.response.status).toBe(403);
+
+    const memberCreateBindingResult = await createTenantSourceBindingByAuth(
+      member.accessToken,
+      {
+        tenantId,
+        sourceId,
+        deviceId,
+        agentId,
+      },
+      member.userId,
+    );
+    expect(memberCreateBindingResult.response.status).toBe(403);
+  });
+
+  test("Identity 扩展安全：重复创建 device/agent/source-binding 返回 409", async () => {
+    const nonce = createNonce("identity-binding-duplicate");
+    const owner = await registerAndLoginUser(`${nonce}-owner`);
+    if (!owner.userId) {
+      throw new Error("无法解析 owner userId，无法执行扩展重复冲突测试。");
+    }
+
+    const createTenantResult = await createTenantByAuth(
+      owner.accessToken,
+      {
+        name: `扩展重复租户-${nonce}`,
+        slug: `tenant-binding-dup-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(createTenantResult, [201]);
+
+    const tenantId = extractEntityId(createTenantResult.payload);
+    if (!tenantId) {
+      throw new Error("扩展重复冲突：租户创建响应缺少 tenantId。");
+    }
+
+    const createSourceResult = await createIdentitySourceByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        name: `Identity Source-dup-${nonce}`,
+        location: `~/.codex/sessions/identity-dup-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(createSourceResult, [201]);
+    const sourceId = extractEntityId(createSourceResult.payload);
+    if (!sourceId) {
+      throw new Error("扩展重复冲突：source 创建响应缺少 sourceId。");
+    }
+
+    const firstDevice = await createTenantDeviceByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        name: `设备重复-${nonce}`,
+        slug: `device-dup-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(firstDevice, [201]);
+    const secondDevice = await createTenantDeviceByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        name: `设备重复-${nonce}`,
+        slug: `device-dup-${nonce}`,
+      },
+      owner.userId,
+    );
+    expect(secondDevice.response.status).toBe(409);
+
+    const deviceId = extractEntityId(firstDevice.payload);
+    if (!deviceId) {
+      throw new Error("扩展重复冲突：设备创建响应缺少 deviceId。");
+    }
+
+    const firstAgent = await createTenantAgentByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        name: `Agent重复-${nonce}`,
+        slug: `agent-dup-${nonce}`,
+        deviceId,
+      },
+      owner.userId,
+    );
+    assertApiStatus(firstAgent, [201]);
+    const secondAgent = await createTenantAgentByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        name: `Agent重复-${nonce}`,
+        slug: `agent-dup-${nonce}`,
+        deviceId,
+      },
+      owner.userId,
+    );
+    expect(secondAgent.response.status).toBe(409);
+
+    const agentId = extractEntityId(firstAgent.payload);
+    if (!agentId) {
+      throw new Error("扩展重复冲突：agent 创建响应缺少 agentId。");
+    }
+
+    const firstBinding = await createTenantSourceBindingByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        sourceId,
+        deviceId,
+        agentId,
+        slug: `binding-dup-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(firstBinding, [201]);
+    const secondBinding = await createTenantSourceBindingByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        sourceId,
+        deviceId,
+        agentId,
+        slug: `binding-dup-${nonce}`,
+      },
+      owner.userId,
+    );
+    expect(secondBinding.response.status).toBe(409);
   });
 
   test("GET /api/v1/health 返回服务健康状态", async () => {

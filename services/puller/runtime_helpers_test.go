@@ -166,14 +166,17 @@ func TestRetryHelpers(t *testing.T) {
 		t.Fatalf("isRetryableSyncJobError(%q) = false, want true", errCodeParseFailed)
 	}
 
-	if !shouldRetrySyncJobFailure(syncJob{Attempt: 1}, errCodeIngestFailed, 3) {
-		t.Fatalf("shouldRetrySyncJobFailure(first attempt) = false, want true")
+	if !shouldRetrySyncJobFailure(syncJob{Mode: "sync", Attempt: 1}, errCodeIngestFailed, 3) {
+		t.Fatalf("shouldRetrySyncJobFailure(sync first attempt) = false, want true")
 	}
-	if shouldRetrySyncJobFailure(syncJob{Attempt: 4}, errCodeIngestFailed, 3) {
+	if shouldRetrySyncJobFailure(syncJob{Mode: "sync", Attempt: 4}, errCodeIngestFailed, 3) {
 		t.Fatalf("shouldRetrySyncJobFailure(over max retries) = true, want false")
 	}
-	if !shouldRetrySyncJobFailure(syncJob{Attempt: 1}, errCodeParseFailed, 3) {
+	if !shouldRetrySyncJobFailure(syncJob{Mode: "hybrid", Attempt: 1}, errCodeParseFailed, 3) {
 		t.Fatalf("shouldRetrySyncJobFailure(parse_failed) = false, want true")
+	}
+	if shouldRetrySyncJobFailure(syncJob{Mode: "realtime", Attempt: 1}, errCodeIngestFailed, 3) {
+		t.Fatalf("shouldRetrySyncJobFailure(realtime) = true, want false")
 	}
 
 	base := 2 * time.Second

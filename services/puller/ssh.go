@@ -169,7 +169,7 @@ func buildSSHListCommand(path string) string {
 	return "if [ -f " + quotedPath + " ]; then " +
 		"printf '%s\\n' " + quotedPath + "; " +
 		"elif [ -d " + quotedPath + " ]; then " +
-		"find " + quotedPath + " -type f \\( -name '*.json' -o -name '*.jsonl' -o -name '*.md' \\) -print | LC_ALL=C sort; " +
+		"find " + quotedPath + " -type f \\( -name '*.json' -o -name '*.jsonl' -o -name '*.ndjson' -o -name '*.md' -o -name '*.log' -o -name '*.txt' \\) -print | LC_ALL=C sort; " +
 		"else " +
 		"echo 'ssh source path not found or not regular file/directory' >&2; exit 3; " +
 		"fi"

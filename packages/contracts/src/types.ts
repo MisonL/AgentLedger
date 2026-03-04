@@ -677,3 +677,143 @@ export interface AddTenantMemberInput {
   organizationId?: string;
   orgRole?: OrgRole;
 }
+
+export type SourceBindingMethod = "ssh-pull" | "agent-push";
+
+export interface DeviceItem {
+  id: string;
+  tenantId: string;
+  organizationId?: string;
+  userId: string;
+  hostname: string;
+  fingerprint: string;
+  platform?: string;
+  active: boolean;
+  lastSeenAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentItem {
+  id: string;
+  tenantId: string;
+  organizationId?: string;
+  userId?: string;
+  deviceId: string;
+  hostname: string;
+  version?: string;
+  active: boolean;
+  lastSeenAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SourceBindingItem {
+  id: string;
+  tenantId: string;
+  organizationId?: string;
+  userId?: string;
+  sourceId: string;
+  deviceId?: string;
+  agentId?: string;
+  method: SourceBindingMethod;
+  accessMode: SourceAccessMode;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DeviceListInput {
+  tenantId: string;
+  organizationId?: string;
+  userId?: string;
+  keyword?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface AgentListInput {
+  tenantId: string;
+  organizationId?: string;
+  userId?: string;
+  deviceId?: string;
+  keyword?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface SourceBindingListInput {
+  tenantId: string;
+  organizationId?: string;
+  userId?: string;
+  sourceId?: string;
+  deviceId?: string;
+  agentId?: string;
+  method?: SourceBindingMethod;
+  accessMode?: SourceAccessMode;
+  active?: boolean;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface CreateDeviceInput {
+  tenantId: string;
+  organizationId?: string;
+  userId: string;
+  hostname: string;
+  fingerprint: string;
+  platform?: string;
+}
+
+export interface CreateAgentInput {
+  tenantId: string;
+  organizationId?: string;
+  userId?: string;
+  deviceId: string;
+  hostname: string;
+  version?: string;
+}
+
+export interface CreateSourceBindingInput {
+  tenantId: string;
+  organizationId?: string;
+  userId?: string;
+  sourceId: string;
+  deviceId?: string;
+  agentId?: string;
+  method: SourceBindingMethod;
+  accessMode?: SourceAccessMode;
+}
+
+export interface DeleteDeviceInput {
+  tenantId: string;
+  deviceId: string;
+}
+
+export interface DeleteAgentInput {
+  tenantId: string;
+  agentId: string;
+}
+
+export interface DeleteSourceBindingInput {
+  tenantId: string;
+  bindingId: string;
+}
+
+export interface DeviceListResponse {
+  items: DeviceItem[];
+  total: number;
+  filters: DeviceListInput;
+}
+
+export interface AgentListResponse {
+  items: AgentItem[];
+  total: number;
+  filters: AgentListInput;
+}
+
+export interface SourceBindingListResponse {
+  items: SourceBindingItem[];
+  total: number;
+  filters: SourceBindingListInput;
+}
