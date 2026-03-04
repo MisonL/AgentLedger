@@ -1329,6 +1329,7 @@ describe("Web Console", () => {
       fireEvent.click(await screen.findByRole("button", { name: "导出 Sessions" }));
       expect(await screen.findByText("Sessions 导出成功：sessions-ui.csv")).toBeInTheDocument();
 
+      fireEvent.change(screen.getByLabelText("维度"), { target: { value: "weekly" } });
       fireEvent.click(screen.getByRole("button", { name: "导出 Usage" }));
       expect(await screen.findByText("Usage 导出成功：usage-ui.csv")).toBeInTheDocument();
 
@@ -1345,7 +1346,7 @@ describe("Web Console", () => {
         fetchSpy.mock.calls.some(([url, init]) => {
           const requestInit = init as RequestInit | undefined;
           return (
-            toUrl(url).includes("/api/v1/exports/usage?format=csv&dimension=daily") &&
+            toUrl(url).includes("/api/v1/exports/usage?format=csv&dimension=weekly") &&
             (requestInit?.method ?? "GET").toUpperCase() === "GET"
           );
         })

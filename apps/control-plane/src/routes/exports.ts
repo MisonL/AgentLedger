@@ -9,6 +9,7 @@ import type {
   UsageModelItem,
   UsageMonthlyItem,
   UsageSessionBreakdownItem,
+  UsageWeekItem,
 } from "../contracts";
 import {
   validateExportJobId,
@@ -44,6 +45,13 @@ const USAGE_DAILY_EXPORT_CSV_HEADERS = [
   "costRaw",
   "costEstimated",
   "costMode",
+];
+const USAGE_WEEKLY_EXPORT_CSV_HEADERS = [
+  "weekStart",
+  "weekEnd",
+  "tokens",
+  "cost",
+  "sessions",
 ];
 const USAGE_MONTHLY_EXPORT_CSV_HEADERS = [
   "month",
@@ -99,6 +107,7 @@ interface SessionExportJobRecord {
 
 type UsageExportItems =
   | UsageDailyItem[]
+  | UsageWeekItem[]
   | UsageMonthlyItem[]
   | UsageModelItem[]
   | UsageSessionBreakdownItem[]
@@ -157,6 +166,79 @@ function buildCsvRows(headers: string[], rows: Array<Array<unknown>>): string {
   return [headers.join(","), ...bodyRows].join("\n");
 }
 
+function toUtcWeekStart(value: string): Date | null {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  const date = new Date(
+    Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate())
+  );
+  const weekday = date.getUTCDay();
+  const diffToMonday = weekday === 0 ? -6 : 1 - weekday;
+  date.setUTCDate(date.getUTCDate() + diffToMonday);
+  return date;
+}
+
+function aggregateUsageWeeklyItems(
+  items: UsageDailyItem[],
+  limit?: number
+): UsageWeekItem[] {
+  const bucket = new Map<
+    string,
+    {
+      weekStart: Date;
+      tokens: number;
+      cost: number;
+      sessions: number;
+    }
+  >();
+
+  for (const item of items) {
+    const weekStart = toUtcWeekStart(item.date);
+    if (!weekStart) {
+      continue;
+    }
+
+    const key = weekStart.toISOString().slice(0, 10);
+    const current = bucket.get(key);
+    if (current) {
+      current.tokens += item.tokens;
+      current.cost += item.cost;
+      current.sessions += item.sessions;
+      continue;
+    }
+
+    bucket.set(key, {
+      weekStart,
+      tokens: item.tokens,
+      cost: item.cost,
+      sessions: item.sessions,
+    });
+  }
+
+  const weeklyItems = Array.from(bucket.values())
+    .sort((left, right) => left.weekStart.getTime() - right.weekStart.getTime())
+    .map((item) => {
+      const weekEnd = new Date(item.weekStart);
+      weekEnd.setUTCDate(weekEnd.getUTCDate() + 6);
+      weekEnd.setUTCHours(23, 59, 59, 999);
+      return {
+        weekStart: item.weekStart.toISOString(),
+        weekEnd: weekEnd.toISOString(),
+        tokens: item.tokens,
+        cost: Number(item.cost.toFixed(6)),
+        sessions: item.sessions,
+      };
+    });
+
+  if (typeof limit === "number" && limit > 0 && weeklyItems.length > limit) {
+    return weeklyItems.slice(weeklyItems.length - limit);
+  }
+  return weeklyItems;
+}
+
 function buildUsageCsv(
   dimension: UsageExportDimension,
   items: UsageExportItems
@@ -173,6 +255,17 @@ function buildUsageCsv(
           item.costRaw,
           item.costEstimated,
           item.costMode,
+        ])
+      );
+    case "weekly":
+      return buildCsvRows(
+        USAGE_WEEKLY_EXPORT_CSV_HEADERS,
+        (items as UsageWeekItem[]).map((item) => [
+          item.weekStart,
+          item.weekEnd,
+          item.tokens,
+          item.cost,
+          item.sessions,
         ])
       );
     case "monthly":
@@ -286,6 +379,15 @@ async function listUsageExportItems(input: {
   switch (input.dimension) {
     case "daily":
       return repository.listUsageDaily(baseQuery);
+    case "weekly":
+      {
+        const dailyItems = await repository.listUsageDaily({
+          tenantId: input.tenantId,
+          from: input.from,
+          to: input.to,
+        });
+        return aggregateUsageWeeklyItems(dailyItems, input.limit);
+      }
     case "monthly":
       return repository.listUsageMonthly(baseQuery);
     case "models":

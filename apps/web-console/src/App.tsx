@@ -209,6 +209,7 @@ const EXPORT_FORMAT_OPTIONS: Array<{ value: ExportFormat; label: string }> = [
 
 const USAGE_EXPORT_DIMENSION_OPTIONS: Array<{ value: UsageExportDimension; label: string }> = [
   { value: "daily", label: "daily" },
+  { value: "weekly", label: "weekly" },
   { value: "monthly", label: "monthly" },
   { value: "models", label: "models" },
   { value: "sessions", label: "sessions" },

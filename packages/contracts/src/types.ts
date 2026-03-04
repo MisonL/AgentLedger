@@ -325,6 +325,7 @@ export interface SessionExportQueryInput extends SessionSearchInput {
 
 export type UsageExportDimension =
   | "daily"
+  | "weekly"
   | "monthly"
   | "models"
   | "sessions"

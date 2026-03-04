@@ -1039,7 +1039,7 @@ describe("api mock fallback gate", () => {
       if (url.includes("/api/v1/exports/usage") && method === "GET") {
         return mockFileResponse("date,tokens\n2026-03-01,1000\n", {
           contentType: "text/csv; charset=utf-8",
-          contentDisposition: 'attachment; filename="usage-daily-2026.csv"',
+          contentDisposition: 'attachment; filename="usage-weekly-2026.csv"',
         });
       }
 
@@ -1056,12 +1056,12 @@ describe("api mock fallback gate", () => {
 
     await expect(
       exportUsage("csv", {
-        dimension: "daily",
+        dimension: "weekly",
         limit: 10,
       })
     ).resolves.toEqual(
       expect.objectContaining({
-        filename: "usage-daily-2026.csv",
+        filename: "usage-weekly-2026.csv",
         contentType: expect.stringContaining("text/csv"),
         blob: expect.any(Blob),
       })
@@ -1081,6 +1081,6 @@ describe("api mock fallback gate", () => {
       exportUsage("csv", {
         dimension: "invalid" as never,
       })
-    ).rejects.toThrow("dimension 必须是 daily/monthly/models/sessions/heatmap。");
+    ).rejects.toThrow("dimension 必须是 daily/weekly/monthly/models/sessions/heatmap。");
   });
 });

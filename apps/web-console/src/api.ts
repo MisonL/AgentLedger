@@ -69,6 +69,7 @@ const ALERT_MUTABLE_STATUSES = ["acknowledged", "resolved"] as const;
 const EXPORT_FORMATS = ["json", "csv"] as const;
 const USAGE_EXPORT_DIMENSIONS = [
   "daily",
+  "weekly",
   "monthly",
   "models",
   "sessions",
@@ -1509,7 +1510,7 @@ export async function exportUsage(
     throw new Error("format 必须是 json 或 csv。");
   }
   if (!isUsageExportDimension(input.dimension)) {
-    throw new Error("dimension 必须是 daily/monthly/models/sessions/heatmap。");
+    throw new Error("dimension 必须是 daily/weekly/monthly/models/sessions/heatmap。");
   }
 
   const defaultFilename = `usage-${input.dimension}-export.${format}`;

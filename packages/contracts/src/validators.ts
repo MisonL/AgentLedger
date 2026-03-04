@@ -161,6 +161,7 @@ const USAGE_HEATMAP_METRIC_SET = new Set<UsageHeatmapMetric>([
 ]);
 const USAGE_EXPORT_DIMENSION_SET = new Set<UsageExportDimension>([
   "daily",
+  "weekly",
   "monthly",
   "models",
   "sessions",
@@ -2308,13 +2309,13 @@ export function validateUsageExportQueryInput(
   if (input.dimension !== undefined && !normalizeString(input.dimension)) {
     return {
       success: false,
-      error: "dimension 必须是 daily/monthly/models/sessions/heatmap 之一。",
+      error: "dimension 必须是 daily/weekly/monthly/models/sessions/heatmap 之一。",
     };
   }
   if (!isUsageExportDimension(dimension)) {
     return {
       success: false,
-      error: "dimension 必须是 daily/monthly/models/sessions/heatmap 之一。",
+      error: "dimension 必须是 daily/weekly/monthly/models/sessions/heatmap 之一。",
     };
   }
 

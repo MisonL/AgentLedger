@@ -7937,7 +7937,7 @@ describe("Control Plane API", () => {
     ).toBe(true);
   });
 
-  test("GET /api/v1/exports/usage 支持 daily/sessions 的 json/csv 导出", async () => {
+  test("GET /api/v1/exports/usage 支持 daily/weekly 的 json/csv 导出", async () => {
     const authHeaders = await resolveAuthHeaders();
     const from = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const to = new Date().toISOString();
@@ -7966,7 +7966,7 @@ describe("Control Plane API", () => {
     expect(jsonBody.filters.limit).toBe(30);
 
     const csvResponse = await app.request(
-      "/api/v1/exports/usage?format=csv&dimension=sessions&limit=20",
+      "/api/v1/exports/usage?format=csv&dimension=weekly&limit=20",
       {
         headers: authHeaders,
       },
@@ -7976,10 +7976,10 @@ describe("Control Plane API", () => {
     expect(csvResponse.status).toBe(200);
     expect(csvResponse.headers.get("content-type")).toContain("text/csv");
     expect(csvResponse.headers.get("content-disposition")).toContain(
-      'attachment; filename="usage-sessions-',
+      'attachment; filename="usage-weekly-',
     );
     expect(csvBody.split("\n")[0]).toBe(
-      "sessionId,sourceId,tool,model,startedAt,inputTokens,outputTokens,cacheReadTokens,cacheWriteTokens,reasoningTokens,totalTokens,cost,costRaw,costEstimated,costMode",
+      "weekStart,weekEnd,tokens,cost,sessions",
     );
 
     const auditResponse = await app.request(
@@ -8009,7 +8009,7 @@ describe("Control Plane API", () => {
         (item) =>
           item.action === "control_plane.export_requested" &&
           item.metadata.target === "usage" &&
-          item.metadata.dimension === "sessions" &&
+          item.metadata.dimension === "weekly" &&
           item.metadata.format === "csv",
       ),
     ).toBe(true);

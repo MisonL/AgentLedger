@@ -280,6 +280,7 @@ export interface UsageWeeklySummaryResponse {
 export type ExportFormat = "json" | "csv";
 export type UsageExportDimension =
   | "daily"
+  | "weekly"
   | "monthly"
   | "models"
   | "sessions"
