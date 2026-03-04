@@ -79,6 +79,8 @@ import type {
   PricingCatalog,
   PricingCatalogEntry,
   UsageDailyItem,
+  UsageExportDimension,
+  UsageExportQueryInput,
   UsageHeatmapDrilldownResponse,
   UsageHeatmapMetric,
   UsageModelItem,
@@ -155,7 +157,16 @@ const USAGE_HEATMAP_METRIC_SET = new Set<UsageHeatmapMetric>([
   "cost",
   "sessions",
 ]);
+const USAGE_EXPORT_DIMENSION_SET = new Set<UsageExportDimension>([
+  "daily",
+  "monthly",
+  "models",
+  "sessions",
+  "heatmap",
+]);
+const USAGE_EXPORT_LIMIT_DEFAULT = 50;
 const SESSION_LIMIT_MAX = 200;
+const USAGE_EXPORT_LIMIT_MAX = 2000;
 const SOURCE_PARSE_FAILURE_LIMIT_DEFAULT = 50;
 const SOURCE_PARSE_FAILURE_LIMIT_MAX = 500;
 const ALERT_LIMIT_MAX = 200;
@@ -788,6 +799,13 @@ export function isUsageHeatmapMetric(value: unknown): value is UsageHeatmapMetri
   return (
     typeof value === "string" &&
     USAGE_HEATMAP_METRIC_SET.has(value as UsageHeatmapMetric)
+  );
+}
+
+export function isUsageExportDimension(value: unknown): value is UsageExportDimension {
+  return (
+    typeof value === "string" &&
+    USAGE_EXPORT_DIMENSION_SET.has(value as UsageExportDimension)
   );
 }
 
@@ -2159,6 +2177,85 @@ export function validateSessionExportQueryInput(
     data: {
       format,
       ...searchInputResult.data,
+    },
+  };
+}
+
+export function validateUsageExportQueryInput(
+  input: unknown
+): ValidationResult<UsageExportQueryInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "查询参数必须是对象。" };
+  }
+
+  const format = normalizeString(input.format) ?? "json";
+  if (input.format !== undefined && !normalizeString(input.format)) {
+    return { success: false, error: "format 必须是 json/csv 之一。" };
+  }
+  if (!isExportFormat(format)) {
+    return { success: false, error: "format 必须是 json/csv 之一。" };
+  }
+
+  const dimension = normalizeString(input.dimension) ?? "daily";
+  if (input.dimension !== undefined && !normalizeString(input.dimension)) {
+    return {
+      success: false,
+      error: "dimension 必须是 daily/monthly/models/sessions/heatmap 之一。",
+    };
+  }
+  if (!isUsageExportDimension(dimension)) {
+    return {
+      success: false,
+      error: "dimension 必须是 daily/monthly/models/sessions/heatmap 之一。",
+    };
+  }
+
+  const from = normalizeString(input.from);
+  const to = normalizeString(input.to);
+  if (input.from !== undefined && !from) {
+    return { success: false, error: "from 必须为 ISO 日期字符串。" };
+  }
+  if (input.to !== undefined && !to) {
+    return { success: false, error: "to 必须为 ISO 日期字符串。" };
+  }
+  if (from && !isISODate(from)) {
+    return { success: false, error: "from 必须为 ISO 日期字符串。" };
+  }
+  if (to && !isISODate(to)) {
+    return { success: false, error: "to 必须为 ISO 日期字符串。" };
+  }
+  if (from && to && Date.parse(from) > Date.parse(to)) {
+    return { success: false, error: "from 不能晚于 to。" };
+  }
+
+  const parsedLimit = toOptionalInteger(input.limit);
+  if (
+    input.limit !== undefined &&
+    (parsedLimit === undefined ||
+      !Number.isInteger(parsedLimit) ||
+      parsedLimit < 1 ||
+      parsedLimit > USAGE_EXPORT_LIMIT_MAX)
+  ) {
+    return {
+      success: false,
+      error: `limit 必须是 1 到 ${USAGE_EXPORT_LIMIT_MAX} 的整数。`,
+    };
+  }
+
+  const timezone = normalizeString(input.timezone);
+  if (input.timezone !== undefined && !timezone) {
+    return { success: false, error: "timezone 必须为非空字符串。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      format,
+      dimension,
+      from,
+      to,
+      limit: parsedLimit ?? USAGE_EXPORT_LIMIT_DEFAULT,
+      timezone,
     },
   };
 }

@@ -7214,6 +7214,98 @@ describe("Control Plane API", () => {
     ).toBe(true);
   });
 
+  test("GET /api/v1/exports/usage 支持 daily/sessions 的 json/csv 导出", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const from = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const to = new Date().toISOString();
+
+    const jsonResponse = await app.request(
+      `/api/v1/exports/usage?format=json&dimension=daily&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=30`,
+      {
+        headers: authHeaders,
+      },
+    );
+    const jsonBody = (await jsonResponse.json()) as {
+      items: UsageDailyItem[];
+      total: number;
+      filters: {
+        dimension: string;
+        from?: string;
+        to?: string;
+        limit?: number;
+      };
+    };
+
+    expect(jsonResponse.status).toBe(200);
+    expect(Array.isArray(jsonBody.items)).toBe(true);
+    expect(typeof jsonBody.total).toBe("number");
+    expect(jsonBody.filters.dimension).toBe("daily");
+    expect(jsonBody.filters.limit).toBe(30);
+
+    const csvResponse = await app.request(
+      "/api/v1/exports/usage?format=csv&dimension=sessions&limit=20",
+      {
+        headers: authHeaders,
+      },
+    );
+    const csvBody = await csvResponse.text();
+
+    expect(csvResponse.status).toBe(200);
+    expect(csvResponse.headers.get("content-type")).toContain("text/csv");
+    expect(csvResponse.headers.get("content-disposition")).toContain(
+      'attachment; filename="usage-sessions-',
+    );
+    expect(csvBody.split("\n")[0]).toBe(
+      "sessionId,sourceId,tool,model,startedAt,inputTokens,outputTokens,cacheReadTokens,cacheWriteTokens,reasoningTokens,totalTokens,cost,costRaw,costEstimated,costMode",
+    );
+
+    const auditResponse = await app.request(
+      "/api/v1/audits?action=control_plane.export_requested&limit=200",
+      {
+        headers: authHeaders,
+      },
+    );
+    const audits = (await auditResponse.json()) as {
+      items: Array<{
+        action: string;
+        metadata: Record<string, unknown>;
+      }>;
+    };
+    expect(auditResponse.status).toBe(200);
+    expect(
+      audits.items.some(
+        (item) =>
+          item.action === "control_plane.export_requested" &&
+          item.metadata.target === "usage" &&
+          item.metadata.dimension === "daily" &&
+          item.metadata.format === "json",
+      ),
+    ).toBe(true);
+    expect(
+      audits.items.some(
+        (item) =>
+          item.action === "control_plane.export_requested" &&
+          item.metadata.target === "usage" &&
+          item.metadata.dimension === "sessions" &&
+          item.metadata.format === "csv",
+      ),
+    ).toBe(true);
+  });
+
+  test("GET /api/v1/exports/usage 参数非法返回 400", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const response = await app.request(
+      "/api/v1/exports/usage?format=csv&dimension=unknown",
+      {
+        headers: authHeaders,
+      },
+    );
+    const payload = (await response.json()) as { message?: string };
+
+    expect(response.status).toBe(400);
+    expect(typeof payload.message).toBe("string");
+  });
+
   test("异步导出 job 支持 创建->完成->下载链路（json）并写入 export_requested/export_completed 审计", async () => {
     const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const keyword = `async-export-${nonce}`;

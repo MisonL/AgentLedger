@@ -301,6 +301,19 @@ export interface SessionExportQueryInput extends SessionSearchInput {
   format: ExportFormat;
 }
 
+export type UsageExportDimension =
+  | "daily"
+  | "monthly"
+  | "models"
+  | "sessions"
+  | "heatmap";
+
+export interface UsageExportQueryInput extends UsageAggregateFilters {
+  format: ExportFormat;
+  dimension: UsageExportDimension;
+  timezone?: string;
+}
+
 export type SessionExportJobStatus = "pending" | "running" | "completed" | "failed";
 
 export type SessionExportJobCreateInput = SessionExportQueryInput;

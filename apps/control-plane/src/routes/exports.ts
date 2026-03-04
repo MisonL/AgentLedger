@@ -1,13 +1,20 @@
 import { Hono, type Context } from "hono";
 import type {
+  HeatmapCell,
   Session,
   SessionExportJob,
   SessionSearchInput,
+  UsageDailyItem,
+  UsageExportDimension,
+  UsageModelItem,
+  UsageMonthlyItem,
+  UsageSessionBreakdownItem,
 } from "../contracts";
 import {
   validateExportJobId,
   validateSessionExportJobCreateInput,
   validateSessionExportQueryInput,
+  validateUsageExportQueryInput,
 } from "../contracts";
 import type { AppendAuditLogInput } from "../data/repository";
 import { getControlPlaneRepository } from "../data/repository";
@@ -29,6 +36,51 @@ const SESSION_EXPORT_CSV_HEADERS = [
   "tokens",
   "cost",
 ];
+const USAGE_DAILY_EXPORT_CSV_HEADERS = [
+  "date",
+  "tokens",
+  "cost",
+  "sessions",
+  "costRaw",
+  "costEstimated",
+  "costMode",
+];
+const USAGE_MONTHLY_EXPORT_CSV_HEADERS = [
+  "month",
+  "tokens",
+  "cost",
+  "sessions",
+  "costRaw",
+  "costEstimated",
+  "costMode",
+];
+const USAGE_MODEL_EXPORT_CSV_HEADERS = [
+  "model",
+  "tokens",
+  "cost",
+  "sessions",
+  "costRaw",
+  "costEstimated",
+  "costMode",
+];
+const USAGE_SESSION_EXPORT_CSV_HEADERS = [
+  "sessionId",
+  "sourceId",
+  "tool",
+  "model",
+  "startedAt",
+  "inputTokens",
+  "outputTokens",
+  "cacheReadTokens",
+  "cacheWriteTokens",
+  "reasoningTokens",
+  "totalTokens",
+  "cost",
+  "costRaw",
+  "costEstimated",
+  "costMode",
+];
+const USAGE_HEATMAP_EXPORT_CSV_HEADERS = ["date", "tokens", "cost", "sessions"];
 
 interface SessionExportJobResult {
   items: Session[];
@@ -44,6 +96,13 @@ interface SessionExportJobRecord {
   result?: SessionExportJobResult;
   csvContent?: string;
 }
+
+type UsageExportItems =
+  | UsageDailyItem[]
+  | UsageMonthlyItem[]
+  | UsageModelItem[]
+  | UsageSessionBreakdownItem[]
+  | HeatmapCell[];
 
 async function requireAuthContext(c: Context<AppEnv>) {
   const authResult = await authMiddleware(c, async () => {});
@@ -93,6 +152,94 @@ function buildSessionsCsv(items: Session[]): string {
   return [SESSION_EXPORT_CSV_HEADERS.join(","), ...rows].join("\n");
 }
 
+function buildCsvRows(headers: string[], rows: Array<Array<unknown>>): string {
+  const bodyRows = rows.map((row) => row.map(escapeCsvCell).join(","));
+  return [headers.join(","), ...bodyRows].join("\n");
+}
+
+function buildUsageCsv(
+  dimension: UsageExportDimension,
+  items: UsageExportItems
+): string {
+  switch (dimension) {
+    case "daily":
+      return buildCsvRows(
+        USAGE_DAILY_EXPORT_CSV_HEADERS,
+        (items as UsageDailyItem[]).map((item) => [
+          item.date,
+          item.tokens,
+          item.cost,
+          item.sessions,
+          item.costRaw,
+          item.costEstimated,
+          item.costMode,
+        ])
+      );
+    case "monthly":
+      return buildCsvRows(
+        USAGE_MONTHLY_EXPORT_CSV_HEADERS,
+        (items as UsageMonthlyItem[]).map((item) => [
+          item.month,
+          item.tokens,
+          item.cost,
+          item.sessions,
+          item.costRaw,
+          item.costEstimated,
+          item.costMode,
+        ])
+      );
+    case "models":
+      return buildCsvRows(
+        USAGE_MODEL_EXPORT_CSV_HEADERS,
+        (items as UsageModelItem[]).map((item) => [
+          item.model,
+          item.tokens,
+          item.cost,
+          item.sessions,
+          item.costRaw,
+          item.costEstimated,
+          item.costMode,
+        ])
+      );
+    case "sessions":
+      return buildCsvRows(
+        USAGE_SESSION_EXPORT_CSV_HEADERS,
+        (items as UsageSessionBreakdownItem[]).map((item) => [
+          item.sessionId,
+          item.sourceId,
+          item.tool,
+          item.model,
+          item.startedAt,
+          item.inputTokens,
+          item.outputTokens,
+          item.cacheReadTokens,
+          item.cacheWriteTokens,
+          item.reasoningTokens,
+          item.totalTokens,
+          item.cost,
+          item.costRaw,
+          item.costEstimated,
+          item.costMode,
+        ])
+      );
+    case "heatmap":
+      return buildCsvRows(
+        USAGE_HEATMAP_EXPORT_CSV_HEADERS,
+        (items as HeatmapCell[]).map((item) => [
+          item.date,
+          item.tokens,
+          item.cost,
+          item.sessions,
+        ])
+      );
+  }
+}
+
+function buildUsageCsvFileName(dimension: UsageExportDimension): string {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `usage-${dimension}-${timestamp}.csv`;
+}
+
 function toSessionSearchInput(input: {
   sourceId?: string;
   keyword?: string;
@@ -119,6 +266,46 @@ function toSessionSearchInput(input: {
     limit: input.limit,
     cursor: input.cursor,
   };
+}
+
+async function listUsageExportItems(input: {
+  tenantId: string;
+  dimension: UsageExportDimension;
+  from?: string;
+  to?: string;
+  limit?: number;
+  timezone?: string;
+}): Promise<UsageExportItems> {
+  const baseQuery = {
+    tenantId: input.tenantId,
+    from: input.from,
+    to: input.to,
+    limit: input.limit,
+  };
+
+  switch (input.dimension) {
+    case "daily":
+      return repository.listUsageDaily(baseQuery);
+    case "monthly":
+      return repository.listUsageMonthly(baseQuery);
+    case "models":
+      return repository.listUsageModelRanking(baseQuery);
+    case "sessions":
+      return repository.listUsageSessionBreakdown(baseQuery);
+    case "heatmap":
+      {
+        const cells = await repository.listUsageHeatmap({
+          tenantId: input.tenantId,
+          from: input.from,
+          to: input.to,
+          timezone: input.timezone,
+        });
+        if (typeof input.limit === "number" && input.limit > 0 && cells.length > input.limit) {
+          return cells.slice(cells.length - input.limit);
+        }
+        return cells;
+      }
+  }
 }
 
 function buildCsvFileName(): string {
@@ -406,6 +593,62 @@ exportRoutes.get("/exports/sessions", async (c) => {
     items: payload.items,
     total: payload.total,
     nextCursor: payload.nextCursor,
+    filters,
+  });
+});
+
+exportRoutes.get("/exports/usage", async (c) => {
+  const auth = await requireAuthContext(c);
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const result = validateUsageExportQueryInput(c.req.query());
+  if (!result.success) {
+    return c.json({ message: result.error }, 400);
+  }
+
+  const filters = {
+    dimension: result.data.dimension,
+    from: result.data.from,
+    to: result.data.to,
+    limit: result.data.limit,
+    timezone: result.data.timezone,
+  };
+  const items = await listUsageExportItems({
+    tenantId: auth.tenantId,
+    ...filters,
+  });
+  const requestId = c.get("requestId");
+
+  await appendAuditLogSafely({
+    eventId: `cp:${requestId}`,
+    action: "control_plane.export_requested",
+    level: "info",
+    detail: `Exported usage(${filters.dimension}) as ${result.data.format}.`,
+    tenantId: auth.tenantId,
+    metadata: {
+      requestId,
+      target: "usage",
+      format: result.data.format,
+      total: items.length,
+      dimension: filters.dimension,
+      filters,
+    },
+  });
+
+  if (result.data.format === "csv") {
+    c.header("Content-Type", "text/csv; charset=utf-8");
+    c.header(
+      "Content-Disposition",
+      `attachment; filename="${buildUsageCsvFileName(filters.dimension)}"`
+    );
+    return c.body(buildUsageCsv(filters.dimension, items));
+  }
+
+  return c.json({
+    items,
+    total: items.length,
     filters,
   });
 });
