@@ -1108,6 +1108,18 @@ describe("Web Console", () => {
           filters: {},
         });
       }
+      if (url.includes("/api/v1/usage/weekly-summary") && method === "GET") {
+        return mockJsonResponse({
+          metric: "tokens",
+          timezone: "UTC",
+          weeks: [],
+          summary: {
+            tokens: 0,
+            cost: 0,
+            sessions: 0,
+          },
+        });
+      }
 
       throw new Error(`unexpected call: ${method} ${url}`);
     });
@@ -1115,6 +1127,7 @@ describe("Web Console", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "治理中心" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "周报摘要", level: 2 })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "告警工作台", level: 2 })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "导出中心", level: 2 })).toBeInTheDocument();
   });
@@ -1152,6 +1165,33 @@ describe("Web Console", () => {
             },
           ],
           total: 1,
+        });
+      }
+      if (url.includes("/api/v1/usage/weekly-summary") && method === "GET") {
+        return mockJsonResponse({
+          metric: "tokens",
+          timezone: "UTC",
+          weeks: [
+            {
+              weekStart: "2026-02-24",
+              weekEnd: "2026-03-02",
+              tokens: 100,
+              cost: 1.2,
+              sessions: 3,
+            },
+          ],
+          summary: {
+            tokens: 100,
+            cost: 1.2,
+            sessions: 3,
+          },
+          peakWeek: {
+            weekStart: "2026-02-24",
+            weekEnd: "2026-03-02",
+            tokens: 100,
+            cost: 1.2,
+            sessions: 3,
+          },
         });
       }
 
@@ -1222,6 +1262,18 @@ describe("Web Console", () => {
 
       if (url.includes("/api/v1/alerts") && method === "GET") {
         return mockJsonResponse({ items: [], total: 0 });
+      }
+      if (url.includes("/api/v1/usage/weekly-summary") && method === "GET") {
+        return mockJsonResponse({
+          metric: "tokens",
+          timezone: "UTC",
+          weeks: [],
+          summary: {
+            tokens: 0,
+            cost: 0,
+            sessions: 0,
+          },
+        });
       }
 
       if (url.includes("/api/v1/exports/sessions") && method === "GET") {

@@ -22,6 +22,7 @@ import type {
   UsageDailyItem,
   UsageHeatmapDrilldownResponse,
   UsageHeatmapResponse,
+  UsageWeeklySummaryResponse,
 } from "../src/contracts";
 import { createApp } from "../src/app";
 import { getControlPlaneRepository } from "../src/data/repository";
@@ -4020,6 +4021,175 @@ describe("Control Plane API", () => {
     expect(typeof body.summary.tokens).toBe("number");
     expect(typeof body.summary.cost).toBe("number");
     expect(typeof body.summary.sessions).toBe("number");
+  });
+
+  test("GET /api/v1/usage/weekly-summary 代理成功并归一化 weekly 字段", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const authTenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const originalProxyEnabled = Bun.env.ANALYTICS_PROXY_ENABLED;
+    const originalBaseUrl = Bun.env.ANALYTICS_BASE_URL;
+    const originalFetch = globalThis.fetch;
+    const proxyBaseUrl = "http://127.0.0.1:19101";
+    const queryString =
+      "?tenant_id=tenant-weekly&metric=tokens&timezone=Asia%2FShanghai&from=2026-02-24T00%3A00%3A00.000Z&to=2026-03-09T00%3A00%3A00.000Z";
+    const fetchCalls: string[] = [];
+
+    try {
+      Bun.env.ANALYTICS_PROXY_ENABLED = "true";
+      Bun.env.ANALYTICS_BASE_URL = proxyBaseUrl;
+      globalThis.fetch = (async (input) => {
+        const url = input instanceof Request ? input.url : String(input);
+        fetchCalls.push(url);
+        return new Response(
+          JSON.stringify({
+            metric: "tokens",
+            timezone: "Asia/Shanghai",
+            weeks: [
+              {
+                week_start: "2026-02-24",
+                week_end: "2026-03-02",
+                tokens: 3200,
+                cost: 1.23,
+                sessions: 4,
+              },
+            ],
+            summary: {
+              tokens: 3200,
+              cost: 1.23,
+              sessions: 4,
+            },
+            peak_week: {
+              week_start: "2026-02-24",
+              week_end: "2026-03-02",
+              tokens: 3200,
+              cost: 1.23,
+              sessions: 4,
+            },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }) as typeof fetch;
+
+      const response = await app.request(
+        `/api/v1/usage/weekly-summary${queryString}`,
+        {
+          headers: authHeaders,
+        },
+      );
+      const body = (await response.json()) as UsageWeeklySummaryResponse;
+
+      expect(response.status).toBe(200);
+      expect(fetchCalls.length).toBe(1);
+      const forwardedUrl = new URL(fetchCalls[0]);
+      expect(`${forwardedUrl.origin}${forwardedUrl.pathname}`).toBe(
+        `${proxyBaseUrl}/v1/usage/weekly-summary`,
+      );
+      expect(forwardedUrl.searchParams.get("tenant_id")).toBe(authTenantId);
+      expect(forwardedUrl.searchParams.has("tenantId")).toBe(false);
+      expect(forwardedUrl.searchParams.get("metric")).toBe("tokens");
+      expect(forwardedUrl.searchParams.get("tz")).toBe("Asia/Shanghai");
+      expect(forwardedUrl.searchParams.get("from")).toBe(
+        "2026-02-24T00:00:00.000Z",
+      );
+      expect(forwardedUrl.searchParams.get("to")).toBe(
+        "2026-03-09T00:00:00.000Z",
+      );
+      expect(body).toEqual({
+        metric: "tokens",
+        timezone: "Asia/Shanghai",
+        weeks: [
+          {
+            weekStart: "2026-02-24",
+            weekEnd: "2026-03-02",
+            tokens: 3200,
+            cost: 1.23,
+            sessions: 4,
+          },
+        ],
+        summary: {
+          tokens: 3200,
+          cost: 1.23,
+          sessions: 4,
+        },
+        peakWeek: {
+          weekStart: "2026-02-24",
+          weekEnd: "2026-03-02",
+          tokens: 3200,
+          cost: 1.23,
+          sessions: 4,
+        },
+      });
+    } finally {
+      if (originalProxyEnabled === undefined) {
+        delete Bun.env.ANALYTICS_PROXY_ENABLED;
+      } else {
+        Bun.env.ANALYTICS_PROXY_ENABLED = originalProxyEnabled;
+      }
+      if (originalBaseUrl === undefined) {
+        delete Bun.env.ANALYTICS_BASE_URL;
+      } else {
+        Bun.env.ANALYTICS_BASE_URL = originalBaseUrl;
+      }
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("GET /api/v1/usage/weekly-summary 代理 4xx 时透传参数错误", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const authTenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const originalProxyEnabled = Bun.env.ANALYTICS_PROXY_ENABLED;
+    const originalBaseUrl = Bun.env.ANALYTICS_BASE_URL;
+    const originalFetch = globalThis.fetch;
+    const proxyBaseUrl = "http://127.0.0.1:19102";
+    const fetchCalls: string[] = [];
+
+    try {
+      Bun.env.ANALYTICS_PROXY_ENABLED = "true";
+      Bun.env.ANALYTICS_BASE_URL = proxyBaseUrl;
+      globalThis.fetch = (async (input) => {
+        const url = input instanceof Request ? input.url : String(input);
+        fetchCalls.push(url);
+        return new Response(JSON.stringify({ message: "invalid weekly query" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof fetch;
+
+      const response = await app.request(
+        "/api/v1/usage/weekly-summary?tenant_id=tenant-4xx&from=bad-date",
+        {
+          headers: authHeaders,
+        },
+      );
+      const body = (await response.json()) as {
+        error?: string;
+        status?: number;
+      };
+
+      expect(fetchCalls).toEqual([
+        `${proxyBaseUrl}/v1/usage/weekly-summary?tenant_id=${encodeURIComponent(authTenantId)}&from=bad-date`,
+      ]);
+      expect(response.status).toBe(400);
+      expect(body).toEqual({
+        error: "analytics 请求参数不合法",
+        status: 400,
+      });
+    } finally {
+      if (originalProxyEnabled === undefined) {
+        delete Bun.env.ANALYTICS_PROXY_ENABLED;
+      } else {
+        Bun.env.ANALYTICS_PROXY_ENABLED = originalProxyEnabled;
+      }
+      if (originalBaseUrl === undefined) {
+        delete Bun.env.ANALYTICS_BASE_URL;
+      } else {
+        Bun.env.ANALYTICS_BASE_URL = originalBaseUrl;
+      }
+      globalThis.fetch = originalFetch;
+    }
   });
 
   test("GET /api/v1/usage/heatmap/drilldown 支持按日期与指标下钻", async () => {

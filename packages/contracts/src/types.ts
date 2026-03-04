@@ -129,6 +129,28 @@ export interface UsageHeatmapResponse {
   };
 }
 
+export type UsageHeatmapMetric = "tokens" | "cost" | "sessions";
+
+export interface UsageWeekItem {
+  weekStart: string;
+  weekEnd: string;
+  tokens: number;
+  cost: number;
+  sessions: number;
+}
+
+export interface UsageWeeklySummaryResponse {
+  metric: UsageHeatmapMetric;
+  timezone: string;
+  weeks: UsageWeekItem[];
+  summary: {
+    tokens: number;
+    cost: number;
+    sessions: number;
+  };
+  peakWeek?: UsageWeekItem;
+}
+
 export type BudgetPeriod = "daily" | "monthly";
 export type BudgetScope = "global" | "source" | "org" | "user" | "model";
 export type BudgetGovernanceState = "active" | "frozen" | "pending_release";
@@ -359,8 +381,6 @@ export interface UsageListResponse<TItem> {
   total: number;
   filters: UsageAggregateFilters;
 }
-
-export type UsageHeatmapMetric = "tokens" | "cost" | "sessions";
 
 export interface UsageHeatmapDrilldownFilters extends UsageAggregateFilters {
   date: string;

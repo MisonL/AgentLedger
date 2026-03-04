@@ -40,9 +40,12 @@ import type {
   UsageAggregateResponse,
   UsageDailyItem,
   UsageHeatmapResponse,
+  UsageWeekItem,
   UsageModelItem,
   UsageMonthlyItem,
   UsageSessionBreakdownItem,
+  UsageWeeklySummaryQueryInput,
+  UsageWeeklySummaryResponse,
 } from "./types";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(
@@ -71,6 +74,7 @@ const USAGE_EXPORT_DIMENSIONS = [
   "sessions",
   "heatmap",
 ] as const;
+const USAGE_METRICS = ["tokens", "cost", "sessions"] as const;
 
 function daysAgo(days: number): Date {
   const date = new Date();
@@ -427,6 +431,10 @@ function isUsageExportDimension(value: unknown): value is UsageExportDimension {
   );
 }
 
+function isUsageMetric(value: unknown): value is "tokens" | "cost" | "sessions" {
+  return typeof value === "string" && USAGE_METRICS.includes(value as "tokens" | "cost" | "sessions");
+}
+
 function isAlertListInput(value: unknown): value is AlertListInput {
   if (!isRecord(value)) {
     return false;
@@ -534,6 +542,29 @@ function buildUsageAggregateQuery(filters?: UsageAggregateFilters): string {
   }
   if (typeof filters.limit === "number" && Number.isInteger(filters.limit) && filters.limit > 0) {
     params.set("limit", String(filters.limit));
+  }
+
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildUsageWeeklySummaryQuery(input?: UsageWeeklySummaryQueryInput): string {
+  if (!input) {
+    return "";
+  }
+
+  const params = new URLSearchParams();
+  if (typeof input.from === "string" && input.from.trim().length > 0) {
+    params.set("from", input.from.trim());
+  }
+  if (typeof input.to === "string" && input.to.trim().length > 0) {
+    params.set("to", input.to.trim());
+  }
+  if (typeof input.metric === "string" && isUsageMetric(input.metric)) {
+    params.set("metric", input.metric);
+  }
+  if (typeof input.timezone === "string" && input.timezone.trim().length > 0) {
+    params.set("timezone", input.timezone.trim());
   }
 
   const query = params.toString();
@@ -677,6 +708,57 @@ function isUsageAggregateResponse<TItem>(
   value: unknown
 ): value is UsageAggregateResponse<TItem> {
   return isRecord(value) && Array.isArray(value.items);
+}
+
+function isUsageWeekItem(value: unknown): value is UsageWeekItem {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.weekStart === "string" &&
+    !Number.isNaN(Date.parse(value.weekStart)) &&
+    typeof value.weekEnd === "string" &&
+    !Number.isNaN(Date.parse(value.weekEnd)) &&
+    typeof value.tokens === "number" &&
+    Number.isInteger(value.tokens) &&
+    value.tokens >= 0 &&
+    typeof value.cost === "number" &&
+    Number.isFinite(value.cost) &&
+    value.cost >= 0 &&
+    typeof value.sessions === "number" &&
+    Number.isInteger(value.sessions) &&
+    value.sessions >= 0
+  );
+}
+
+function isUsageWeeklySummaryResponse(
+  value: unknown
+): value is UsageWeeklySummaryResponse {
+  if (!isRecord(value) || !Array.isArray(value.weeks) || !isRecord(value.summary)) {
+    return false;
+  }
+
+  const peakWeekOk =
+    value.peakWeek === undefined ||
+    value.peakWeek === null ||
+    isUsageWeekItem(value.peakWeek);
+  return (
+    isUsageMetric(value.metric) &&
+    typeof value.timezone === "string" &&
+    value.timezone.trim().length > 0 &&
+    value.weeks.every((item) => isUsageWeekItem(item)) &&
+    typeof value.summary.tokens === "number" &&
+    Number.isInteger(value.summary.tokens) &&
+    value.summary.tokens >= 0 &&
+    typeof value.summary.cost === "number" &&
+    Number.isFinite(value.summary.cost) &&
+    value.summary.cost >= 0 &&
+    typeof value.summary.sessions === "number" &&
+    Number.isInteger(value.summary.sessions) &&
+    value.summary.sessions >= 0 &&
+    peakWeekOk
+  );
 }
 
 function isPricingCatalogEntry(value: unknown): value is PricingCatalogEntry {
@@ -1522,6 +1604,21 @@ export async function fetchUsageSessions(
   );
   if (!isUsageAggregateResponse<UsageSessionBreakdownItem>(result)) {
     throw new Error("usage.sessions 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchUsageWeeklySummary(
+  input?: UsageWeeklySummaryQueryInput,
+  signal?: AbortSignal
+): Promise<UsageWeeklySummaryResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v1/usage/weekly-summary${buildUsageWeeklySummaryQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isUsageWeeklySummaryResponse(result)) {
+    throw new Error("usage.weekly-summary 返回结构不合法");
   }
   return result;
 }

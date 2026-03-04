@@ -17,6 +17,7 @@ import {
   fetchUsageModels,
   fetchUsageMonthly,
   fetchUsageSessions,
+  fetchUsageWeeklySummary,
   getAccessToken,
   hasAccessToken,
   searchSessions,
@@ -409,7 +410,7 @@ describe("api mock fallback gate", () => {
     expect(hasAccessToken()).toBe(false);
   });
 
-  test("usage 聚合接口（daily/monthly/models/sessions）会拼接 query 并返回列表结构", async () => {
+  test("usage 聚合接口（daily/monthly/models/sessions/weekly-summary）会拼接 query 并返回列表结构", async () => {
     env.DEV = false;
     setAuthTokens({
       accessToken: "access-token-usage",
@@ -461,6 +462,33 @@ describe("api mock fallback gate", () => {
           total: 1,
         });
       }
+      if (url.includes("/api/v1/usage/weekly-summary") && method === "GET") {
+        return mockJsonResponse({
+          metric: "tokens",
+          timezone: "Asia/Shanghai",
+          weeks: [
+            {
+              weekStart: "2026-02-24",
+              weekEnd: "2026-03-02",
+              tokens: 3200,
+              cost: 1.23,
+              sessions: 4,
+            },
+          ],
+          summary: {
+            tokens: 3200,
+            cost: 1.23,
+            sessions: 4,
+          },
+          peakWeek: {
+            weekStart: "2026-02-24",
+            weekEnd: "2026-03-02",
+            tokens: 3200,
+            cost: 1.23,
+            sessions: 4,
+          },
+        });
+      }
       throw new Error(`unexpected call: ${method} ${url}`);
     });
 
@@ -481,6 +509,19 @@ describe("api mock fallback gate", () => {
     await expect(fetchUsageSessions(filters)).resolves.toEqual(
       expect.objectContaining({ total: 1 })
     );
+    await expect(
+      fetchUsageWeeklySummary({
+        metric: "tokens",
+        timezone: "Asia/Shanghai",
+        from: filters.from,
+        to: filters.to,
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        metric: "tokens",
+        timezone: "Asia/Shanghai",
+      })
+    );
 
     expect(fetchSpy.mock.calls.some(([url]) => toUrl(url).includes("/api/v1/usage/daily?"))).toBe(
       true
@@ -494,6 +535,16 @@ describe("api mock fallback gate", () => {
     expect(fetchSpy.mock.calls.some(([url]) => toUrl(url).includes("/api/v1/usage/sessions?"))).toBe(
       true
     );
+    expect(
+      fetchSpy.mock.calls.some(([url]) => {
+        const value = toUrl(url);
+        return (
+          value.includes("/api/v1/usage/weekly-summary?") &&
+          value.includes("metric=tokens") &&
+          value.includes("timezone=Asia%2FShanghai")
+        );
+      })
+    ).toBe(true);
   });
 
   test("session detail/events/pricing/source health/parse-failures/test-connection 接口请求方式正确", async () => {

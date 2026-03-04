@@ -733,6 +733,16 @@
   align-items: center;
 }
 
+.governance-weekly-overview {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.governance-weekly-overview p {
+  margin: 0;
+}
+
 .governance-export-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -15,6 +15,7 @@ import {
   exchangeExternalAuthCode,
   fetchAlerts,
   fetchAuthProviders,
+  fetchUsageWeeklySummary,
   fetchSourceHealth,
   fetchSourceParseFailures,
   fetchHeatmap,
@@ -212,6 +213,18 @@ const USAGE_EXPORT_DIMENSION_OPTIONS: Array<{ value: UsageExportDimension; label
   { value: "models", label: "models" },
   { value: "sessions", label: "sessions" },
   { value: "heatmap", label: "heatmap" },
+];
+
+const WEEKLY_SUMMARY_METRIC_OPTIONS: Array<{ value: MetricKey; label: string }> = [
+  { value: "tokens", label: "tokens" },
+  { value: "cost", label: "cost" },
+  { value: "sessions", label: "sessions" },
+];
+
+const WEEKLY_SUMMARY_TIMEZONE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "UTC", label: "UTC" },
+  { value: "Asia/Shanghai", label: "Asia/Shanghai" },
+  { value: "America/Los_Angeles", label: "America/Los_Angeles" },
 ];
 
 function createEmptyPricingEntry(): PricingEntryFormState {
@@ -2153,6 +2166,8 @@ function AnalyticsPage() {
 
 function GovernancePage() {
   const queryClient = useQueryClient();
+  const [weeklyMetric, setWeeklyMetric] = useState<MetricKey>("tokens");
+  const [weeklyTimezone, setWeeklyTimezone] = useState<string>("UTC");
   const [statusFilter, setStatusFilter] = useState<AlertStatus | "">("");
   const [severityFilter, setSeverityFilter] = useState<AlertSeverity | "">("");
   const [alertFeedback, setAlertFeedback] = useState<string | null>(null);
@@ -2176,6 +2191,19 @@ function GovernancePage() {
     queryKey: ["alerts", alertQueryInput],
     queryFn: ({ signal }) => fetchAlerts(alertQueryInput, signal),
     staleTime: 20_000,
+  });
+
+  const weeklySummaryQuery = useQuery({
+    queryKey: ["usage", "weekly-summary", weeklyMetric, weeklyTimezone],
+    queryFn: ({ signal }) =>
+      fetchUsageWeeklySummary(
+        {
+          metric: weeklyMetric,
+          timezone: weeklyTimezone,
+        },
+        signal
+      ),
+    staleTime: 60_000,
   });
 
   const updateAlertStatusMutation = useMutation({
@@ -2218,9 +2246,119 @@ function GovernancePage() {
   });
 
   const alertItems = alertsQuery.data?.items ?? [];
+  const weeklyItems = weeklySummaryQuery.data?.weeks ?? [];
+  const weeklyPeak = weeklySummaryQuery.data?.peakWeek;
 
   return (
     <>
+      <section className="panel">
+        <header>
+          <h2>周报摘要</h2>
+          <p>展示最近周级用量统计与峰值周。</p>
+        </header>
+
+        <div className="filters-row">
+          <label className="inline-field" htmlFor="weekly-summary-metric">
+            指标
+            <select
+              id="weekly-summary-metric"
+              value={weeklyMetric}
+              onChange={(event) => setWeeklyMetric(event.target.value as MetricKey)}
+            >
+              {WEEKLY_SUMMARY_METRIC_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="weekly-summary-timezone">
+            时区
+            <select
+              id="weekly-summary-timezone"
+              value={weeklyTimezone}
+              onChange={(event) => setWeeklyTimezone(event.target.value)}
+            >
+              {WEEKLY_SUMMARY_TIMEZONE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {weeklySummaryQuery.isLoading ? <p className="feedback info">周报摘要加载中...</p> : null}
+        {weeklySummaryQuery.isError ? (
+          <p className="feedback error">
+            周报摘要加载失败：{toErrorMessage(weeklySummaryQuery.error)}
+          </p>
+        ) : null}
+
+        {weeklySummaryQuery.data ? (
+          <div className="governance-weekly-overview">
+            <p>
+              统计区间内总计：
+              <strong>
+                {" "}
+                {weeklySummaryQuery.data.summary.tokens.toLocaleString("zh-CN")} tokens / $
+                {weeklySummaryQuery.data.summary.cost.toFixed(2)} /{" "}
+                {weeklySummaryQuery.data.summary.sessions.toLocaleString("zh-CN")} sessions
+              </strong>
+            </p>
+            <p>
+              峰值周：
+              <strong>
+                {" "}
+                {weeklyPeak
+                  ? `${weeklyPeak.weekStart} ~ ${weeklyPeak.weekEnd}（${weeklyMetric}: ${
+                      weeklyMetric === "cost"
+                        ? `$${weeklyPeak.cost.toFixed(2)}`
+                        : weeklyMetric === "sessions"
+                          ? weeklyPeak.sessions.toLocaleString("zh-CN")
+                          : weeklyPeak.tokens.toLocaleString("zh-CN")
+                    }）`
+                  : "暂无峰值"}
+              </strong>
+            </p>
+          </div>
+        ) : null}
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>Week Start</th>
+                <th>Week End</th>
+                <th>Tokens</th>
+                <th>Cost</th>
+                <th>Sessions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {weeklyItems.length === 0 ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={5}>
+                    暂无周报数据
+                  </td>
+                </tr>
+              ) : (
+                weeklyItems.map((item) => (
+                  <tr key={`${item.weekStart}:${item.weekEnd}`}>
+                    <td>{item.weekStart}</td>
+                    <td>{item.weekEnd}</td>
+                    <td>{item.tokens.toLocaleString("zh-CN")}</td>
+                    <td>${item.cost.toFixed(2)}</td>
+                    <td>{item.sessions.toLocaleString("zh-CN")}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section className="panel">
         <header>
           <h2>告警工作台</h2>

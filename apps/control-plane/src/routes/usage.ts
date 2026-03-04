@@ -4,9 +4,11 @@ import {
   type HeatmapCell,
   type UsageAggregateFilters,
   type UsageDailyItem,
+  type UsageWeekItem,
   type UsageHeatmapDrilldownResponse,
   type UsageHeatmapMetric,
   type UsageHeatmapResponse,
+  type UsageWeeklySummaryResponse,
   type UsageListResponse,
   type UsageModelItem,
   type UsageMonthlyItem,
@@ -21,7 +23,8 @@ import type { AppEnv } from "../types";
 
 export const usageRoutes = new Hono<AppEnv>();
 const repository = getControlPlaneRepository();
-const ANALYTICS_PROXY_PATH = "/v1/usage/heatmap";
+const ANALYTICS_HEATMAP_PROXY_PATH = "/v1/usage/heatmap";
+const ANALYTICS_WEEKLY_SUMMARY_PROXY_PATH = "/v1/usage/weekly-summary";
 const DEFAULT_ANALYTICS_BASE_URL = "http://127.0.0.1:8083";
 const DEFAULT_ANALYTICS_PROXY_TIMEOUT_MS = 1_500;
 const MIN_ANALYTICS_PROXY_TIMEOUT_MS = 100;
@@ -38,6 +41,13 @@ class analyticsProxyClientError extends Error {
     super(`analytics 请求参数错误: ${statusCode}`);
     this.name = "analyticsProxyClientError";
     this.statusCode = statusCode;
+  }
+}
+
+class analyticsProxyUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "analyticsProxyUnavailableError";
   }
 }
 
@@ -134,6 +144,146 @@ function parseAnalyticsHeatmap(payload: unknown): HeatmapCell[] | null {
     normalized.push(cell);
   }
   return normalized;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function readStringField(
+  value: Record<string, unknown>,
+  keys: string[]
+): string | undefined {
+  for (const key of keys) {
+    const candidate = value[key];
+    if (typeof candidate === "string") {
+      const trimmed = candidate.trim();
+      if (trimmed.length > 0) {
+        return trimmed;
+      }
+    }
+  }
+  return undefined;
+}
+
+function normalizeWeekItem(value: unknown): UsageWeekItem | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const weekStart = readStringField(value, ["weekStart", "week_start"]);
+  const weekEnd = readStringField(value, ["weekEnd", "week_end"]);
+  const tokensValue = value.tokens;
+  const costValue = value.cost;
+  const sessionsValue = value.sessions;
+
+  if (!weekStart || !weekEnd) {
+    return null;
+  }
+  if (Number.isNaN(Date.parse(weekStart)) || Number.isNaN(Date.parse(weekEnd))) {
+    return null;
+  }
+  if (
+    typeof tokensValue !== "number" ||
+    !Number.isInteger(tokensValue) ||
+    tokensValue < 0
+  ) {
+    return null;
+  }
+  if (
+    typeof costValue !== "number" ||
+    !Number.isFinite(costValue) ||
+    costValue < 0
+  ) {
+    return null;
+  }
+  if (
+    typeof sessionsValue !== "number" ||
+    !Number.isInteger(sessionsValue) ||
+    sessionsValue < 0
+  ) {
+    return null;
+  }
+
+  return {
+    weekStart,
+    weekEnd,
+    tokens: tokensValue,
+    cost: costValue,
+    sessions: sessionsValue,
+  };
+}
+
+function parseAnalyticsWeeklySummary(
+  payload: unknown
+): UsageWeeklySummaryResponse | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const metric = parseUsageHeatmapMetric(
+    readStringField(payload, ["metric"])
+  );
+  const timezone = readStringField(payload, ["timezone"]);
+  if (!metric || !timezone) {
+    return null;
+  }
+
+  const summary = payload.summary;
+  if (!isRecord(summary)) {
+    return null;
+  }
+  const summaryTokens = summary.tokens;
+  const summaryCost = summary.cost;
+  const summarySessions = summary.sessions;
+  if (
+    typeof summaryTokens !== "number" ||
+    !Number.isInteger(summaryTokens) ||
+    summaryTokens < 0 ||
+    typeof summaryCost !== "number" ||
+    !Number.isFinite(summaryCost) ||
+    summaryCost < 0 ||
+    typeof summarySessions !== "number" ||
+    !Number.isInteger(summarySessions) ||
+    summarySessions < 0
+  ) {
+    return null;
+  }
+
+  if (!Array.isArray(payload.weeks)) {
+    return null;
+  }
+
+  const weeks: UsageWeekItem[] = [];
+  for (const item of payload.weeks) {
+    const normalized = normalizeWeekItem(item);
+    if (!normalized) {
+      return null;
+    }
+    weeks.push(normalized);
+  }
+
+  const peakWeekRaw =
+    payload.peakWeek !== undefined ? payload.peakWeek : payload.peak_week;
+  const peakWeek =
+    peakWeekRaw === undefined || peakWeekRaw === null
+      ? undefined
+      : normalizeWeekItem(peakWeekRaw);
+  if (peakWeekRaw !== undefined && peakWeekRaw !== null && !peakWeek) {
+    return null;
+  }
+
+  return {
+    metric,
+    timezone,
+    weeks,
+    summary: {
+      tokens: summaryTokens,
+      cost: summaryCost,
+      sessions: summarySessions,
+    },
+    ...(peakWeek ? { peakWeek } : {}),
+  };
 }
 
 function toOptionalQueryString(value: string | null): string | undefined {
@@ -393,7 +543,7 @@ async function listUsageHeatmapWithFallback(
   }
 
   const analyticsBaseUrl = getAnalyticsBaseUrl();
-  const analyticsUrl = `${analyticsBaseUrl}${ANALYTICS_PROXY_PATH}${analyticsQueryString}`;
+  const analyticsUrl = `${analyticsBaseUrl}${ANALYTICS_HEATMAP_PROXY_PATH}${analyticsQueryString}`;
   const timeoutMs = getAnalyticsProxyTimeoutMs();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -430,6 +580,47 @@ async function listUsageHeatmapWithFallback(
       error,
     });
     return repository.listUsageHeatmap(query);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function fetchUsageWeeklySummary(
+  analyticsQueryString: string
+): Promise<UsageWeeklySummaryResponse> {
+  if (!isAnalyticsProxyEnabled()) {
+    throw new analyticsProxyUnavailableError(
+      "ANALYTICS_PROXY_ENABLED=false 时无法查询 weekly summary。"
+    );
+  }
+
+  const analyticsBaseUrl = getAnalyticsBaseUrl();
+  const analyticsUrl = `${analyticsBaseUrl}${ANALYTICS_WEEKLY_SUMMARY_PROXY_PATH}${analyticsQueryString}`;
+  const timeoutMs = getAnalyticsProxyTimeoutMs();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(analyticsUrl, {
+      method: "GET",
+      headers: {
+        accept: "application/json",
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      if (response.status >= 400 && response.status < 500) {
+        throw new analyticsProxyClientError(response.status);
+      }
+      throw new Error(`analytics 返回状态异常: ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const normalized = parseAnalyticsWeeklySummary(payload);
+    if (!normalized) {
+      throw new Error("analytics weekly-summary 返回结构不合法");
+    }
+    return normalized;
   } finally {
     clearTimeout(timeoutId);
   }
@@ -483,6 +674,55 @@ usageRoutes.get("/usage/heatmap", async (c) => {
   };
 
   return c.json(payload);
+});
+
+usageRoutes.get("/usage/weekly-summary", async (c) => {
+  const auth = await requireAuthContext(c);
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const requestUrl = new URL(c.req.url);
+  const query = {
+    ...parseUsageHeatmapQuery(requestUrl),
+    tenantId: auth.tenantId,
+  };
+  const analyticsQueryString = buildAnalyticsQueryString(
+    requestUrl.searchParams,
+    query
+  );
+
+  try {
+    const payload = await fetchUsageWeeklySummary(analyticsQueryString);
+    return c.json(payload);
+  } catch (error) {
+    if (error instanceof analyticsProxyClientError) {
+      return c.json(
+        {
+          error: "analytics 请求参数不合法",
+          status: error.statusCode,
+        },
+        400
+      );
+    }
+    if (error instanceof analyticsProxyUnavailableError) {
+      return c.json(
+        {
+          message: error.message,
+        },
+        503
+      );
+    }
+    console.warn("[control-plane] weekly summary 代理失败。", {
+      error,
+    });
+    return c.json(
+      {
+        message: "query usage weekly summary failed",
+      },
+      502
+    );
+  }
 });
 
 usageRoutes.get("/usage/heatmap/drilldown", async (c) => {

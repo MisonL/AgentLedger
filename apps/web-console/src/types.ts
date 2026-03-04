@@ -252,6 +252,31 @@ export interface UsageAggregateResponse<TItem> {
   filters?: UsageAggregateFilters;
 }
 
+export interface UsageWeekItem {
+  weekStart: string;
+  weekEnd: string;
+  tokens: number;
+  cost: number;
+  sessions: number;
+}
+
+export interface UsageWeeklySummaryQueryInput extends UsageAggregateFilters {
+  metric?: MetricKey;
+  timezone?: string;
+}
+
+export interface UsageWeeklySummaryResponse {
+  metric: MetricKey;
+  timezone: string;
+  weeks: UsageWeekItem[];
+  summary: {
+    tokens: number;
+    cost: number;
+    sessions: number;
+  };
+  peakWeek?: UsageWeekItem;
+}
+
 export type ExportFormat = "json" | "csv";
 export type UsageExportDimension =
   | "daily"
