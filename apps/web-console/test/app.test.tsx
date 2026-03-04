@@ -335,6 +335,88 @@ describe("Web Console", () => {
     ).toBeInTheDocument();
   });
 
+  test("Sources 页面支持测试连接并展示结果反馈", async () => {
+    window.location.hash = "#/sources";
+    setAuthTokens({
+      accessToken: "access-token-test-source-connection",
+      refreshToken: "refresh-token-test-source-connection",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/sources") && method === "GET") {
+        return mockJsonResponse({
+          items: [
+            {
+              id: "source-connect-1",
+              name: "qa-ssh-node",
+              type: "ssh",
+              location: "10.0.0.56",
+              enabled: true,
+              createdAt: "2026-03-02T10:00:00.000Z",
+            },
+          ],
+          total: 1,
+        });
+      }
+
+      if (url.endsWith("/api/v1/sources/source-connect-1/health") && method === "GET") {
+        return mockJsonResponse({
+          sourceId: "source-connect-1",
+          accessMode: "hybrid",
+          lastSuccessAt: "2026-03-02T10:05:00.000Z",
+          lastFailureAt: null,
+          failureCount: 0,
+          avgLatencyMs: 100,
+          freshnessMinutes: 3,
+        });
+      }
+
+      if (url.includes("/api/v1/sources/source-connect-1/parse-failures") && method === "GET") {
+        return mockJsonResponse({
+          items: [],
+          total: 0,
+          filters: {
+            limit: 5,
+          },
+        });
+      }
+
+      if (url.endsWith("/api/v1/sources/test-connection") && method === "POST") {
+        const payload = JSON.parse(String(init?.body ?? "{}")) as { sourceId?: string };
+        expect(payload.sourceId).toBe("source-connect-1");
+        return mockJsonResponse({
+          sourceId: "source-connect-1",
+          success: true,
+          mode: "ssh",
+          latencyMs: 87,
+          detail: "ssh handshake ok",
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Sources 管理", level: 1 })).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "测试连接" }));
+
+    expect(await screen.findByText("成功 (87ms)：ssh handshake ok")).toBeInTheDocument();
+
+    const postCall = fetchSpy.mock.calls.find(
+      ([url, init]) =>
+        toUrl(url).endsWith("/api/v1/sources/test-connection") &&
+        (init as RequestInit | undefined)?.method === "POST"
+    );
+    expect(postCall).toBeTruthy();
+  });
+
   test("Analytics 页面会请求 usage daily/monthly/models/sessions 并展示环比与趋势图", async () => {
     setAuthTokens({
       accessToken: "access-token-test-analytics",
@@ -1132,6 +1214,140 @@ describe("Web Console", () => {
     expect(await screen.findByRole("heading", { name: "导出中心", level: 2 })).toBeInTheDocument();
   });
 
+  test("治理页支持告警级别与状态筛选", async () => {
+    window.location.hash = "#/governance";
+    setAuthTokens({
+      accessToken: "access-token-governance-filters",
+      refreshToken: "refresh-token-governance-filters",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const alerts = [
+      {
+        id: "alert-filter-warning-open",
+        tenantId: "default",
+        budgetId: "budget-filter-1",
+        scope: "tenant",
+        scopeRef: "default",
+        severity: "warning",
+        status: "open",
+        message: "warning budget approaching",
+        threshold: 0.8,
+        value: 0.82,
+        createdAt: "2026-03-01T09:00:00.000Z",
+        updatedAt: "2026-03-01T09:05:00.000Z",
+        metadata: {},
+      },
+      {
+        id: "alert-filter-critical-open",
+        tenantId: "default",
+        budgetId: "budget-filter-2",
+        scope: "tenant",
+        scopeRef: "default",
+        severity: "critical",
+        status: "open",
+        message: "critical unresolved incident",
+        threshold: 0.9,
+        value: 0.95,
+        createdAt: "2026-03-01T10:00:00.000Z",
+        updatedAt: "2026-03-01T10:02:00.000Z",
+        metadata: {},
+      },
+      {
+        id: "alert-filter-critical-resolved",
+        tenantId: "default",
+        budgetId: "budget-filter-3",
+        scope: "tenant",
+        scopeRef: "default",
+        severity: "critical",
+        status: "resolved",
+        message: "critical already resolved",
+        threshold: 0.9,
+        value: 0.93,
+        createdAt: "2026-03-01T11:00:00.000Z",
+        updatedAt: "2026-03-01T11:20:00.000Z",
+        metadata: {},
+      },
+    ];
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.includes("/api/v1/alerts") && method === "GET") {
+        const parsedUrl = new URL(url, "http://localhost");
+        const severity = parsedUrl.searchParams.get("severity");
+        const status = parsedUrl.searchParams.get("status");
+        const filteredItems = alerts.filter((item) => {
+          if (severity && item.severity !== severity) {
+            return false;
+          }
+          if (status && item.status !== status) {
+            return false;
+          }
+          return true;
+        });
+
+        return mockJsonResponse({
+          items: filteredItems,
+          total: filteredItems.length,
+          filters: {
+            limit: 50,
+            ...(severity ? { severity } : {}),
+            ...(status ? { status } : {}),
+          },
+        });
+      }
+      if (url.includes("/api/v1/usage/weekly-summary") && method === "GET") {
+        return mockJsonResponse({
+          metric: "tokens",
+          timezone: "UTC",
+          weeks: [],
+          summary: {
+            tokens: 0,
+            cost: 0,
+            sessions: 0,
+          },
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("warning budget approaching")).toBeInTheDocument();
+    expect(await screen.findByText("critical unresolved incident")).toBeInTheDocument();
+    expect(await screen.findByText("critical already resolved")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("级别"), { target: { value: "critical" } });
+
+    expect(await screen.findByText("critical unresolved incident")).toBeInTheDocument();
+    expect(await screen.findByText("critical already resolved")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("warning budget approaching")).not.toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText("状态"), { target: { value: "resolved" } });
+
+    expect(await screen.findByText("critical already resolved")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("critical unresolved incident")).not.toBeInTheDocument();
+    });
+
+    expect(
+      fetchSpy.mock.calls.some(([url]) => {
+        const parsedUrl = new URL(toUrl(url), "http://localhost");
+        return (
+          parsedUrl.pathname === "/api/v1/alerts" &&
+          parsedUrl.searchParams.get("severity") === "critical" &&
+          parsedUrl.searchParams.get("status") === "resolved"
+        );
+      })
+    ).toBe(true);
+  });
+
   test("治理页支持 ACK 告警状态", async () => {
     window.location.hash = "#/governance";
     setAuthTokens({
@@ -1224,6 +1440,89 @@ describe("Web Console", () => {
     const patchCall = fetchSpy.mock.calls.find(
       ([url, init]) =>
         toUrl(url).endsWith("/api/v1/alerts/alert-ui-1/status") &&
+        (init as RequestInit | undefined)?.method === "PATCH"
+    );
+    expect(patchCall).toBeTruthy();
+  });
+
+  test("治理页支持 Resolve 告警状态并展示完成反馈", async () => {
+    window.location.hash = "#/governance";
+    setAuthTokens({
+      accessToken: "access-token-governance-resolve",
+      refreshToken: "refresh-token-governance-resolve",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const alerts = [
+      {
+        id: "alert-ui-resolve",
+        tenantId: "default",
+        budgetId: "budget-ui-resolve",
+        scope: "tenant",
+        scopeRef: "default",
+        severity: "warning",
+        status: "open",
+        message: "resolve me",
+        threshold: 0.7,
+        value: 0.75,
+        createdAt: "2026-03-01T12:00:00.000Z",
+        updatedAt: "2026-03-01T12:10:00.000Z",
+        metadata: {},
+      },
+    ];
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.includes("/api/v1/alerts") && method === "GET") {
+        return mockJsonResponse({
+          items: alerts,
+          total: alerts.length,
+        });
+      }
+      if (url.includes("/api/v1/usage/weekly-summary") && method === "GET") {
+        return mockJsonResponse({
+          metric: "tokens",
+          timezone: "UTC",
+          weeks: [],
+          summary: {
+            tokens: 0,
+            cost: 0,
+            sessions: 0,
+          },
+        });
+      }
+
+      if (url.endsWith("/api/v1/alerts/alert-ui-resolve/status") && method === "PATCH") {
+        const payload = JSON.parse(String(init?.body ?? "{}")) as { status?: string };
+        expect(payload.status).toBe("resolved");
+        alerts[0] = {
+          ...alerts[0],
+          status: "resolved",
+          updatedAt: "2026-03-01T12:20:00.000Z",
+        };
+        return mockJsonResponse(alerts[0]);
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Resolve" }));
+
+    expect(await screen.findByText("告警 alert-ui-resolve 已更新为 resolved。")).toBeInTheDocument();
+    expect(await screen.findByText("已完成")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
+    });
+
+    const patchCall = fetchSpy.mock.calls.find(
+      ([url, init]) =>
+        toUrl(url).endsWith("/api/v1/alerts/alert-ui-resolve/status") &&
         (init as RequestInit | undefined)?.method === "PATCH"
     );
     expect(patchCall).toBeTruthy();

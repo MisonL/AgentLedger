@@ -219,6 +219,9 @@ func collectCommand(args []string) int {
 	output := fs.String("output", "", "输出 JSONL 文件（默认 stdout）")
 	maxEvents := fs.Int("max-events", 0, "最多输出事件数（<=0 表示不限制）")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
 

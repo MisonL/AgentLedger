@@ -47,9 +47,9 @@ func TestDefaultConnectorRegistrySelect(t *testing.T) {
 			"roo-cline",
 			"cline",
 		}, parseVSCodeLines),
+		newFeatureConnectorWithParser(connectorNameTRAECLI, []string{"trae-cli", "trae cli"}, parseTRAECLILines),
 		newFeatureConnectorWithParser(connectorNameTRAEIDE, []string{"trae-ide", "trae ide", ".trae"}, parseTRAEIDELines),
 		newFeatureConnectorWithParser(connectorNameKimiCLI, []string{"kimi", "kimi-cli"}, parseKimiCLILines),
-		newFeatureConnectorWithParser(connectorNameTRAECLI, []string{"trae-cli", "trae cli"}, parseTRAECLILines),
 		newFeatureConnectorWithParser(connectorNameCodeBuddyCLI, []string{"codebuddy-cli", "codebuddy cli"}, parseCodeBuddyCLILines),
 		newFeatureConnectorWithParser(connectorNameWindsurf, []string{"windsurf"}, parseWindsurfLines),
 		newFeatureConnectorWithParser(connectorNameLingma, []string{"lingma"}, parseLingmaLines),
@@ -127,6 +127,12 @@ func TestDefaultConnectorRegistrySelect(t *testing.T) {
 			name:       "trae_cli_by_source_name",
 			source:     sourceRecord{Name: "TRAE CLI Chat"},
 			sourcePath: "/var/log/app.log",
+			want:       connectorNameTRAECLI,
+		},
+		{
+			name:       "trae_cli_should_win_over_trae_ide_on_hidden_dir_path",
+			source:     sourceRecord{Name: "ssh-source"},
+			sourcePath: "/Users/dev/.trae-cli/sessions/session.log",
 			want:       connectorNameTRAECLI,
 		},
 		{

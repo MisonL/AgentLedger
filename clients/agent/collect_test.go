@@ -266,6 +266,25 @@ func TestPrintUsage_IncludesCollect(t *testing.T) {
 	}
 }
 
+func TestCollectCommand_HelpReturnsSuccess(t *testing.T) {
+	testCases := []struct {
+		name string
+		args []string
+	}{
+		{name: "long help", args: []string{"--help"}},
+		{name: "short help", args: []string{"-h"}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			exitCode := collectCommand(tc.args)
+			if exitCode != 0 {
+				t.Fatalf("collectCommand(%v)=%d, want=0", tc.args, exitCode)
+			}
+		})
+	}
+}
+
 func splitNonEmptyLines(raw string) []string {
 	scanner := bufio.NewScanner(strings.NewReader(raw))
 	lines := make([]string, 0)
