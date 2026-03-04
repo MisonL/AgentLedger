@@ -157,6 +157,21 @@ export type BudgetGovernanceState = "active" | "frozen" | "pending_release";
 export type AlertStatus = "open" | "acknowledged" | "resolved";
 export type AlertMutableStatus = "acknowledged" | "resolved";
 export type AlertSeverity = "warning" | "critical";
+export type AlertOrchestrationEventType = "alert" | "weekly";
+export type AlertOrchestrationChannel =
+  | "webhook"
+  | "wecom"
+  | "dingtalk"
+  | "feishu"
+  | "email"
+  | "email_webhook";
+export type DataResidencyMode = "single_region" | "active_active";
+export type ReplicationJobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+export type RuleLifecycleStatus = "draft" | "published" | "deprecated";
+export type RuleApprovalDecision = "approved" | "rejected";
+export type McpRiskLevel = "low" | "medium" | "high";
+export type McpToolDecision = "allow" | "deny" | "require_approval";
+export type McpApprovalStatus = "pending" | "approved" | "rejected";
 export type AuditLevel = "info" | "warning" | "error" | "critical";
 
 export interface BudgetThresholds {
@@ -204,6 +219,246 @@ export interface Alert {
   updatedAt: string;
 }
 
+export interface AlertOrchestrationRule {
+  id: string;
+  tenantId: string;
+  name: string;
+  enabled: boolean;
+  eventType: AlertOrchestrationEventType;
+  severity?: AlertSeverity;
+  sourceId?: string;
+  dedupeWindowSeconds: number;
+  suppressionWindowSeconds: number;
+  mergeWindowSeconds: number;
+  slaMinutes?: number;
+  channels: AlertOrchestrationChannel[];
+  updatedAt: string;
+}
+
+export interface AlertOrchestrationRuleUpsertInput {
+  id: string;
+  tenantId: string;
+  name: string;
+  enabled: boolean;
+  eventType: AlertOrchestrationEventType;
+  severity?: AlertSeverity;
+  sourceId?: string;
+  dedupeWindowSeconds: number;
+  suppressionWindowSeconds: number;
+  mergeWindowSeconds: number;
+  slaMinutes?: number;
+  channels: AlertOrchestrationChannel[];
+  updatedAt: string;
+}
+
+export interface RegionDescriptor {
+  id: string;
+  name: string;
+  active: boolean;
+  description?: string;
+}
+
+export interface TenantResidencyPolicy {
+  tenantId: string;
+  mode: DataResidencyMode;
+  primaryRegion: string;
+  replicaRegions: string[];
+  allowCrossRegionTransfer: boolean;
+  requireTransferApproval: boolean;
+  updatedAt: string;
+}
+
+export interface TenantResidencyPolicyUpsertInput {
+  tenantId: string;
+  mode: DataResidencyMode;
+  primaryRegion: string;
+  replicaRegions: string[];
+  allowCrossRegionTransfer: boolean;
+  requireTransferApproval: boolean;
+  updatedAt: string;
+}
+
+export interface ReplicationJob {
+  id: string;
+  tenantId: string;
+  sourceRegion: string;
+  targetRegion: string;
+  status: ReplicationJobStatus;
+  reason?: string;
+  createdByUserId?: string;
+  approvedByUserId?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+export interface ReplicationJobCreateInput {
+  tenantId: string;
+  sourceRegion: string;
+  targetRegion: string;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ReplicationJobListInput {
+  status?: ReplicationJobStatus;
+  sourceRegion?: string;
+  targetRegion?: string;
+  limit?: number;
+}
+
+export interface ReplicationJobCancelInput {
+  reason?: string;
+}
+
+export interface RuleScopeBinding {
+  organizations?: string[];
+  projects?: string[];
+  clients?: string[];
+}
+
+export interface RuleAsset {
+  id: string;
+  tenantId: string;
+  name: string;
+  description?: string;
+  status: RuleLifecycleStatus;
+  latestVersion: number;
+  publishedVersion?: number;
+  scopeBinding: RuleScopeBinding;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RuleAssetCreateInput {
+  name: string;
+  description?: string;
+  scopeBinding?: RuleScopeBinding;
+}
+
+export interface RuleAssetListInput {
+  status?: RuleLifecycleStatus;
+  keyword?: string;
+  limit?: number;
+}
+
+export interface RuleAssetVersion {
+  id: string;
+  tenantId: string;
+  assetId: string;
+  version: number;
+  content: string;
+  changelog?: string;
+  createdByUserId?: string;
+  createdAt: string;
+}
+
+export interface RuleAssetVersionCreateInput {
+  content: string;
+  changelog?: string;
+}
+
+export interface RulePublishInput {
+  version: number;
+}
+
+export interface RuleRollbackInput {
+  version: number;
+  reason?: string;
+}
+
+export interface RuleApproval {
+  id: string;
+  tenantId: string;
+  assetId: string;
+  version: number;
+  approverUserId: string;
+  approverEmail?: string;
+  decision: RuleApprovalDecision;
+  reason?: string;
+  createdAt: string;
+}
+
+export interface RuleApprovalCreateInput {
+  version: number;
+  decision: RuleApprovalDecision;
+  reason?: string;
+}
+
+export interface RuleApprovalListInput {
+  version?: number;
+  decision?: RuleApprovalDecision;
+  limit?: number;
+}
+
+export interface McpToolPolicy {
+  tenantId: string;
+  toolId: string;
+  riskLevel: McpRiskLevel;
+  decision: McpToolDecision;
+  reason?: string;
+  updatedAt: string;
+}
+
+export interface McpToolPolicyUpsertInput {
+  toolId: string;
+  riskLevel: McpRiskLevel;
+  decision: McpToolDecision;
+  reason?: string;
+}
+
+export interface McpToolPolicyListInput {
+  riskLevel?: McpRiskLevel;
+  decision?: McpToolDecision;
+  keyword?: string;
+  limit?: number;
+}
+
+export interface McpApprovalRequest {
+  id: string;
+  tenantId: string;
+  toolId: string;
+  status: McpApprovalStatus;
+  requestedByUserId: string;
+  requestedByEmail?: string;
+  reason?: string;
+  reviewedByUserId?: string;
+  reviewedByEmail?: string;
+  reviewReason?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface McpApprovalCreateInput {
+  toolId: string;
+  reason?: string;
+}
+
+export interface McpApprovalReviewInput {
+  reason?: string;
+}
+
+export interface McpInvocationAudit {
+  id: string;
+  tenantId: string;
+  toolId: string;
+  decision: McpToolDecision;
+  result: "allowed" | "blocked" | "approved";
+  approvalRequestId?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface McpInvocationListInput {
+  toolId?: string;
+  decision?: McpToolDecision;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
 export interface AuditItem {
   id: string;
   eventId: string;
@@ -212,6 +467,232 @@ export interface AuditItem {
   detail: string;
   metadata: Record<string, unknown>;
   createdAt: string;
+}
+
+export type ApiKeyScope = "read" | "write" | "admin";
+export type ApiKeyStatus = "active" | "revoked" | "expired";
+
+export interface ApiKeyItem {
+  id: string;
+  tenantId: string;
+  name: string;
+  scope: ApiKeyScope;
+  status: ApiKeyStatus;
+  keyPrefix: string;
+  createdByUserId?: string;
+  lastUsedAt?: string;
+  expiresAt?: string;
+  revokedAt?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiKeySecretView {
+  keyId: string;
+  keyPrefix: string;
+  secret: string;
+  createdAt: string;
+}
+
+export interface ApiKeyListInput {
+  tenantId: string;
+  scope?: ApiKeyScope;
+  status?: ApiKeyStatus;
+  keyword?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface ApiKeyCreateInput {
+  tenantId: string;
+  name: string;
+  scope: ApiKeyScope;
+  expiresAt?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ApiKeyRevokeInput {
+  tenantId: string;
+  keyId: string;
+  reason?: string;
+}
+
+export type WebhookEventType =
+  | "api_key.created"
+  | "api_key.revoked"
+  | "quality.event.created"
+  | "quality.scorecard.updated"
+  | "replay.job.started"
+  | "replay.job.completed"
+  | "replay.job.failed";
+
+export type WebhookEndpointStatus = "active" | "paused" | "disabled";
+
+export interface WebhookEndpoint {
+  id: string;
+  tenantId: string;
+  name: string;
+  url: string;
+  events: WebhookEventType[];
+  status: WebhookEndpointStatus;
+  secretHint?: string;
+  failureCount: number;
+  lastSuccessAt?: string;
+  lastFailureAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WebhookEndpointCreateInput {
+  tenantId: string;
+  name: string;
+  url: string;
+  events: WebhookEventType[];
+  status?: WebhookEndpointStatus;
+  secret?: string;
+}
+
+export interface WebhookEndpointUpdateInput {
+  endpointId: string;
+  name?: string;
+  url?: string;
+  events?: WebhookEventType[];
+  status?: WebhookEndpointStatus;
+  secret?: string;
+}
+
+export type QualityMetric =
+  | "accuracy"
+  | "consistency"
+  | "groundedness"
+  | "safety"
+  | "latency";
+
+export interface QualityEvent {
+  id: string;
+  tenantId: string;
+  sessionId?: string;
+  replayJobId?: string;
+  metric: QualityMetric;
+  score: number;
+  sampleCount: number;
+  occurredAt: string;
+  notes?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface QualityEventCreateInput {
+  tenantId: string;
+  sessionId?: string;
+  replayJobId?: string;
+  metric: QualityMetric;
+  score: number;
+  sampleCount: number;
+  occurredAt: string;
+  notes?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface QualityDailyMetric {
+  date: string;
+  metric: QualityMetric;
+  avgScore: number;
+  p50Score: number;
+  p90Score: number;
+  totalEvents: number;
+}
+
+export interface QualityScorecard {
+  id: string;
+  tenantId: string;
+  metric: QualityMetric;
+  targetScore: number;
+  warningScore: number;
+  criticalScore: number;
+  weight: number;
+  enabled: boolean;
+  updatedByUserId?: string;
+  updatedAt: string;
+}
+
+export interface QualityScorecardUpsertInput {
+  tenantId: string;
+  metric: QualityMetric;
+  targetScore: number;
+  warningScore: number;
+  criticalScore: number;
+  weight?: number;
+  enabled: boolean;
+  updatedAt: string;
+}
+
+export type ReplayJobStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+
+export interface ReplayBaseline {
+  id: string;
+  tenantId: string;
+  name: string;
+  datasetId: string;
+  model: string;
+  promptVersion?: string;
+  sampleCount: number;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReplayBaselineCreateInput {
+  tenantId: string;
+  name: string;
+  datasetId: string;
+  model: string;
+  promptVersion?: string;
+  sampleCount?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ReplayJobCreateInput {
+  tenantId: string;
+  baselineId: string;
+  candidateLabel: string;
+  from?: string;
+  to?: string;
+  sampleLimit?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ReplayJobDiffItem {
+  caseId: string;
+  metric: QualityMetric;
+  baselineScore: number;
+  candidateScore: number;
+  delta: number;
+  verdict: "improved" | "regressed" | "unchanged";
+  detail?: string;
+}
+
+export interface ReplayJob {
+  id: string;
+  tenantId: string;
+  baselineId: string;
+  candidateLabel: string;
+  status: ReplayJobStatus;
+  totalCases: number;
+  processedCases: number;
+  improvedCases: number;
+  regressedCases: number;
+  unchangedCases: number;
+  diffs: ReplayJobDiffItem[];
+  summary: Record<string, unknown>;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
 }
 
 export interface CreateSourceInput {
@@ -517,6 +998,13 @@ export interface AlertListInput {
   cursor?: string;
 }
 
+export interface AlertOrchestrationRuleListInput {
+  eventType?: AlertOrchestrationEventType;
+  enabled?: boolean;
+  severity?: AlertSeverity;
+  sourceId?: string;
+}
+
 export interface AlertStatusUpdateInput {
   status: AlertMutableStatus;
 }
@@ -526,6 +1014,42 @@ export interface AlertListResponse {
   total: number;
   filters: AlertListInput;
   nextCursor: string | null;
+}
+
+export interface AlertOrchestrationRuleListResponse {
+  items: AlertOrchestrationRule[];
+  total: number;
+  filters: AlertOrchestrationRuleListInput;
+}
+
+export interface ReplicationJobListResponse {
+  items: ReplicationJob[];
+  total: number;
+  filters: ReplicationJobListInput;
+}
+
+export interface RuleAssetListResponse {
+  items: RuleAsset[];
+  total: number;
+  filters: RuleAssetListInput;
+}
+
+export interface RuleApprovalListResponse {
+  items: RuleApproval[];
+  total: number;
+  filters: RuleApprovalListInput;
+}
+
+export interface McpToolPolicyListResponse {
+  items: McpToolPolicy[];
+  total: number;
+  filters: McpToolPolicyListInput;
+}
+
+export interface McpInvocationListResponse {
+  items: McpInvocationAudit[];
+  total: number;
+  filters: McpInvocationListInput;
 }
 
 export interface AuditListInput {

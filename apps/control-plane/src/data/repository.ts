@@ -1,5 +1,10 @@
 import type {
   Alert,
+  AlertOrchestrationChannel,
+  AlertOrchestrationEventType,
+  AlertOrchestrationRule,
+  AlertOrchestrationRuleListInput,
+  AlertOrchestrationRuleUpsertInput,
   AlertListInput,
   AlertMutableStatus,
   AlertSeverity,
@@ -16,10 +21,41 @@ import type {
   BudgetThresholds,
   BudgetUpsertInput,
   CreateSourceInput,
+  DataResidencyMode,
   HeatmapCell,
   IntegrationAlertCallbackAction,
+  McpApprovalCreateInput,
+  McpApprovalRequest,
+  McpApprovalReviewInput,
+  McpApprovalStatus,
+  McpInvocationAudit,
+  McpInvocationListInput,
+  McpRiskLevel,
+  McpToolDecision,
+  McpToolPolicy,
+  McpToolPolicyListInput,
+  McpToolPolicyUpsertInput,
   PricingCatalog,
   PricingCatalogEntry,
+  RegionDescriptor,
+  ReplicationJob,
+  ReplicationJobCancelInput,
+  ReplicationJobCreateInput,
+  ReplicationJobListInput,
+  ReplicationJobStatus,
+  RuleApproval,
+  RuleApprovalCreateInput,
+  RuleApprovalDecision,
+  RuleApprovalListInput,
+  RuleAsset,
+  RuleAssetCreateInput,
+  RuleAssetListInput,
+  RuleAssetVersion,
+  RuleAssetVersionCreateInput,
+  RuleLifecycleStatus,
+  RuleScopeBinding,
+  RulePublishInput,
+  RuleRollbackInput,
   Session,
   SessionDetail,
   SessionEvent,
@@ -33,6 +69,8 @@ import type {
   SourceType,
   SyncJob,
   SyncJobStatus,
+  TenantResidencyPolicy,
+  TenantResidencyPolicyUpsertInput,
   UsageDailyItem,
   UsageCostMode,
   UsageModelItem,
@@ -42,18 +80,65 @@ import type {
   TenantRole,
 } from "../contracts";
 
+export type ReplayJobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+
 const DEFAULT_SESSION_LIMIT = 50;
 const DEFAULT_ALERT_LIMIT = 50;
 const DEFAULT_AUDIT_LIMIT = 50;
 const DEFAULT_SYNC_JOB_LIMIT = 50;
 const DEFAULT_PARSE_FAILURE_LIMIT = 50;
 const MAX_PARSE_FAILURE_LIMIT = 500;
+const DEFAULT_WEBHOOK_ENDPOINT_LIMIT = 200;
+const DEFAULT_QUALITY_DAILY_METRIC_LIMIT = 60;
+const DEFAULT_QUALITY_SCORECARD_LIMIT = 100;
+const DEFAULT_REPLAY_BASELINE_LIMIT = 100;
+const DEFAULT_REPLAY_JOB_LIMIT = 100;
 const SOURCE_TYPES: ReadonlyArray<SourceType> = ["local", "ssh", "sync-cache"];
 const SOURCE_ACCESS_MODES: ReadonlyArray<SourceAccessMode> = ["realtime", "sync", "hybrid"];
 const ALERT_STATUS_SET: ReadonlyArray<AlertStatus> = ["open", "acknowledged", "resolved"];
 const ALERT_SEVERITY_SET: ReadonlyArray<AlertSeverity> = [
   "warning",
   "critical",
+];
+const ALERT_ORCHESTRATION_EVENT_TYPES: ReadonlyArray<AlertOrchestrationEventType> = [
+  "alert",
+  "weekly",
+];
+const ALERT_ORCHESTRATION_CHANNELS: ReadonlyArray<AlertOrchestrationChannel> = [
+  "webhook",
+  "wecom",
+  "dingtalk",
+  "feishu",
+  "email",
+  "email_webhook",
+];
+const DATA_RESIDENCY_MODES: ReadonlyArray<DataResidencyMode> = ["single_region", "active_active"];
+const REPLICATION_JOB_STATUSES: ReadonlyArray<ReplicationJobStatus> = [
+  "pending",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+];
+const RULE_LIFECYCLE_STATUSES: ReadonlyArray<RuleLifecycleStatus> = [
+  "draft",
+  "published",
+  "deprecated",
+];
+const RULE_APPROVAL_DECISIONS: ReadonlyArray<RuleApprovalDecision> = ["approved", "rejected"];
+const MCP_RISK_LEVELS: ReadonlyArray<McpRiskLevel> = ["low", "medium", "high"];
+const MCP_TOOL_DECISIONS: ReadonlyArray<McpToolDecision> = ["allow", "deny", "require_approval"];
+const MCP_APPROVAL_STATUSES: ReadonlyArray<McpApprovalStatus> = [
+  "pending",
+  "approved",
+  "rejected",
+];
+const REPLAY_JOB_STATUS_SET: ReadonlyArray<ReplayJobStatus> = [
+  "pending",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
 ];
 const AUDIT_LEVEL_SET: ReadonlyArray<AuditLevel> = ["info", "warning", "error", "critical"];
 const TENANT_ROLE_SET: ReadonlyArray<TenantRole> = [
@@ -90,6 +175,26 @@ const DEFAULT_TENANT_ID = "default";
 const DEFAULT_TENANT_NAME = "Default Tenant";
 const DEFAULT_HEATMAP_TIMEZONE = "UTC";
 const DEFAULT_CALLBACK_CLAIM_STALE_AFTER_MS = 2 * 60 * 1000;
+const DEFAULT_REGIONS: ReadonlyArray<RegionDescriptor> = [
+  {
+    id: "cn-hangzhou",
+    name: "华东 1（杭州）",
+    active: true,
+    description: "默认主区域",
+  },
+  {
+    id: "cn-shanghai",
+    name: "华东 2（上海）",
+    active: true,
+    description: "推荐副本区域",
+  },
+  {
+    id: "ap-southeast-1",
+    name: "新加坡",
+    active: true,
+    description: "海外合规区域",
+  },
+];
 
 type DbRow = Record<string, unknown>;
 
@@ -168,6 +273,41 @@ export interface AlertListResult {
   items: Alert[];
   total: number;
   nextCursor: string | null;
+}
+
+export interface AlertOrchestrationRuleListResult {
+  items: AlertOrchestrationRule[];
+  total: number;
+}
+
+export interface ReplicationJobListResult {
+  items: ReplicationJob[];
+  total: number;
+}
+
+export interface RuleAssetListResult {
+  items: RuleAsset[];
+  total: number;
+}
+
+export interface RuleApprovalListResult {
+  items: RuleApproval[];
+  total: number;
+}
+
+export interface McpToolPolicyListResult {
+  items: McpToolPolicy[];
+  total: number;
+}
+
+export interface McpApprovalRequestListResult {
+  items: McpApprovalRequest[];
+  total: number;
+}
+
+export interface McpInvocationListResult {
+  items: McpInvocationAudit[];
+  total: number;
 }
 
 export interface AuditListQueryInput extends AuditListInput {
@@ -259,6 +399,17 @@ interface MemorySourceParseFailureRecord {
   failure: SourceParseFailure;
 }
 
+interface MemoryApiKeyHashRecord {
+  tenantId: string;
+  apiKeyId: string;
+}
+
+interface MemoryReplayJobDiffRecord {
+  tenantId: string;
+  replayJobId: string;
+  diff: Record<string, unknown>;
+}
+
 interface NormalizedSessionSearchInput {
   tenantId?: string;
   sourceId?: string;
@@ -292,6 +443,47 @@ interface NormalizedAlertListInput {
   cursor?: string;
 }
 
+interface NormalizedAlertOrchestrationRuleListInput {
+  eventType?: AlertOrchestrationEventType;
+  enabled?: boolean;
+  severity?: AlertSeverity;
+  sourceId?: string;
+}
+
+interface NormalizedReplicationJobListInput {
+  status?: ReplicationJobStatus;
+  sourceRegion?: string;
+  targetRegion?: string;
+  limit: number;
+}
+
+interface NormalizedRuleAssetListInput {
+  status?: RuleLifecycleStatus;
+  keyword?: string;
+  limit: number;
+}
+
+interface NormalizedRuleApprovalListInput {
+  version?: number;
+  decision?: RuleApprovalDecision;
+  limit: number;
+}
+
+interface NormalizedMcpToolPolicyListInput {
+  riskLevel?: McpRiskLevel;
+  decision?: McpToolDecision;
+  keyword?: string;
+  limit: number;
+}
+
+interface NormalizedMcpInvocationListInput {
+  toolId?: string;
+  decision?: McpToolDecision;
+  from?: string;
+  to?: string;
+  limit: number;
+}
+
 interface NormalizedAuditListInput {
   tenantId?: string;
   eventId?: string;
@@ -302,6 +494,29 @@ interface NormalizedAuditListInput {
   to?: string;
   limit: number;
   cursor?: string;
+}
+
+interface NormalizedQualityDailyMetricsInput {
+  from?: string;
+  to?: string;
+  scorecardKey?: string;
+  limit: number;
+}
+
+interface NormalizedQualityScorecardListInput {
+  scorecardKey?: string;
+  limit: number;
+}
+
+interface NormalizedReplayBaselineListInput {
+  keyword?: string;
+  limit: number;
+}
+
+interface NormalizedReplayJobListInput {
+  baselineId?: string;
+  status?: ReplayJobStatus;
+  limit: number;
 }
 
 interface NormalizedUsageHeatmapInput {
@@ -372,6 +587,20 @@ export interface RejectBudgetReleaseRequestOptions {
 export interface ListBudgetReleaseRequestsInput {
   status?: BudgetReleaseRequestStatus;
   limit?: number;
+}
+
+export interface ListMcpApprovalRequestsInput {
+  status?: McpApprovalStatus;
+  limit?: number;
+}
+
+export interface AppendMcpInvocationInput {
+  toolId: string;
+  decision: McpToolDecision;
+  result: "allowed" | "blocked" | "approved";
+  approvalRequestId?: string;
+  metadata?: Record<string, unknown>;
+  createdAt?: string;
 }
 
 export interface LocalUser {
@@ -515,6 +744,177 @@ export interface CreateAuthSessionInput {
 export interface RotateAuthSessionInput {
   sessionToken: string;
   expiresAt: string;
+}
+
+export interface ApiKey {
+  id: string;
+  tenantId: string;
+  name: string;
+  keyHash: string;
+  scopes: string[];
+  lastUsedAt?: string;
+  revokedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateApiKeyInput {
+  name: string;
+  keyHash: string;
+  scopes?: string[];
+  createdAt?: string;
+}
+
+export interface WebhookEndpoint {
+  id: string;
+  tenantId: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  eventTypes: string[];
+  secretHash?: string;
+  headers: Record<string, string>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateWebhookEndpointInput {
+  name: string;
+  url: string;
+  enabled?: boolean;
+  eventTypes?: string[];
+  secretHash?: string;
+  headers?: Record<string, string>;
+}
+
+export interface UpdateWebhookEndpointInput {
+  name?: string;
+  url?: string;
+  enabled?: boolean;
+  eventTypes?: string[];
+  secretHash?: string | null;
+  headers?: Record<string, string>;
+}
+
+export interface QualityEvent {
+  id: string;
+  tenantId: string;
+  scorecardKey: string;
+  metricKey?: string;
+  score: number;
+  passed: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface CreateQualityEventInput {
+  scorecardKey: string;
+  metricKey?: string;
+  score: number;
+  passed?: boolean;
+  metadata?: Record<string, unknown>;
+  createdAt?: string;
+}
+
+export interface ListQualityDailyMetricsInput {
+  from?: string;
+  to?: string;
+  scorecardKey?: string;
+  limit?: number;
+}
+
+export interface QualityDailyMetric {
+  date: string;
+  total: number;
+  passed: number;
+  failed: number;
+  averageScore: number;
+}
+
+export interface QualityScorecard {
+  tenantId: string;
+  scorecardKey: string;
+  title: string;
+  description?: string;
+  score: number;
+  dimensions: Record<string, number>;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListQualityScorecardsInput {
+  scorecardKey?: string;
+  limit?: number;
+}
+
+export interface QualityScorecardUpsertInput {
+  scorecardKey: string;
+  title: string;
+  description?: string;
+  score: number;
+  dimensions?: Record<string, number>;
+  metadata?: Record<string, unknown>;
+  updatedAt?: string;
+}
+
+export interface ReplayBaseline {
+  id: string;
+  tenantId: string;
+  name: string;
+  description?: string;
+  datasetRef?: string;
+  scenarioCount: number;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateReplayBaselineInput {
+  name: string;
+  description?: string;
+  datasetRef?: string;
+  scenarioCount?: number;
+  metadata?: Record<string, unknown>;
+  createdAt?: string;
+}
+
+export interface ListReplayBaselinesInput {
+  keyword?: string;
+  limit?: number;
+}
+
+export interface ReplayJob {
+  id: string;
+  tenantId: string;
+  baselineId: string;
+  status: ReplayJobStatus;
+  parameters: Record<string, unknown>;
+  summary: Record<string, unknown>;
+  diff: Record<string, unknown>;
+  error?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateReplayJobInput {
+  baselineId: string;
+  status?: ReplayJobStatus;
+  parameters?: Record<string, unknown>;
+  summary?: Record<string, unknown>;
+  diff?: Record<string, unknown>;
+  error?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  createdAt?: string;
+}
+
+export interface ListReplayJobsInput {
+  baselineId?: string;
+  status?: ReplayJobStatus;
+  limit?: number;
 }
 
 function toIsoString(value: unknown): string | null {
@@ -1230,11 +1630,175 @@ function toAlertSeverity(value: unknown): AlertSeverity {
   return "warning";
 }
 
+function toAlertOrchestrationEventType(value: unknown): AlertOrchestrationEventType {
+  if (
+    typeof value === "string" &&
+    ALERT_ORCHESTRATION_EVENT_TYPES.includes(value as AlertOrchestrationEventType)
+  ) {
+    return value as AlertOrchestrationEventType;
+  }
+  return "alert";
+}
+
+function toAlertOrchestrationChannel(value: unknown): AlertOrchestrationChannel | null {
+  if (
+    typeof value === "string" &&
+    ALERT_ORCHESTRATION_CHANNELS.includes(value as AlertOrchestrationChannel)
+  ) {
+    return value as AlertOrchestrationChannel;
+  }
+  return null;
+}
+
+function toDataResidencyMode(value: unknown): DataResidencyMode {
+  if (typeof value === "string" && DATA_RESIDENCY_MODES.includes(value as DataResidencyMode)) {
+    return value as DataResidencyMode;
+  }
+  return "single_region";
+}
+
+function toReplicationJobStatus(value: unknown): ReplicationJobStatus {
+  if (
+    typeof value === "string" &&
+    REPLICATION_JOB_STATUSES.includes(value as ReplicationJobStatus)
+  ) {
+    return value as ReplicationJobStatus;
+  }
+  return "pending";
+}
+
+function toRuleLifecycleStatus(value: unknown): RuleLifecycleStatus {
+  if (
+    typeof value === "string" &&
+    RULE_LIFECYCLE_STATUSES.includes(value as RuleLifecycleStatus)
+  ) {
+    return value as RuleLifecycleStatus;
+  }
+  return "draft";
+}
+
+function toRuleApprovalDecision(value: unknown): RuleApprovalDecision {
+  if (
+    typeof value === "string" &&
+    RULE_APPROVAL_DECISIONS.includes(value as RuleApprovalDecision)
+  ) {
+    return value as RuleApprovalDecision;
+  }
+  return "approved";
+}
+
+function toMcpRiskLevel(value: unknown): McpRiskLevel {
+  if (typeof value === "string" && MCP_RISK_LEVELS.includes(value as McpRiskLevel)) {
+    return value as McpRiskLevel;
+  }
+  return "medium";
+}
+
+function toMcpToolDecision(value: unknown): McpToolDecision {
+  if (typeof value === "string" && MCP_TOOL_DECISIONS.includes(value as McpToolDecision)) {
+    return value as McpToolDecision;
+  }
+  return "require_approval";
+}
+
+function toMcpApprovalStatus(value: unknown): McpApprovalStatus {
+  if (
+    typeof value === "string" &&
+    MCP_APPROVAL_STATUSES.includes(value as McpApprovalStatus)
+  ) {
+    return value as McpApprovalStatus;
+  }
+  return "pending";
+}
+
+function toReplayJobStatus(value: unknown): ReplayJobStatus {
+  if (
+    typeof value === "string" &&
+    REPLAY_JOB_STATUS_SET.includes(value as ReplayJobStatus)
+  ) {
+    return value as ReplayJobStatus;
+  }
+  return "pending";
+}
+
 function toAuditLevel(value: unknown): AuditLevel {
   if (typeof value === "string" && AUDIT_LEVEL_SET.includes(value as AuditLevel)) {
     return value as AuditLevel;
   }
   return "info";
+}
+
+function normalizeDistinctStringArray(
+  values: unknown,
+  options: {
+    lowerCase?: boolean;
+  } = {}
+): string[] {
+  const normalized: string[] = [];
+  const dedupe = new Set<string>();
+  const lowerCase = options.lowerCase === true;
+  for (const item of Array.isArray(values) ? values : []) {
+    const candidate = firstNonEmptyString(item);
+    if (!candidate) {
+      continue;
+    }
+    const value = lowerCase ? candidate.toLowerCase() : candidate;
+    if (dedupe.has(value)) {
+      continue;
+    }
+    dedupe.add(value);
+    normalized.push(value);
+  }
+  return normalized;
+}
+
+function normalizeStringRecord(value: unknown): Record<string, string> {
+  const row = toDbRow(value);
+  if (!row) {
+    return {};
+  }
+
+  const normalized: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(row)) {
+    const key = firstNonEmptyString(rawKey);
+    if (!key) {
+      continue;
+    }
+    const mappedValue = firstNonEmptyString(rawValue);
+    if (!mappedValue) {
+      continue;
+    }
+    normalized[key] = mappedValue;
+  }
+  return normalized;
+}
+
+function normalizeNumericRecord(value: unknown): Record<string, number> {
+  const row = toDbRow(value);
+  if (!row) {
+    return {};
+  }
+  const normalized: Record<string, number> = {};
+  for (const [rawKey, rawValue] of Object.entries(row)) {
+    const key = firstNonEmptyString(rawKey);
+    if (!key) {
+      continue;
+    }
+    const mappedValue = toNumber(rawValue, Number.NaN);
+    if (!Number.isFinite(mappedValue)) {
+      continue;
+    }
+    normalized[key] = Number(mappedValue.toFixed(6));
+  }
+  return normalized;
+}
+
+function normalizeQualityScore(value: unknown): number {
+  const mapped = toNumber(value, 0);
+  if (!Number.isFinite(mapped)) {
+    return 0;
+  }
+  return Number(Math.max(0, mapped).toFixed(6));
 }
 
 function toTenantRole(value: unknown): TenantRole {
@@ -1409,6 +1973,280 @@ function mapAlertRow(row: DbRow): Alert {
     severity: toAlertSeverity(row.severity),
     triggeredAt,
     updatedAt: toIsoString(row.updated_at ?? row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapAlertOrchestrationRuleRow(row: DbRow): AlertOrchestrationRule {
+  const channels: AlertOrchestrationChannel[] = [];
+  const channelSet = new Set<AlertOrchestrationChannel>();
+  for (const channel of toJsonArray(row.channels)) {
+    const normalized = firstNonEmptyString(channel);
+    if (!normalized) {
+      continue;
+    }
+    const mapped = toAlertOrchestrationChannel(normalized.toLowerCase());
+    if (!mapped) {
+      continue;
+    }
+    if (channelSet.has(mapped)) {
+      continue;
+    }
+    channelSet.add(mapped);
+    channels.push(mapped);
+  }
+
+  const sourceId = firstNonEmptyString(row.source_id);
+  const severityRaw = firstNonEmptyString(row.severity);
+  const severity = severityRaw ? toAlertSeverity(severityRaw) : undefined;
+  const slaMinutes = toOptionalNonNegativeInteger(row.sla_minutes);
+
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    name: firstNonEmptyString(row.name) ?? "",
+    enabled: toBoolean(row.enabled, true),
+    eventType: toAlertOrchestrationEventType(row.event_type),
+    severity,
+    sourceId: sourceId ?? undefined,
+    dedupeWindowSeconds: toOptionalNonNegativeInteger(row.dedupe_window_seconds) ?? 0,
+    suppressionWindowSeconds: toOptionalNonNegativeInteger(row.suppression_window_seconds) ?? 0,
+    mergeWindowSeconds: toOptionalNonNegativeInteger(row.merge_window_seconds) ?? 0,
+    slaMinutes,
+    channels,
+    updatedAt: toIsoString(row.updated_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapRuleScopeBinding(value: unknown): RuleScopeBinding {
+  const row = toDbRow(value) ?? {};
+  const readList = (field: string): string[] | undefined => {
+    const result: string[] = [];
+    for (const item of toJsonArray(row[field])) {
+      const normalized = firstNonEmptyString(item);
+      if (!normalized) {
+        continue;
+      }
+      if (!result.includes(normalized)) {
+        result.push(normalized);
+      }
+    }
+    return result.length > 0 ? result : undefined;
+  };
+
+  return {
+    organizations: readList("organizations"),
+    projects: readList("projects"),
+    clients: readList("clients"),
+  };
+}
+
+function mapTenantResidencyPolicyRow(row: DbRow): TenantResidencyPolicy {
+  const replicaRegions = toJsonArray(row.replica_regions).flatMap((value) => {
+    const normalized = firstNonEmptyString(value);
+    return normalized ? [normalized] : [];
+  });
+
+  return {
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    mode: toDataResidencyMode(row.mode),
+    primaryRegion: firstNonEmptyString(row.primary_region) ?? "cn-hangzhou",
+    replicaRegions,
+    allowCrossRegionTransfer: toBoolean(row.allow_cross_region_transfer, false),
+    requireTransferApproval: toBoolean(row.require_transfer_approval, false),
+    updatedAt: toIsoString(row.updated_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapReplicationJobRow(row: DbRow): ReplicationJob {
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    sourceRegion: firstNonEmptyString(row.source_region) ?? "",
+    targetRegion: firstNonEmptyString(row.target_region) ?? "",
+    status: toReplicationJobStatus(row.status),
+    reason: firstNonEmptyString(row.reason) ?? undefined,
+    createdByUserId: firstNonEmptyString(row.created_by_user_id) ?? undefined,
+    approvedByUserId: firstNonEmptyString(row.approved_by_user_id) ?? undefined,
+    metadata: toDbRow(row.metadata) ?? {},
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+    startedAt: toIsoString(row.started_at) ?? undefined,
+    finishedAt: toIsoString(row.finished_at) ?? undefined,
+  };
+}
+
+function mapRuleAssetRow(row: DbRow): RuleAsset {
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    name: firstNonEmptyString(row.name) ?? "",
+    description: firstNonEmptyString(row.description) ?? undefined,
+    status: toRuleLifecycleStatus(row.status),
+    latestVersion: Math.max(0, Math.trunc(toNumber(row.latest_version, 0))),
+    publishedVersion: toOptionalNonNegativeInteger(row.published_version),
+    scopeBinding: mapRuleScopeBinding(row.scope_binding),
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapRuleAssetVersionRow(row: DbRow): RuleAssetVersion {
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    assetId: firstNonEmptyString(row.asset_id) ?? "",
+    version: Math.max(1, Math.trunc(toNumber(row.version, 1))),
+    content: firstNonEmptyString(row.content) ?? "",
+    changelog: firstNonEmptyString(row.changelog) ?? undefined,
+    createdByUserId: firstNonEmptyString(row.created_by_user_id) ?? undefined,
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapRuleApprovalRow(row: DbRow): RuleApproval {
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    assetId: firstNonEmptyString(row.asset_id) ?? "",
+    version: Math.max(1, Math.trunc(toNumber(row.version, 1))),
+    approverUserId: firstNonEmptyString(row.approver_user_id) ?? "",
+    approverEmail: firstNonEmptyString(row.approver_email) ?? undefined,
+    decision: toRuleApprovalDecision(row.decision),
+    reason: firstNonEmptyString(row.reason) ?? undefined,
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapMcpToolPolicyRow(row: DbRow): McpToolPolicy {
+  return {
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    toolId: firstNonEmptyString(row.tool_id) ?? "",
+    riskLevel: toMcpRiskLevel(row.risk_level),
+    decision: toMcpToolDecision(row.decision),
+    reason: firstNonEmptyString(row.reason) ?? undefined,
+    updatedAt: toIsoString(row.updated_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapMcpApprovalRequestRow(row: DbRow): McpApprovalRequest {
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    toolId: firstNonEmptyString(row.tool_id) ?? "",
+    status: toMcpApprovalStatus(row.status),
+    requestedByUserId: firstNonEmptyString(row.requested_by_user_id) ?? "",
+    requestedByEmail: firstNonEmptyString(row.requested_by_email) ?? undefined,
+    reason: firstNonEmptyString(row.reason) ?? undefined,
+    reviewedByUserId: firstNonEmptyString(row.reviewed_by_user_id) ?? undefined,
+    reviewedByEmail: firstNonEmptyString(row.reviewed_by_email) ?? undefined,
+    reviewReason: firstNonEmptyString(row.review_reason) ?? undefined,
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapMcpInvocationAuditRow(row: DbRow): McpInvocationAudit {
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    toolId: firstNonEmptyString(row.tool_id) ?? "",
+    decision: toMcpToolDecision(row.decision),
+    result:
+      firstNonEmptyString(row.result) === "blocked"
+        ? "blocked"
+        : firstNonEmptyString(row.result) === "approved"
+          ? "approved"
+          : "allowed",
+    approvalRequestId: firstNonEmptyString(row.approval_request_id) ?? undefined,
+    metadata: toDbRow(row.metadata) ?? {},
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapApiKeyRow(row: DbRow): ApiKey {
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    name: firstNonEmptyString(row.name, row.id) ?? "",
+    keyHash: firstNonEmptyString(row.key_hash) ?? "",
+    scopes: normalizeDistinctStringArray(toJsonArray(row.scopes)),
+    lastUsedAt: toIsoString(row.last_used_at) ?? undefined,
+    revokedAt: toIsoString(row.revoked_at) ?? undefined,
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapWebhookEndpointRow(row: DbRow): WebhookEndpoint {
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    name: firstNonEmptyString(row.name, row.id) ?? "",
+    url: firstNonEmptyString(row.url) ?? "",
+    enabled: toBoolean(row.enabled, true),
+    eventTypes: normalizeDistinctStringArray(toJsonArray(row.event_types), { lowerCase: true }),
+    secretHash: firstNonEmptyString(row.secret_hash) ?? undefined,
+    headers: normalizeStringRecord(row.headers),
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapQualityEventRow(row: DbRow): QualityEvent {
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    scorecardKey: firstNonEmptyString(row.scorecard_key) ?? "unknown",
+    metricKey: firstNonEmptyString(row.metric_key) ?? undefined,
+    score: normalizeQualityScore(row.score),
+    passed: toBoolean(row.passed, false),
+    metadata: toDbRow(row.metadata) ?? {},
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapQualityScorecardRow(row: DbRow): QualityScorecard {
+  return {
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    scorecardKey: firstNonEmptyString(row.scorecard_key) ?? "unknown",
+    title: firstNonEmptyString(row.title, row.scorecard_key) ?? "unknown",
+    description: firstNonEmptyString(row.description) ?? undefined,
+    score: normalizeQualityScore(row.score),
+    dimensions: normalizeNumericRecord(row.dimensions),
+    metadata: toDbRow(row.metadata) ?? {},
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapReplayBaselineRow(row: DbRow): ReplayBaseline {
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    name: firstNonEmptyString(row.name, row.id) ?? "",
+    description: firstNonEmptyString(row.description) ?? undefined,
+    datasetRef: firstNonEmptyString(row.dataset_ref) ?? undefined,
+    scenarioCount: Math.max(0, Math.trunc(toNumber(row.scenario_count, 0))),
+    metadata: toDbRow(row.metadata) ?? {},
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapReplayJobRow(row: DbRow): ReplayJob {
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    baselineId: firstNonEmptyString(row.baseline_id) ?? "",
+    status: toReplayJobStatus(row.status),
+    parameters: toDbRow(row.parameters) ?? {},
+    summary: toDbRow(row.summary_payload ?? row.summary) ?? {},
+    diff: toDbRow(row.diff_payload ?? row.diff) ?? {},
+    error: firstNonEmptyString(row.error) ?? undefined,
+    startedAt: toIsoString(row.started_at) ?? undefined,
+    finishedAt: toIsoString(row.finished_at) ?? undefined,
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
   };
 }
 
@@ -1647,6 +2485,81 @@ function normalizeAlertListInput(input: AlertListInput): NormalizedAlertListInpu
   };
 }
 
+function normalizeAlertOrchestrationRuleListInput(
+  input: AlertOrchestrationRuleListInput | undefined
+): NormalizedAlertOrchestrationRuleListInput {
+  return {
+    eventType: input?.eventType,
+    enabled: typeof input?.enabled === "boolean" ? input.enabled : undefined,
+    severity: input?.severity,
+    sourceId: firstNonEmptyString(input?.sourceId) ?? undefined,
+  };
+}
+
+function normalizeReplicationJobListInput(
+  input: ReplicationJobListInput = {}
+): NormalizedReplicationJobListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(200, Math.max(1, rawLimit ?? 50));
+  return {
+    status: input.status,
+    sourceRegion: firstNonEmptyString(input.sourceRegion) ?? undefined,
+    targetRegion: firstNonEmptyString(input.targetRegion) ?? undefined,
+    limit,
+  };
+}
+
+function normalizeRuleAssetListInput(input: RuleAssetListInput = {}): NormalizedRuleAssetListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(200, Math.max(1, rawLimit ?? 50));
+  return {
+    status: input.status,
+    keyword: firstNonEmptyString(input.keyword) ?? undefined,
+    limit,
+  };
+}
+
+function normalizeRuleApprovalListInput(
+  input: RuleApprovalListInput = {}
+): NormalizedRuleApprovalListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(200, Math.max(1, rawLimit ?? 50));
+  return {
+    version: toOptionalNonNegativeInteger(input.version),
+    decision: input.decision,
+    limit,
+  };
+}
+
+function normalizeMcpToolPolicyListInput(
+  input: McpToolPolicyListInput = {}
+): NormalizedMcpToolPolicyListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(200, Math.max(1, rawLimit ?? 50));
+  return {
+    riskLevel: input.riskLevel,
+    decision: input.decision,
+    keyword: firstNonEmptyString(input.keyword) ?? undefined,
+    limit,
+  };
+}
+
+function normalizeMcpInvocationListInput(
+  input: McpInvocationListInput = {}
+): NormalizedMcpInvocationListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(200, Math.max(1, rawLimit ?? 50));
+  const from = toIsoString(input.from);
+  const to = toIsoString(input.to);
+  return {
+    toolId: firstNonEmptyString(input.toolId) ?? undefined,
+    decision: input.decision,
+    from: from ?? undefined,
+    to: to ?? undefined,
+    limit,
+  };
+}
+
 function normalizeAuditListInput(
   input: AuditListQueryInput,
   tenantId?: string
@@ -1661,6 +2574,54 @@ function normalizeAuditListInput(
     to: input.to,
     limit: input.limit ?? DEFAULT_AUDIT_LIMIT,
     cursor: firstNonEmptyString(input.cursor) ?? undefined,
+  };
+}
+
+function normalizeQualityDailyMetricsInput(
+  input: ListQualityDailyMetricsInput = {}
+): NormalizedQualityDailyMetricsInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(366, Math.max(1, rawLimit ?? DEFAULT_QUALITY_DAILY_METRIC_LIMIT));
+  return {
+    from: toIsoString(input.from) ?? undefined,
+    to: toIsoString(input.to) ?? undefined,
+    scorecardKey: firstNonEmptyString(input.scorecardKey) ?? undefined,
+    limit,
+  };
+}
+
+function normalizeQualityScorecardListInput(
+  input: ListQualityScorecardsInput = {}
+): NormalizedQualityScorecardListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(200, Math.max(1, rawLimit ?? DEFAULT_QUALITY_SCORECARD_LIMIT));
+  return {
+    scorecardKey: firstNonEmptyString(input.scorecardKey) ?? undefined,
+    limit,
+  };
+}
+
+function normalizeReplayBaselineListInput(
+  input: ListReplayBaselinesInput = {}
+): NormalizedReplayBaselineListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(200, Math.max(1, rawLimit ?? DEFAULT_REPLAY_BASELINE_LIMIT));
+  return {
+    keyword: firstNonEmptyString(input.keyword) ?? undefined,
+    limit,
+  };
+}
+
+function normalizeReplayJobListInput(
+  input: ListReplayJobsInput = {}
+): NormalizedReplayJobListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(200, Math.max(1, rawLimit ?? DEFAULT_REPLAY_JOB_LIMIT));
+  const statusRaw = firstNonEmptyString(input.status);
+  return {
+    baselineId: firstNonEmptyString(input.baselineId) ?? undefined,
+    status: statusRaw ? toReplayJobStatus(statusRaw) : undefined,
+    limit,
   };
 }
 
@@ -1713,6 +2674,10 @@ function normalizeUsageAggregateInput(
 
 function normalizeScopedTenantId(tenantId: string | undefined): string {
   return firstNonEmptyString(tenantId) ?? DEFAULT_TENANT_ID;
+}
+
+function buildTenantScopedLookupKey(tenantId: string, scopedValue: string): string {
+  return `${tenantId}:${scopedValue}`;
 }
 
 function readDatePart(parts: Intl.DateTimeFormatPart[], type: "year" | "month" | "day"): number {
@@ -1970,6 +2935,15 @@ class ControlPlaneRepository {
   private readonly memorySessionEvents: MemorySessionEventRecord[] = [];
   private readonly memoryBudgets: TenantBudgetRecord[] = [];
   private readonly memoryAlerts: Alert[] = [];
+  private readonly memoryAlertOrchestrationRules: AlertOrchestrationRule[] = [];
+  private readonly memoryResidencyPolicies: TenantResidencyPolicy[] = [];
+  private readonly memoryReplicationJobs: ReplicationJob[] = [];
+  private readonly memoryRuleAssets: RuleAsset[] = [];
+  private readonly memoryRuleAssetVersions: RuleAssetVersion[] = [];
+  private readonly memoryRuleApprovals: RuleApproval[] = [];
+  private readonly memoryMcpToolPolicies: McpToolPolicy[] = [];
+  private readonly memoryMcpApprovalRequests: McpApprovalRequest[] = [];
+  private readonly memoryMcpInvocations: McpInvocationAudit[] = [];
   private readonly memoryBudgetReleaseRequests: TenantBudgetReleaseRequestRecord[] = [];
   private readonly memoryIntegrationAlertCallbacks: IntegrationAlertCallbackRecord[] = [];
   private readonly memoryPricingCatalogVersions: PricingCatalogVersionRecord[] = [];
@@ -1983,6 +2957,14 @@ class ControlPlaneRepository {
   private readonly memoryAgentBindings: AgentBinding[] = [];
   private readonly memorySourceBindings: SourceBinding[] = [];
   private readonly memoryAuthSessions: AuthSession[] = [];
+  private readonly memoryApiKeys: ApiKey[] = [];
+  private readonly memoryApiKeyByHash = new Map<string, MemoryApiKeyHashRecord>();
+  private readonly memoryWebhookEndpoints: WebhookEndpoint[] = [];
+  private readonly memoryQualityEvents: QualityEvent[] = [];
+  private readonly memoryQualityScorecards: QualityScorecard[] = [];
+  private readonly memoryReplayBaselines: ReplayBaseline[] = [];
+  private readonly memoryReplayJobs: ReplayJob[] = [];
+  private readonly memoryReplayJobDiffById = new Map<string, MemoryReplayJobDiffRecord>();
   private pool: PgPool | null = null;
   private initPromise: Promise<void> | null = null;
   private loggedDbFallback = false;
@@ -5437,6 +6419,1708 @@ class ControlPlaneRepository {
     }
   }
 
+  async listAlertOrchestrationRules(
+    tenantId: string,
+    input: AlertOrchestrationRuleListInput = {}
+  ): Promise<AlertOrchestrationRuleListResult> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalized = normalizeAlertOrchestrationRuleListInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listAlertOrchestrationRulesFromMemory(normalizedTenantId, normalized);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+
+      if (normalized.eventType) {
+        params.push(normalized.eventType);
+        whereClauses.push(`event_type = $${params.length}`);
+      }
+      if (normalized.enabled !== undefined) {
+        params.push(normalized.enabled);
+        whereClauses.push(`enabled = $${params.length}`);
+      }
+      if (normalized.severity) {
+        params.push(normalized.severity);
+        whereClauses.push(`severity = $${params.length}`);
+      }
+      if (normalized.sourceId) {
+        params.push(normalized.sourceId);
+        whereClauses.push(`source_id = $${params.length}`);
+      }
+
+      const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+      const result = await pool.query(
+        `SELECT tenant_id,
+                id,
+                name,
+                enabled,
+                event_type,
+                severity,
+                source_id,
+                dedupe_window_seconds,
+                suppression_window_seconds,
+                merge_window_seconds,
+                sla_minutes,
+                channels,
+                updated_at
+         FROM alert_orchestration_rules
+         ${whereSql}
+         ORDER BY updated_at DESC, id ASC`,
+        params
+      );
+      const items = result.rows.map(mapAlertOrchestrationRuleRow);
+      return {
+        items,
+        total: items.length,
+      };
+    } catch (error) {
+      this.disableDb(error, "查询 alert orchestration rules 失败");
+      return this.listAlertOrchestrationRulesFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
+  async getAlertOrchestrationRuleById(
+    tenantId: string,
+    ruleId: string
+  ): Promise<AlertOrchestrationRule | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedRuleId = firstNonEmptyString(ruleId);
+    if (!normalizedRuleId) {
+      return null;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getAlertOrchestrationRuleByIdFromMemory(normalizedTenantId, normalizedRuleId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT tenant_id,
+                id,
+                name,
+                enabled,
+                event_type,
+                severity,
+                source_id,
+                dedupe_window_seconds,
+                suppression_window_seconds,
+                merge_window_seconds,
+                sla_minutes,
+                channels,
+                updated_at
+         FROM alert_orchestration_rules
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedRuleId]
+      );
+      const row = result.rows[0];
+      return row ? mapAlertOrchestrationRuleRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询单条 alert orchestration rule 失败");
+      return this.getAlertOrchestrationRuleByIdFromMemory(normalizedTenantId, normalizedRuleId);
+    }
+  }
+
+  async upsertAlertOrchestrationRule(
+    tenantId: string,
+    input: AlertOrchestrationRuleUpsertInput
+  ): Promise<AlertOrchestrationRule> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedRuleId = firstNonEmptyString(input.id) ?? crypto.randomUUID();
+    const normalizedName = firstNonEmptyString(input.name) ?? normalizedRuleId;
+    const normalizedEventType = toAlertOrchestrationEventType(input.eventType);
+    const severityRaw = firstNonEmptyString(input.severity);
+    const sourceId = firstNonEmptyString(input.sourceId) ?? undefined;
+    const updatedAt = toIsoString(input.updatedAt) ?? new Date().toISOString();
+    const channels: AlertOrchestrationChannel[] = [];
+    const channelSet = new Set<AlertOrchestrationChannel>();
+    for (const channel of Array.isArray(input.channels) ? input.channels : []) {
+      const normalizedChannel = firstNonEmptyString(channel);
+      if (!normalizedChannel) {
+        continue;
+      }
+      const mappedChannel = toAlertOrchestrationChannel(normalizedChannel.toLowerCase());
+      if (!mappedChannel) {
+        continue;
+      }
+      if (channelSet.has(mappedChannel)) {
+        continue;
+      }
+      channelSet.add(mappedChannel);
+      channels.push(mappedChannel);
+    }
+
+    const normalizedInput: AlertOrchestrationRuleUpsertInput = {
+      id: normalizedRuleId,
+      tenantId: normalizedTenantId,
+      name: normalizedName,
+      enabled: input.enabled === true,
+      eventType: normalizedEventType,
+      severity: severityRaw ? toAlertSeverity(severityRaw) : undefined,
+      sourceId,
+      dedupeWindowSeconds: toOptionalNonNegativeInteger(input.dedupeWindowSeconds) ?? 0,
+      suppressionWindowSeconds: toOptionalNonNegativeInteger(input.suppressionWindowSeconds) ?? 0,
+      mergeWindowSeconds: toOptionalNonNegativeInteger(input.mergeWindowSeconds) ?? 0,
+      slaMinutes: toOptionalNonNegativeInteger(input.slaMinutes),
+      channels,
+      updatedAt,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.upsertAlertOrchestrationRuleToMemory(normalizedTenantId, normalizedInput);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO alert_orchestration_rules (
+           tenant_id,
+           id,
+           name,
+           enabled,
+           event_type,
+           severity,
+           source_id,
+           dedupe_window_seconds,
+           suppression_window_seconds,
+           merge_window_seconds,
+           sla_minutes,
+           channels,
+           updated_at,
+           created_at
+         )
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6,
+           $7,
+           $8,
+           $9,
+           $10,
+           $11,
+           $12::jsonb,
+           $13::timestamptz,
+           $13::timestamptz
+         )
+         ON CONFLICT (tenant_id, id)
+         DO UPDATE
+           SET name = EXCLUDED.name,
+               enabled = EXCLUDED.enabled,
+               event_type = EXCLUDED.event_type,
+               severity = EXCLUDED.severity,
+               source_id = EXCLUDED.source_id,
+               dedupe_window_seconds = EXCLUDED.dedupe_window_seconds,
+               suppression_window_seconds = EXCLUDED.suppression_window_seconds,
+               merge_window_seconds = EXCLUDED.merge_window_seconds,
+               sla_minutes = EXCLUDED.sla_minutes,
+               channels = EXCLUDED.channels,
+               updated_at = EXCLUDED.updated_at
+         RETURNING tenant_id,
+                   id,
+                   name,
+                   enabled,
+                   event_type,
+                   severity,
+                   source_id,
+                   dedupe_window_seconds,
+                   suppression_window_seconds,
+                   merge_window_seconds,
+                   sla_minutes,
+                   channels,
+                   updated_at`,
+        [
+          normalizedTenantId,
+          normalizedInput.id,
+          normalizedInput.name,
+          normalizedInput.enabled,
+          normalizedInput.eventType,
+          normalizedInput.severity ?? null,
+          normalizedInput.sourceId ?? null,
+          normalizedInput.dedupeWindowSeconds,
+          normalizedInput.suppressionWindowSeconds,
+          normalizedInput.mergeWindowSeconds,
+          normalizedInput.slaMinutes ?? null,
+          safeStringifyJson(normalizedInput.channels),
+          normalizedInput.updatedAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        return this.upsertAlertOrchestrationRuleToMemory(normalizedTenantId, normalizedInput);
+      }
+      return mapAlertOrchestrationRuleRow(row);
+    } catch (error) {
+      this.disableDb(error, "写入 alert orchestration rule 失败");
+      return this.upsertAlertOrchestrationRuleToMemory(normalizedTenantId, normalizedInput);
+    }
+  }
+
+  async listResidencyRegions(): Promise<RegionDescriptor[]> {
+    return DEFAULT_REGIONS.map((region) => ({ ...region }));
+  }
+
+  async getTenantResidencyPolicy(tenantId: string): Promise<TenantResidencyPolicy | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getTenantResidencyPolicyFromMemory(normalizedTenantId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT tenant_id,
+                mode,
+                primary_region,
+                replica_regions,
+                allow_cross_region_transfer,
+                require_transfer_approval,
+                updated_at
+         FROM tenant_residency_policies
+         WHERE tenant_id = $1
+         LIMIT 1`,
+        [normalizedTenantId]
+      );
+      const row = result.rows[0];
+      return row ? mapTenantResidencyPolicyRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询租户数据主权策略失败");
+      return this.getTenantResidencyPolicyFromMemory(normalizedTenantId);
+    }
+  }
+
+  async upsertTenantResidencyPolicy(
+    tenantId: string,
+    input: TenantResidencyPolicyUpsertInput
+  ): Promise<TenantResidencyPolicy> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const primaryRegion = firstNonEmptyString(input.primaryRegion) ?? "cn-hangzhou";
+    const mode = toDataResidencyMode(input.mode);
+    const replicaRegionSet = new Set<string>();
+    const replicaRegions: string[] = [];
+    for (const region of Array.isArray(input.replicaRegions) ? input.replicaRegions : []) {
+      const normalizedRegion = firstNonEmptyString(region);
+      if (!normalizedRegion || normalizedRegion === primaryRegion || replicaRegionSet.has(normalizedRegion)) {
+        continue;
+      }
+      replicaRegionSet.add(normalizedRegion);
+      replicaRegions.push(normalizedRegion);
+    }
+    const updatedAt = toIsoString(input.updatedAt) ?? new Date().toISOString();
+    const normalized: TenantResidencyPolicy = {
+      tenantId: normalizedTenantId,
+      mode,
+      primaryRegion,
+      replicaRegions: mode === "single_region" ? [] : replicaRegions,
+      allowCrossRegionTransfer: input.allowCrossRegionTransfer === true,
+      requireTransferApproval: input.requireTransferApproval === true,
+      updatedAt,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.upsertTenantResidencyPolicyToMemory(normalized);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO tenant_residency_policies (
+           tenant_id,
+           mode,
+           primary_region,
+           replica_regions,
+           allow_cross_region_transfer,
+           require_transfer_approval,
+           updated_at
+         )
+         VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7::timestamptz)
+         ON CONFLICT (tenant_id)
+         DO UPDATE
+           SET mode = EXCLUDED.mode,
+               primary_region = EXCLUDED.primary_region,
+               replica_regions = EXCLUDED.replica_regions,
+               allow_cross_region_transfer = EXCLUDED.allow_cross_region_transfer,
+               require_transfer_approval = EXCLUDED.require_transfer_approval,
+               updated_at = EXCLUDED.updated_at
+         RETURNING tenant_id,
+                   mode,
+                   primary_region,
+                   replica_regions,
+                   allow_cross_region_transfer,
+                   require_transfer_approval,
+                   updated_at`,
+        [
+          normalized.tenantId,
+          normalized.mode,
+          normalized.primaryRegion,
+          safeStringifyJson(normalized.replicaRegions),
+          normalized.allowCrossRegionTransfer,
+          normalized.requireTransferApproval,
+          normalized.updatedAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        return this.upsertTenantResidencyPolicyToMemory(normalized);
+      }
+      return mapTenantResidencyPolicyRow(row);
+    } catch (error) {
+      this.disableDb(error, "写入租户数据主权策略失败");
+      return this.upsertTenantResidencyPolicyToMemory(normalized);
+    }
+  }
+
+  async createReplicationJob(
+    tenantId: string,
+    input: ReplicationJobCreateInput,
+    options: {
+      createdByUserId?: string;
+      approvedByUserId?: string;
+    } = {}
+  ): Promise<ReplicationJob> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const now = new Date().toISOString();
+    const sourceRegion = firstNonEmptyString(input.sourceRegion) ?? "cn-hangzhou";
+    const targetRegion = firstNonEmptyString(input.targetRegion) ?? "cn-shanghai";
+    const metadata = toDbRow(input.metadata) ?? {};
+    const job: ReplicationJob = {
+      id: crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      sourceRegion,
+      targetRegion,
+      status: "pending",
+      reason: firstNonEmptyString(input.reason) ?? undefined,
+      createdByUserId: firstNonEmptyString(options.createdByUserId) ?? undefined,
+      approvedByUserId: firstNonEmptyString(options.approvedByUserId) ?? undefined,
+      metadata,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.saveReplicationJobToMemory(job);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO residency_replication_jobs (
+           id,
+           tenant_id,
+           source_region,
+           target_region,
+           status,
+           reason,
+           created_by_user_id,
+           approved_by_user_id,
+           metadata,
+           created_at,
+           updated_at,
+           started_at,
+           finished_at
+         )
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6,
+           $7,
+           $8,
+           $9::jsonb,
+           $10::timestamptz,
+           $10::timestamptz,
+           NULL,
+           NULL
+         )
+         RETURNING id,
+                   tenant_id,
+                   source_region,
+                   target_region,
+                   status,
+                   reason,
+                   created_by_user_id,
+                   approved_by_user_id,
+                   metadata,
+                   created_at,
+                   updated_at,
+                   started_at,
+                   finished_at`,
+        [
+          job.id,
+          job.tenantId,
+          job.sourceRegion,
+          job.targetRegion,
+          job.status,
+          job.reason ?? null,
+          job.createdByUserId ?? null,
+          job.approvedByUserId ?? null,
+          safeStringifyJson(job.metadata),
+          job.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        return this.saveReplicationJobToMemory(job);
+      }
+      return mapReplicationJobRow(row);
+    } catch (error) {
+      this.disableDb(error, "创建区域复制任务失败");
+      return this.saveReplicationJobToMemory(job);
+    }
+  }
+
+  async listReplicationJobs(
+    tenantId: string,
+    input: ReplicationJobListInput = {}
+  ): Promise<ReplicationJobListResult> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalized = normalizeReplicationJobListInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listReplicationJobsFromMemory(normalizedTenantId, normalized);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+      if (normalized.status) {
+        params.push(normalized.status);
+        whereClauses.push(`status = $${params.length}`);
+      }
+      if (normalized.sourceRegion) {
+        params.push(normalized.sourceRegion);
+        whereClauses.push(`source_region = $${params.length}`);
+      }
+      if (normalized.targetRegion) {
+        params.push(normalized.targetRegion);
+        whereClauses.push(`target_region = $${params.length}`);
+      }
+      params.push(normalized.limit);
+
+      const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                source_region,
+                target_region,
+                status,
+                reason,
+                created_by_user_id,
+                approved_by_user_id,
+                metadata,
+                created_at,
+                updated_at,
+                started_at,
+                finished_at
+         FROM residency_replication_jobs
+         ${whereSql}
+         ORDER BY created_at DESC, id DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      const items = result.rows.map(mapReplicationJobRow);
+      return {
+        items,
+        total: items.length,
+      };
+    } catch (error) {
+      this.disableDb(error, "查询区域复制任务失败");
+      return this.listReplicationJobsFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
+  async getReplicationJobById(tenantId: string, jobId: string): Promise<ReplicationJob | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedJobId = firstNonEmptyString(jobId);
+    if (!normalizedJobId) {
+      return null;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getReplicationJobByIdFromMemory(normalizedTenantId, normalizedJobId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                source_region,
+                target_region,
+                status,
+                reason,
+                created_by_user_id,
+                approved_by_user_id,
+                metadata,
+                created_at,
+                updated_at,
+                started_at,
+                finished_at
+         FROM residency_replication_jobs
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedJobId]
+      );
+      const row = result.rows[0];
+      return row ? mapReplicationJobRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询区域复制任务失败");
+      return this.getReplicationJobByIdFromMemory(normalizedTenantId, normalizedJobId);
+    }
+  }
+
+  async cancelReplicationJob(
+    tenantId: string,
+    jobId: string,
+    input: ReplicationJobCancelInput = {},
+    options: {
+      userId?: string;
+    } = {}
+  ): Promise<ReplicationJob | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedJobId = firstNonEmptyString(jobId);
+    if (!normalizedJobId) {
+      return null;
+    }
+    const updatedAt = new Date().toISOString();
+    const reason = firstNonEmptyString(input.reason) ?? undefined;
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.cancelReplicationJobInMemory(
+        normalizedTenantId,
+        normalizedJobId,
+        reason,
+        firstNonEmptyString(options.userId) ?? undefined,
+        updatedAt
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `UPDATE residency_replication_jobs
+         SET status = 'cancelled',
+             reason = COALESCE($3, reason),
+             approved_by_user_id = COALESCE($4, approved_by_user_id),
+             finished_at = COALESCE(finished_at, $5::timestamptz),
+             updated_at = $5::timestamptz
+         WHERE tenant_id = $1
+           AND id = $2
+           AND status IN ('pending', 'running')
+         RETURNING id,
+                   tenant_id,
+                   source_region,
+                   target_region,
+                   status,
+                   reason,
+                   created_by_user_id,
+                   approved_by_user_id,
+                   metadata,
+                   created_at,
+                   updated_at,
+                   started_at,
+                   finished_at`,
+        [
+          normalizedTenantId,
+          normalizedJobId,
+          reason ?? null,
+          firstNonEmptyString(options.userId) ?? null,
+          updatedAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (row) {
+        return mapReplicationJobRow(row);
+      }
+      return await this.getReplicationJobById(normalizedTenantId, normalizedJobId);
+    } catch (error) {
+      this.disableDb(error, "取消区域复制任务失败");
+      return this.cancelReplicationJobInMemory(
+        normalizedTenantId,
+        normalizedJobId,
+        reason,
+        firstNonEmptyString(options.userId) ?? undefined,
+        updatedAt
+      );
+    }
+  }
+
+  async listRuleAssets(tenantId: string, input: RuleAssetListInput = {}): Promise<RuleAssetListResult> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalized = normalizeRuleAssetListInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listRuleAssetsFromMemory(normalizedTenantId, normalized);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+      if (normalized.status) {
+        params.push(normalized.status);
+        whereClauses.push(`status = $${params.length}`);
+      }
+      if (normalized.keyword) {
+        params.push(`%${normalized.keyword}%`);
+        whereClauses.push(`(name ILIKE $${params.length} OR COALESCE(description, '') ILIKE $${params.length})`);
+      }
+      params.push(normalized.limit);
+      const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                name,
+                description,
+                status,
+                latest_version,
+                published_version,
+                scope_binding,
+                created_at,
+                updated_at
+         FROM rule_assets
+         ${whereSql}
+         ORDER BY updated_at DESC, id DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      const items = result.rows.map(mapRuleAssetRow);
+      return {
+        items,
+        total: items.length,
+      };
+    } catch (error) {
+      this.disableDb(error, "查询规则资产失败");
+      return this.listRuleAssetsFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
+  async getRuleAssetById(tenantId: string, assetId: string): Promise<RuleAsset | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAssetId = firstNonEmptyString(assetId);
+    if (!normalizedAssetId) {
+      return null;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getRuleAssetByIdFromMemory(normalizedTenantId, normalizedAssetId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                name,
+                description,
+                status,
+                latest_version,
+                published_version,
+                scope_binding,
+                created_at,
+                updated_at
+         FROM rule_assets
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedAssetId]
+      );
+      const row = result.rows[0];
+      return row ? mapRuleAssetRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询规则资产失败");
+      return this.getRuleAssetByIdFromMemory(normalizedTenantId, normalizedAssetId);
+    }
+  }
+
+  async createRuleAsset(tenantId: string, input: RuleAssetCreateInput): Promise<RuleAsset> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const now = new Date().toISOString();
+    const scopeBinding = mapRuleScopeBinding(input.scopeBinding);
+    const asset: RuleAsset = {
+      id: crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      name: firstNonEmptyString(input.name) ?? "untitled-rule",
+      description: firstNonEmptyString(input.description) ?? undefined,
+      status: "draft",
+      latestVersion: 0,
+      publishedVersion: undefined,
+      scopeBinding,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.saveRuleAssetToMemory(asset);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO rule_assets (
+           id,
+           tenant_id,
+           name,
+           description,
+           status,
+           latest_version,
+           published_version,
+           scope_binding,
+           created_at,
+           updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, NULL, $7::jsonb, $8::timestamptz, $8::timestamptz)
+         RETURNING id,
+                   tenant_id,
+                   name,
+                   description,
+                   status,
+                   latest_version,
+                   published_version,
+                   scope_binding,
+                   created_at,
+                   updated_at`,
+        [
+          asset.id,
+          asset.tenantId,
+          asset.name,
+          asset.description ?? null,
+          asset.status,
+          asset.latestVersion,
+          safeStringifyJson(asset.scopeBinding),
+          asset.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        return this.saveRuleAssetToMemory(asset);
+      }
+      return mapRuleAssetRow(row);
+    } catch (error) {
+      this.disableDb(error, "创建规则资产失败");
+      return this.saveRuleAssetToMemory(asset);
+    }
+  }
+
+  async listRuleAssetVersions(
+    tenantId: string,
+    assetId: string,
+    limit = 50
+  ): Promise<RuleAssetVersion[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAssetId = firstNonEmptyString(assetId);
+    if (!normalizedAssetId) {
+      return [];
+    }
+    const normalizedLimit = Math.min(200, Math.max(1, Math.trunc(limit)));
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listRuleAssetVersionsFromMemory(normalizedTenantId, normalizedAssetId, normalizedLimit);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                asset_id,
+                version,
+                content,
+                changelog,
+                created_by_user_id,
+                created_at
+         FROM rule_asset_versions
+         WHERE tenant_id = $1
+           AND asset_id = $2
+         ORDER BY version DESC, created_at DESC
+         LIMIT $3`,
+        [normalizedTenantId, normalizedAssetId, normalizedLimit]
+      );
+      return result.rows.map(mapRuleAssetVersionRow);
+    } catch (error) {
+      this.disableDb(error, "查询规则版本失败");
+      return this.listRuleAssetVersionsFromMemory(normalizedTenantId, normalizedAssetId, normalizedLimit);
+    }
+  }
+
+  async createRuleAssetVersion(
+    tenantId: string,
+    assetId: string,
+    input: RuleAssetVersionCreateInput,
+    options: {
+      createdByUserId?: string;
+    } = {}
+  ): Promise<RuleAssetVersion | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAssetId = firstNonEmptyString(assetId);
+    if (!normalizedAssetId) {
+      return null;
+    }
+
+    const content = firstNonEmptyString(input.content);
+    if (!content) {
+      return null;
+    }
+    const createdAt = new Date().toISOString();
+    const createdByUserId = firstNonEmptyString(options.createdByUserId) ?? undefined;
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.createRuleAssetVersionToMemory(
+        normalizedTenantId,
+        normalizedAssetId,
+        content,
+        firstNonEmptyString(input.changelog) ?? undefined,
+        createdByUserId,
+        createdAt
+      );
+    }
+
+    try {
+      const asset = await this.getRuleAssetById(normalizedTenantId, normalizedAssetId);
+      if (!asset) {
+        return null;
+      }
+      const currentResult = await pool.query(
+        `SELECT COALESCE(MAX(version), 0) AS max_version
+         FROM rule_asset_versions
+         WHERE tenant_id = $1
+           AND asset_id = $2`,
+        [normalizedTenantId, normalizedAssetId]
+      );
+      const currentVersion = Math.max(0, Math.trunc(toNumber(currentResult.rows[0]?.max_version, 0)));
+      const nextVersion = currentVersion + 1;
+      const versionId = crypto.randomUUID();
+
+      const versionResult = await pool.query(
+        `INSERT INTO rule_asset_versions (
+           id,
+           tenant_id,
+           asset_id,
+           version,
+           content,
+           changelog,
+           created_by_user_id,
+           created_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz)
+         RETURNING id,
+                   tenant_id,
+                   asset_id,
+                   version,
+                   content,
+                   changelog,
+                   created_by_user_id,
+                   created_at`,
+        [
+          versionId,
+          normalizedTenantId,
+          normalizedAssetId,
+          nextVersion,
+          content,
+          firstNonEmptyString(input.changelog) ?? null,
+          createdByUserId ?? null,
+          createdAt,
+        ]
+      );
+      await pool.query(
+        `UPDATE rule_assets
+         SET latest_version = GREATEST(latest_version, $3),
+             status = CASE
+               WHEN status = 'deprecated' THEN 'draft'
+               ELSE status
+             END,
+             updated_at = $4::timestamptz
+         WHERE tenant_id = $1
+           AND id = $2`,
+        [normalizedTenantId, normalizedAssetId, nextVersion, createdAt]
+      );
+      const row = versionResult.rows[0];
+      return row ? mapRuleAssetVersionRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "创建规则版本失败");
+      return this.createRuleAssetVersionToMemory(
+        normalizedTenantId,
+        normalizedAssetId,
+        content,
+        firstNonEmptyString(input.changelog) ?? undefined,
+        createdByUserId,
+        createdAt
+      );
+    }
+  }
+
+  async publishRuleAssetVersion(
+    tenantId: string,
+    assetId: string,
+    input: RulePublishInput
+  ): Promise<RuleAsset | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAssetId = firstNonEmptyString(assetId);
+    if (!normalizedAssetId) {
+      return null;
+    }
+    const version = Math.max(1, Math.trunc(toNumber(input.version, 1)));
+    const updatedAt = new Date().toISOString();
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.publishRuleAssetVersionFromMemory(
+        normalizedTenantId,
+        normalizedAssetId,
+        version,
+        updatedAt
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `UPDATE rule_assets AS assets
+         SET published_version = $3,
+             status = 'published',
+             updated_at = $4::timestamptz
+         WHERE assets.tenant_id = $1
+           AND assets.id = $2
+           AND EXISTS (
+             SELECT 1
+             FROM rule_asset_versions AS versions
+             WHERE versions.tenant_id = $1
+               AND versions.asset_id = $2
+               AND versions.version = $3
+           )
+         RETURNING id,
+                   tenant_id,
+                   name,
+                   description,
+                   status,
+                   latest_version,
+                   published_version,
+                   scope_binding,
+                   created_at,
+                   updated_at`,
+        [normalizedTenantId, normalizedAssetId, version, updatedAt]
+      );
+      const row = result.rows[0];
+      if (row) {
+        return mapRuleAssetRow(row);
+      }
+      return this.getRuleAssetById(normalizedTenantId, normalizedAssetId);
+    } catch (error) {
+      this.disableDb(error, "发布规则版本失败");
+      return this.publishRuleAssetVersionFromMemory(
+        normalizedTenantId,
+        normalizedAssetId,
+        version,
+        updatedAt
+      );
+    }
+  }
+
+  async rollbackRuleAssetVersion(
+    tenantId: string,
+    assetId: string,
+    input: RuleRollbackInput
+  ): Promise<RuleAsset | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAssetId = firstNonEmptyString(assetId);
+    if (!normalizedAssetId) {
+      return null;
+    }
+    const version = Math.max(1, Math.trunc(toNumber(input.version, 1)));
+    const updatedAt = new Date().toISOString();
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.publishRuleAssetVersionFromMemory(
+        normalizedTenantId,
+        normalizedAssetId,
+        version,
+        updatedAt
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `UPDATE rule_assets AS assets
+         SET published_version = $3,
+             status = 'published',
+             updated_at = $4::timestamptz
+         WHERE assets.tenant_id = $1
+           AND assets.id = $2
+           AND EXISTS (
+             SELECT 1
+             FROM rule_asset_versions AS versions
+             WHERE versions.tenant_id = $1
+               AND versions.asset_id = $2
+               AND versions.version = $3
+           )
+         RETURNING id,
+                   tenant_id,
+                   name,
+                   description,
+                   status,
+                   latest_version,
+                   published_version,
+                   scope_binding,
+                   created_at,
+                   updated_at`,
+        [normalizedTenantId, normalizedAssetId, version, updatedAt]
+      );
+      const row = result.rows[0];
+      if (row) {
+        return mapRuleAssetRow(row);
+      }
+      return this.getRuleAssetById(normalizedTenantId, normalizedAssetId);
+    } catch (error) {
+      this.disableDb(error, "回滚规则版本失败");
+      return this.publishRuleAssetVersionFromMemory(
+        normalizedTenantId,
+        normalizedAssetId,
+        version,
+        updatedAt
+      );
+    }
+  }
+
+  async listRuleApprovals(
+    tenantId: string,
+    assetId: string,
+    input: RuleApprovalListInput = {}
+  ): Promise<RuleApprovalListResult> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAssetId = firstNonEmptyString(assetId);
+    if (!normalizedAssetId) {
+      return { items: [], total: 0 };
+    }
+    const normalized = normalizeRuleApprovalListInput(input);
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listRuleApprovalsFromMemory(normalizedTenantId, normalizedAssetId, normalized);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId, normalizedAssetId];
+      const whereClauses: string[] = ["tenant_id = $1", "asset_id = $2"];
+      if (normalized.version !== undefined) {
+        params.push(normalized.version);
+        whereClauses.push(`version = $${params.length}`);
+      }
+      if (normalized.decision) {
+        params.push(normalized.decision);
+        whereClauses.push(`decision = $${params.length}`);
+      }
+      params.push(normalized.limit);
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                asset_id,
+                version,
+                approver_user_id,
+                approver_email,
+                decision,
+                reason,
+                created_at
+         FROM rule_approvals
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY created_at DESC, id DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      const items = result.rows.map(mapRuleApprovalRow);
+      return {
+        items,
+        total: items.length,
+      };
+    } catch (error) {
+      this.disableDb(error, "查询规则审批记录失败");
+      return this.listRuleApprovalsFromMemory(normalizedTenantId, normalizedAssetId, normalized);
+    }
+  }
+
+  async createRuleApproval(
+    tenantId: string,
+    assetId: string,
+    input: RuleApprovalCreateInput,
+    options: {
+      approverUserId: string;
+      approverEmail?: string;
+    }
+  ): Promise<RuleApproval | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAssetId = firstNonEmptyString(assetId);
+    const approverUserId = firstNonEmptyString(options.approverUserId);
+    if (!normalizedAssetId || !approverUserId) {
+      return null;
+    }
+    const version = Math.max(1, Math.trunc(toNumber(input.version, 1)));
+    const createdAt = new Date().toISOString();
+    const approval: RuleApproval = {
+      id: crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      assetId: normalizedAssetId,
+      version,
+      approverUserId,
+      approverEmail: firstNonEmptyString(options.approverEmail) ?? undefined,
+      decision: toRuleApprovalDecision(input.decision),
+      reason: firstNonEmptyString(input.reason) ?? undefined,
+      createdAt,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.createRuleApprovalToMemory(approval);
+    }
+
+    try {
+      const versionExists = await pool.query(
+        `SELECT 1
+         FROM rule_asset_versions
+         WHERE tenant_id = $1
+           AND asset_id = $2
+           AND version = $3
+         LIMIT 1`,
+        [normalizedTenantId, normalizedAssetId, version]
+      );
+      if (versionExists.rows.length === 0) {
+        return null;
+      }
+
+      const result = await pool.query(
+        `INSERT INTO rule_approvals (
+           id,
+           tenant_id,
+           asset_id,
+           version,
+           approver_user_id,
+           approver_email,
+           decision,
+           reason,
+           created_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz)
+         ON CONFLICT (tenant_id, asset_id, version, approver_user_id)
+         DO UPDATE
+           SET approver_email = EXCLUDED.approver_email,
+               decision = EXCLUDED.decision,
+               reason = EXCLUDED.reason,
+               created_at = EXCLUDED.created_at
+         RETURNING id,
+                   tenant_id,
+                   asset_id,
+                   version,
+                   approver_user_id,
+                   approver_email,
+                   decision,
+                   reason,
+                   created_at`,
+        [
+          approval.id,
+          approval.tenantId,
+          approval.assetId,
+          approval.version,
+          approval.approverUserId,
+          approval.approverEmail ?? null,
+          approval.decision,
+          approval.reason ?? null,
+          approval.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      return row ? mapRuleApprovalRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "创建规则审批记录失败");
+      return this.createRuleApprovalToMemory(approval);
+    }
+  }
+
+  async listMcpToolPolicies(
+    tenantId: string,
+    input: McpToolPolicyListInput = {}
+  ): Promise<McpToolPolicyListResult> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalized = normalizeMcpToolPolicyListInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listMcpToolPoliciesFromMemory(normalizedTenantId, normalized);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+      if (normalized.riskLevel) {
+        params.push(normalized.riskLevel);
+        whereClauses.push(`risk_level = $${params.length}`);
+      }
+      if (normalized.decision) {
+        params.push(normalized.decision);
+        whereClauses.push(`decision = $${params.length}`);
+      }
+      if (normalized.keyword) {
+        params.push(`%${normalized.keyword}%`);
+        whereClauses.push(`(tool_id ILIKE $${params.length} OR COALESCE(reason, '') ILIKE $${params.length})`);
+      }
+      params.push(normalized.limit);
+
+      const result = await pool.query(
+        `SELECT tenant_id,
+                tool_id,
+                risk_level,
+                decision,
+                reason,
+                updated_at
+         FROM mcp_tool_policies
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY updated_at DESC, tool_id ASC
+         LIMIT $${params.length}`,
+        params
+      );
+      const items = result.rows.map(mapMcpToolPolicyRow);
+      return {
+        items,
+        total: items.length,
+      };
+    } catch (error) {
+      this.disableDb(error, "查询 MCP 工具策略失败");
+      return this.listMcpToolPoliciesFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
+  async upsertMcpToolPolicy(
+    tenantId: string,
+    input: McpToolPolicyUpsertInput
+  ): Promise<McpToolPolicy> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const updatedAt = new Date().toISOString();
+    const policy: McpToolPolicy = {
+      tenantId: normalizedTenantId,
+      toolId: firstNonEmptyString(input.toolId) ?? "unknown",
+      riskLevel: toMcpRiskLevel(input.riskLevel),
+      decision: toMcpToolDecision(input.decision),
+      reason: firstNonEmptyString(input.reason) ?? undefined,
+      updatedAt,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.upsertMcpToolPolicyToMemory(policy);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO mcp_tool_policies (
+           tenant_id,
+           tool_id,
+           risk_level,
+           decision,
+           reason,
+           updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6::timestamptz)
+         ON CONFLICT (tenant_id, tool_id)
+         DO UPDATE
+           SET risk_level = EXCLUDED.risk_level,
+               decision = EXCLUDED.decision,
+               reason = EXCLUDED.reason,
+               updated_at = EXCLUDED.updated_at
+         RETURNING tenant_id,
+                   tool_id,
+                   risk_level,
+                   decision,
+                   reason,
+                   updated_at`,
+        [
+          policy.tenantId,
+          policy.toolId,
+          policy.riskLevel,
+          policy.decision,
+          policy.reason ?? null,
+          policy.updatedAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        return this.upsertMcpToolPolicyToMemory(policy);
+      }
+      return mapMcpToolPolicyRow(row);
+    } catch (error) {
+      this.disableDb(error, "写入 MCP 工具策略失败");
+      return this.upsertMcpToolPolicyToMemory(policy);
+    }
+  }
+
+  async listMcpApprovalRequests(
+    tenantId: string,
+    input: ListMcpApprovalRequestsInput = {}
+  ): Promise<McpApprovalRequestListResult> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const limit = Math.min(200, Math.max(1, toOptionalNonNegativeInteger(input.limit) ?? 50));
+    const status = input.status;
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listMcpApprovalRequestsFromMemory(normalizedTenantId, status, limit);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+      if (status) {
+        params.push(status);
+        whereClauses.push(`status = $${params.length}`);
+      }
+      params.push(limit);
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                tool_id,
+                status,
+                requested_by_user_id,
+                requested_by_email,
+                reason,
+                reviewed_by_user_id,
+                reviewed_by_email,
+                review_reason,
+                created_at,
+                updated_at
+         FROM mcp_approval_requests
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY updated_at DESC, id DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      const items = result.rows.map(mapMcpApprovalRequestRow);
+      return {
+        items,
+        total: items.length,
+      };
+    } catch (error) {
+      this.disableDb(error, "查询 MCP 审批请求失败");
+      return this.listMcpApprovalRequestsFromMemory(normalizedTenantId, status, limit);
+    }
+  }
+
+  async createMcpApprovalRequest(
+    tenantId: string,
+    input: McpApprovalCreateInput,
+    options: {
+      requestedByUserId: string;
+      requestedByEmail?: string;
+    }
+  ): Promise<McpApprovalRequest> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const now = new Date().toISOString();
+    const record: McpApprovalRequest = {
+      id: crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      toolId: firstNonEmptyString(input.toolId) ?? "unknown",
+      status: "pending",
+      requestedByUserId: firstNonEmptyString(options.requestedByUserId) ?? "unknown",
+      requestedByEmail: firstNonEmptyString(options.requestedByEmail) ?? undefined,
+      reason: firstNonEmptyString(input.reason) ?? undefined,
+      reviewedByUserId: undefined,
+      reviewedByEmail: undefined,
+      reviewReason: undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.saveMcpApprovalRequestToMemory(record);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO mcp_approval_requests (
+           id,
+           tenant_id,
+           tool_id,
+           status,
+           requested_by_user_id,
+           requested_by_email,
+           reason,
+           reviewed_by_user_id,
+           reviewed_by_email,
+           review_reason,
+           created_at,
+           updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL, $8::timestamptz, $8::timestamptz)
+         RETURNING id,
+                   tenant_id,
+                   tool_id,
+                   status,
+                   requested_by_user_id,
+                   requested_by_email,
+                   reason,
+                   reviewed_by_user_id,
+                   reviewed_by_email,
+                   review_reason,
+                   created_at,
+                   updated_at`,
+        [
+          record.id,
+          record.tenantId,
+          record.toolId,
+          record.status,
+          record.requestedByUserId,
+          record.requestedByEmail ?? null,
+          record.reason ?? null,
+          record.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        return this.saveMcpApprovalRequestToMemory(record);
+      }
+      return mapMcpApprovalRequestRow(row);
+    } catch (error) {
+      this.disableDb(error, "创建 MCP 审批请求失败");
+      return this.saveMcpApprovalRequestToMemory(record);
+    }
+  }
+
+  async reviewMcpApprovalRequest(
+    tenantId: string,
+    approvalRequestId: string,
+    nextStatus: "approved" | "rejected",
+    input: McpApprovalReviewInput,
+    options: {
+      reviewedByUserId: string;
+      reviewedByEmail?: string;
+    }
+  ): Promise<McpApprovalRequest | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const requestId = firstNonEmptyString(approvalRequestId);
+    if (!requestId) {
+      return null;
+    }
+    const reviewedByUserId = firstNonEmptyString(options.reviewedByUserId);
+    if (!reviewedByUserId) {
+      return null;
+    }
+    const updatedAt = new Date().toISOString();
+    const reviewReason = firstNonEmptyString(input.reason) ?? undefined;
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.reviewMcpApprovalRequestInMemory(
+        normalizedTenantId,
+        requestId,
+        nextStatus,
+        reviewedByUserId,
+        firstNonEmptyString(options.reviewedByEmail) ?? undefined,
+        reviewReason,
+        updatedAt
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `UPDATE mcp_approval_requests
+         SET status = $3,
+             reviewed_by_user_id = $4,
+             reviewed_by_email = $5,
+             review_reason = $6,
+             updated_at = $7::timestamptz
+         WHERE tenant_id = $1
+           AND id = $2
+           AND status = 'pending'
+         RETURNING id,
+                   tenant_id,
+                   tool_id,
+                   status,
+                   requested_by_user_id,
+                   requested_by_email,
+                   reason,
+                   reviewed_by_user_id,
+                   reviewed_by_email,
+                   review_reason,
+                   created_at,
+                   updated_at`,
+        [
+          normalizedTenantId,
+          requestId,
+          nextStatus,
+          reviewedByUserId,
+          firstNonEmptyString(options.reviewedByEmail) ?? null,
+          reviewReason ?? null,
+          updatedAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (row) {
+        return mapMcpApprovalRequestRow(row);
+      }
+      const currentResult = await pool.query(
+        `SELECT id,
+                tenant_id,
+                tool_id,
+                status,
+                requested_by_user_id,
+                requested_by_email,
+                reason,
+                reviewed_by_user_id,
+                reviewed_by_email,
+                review_reason,
+                created_at,
+                updated_at
+         FROM mcp_approval_requests
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [normalizedTenantId, requestId]
+      );
+      const currentRow = currentResult.rows[0];
+      return currentRow ? mapMcpApprovalRequestRow(currentRow) : null;
+    } catch (error) {
+      this.disableDb(error, "审批 MCP 请求失败");
+      return this.reviewMcpApprovalRequestInMemory(
+        normalizedTenantId,
+        requestId,
+        nextStatus,
+        reviewedByUserId,
+        firstNonEmptyString(options.reviewedByEmail) ?? undefined,
+        reviewReason,
+        updatedAt
+      );
+    }
+  }
+
+  async appendMcpInvocationAudit(
+    tenantId: string,
+    input: AppendMcpInvocationInput
+  ): Promise<McpInvocationAudit> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const invocation: McpInvocationAudit = {
+      id: crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      toolId: firstNonEmptyString(input.toolId) ?? "unknown",
+      decision: toMcpToolDecision(input.decision),
+      result:
+        input.result === "blocked" || input.result === "approved" ? input.result : "allowed",
+      approvalRequestId: firstNonEmptyString(input.approvalRequestId) ?? undefined,
+      metadata: toDbRow(input.metadata) ?? {},
+      createdAt: toIsoString(input.createdAt) ?? new Date().toISOString(),
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.saveMcpInvocationAuditToMemory(invocation);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO mcp_invocation_audits (
+           id,
+           tenant_id,
+           tool_id,
+           decision,
+           result,
+           approval_request_id,
+           metadata,
+           created_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::timestamptz)
+         RETURNING id,
+                   tenant_id,
+                   tool_id,
+                   decision,
+                   result,
+                   approval_request_id,
+                   metadata,
+                   created_at`,
+        [
+          invocation.id,
+          invocation.tenantId,
+          invocation.toolId,
+          invocation.decision,
+          invocation.result,
+          invocation.approvalRequestId ?? null,
+          safeStringifyJson(invocation.metadata),
+          invocation.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        return this.saveMcpInvocationAuditToMemory(invocation);
+      }
+      return mapMcpInvocationAuditRow(row);
+    } catch (error) {
+      this.disableDb(error, "写入 MCP 调用审计失败");
+      return this.saveMcpInvocationAuditToMemory(invocation);
+    }
+  }
+
+  async listMcpInvocationAudits(
+    tenantId: string,
+    input: McpInvocationListInput = {}
+  ): Promise<McpInvocationListResult> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalized = normalizeMcpInvocationListInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listMcpInvocationAuditsFromMemory(normalizedTenantId, normalized);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+      if (normalized.toolId) {
+        params.push(normalized.toolId);
+        whereClauses.push(`tool_id = $${params.length}`);
+      }
+      if (normalized.decision) {
+        params.push(normalized.decision);
+        whereClauses.push(`decision = $${params.length}`);
+      }
+      if (normalized.from) {
+        params.push(normalized.from);
+        whereClauses.push(`created_at >= $${params.length}::timestamptz`);
+      }
+      if (normalized.to) {
+        params.push(normalized.to);
+        whereClauses.push(`created_at <= $${params.length}::timestamptz`);
+      }
+      params.push(normalized.limit);
+
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                tool_id,
+                decision,
+                result,
+                approval_request_id,
+                metadata,
+                created_at
+         FROM mcp_invocation_audits
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY created_at DESC, id DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      const items = result.rows.map(mapMcpInvocationAuditRow);
+      return {
+        items,
+        total: items.length,
+      };
+    } catch (error) {
+      this.disableDb(error, "查询 MCP 调用审计失败");
+      return this.listMcpInvocationAuditsFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
   async appendAuditLog(input: AppendAuditLogInput): Promise<void> {
     const tenantId = firstNonEmptyString(input.tenantId);
     const normalizedTenantId = tenantId ?? DEFAULT_TENANT_ID;
@@ -6835,6 +9519,1131 @@ class ControlPlaneRepository {
     }
   }
 
+  async listApiKeys(tenantId: string): Promise<ApiKey[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listApiKeysFromMemory(normalizedTenantId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                name,
+                key_hash,
+                scopes,
+                last_used_at,
+                revoked_at,
+                created_at,
+                updated_at
+         FROM api_keys
+         WHERE tenant_id = $1
+         ORDER BY created_at DESC, id DESC`,
+        [normalizedTenantId]
+      );
+      return result.rows.map(mapApiKeyRow);
+    } catch (error) {
+      this.disableDb(error, "查询 api_keys 失败");
+      return this.listApiKeysFromMemory(normalizedTenantId);
+    }
+  }
+
+  async createApiKey(tenantId: string, input: CreateApiKeyInput): Promise<ApiKey> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const keyHash = firstNonEmptyString(input.keyHash);
+    if (!keyHash) {
+      throw new Error("api_key_hash_required");
+    }
+
+    const createdAt = toIsoString(input.createdAt) ?? new Date().toISOString();
+    const apiKey: ApiKey = {
+      id: crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      name: firstNonEmptyString(input.name) ?? "unnamed-key",
+      keyHash,
+      scopes: normalizeDistinctStringArray(input.scopes, { lowerCase: true }),
+      lastUsedAt: undefined,
+      revokedAt: undefined,
+      createdAt,
+      updatedAt: createdAt,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.createApiKeyToMemory(apiKey);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO api_keys (
+           id,
+           tenant_id,
+           name,
+           key_hash,
+           scopes,
+           last_used_at,
+           revoked_at,
+           created_at,
+           updated_at
+         )
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5::jsonb,
+           NULL,
+           NULL,
+           $6::timestamptz,
+           $6::timestamptz
+         )
+         ON CONFLICT (tenant_id, key_hash)
+         DO NOTHING
+         RETURNING id,
+                   tenant_id,
+                   name,
+                   key_hash,
+                   scopes,
+                   last_used_at,
+                   revoked_at,
+                   created_at,
+                   updated_at`,
+        [
+          apiKey.id,
+          apiKey.tenantId,
+          apiKey.name,
+          apiKey.keyHash,
+          safeStringifyJson(apiKey.scopes),
+          apiKey.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        throw new Error(`api_key_hash_already_exists:${apiKey.tenantId}:${apiKey.keyHash}`);
+      }
+      return mapApiKeyRow(row);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.startsWith("api_key_hash_already_exists:")
+      ) {
+        throw error;
+      }
+      if (isPgUniqueViolation(error)) {
+        throw new Error(`api_key_hash_already_exists:${apiKey.tenantId}:${apiKey.keyHash}`);
+      }
+      this.disableDb(error, "写入 api_keys 失败");
+      return this.createApiKeyToMemory(apiKey);
+    }
+  }
+
+  async revokeApiKey(
+    tenantId: string,
+    apiKeyId: string,
+    revokedAt?: string
+  ): Promise<ApiKey | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedApiKeyId = firstNonEmptyString(apiKeyId);
+    if (!normalizedApiKeyId) {
+      return null;
+    }
+    const updatedAt = toIsoString(revokedAt) ?? new Date().toISOString();
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.revokeApiKeyFromMemory(normalizedTenantId, normalizedApiKeyId, updatedAt);
+    }
+
+    try {
+      const result = await pool.query(
+        `UPDATE api_keys
+         SET revoked_at = COALESCE(revoked_at, $3::timestamptz),
+             updated_at = CASE
+               WHEN revoked_at IS NULL THEN $3::timestamptz
+               ELSE updated_at
+             END
+         WHERE tenant_id = $1
+           AND id = $2
+         RETURNING id,
+                   tenant_id,
+                   name,
+                   key_hash,
+                   scopes,
+                   last_used_at,
+                   revoked_at,
+                   created_at,
+                   updated_at`,
+        [normalizedTenantId, normalizedApiKeyId, updatedAt]
+      );
+      const row = result.rows[0];
+      return row ? mapApiKeyRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "更新 api_keys 吊销状态失败");
+      return this.revokeApiKeyFromMemory(normalizedTenantId, normalizedApiKeyId, updatedAt);
+    }
+  }
+
+  async touchApiKeyUsage(
+    tenantId: string,
+    apiKeyId: string,
+    usedAt?: string
+  ): Promise<ApiKey | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedApiKeyId = firstNonEmptyString(apiKeyId);
+    if (!normalizedApiKeyId) {
+      return null;
+    }
+    const touchedAt = toIsoString(usedAt) ?? new Date().toISOString();
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.touchApiKeyUsageFromMemory(normalizedTenantId, normalizedApiKeyId, touchedAt);
+    }
+
+    try {
+      const result = await pool.query(
+        `UPDATE api_keys
+         SET last_used_at = CASE
+               WHEN revoked_at IS NULL
+                 THEN COALESCE(
+                   GREATEST(last_used_at, $3::timestamptz),
+                   $3::timestamptz
+                 )
+               ELSE last_used_at
+             END,
+             updated_at = CASE
+               WHEN revoked_at IS NULL THEN $3::timestamptz
+               ELSE updated_at
+             END
+         WHERE tenant_id = $1
+           AND id = $2
+         RETURNING id,
+                   tenant_id,
+                   name,
+                   key_hash,
+                   scopes,
+                   last_used_at,
+                   revoked_at,
+                   created_at,
+                   updated_at`,
+        [normalizedTenantId, normalizedApiKeyId, touchedAt]
+      );
+      const row = result.rows[0];
+      return row ? mapApiKeyRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "更新 api_keys 使用时间失败");
+      return this.touchApiKeyUsageFromMemory(normalizedTenantId, normalizedApiKeyId, touchedAt);
+    }
+  }
+
+  async findApiKeyByHash(tenantId: string, keyHash: string): Promise<ApiKey | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedKeyHash = firstNonEmptyString(keyHash);
+    if (!normalizedKeyHash) {
+      return null;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.findApiKeyByHashFromMemory(normalizedTenantId, normalizedKeyHash);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                name,
+                key_hash,
+                scopes,
+                last_used_at,
+                revoked_at,
+                created_at,
+                updated_at
+         FROM api_keys
+         WHERE tenant_id = $1
+           AND key_hash = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedKeyHash]
+      );
+      const row = result.rows[0];
+      return row ? mapApiKeyRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "按 hash 查询 api_keys 失败");
+      return this.findApiKeyByHashFromMemory(normalizedTenantId, normalizedKeyHash);
+    }
+  }
+
+  async listWebhookEndpoints(
+    tenantId: string,
+    limit: number = DEFAULT_WEBHOOK_ENDPOINT_LIMIT
+  ): Promise<WebhookEndpoint[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedLimit = Math.min(
+      500,
+      Math.max(1, toOptionalNonNegativeInteger(limit) ?? DEFAULT_WEBHOOK_ENDPOINT_LIMIT)
+    );
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listWebhookEndpointsFromMemory(normalizedTenantId, normalizedLimit);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                name,
+                url,
+                enabled,
+                event_types,
+                secret_hash,
+                headers,
+                created_at,
+                updated_at
+         FROM webhook_endpoints
+         WHERE tenant_id = $1
+         ORDER BY updated_at DESC, id DESC
+         LIMIT $2`,
+        [normalizedTenantId, normalizedLimit]
+      );
+      return result.rows.map(mapWebhookEndpointRow);
+    } catch (error) {
+      this.disableDb(error, "查询 webhook_endpoints 失败");
+      return this.listWebhookEndpointsFromMemory(normalizedTenantId, normalizedLimit);
+    }
+  }
+
+  async createWebhookEndpoint(
+    tenantId: string,
+    input: CreateWebhookEndpointInput
+  ): Promise<WebhookEndpoint> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const url = firstNonEmptyString(input.url);
+    if (!url) {
+      throw new Error("webhook_endpoint_url_required");
+    }
+
+    const now = new Date().toISOString();
+    const endpoint: WebhookEndpoint = {
+      id: crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      name: firstNonEmptyString(input.name) ?? "unnamed-webhook",
+      url,
+      enabled: input.enabled !== false,
+      eventTypes: normalizeDistinctStringArray(input.eventTypes, { lowerCase: true }),
+      secretHash: firstNonEmptyString(input.secretHash) ?? undefined,
+      headers: normalizeStringRecord(input.headers),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.createWebhookEndpointToMemory(endpoint);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO webhook_endpoints (
+           id,
+           tenant_id,
+           name,
+           url,
+           enabled,
+           event_types,
+           secret_hash,
+           headers,
+           created_at,
+           updated_at
+         )
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6::jsonb,
+           $7,
+           $8::jsonb,
+           $9::timestamptz,
+           $9::timestamptz
+         )
+         ON CONFLICT (tenant_id, name)
+         DO NOTHING
+         RETURNING id,
+                   tenant_id,
+                   name,
+                   url,
+                   enabled,
+                   event_types,
+                   secret_hash,
+                   headers,
+                   created_at,
+                   updated_at`,
+        [
+          endpoint.id,
+          endpoint.tenantId,
+          endpoint.name,
+          endpoint.url,
+          endpoint.enabled,
+          safeStringifyJson(endpoint.eventTypes),
+          endpoint.secretHash ?? null,
+          safeStringifyJson(endpoint.headers),
+          endpoint.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        throw new Error(
+          `webhook_endpoint_name_already_exists:${endpoint.tenantId}:${endpoint.name}`
+        );
+      }
+      return mapWebhookEndpointRow(row);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.startsWith("webhook_endpoint_name_already_exists:")
+      ) {
+        throw error;
+      }
+      if (isPgUniqueViolation(error)) {
+        throw new Error(
+          `webhook_endpoint_name_already_exists:${endpoint.tenantId}:${endpoint.name}`
+        );
+      }
+      this.disableDb(error, "写入 webhook_endpoints 失败");
+      return this.createWebhookEndpointToMemory(endpoint);
+    }
+  }
+
+  async updateWebhookEndpoint(
+    tenantId: string,
+    endpointId: string,
+    input: UpdateWebhookEndpointInput
+  ): Promise<WebhookEndpoint | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedEndpointId = firstNonEmptyString(endpointId);
+    if (!normalizedEndpointId) {
+      return null;
+    }
+
+    const hasSecretHash = Object.prototype.hasOwnProperty.call(input, "secretHash");
+    const normalizedInput: UpdateWebhookEndpointInput = {
+      name: firstNonEmptyString(input.name) ?? undefined,
+      url: firstNonEmptyString(input.url) ?? undefined,
+      enabled: typeof input.enabled === "boolean" ? input.enabled : undefined,
+      eventTypes: Array.isArray(input.eventTypes)
+        ? normalizeDistinctStringArray(input.eventTypes, { lowerCase: true })
+        : undefined,
+      secretHash: hasSecretHash ? firstNonEmptyString(input.secretHash ?? undefined) ?? null : undefined,
+      headers: input.headers !== undefined ? normalizeStringRecord(input.headers) : undefined,
+    };
+    const hasEventTypes = Array.isArray(normalizedInput.eventTypes);
+    const hasHeaders = normalizedInput.headers !== undefined;
+    const updatedAt = new Date().toISOString();
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.updateWebhookEndpointInMemory(
+        normalizedTenantId,
+        normalizedEndpointId,
+        normalizedInput,
+        hasSecretHash,
+        updatedAt
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `UPDATE webhook_endpoints
+         SET name = COALESCE($3, name),
+             url = COALESCE($4, url),
+             enabled = COALESCE($5, enabled),
+             event_types = CASE
+               WHEN $6::boolean THEN $7::jsonb
+               ELSE event_types
+             END,
+             secret_hash = CASE
+               WHEN $8::boolean THEN $9
+               ELSE secret_hash
+             END,
+             headers = CASE
+               WHEN $10::boolean THEN $11::jsonb
+               ELSE headers
+             END,
+             updated_at = $12::timestamptz
+         WHERE tenant_id = $1
+           AND id = $2
+         RETURNING id,
+                   tenant_id,
+                   name,
+                   url,
+                   enabled,
+                   event_types,
+                   secret_hash,
+                   headers,
+                   created_at,
+                   updated_at`,
+        [
+          normalizedTenantId,
+          normalizedEndpointId,
+          normalizedInput.name ?? null,
+          normalizedInput.url ?? null,
+          normalizedInput.enabled ?? null,
+          hasEventTypes,
+          safeStringifyJson(normalizedInput.eventTypes ?? []),
+          hasSecretHash,
+          hasSecretHash ? normalizedInput.secretHash ?? null : null,
+          hasHeaders,
+          safeStringifyJson(normalizedInput.headers ?? {}),
+          updatedAt,
+        ]
+      );
+      const row = result.rows[0];
+      return row ? mapWebhookEndpointRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "更新 webhook_endpoints 失败");
+      return this.updateWebhookEndpointInMemory(
+        normalizedTenantId,
+        normalizedEndpointId,
+        normalizedInput,
+        hasSecretHash,
+        updatedAt
+      );
+    }
+  }
+
+  async deleteWebhookEndpoint(tenantId: string, endpointId: string): Promise<boolean> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedEndpointId = firstNonEmptyString(endpointId);
+    if (!normalizedEndpointId) {
+      return false;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.deleteWebhookEndpointFromMemory(normalizedTenantId, normalizedEndpointId);
+    }
+
+    try {
+      const result = await pool.query(
+        `DELETE FROM webhook_endpoints
+         WHERE tenant_id = $1
+           AND id = $2
+         RETURNING id`,
+        [normalizedTenantId, normalizedEndpointId]
+      );
+      return Boolean(result.rows[0]);
+    } catch (error) {
+      this.disableDb(error, "删除 webhook_endpoints 失败");
+      return this.deleteWebhookEndpointFromMemory(normalizedTenantId, normalizedEndpointId);
+    }
+  }
+
+  async createQualityEvent(tenantId: string, input: CreateQualityEventInput): Promise<QualityEvent> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const scorecardKey = firstNonEmptyString(input.scorecardKey);
+    if (!scorecardKey) {
+      throw new Error("quality_event_scorecard_key_required");
+    }
+    const createdAt = toIsoString(input.createdAt) ?? new Date().toISOString();
+    const score = normalizeQualityScore(input.score);
+    const qualityEvent: QualityEvent = {
+      id: crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      scorecardKey,
+      metricKey: firstNonEmptyString(input.metricKey) ?? undefined,
+      score,
+      passed: typeof input.passed === "boolean" ? input.passed : score >= 0.8,
+      metadata: toDbRow(input.metadata) ?? {},
+      createdAt,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.createQualityEventToMemory(qualityEvent);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO quality_events (
+           id,
+           tenant_id,
+           scorecard_key,
+           metric_key,
+           score,
+           passed,
+           metadata,
+           created_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::timestamptz)
+         RETURNING id,
+                   tenant_id,
+                   scorecard_key,
+                   metric_key,
+                   score,
+                   passed,
+                   metadata,
+                   created_at`,
+        [
+          qualityEvent.id,
+          qualityEvent.tenantId,
+          qualityEvent.scorecardKey,
+          qualityEvent.metricKey ?? null,
+          qualityEvent.score,
+          qualityEvent.passed,
+          safeStringifyJson(qualityEvent.metadata),
+          qualityEvent.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        return this.createQualityEventToMemory(qualityEvent);
+      }
+      return mapQualityEventRow(row);
+    } catch (error) {
+      this.disableDb(error, "写入 quality_events 失败");
+      return this.createQualityEventToMemory(qualityEvent);
+    }
+  }
+
+  async listQualityDailyMetrics(
+    tenantId: string,
+    input: ListQualityDailyMetricsInput = {}
+  ): Promise<QualityDailyMetric[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalized = normalizeQualityDailyMetricsInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listQualityDailyMetricsFromMemory(normalizedTenantId, normalized);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+      if (normalized.from) {
+        params.push(normalized.from);
+        whereClauses.push(`created_at >= $${params.length}::timestamptz`);
+      }
+      if (normalized.to) {
+        params.push(normalized.to);
+        whereClauses.push(`created_at <= $${params.length}::timestamptz`);
+      }
+      if (normalized.scorecardKey) {
+        params.push(normalized.scorecardKey);
+        whereClauses.push(`scorecard_key = $${params.length}`);
+      }
+      params.push(normalized.limit);
+      const result = await pool.query(
+        `SELECT to_char((created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS metric_date,
+                COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE passed)::int AS passed,
+                COUNT(*) FILTER (WHERE NOT passed)::int AS failed,
+                AVG(score)::double precision AS average_score
+         FROM quality_events
+         WHERE ${whereClauses.join(" AND ")}
+         GROUP BY metric_date
+         ORDER BY metric_date DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      return result.rows.map((row) => ({
+        date: firstNonEmptyString(row.metric_date) ?? "1970-01-01",
+        total: Math.max(0, Math.trunc(toNumber(row.total, 0))),
+        passed: Math.max(0, Math.trunc(toNumber(row.passed, 0))),
+        failed: Math.max(0, Math.trunc(toNumber(row.failed, 0))),
+        averageScore: Number(normalizeQualityScore(row.average_score).toFixed(6)),
+      }));
+    } catch (error) {
+      this.disableDb(error, "聚合 quality_events 日指标失败");
+      return this.listQualityDailyMetricsFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
+  async listQualityScorecards(
+    tenantId: string,
+    input: ListQualityScorecardsInput = {}
+  ): Promise<QualityScorecard[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalized = normalizeQualityScorecardListInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listQualityScorecardsFromMemory(normalizedTenantId, normalized);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+      if (normalized.scorecardKey) {
+        params.push(normalized.scorecardKey);
+        whereClauses.push(`scorecard_key = $${params.length}`);
+      }
+      params.push(normalized.limit);
+      const result = await pool.query(
+        `SELECT tenant_id,
+                scorecard_key,
+                title,
+                description,
+                score,
+                dimensions,
+                metadata,
+                created_at,
+                updated_at
+         FROM quality_scorecards
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY updated_at DESC, scorecard_key ASC
+         LIMIT $${params.length}`,
+        params
+      );
+      return result.rows.map(mapQualityScorecardRow);
+    } catch (error) {
+      this.disableDb(error, "查询 quality_scorecards 失败");
+      return this.listQualityScorecardsFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
+  async upsertQualityScorecard(
+    tenantId: string,
+    input: QualityScorecardUpsertInput
+  ): Promise<QualityScorecard> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const scorecardKey = firstNonEmptyString(input.scorecardKey);
+    if (!scorecardKey) {
+      throw new Error("quality_scorecard_key_required");
+    }
+    const updatedAt = toIsoString(input.updatedAt) ?? new Date().toISOString();
+    const qualityScorecard: QualityScorecard = {
+      tenantId: normalizedTenantId,
+      scorecardKey,
+      title: firstNonEmptyString(input.title) ?? scorecardKey,
+      description: firstNonEmptyString(input.description) ?? undefined,
+      score: normalizeQualityScore(input.score),
+      dimensions: normalizeNumericRecord(input.dimensions),
+      metadata: toDbRow(input.metadata) ?? {},
+      createdAt: updatedAt,
+      updatedAt,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.upsertQualityScorecardToMemory(qualityScorecard);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO quality_scorecards (
+           tenant_id,
+           scorecard_key,
+           title,
+           description,
+           score,
+           dimensions,
+           metadata,
+           created_at,
+           updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::timestamptz, $8::timestamptz)
+         ON CONFLICT (tenant_id, scorecard_key)
+         DO UPDATE
+           SET title = EXCLUDED.title,
+               description = EXCLUDED.description,
+               score = EXCLUDED.score,
+               dimensions = EXCLUDED.dimensions,
+               metadata = EXCLUDED.metadata,
+               updated_at = EXCLUDED.updated_at
+         RETURNING tenant_id,
+                   scorecard_key,
+                   title,
+                   description,
+                   score,
+                   dimensions,
+                   metadata,
+                   created_at,
+                   updated_at`,
+        [
+          qualityScorecard.tenantId,
+          qualityScorecard.scorecardKey,
+          qualityScorecard.title,
+          qualityScorecard.description ?? null,
+          qualityScorecard.score,
+          safeStringifyJson(qualityScorecard.dimensions),
+          safeStringifyJson(qualityScorecard.metadata),
+          qualityScorecard.updatedAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        return this.upsertQualityScorecardToMemory(qualityScorecard);
+      }
+      return mapQualityScorecardRow(row);
+    } catch (error) {
+      this.disableDb(error, "写入 quality_scorecards 失败");
+      return this.upsertQualityScorecardToMemory(qualityScorecard);
+    }
+  }
+
+  async createReplayBaseline(
+    tenantId: string,
+    input: CreateReplayBaselineInput
+  ): Promise<ReplayBaseline> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const name = firstNonEmptyString(input.name);
+    if (!name) {
+      throw new Error("replay_baseline_name_required");
+    }
+    const now = toIsoString(input.createdAt) ?? new Date().toISOString();
+    const replayBaseline: ReplayBaseline = {
+      id: crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      name,
+      description: firstNonEmptyString(input.description) ?? undefined,
+      datasetRef: firstNonEmptyString(input.datasetRef) ?? undefined,
+      scenarioCount: Math.max(0, Math.trunc(toNumber(input.scenarioCount, 0))),
+      metadata: toDbRow(input.metadata) ?? {},
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.createReplayBaselineToMemory(replayBaseline);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO replay_baselines (
+           id,
+           tenant_id,
+           name,
+           description,
+           dataset_ref,
+           scenario_count,
+           metadata,
+           created_at,
+           updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::timestamptz, $8::timestamptz)
+         ON CONFLICT (tenant_id, name)
+         DO NOTHING
+         RETURNING id,
+                   tenant_id,
+                   name,
+                   description,
+                   dataset_ref,
+                   scenario_count,
+                   metadata,
+                   created_at,
+                   updated_at`,
+        [
+          replayBaseline.id,
+          replayBaseline.tenantId,
+          replayBaseline.name,
+          replayBaseline.description ?? null,
+          replayBaseline.datasetRef ?? null,
+          replayBaseline.scenarioCount,
+          safeStringifyJson(replayBaseline.metadata),
+          replayBaseline.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        throw new Error(
+          `replay_baseline_name_already_exists:${replayBaseline.tenantId}:${replayBaseline.name}`
+        );
+      }
+      return mapReplayBaselineRow(row);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.startsWith("replay_baseline_name_already_exists:")
+      ) {
+        throw error;
+      }
+      if (isPgUniqueViolation(error)) {
+        throw new Error(
+          `replay_baseline_name_already_exists:${replayBaseline.tenantId}:${replayBaseline.name}`
+        );
+      }
+      this.disableDb(error, "写入 replay_baselines 失败");
+      return this.createReplayBaselineToMemory(replayBaseline);
+    }
+  }
+
+  async listReplayBaselines(
+    tenantId: string,
+    input: ListReplayBaselinesInput = {}
+  ): Promise<ReplayBaseline[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalized = normalizeReplayBaselineListInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listReplayBaselinesFromMemory(normalizedTenantId, normalized);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+      if (normalized.keyword) {
+        params.push(`%${normalized.keyword.toLowerCase()}%`);
+        whereClauses.push(
+          `(LOWER(name) LIKE $${params.length} OR LOWER(COALESCE(description, '')) LIKE $${params.length})`
+        );
+      }
+      params.push(normalized.limit);
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                name,
+                description,
+                dataset_ref,
+                scenario_count,
+                metadata,
+                created_at,
+                updated_at
+         FROM replay_baselines
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY updated_at DESC, id DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      return result.rows.map(mapReplayBaselineRow);
+    } catch (error) {
+      this.disableDb(error, "查询 replay_baselines 失败");
+      return this.listReplayBaselinesFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
+  async createReplayJob(tenantId: string, input: CreateReplayJobInput): Promise<ReplayJob> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const baselineId = firstNonEmptyString(input.baselineId);
+    if (!baselineId) {
+      throw new Error("replay_job_baseline_id_required");
+    }
+    const now = toIsoString(input.createdAt) ?? new Date().toISOString();
+    const replayJob: ReplayJob = {
+      id: crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      baselineId,
+      status: toReplayJobStatus(input.status),
+      parameters: toDbRow(input.parameters) ?? {},
+      summary: toDbRow(input.summary) ?? {},
+      diff: toDbRow(input.diff) ?? {},
+      error: firstNonEmptyString(input.error) ?? undefined,
+      startedAt: toIsoString(input.startedAt) ?? undefined,
+      finishedAt: toIsoString(input.finishedAt) ?? undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.createReplayJobToMemory(replayJob);
+    }
+
+    try {
+      const baselineResult = await pool.query(
+        `SELECT 1
+         FROM replay_baselines
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [replayJob.tenantId, replayJob.baselineId]
+      );
+      if (!baselineResult.rows[0]) {
+        throw new Error(`replay_baseline_not_found:${replayJob.tenantId}:${replayJob.baselineId}`);
+      }
+
+      const result = await pool.query(
+        `INSERT INTO replay_jobs (
+           id,
+           tenant_id,
+           baseline_id,
+           status,
+           parameters,
+           summary_payload,
+           diff_payload,
+           error,
+           started_at,
+           finished_at,
+           created_at,
+           updated_at
+         )
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5::jsonb,
+           $6::jsonb,
+           $7::jsonb,
+           $8,
+           $9::timestamptz,
+           $10::timestamptz,
+           $11::timestamptz,
+           $11::timestamptz
+         )
+         RETURNING id,
+                   tenant_id,
+                   baseline_id,
+                   status,
+                   parameters,
+                   summary_payload,
+                   diff_payload,
+                   error,
+                   started_at,
+                   finished_at,
+                   created_at,
+                   updated_at`,
+        [
+          replayJob.id,
+          replayJob.tenantId,
+          replayJob.baselineId,
+          replayJob.status,
+          safeStringifyJson(replayJob.parameters),
+          safeStringifyJson(replayJob.summary),
+          safeStringifyJson(replayJob.diff),
+          replayJob.error ?? null,
+          replayJob.startedAt ?? null,
+          replayJob.finishedAt ?? null,
+          replayJob.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        return this.createReplayJobToMemory(replayJob);
+      }
+      return mapReplayJobRow(row);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.startsWith("replay_baseline_not_found:")
+      ) {
+        throw error;
+      }
+      this.disableDb(error, "写入 replay_jobs 失败");
+      return this.createReplayJobToMemory(replayJob);
+    }
+  }
+
+  async listReplayJobs(
+    tenantId: string,
+    input: ListReplayJobsInput = {}
+  ): Promise<ReplayJob[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalized = normalizeReplayJobListInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listReplayJobsFromMemory(normalizedTenantId, normalized);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+      if (normalized.baselineId) {
+        params.push(normalized.baselineId);
+        whereClauses.push(`baseline_id = $${params.length}`);
+      }
+      if (normalized.status) {
+        params.push(normalized.status);
+        whereClauses.push(`status = $${params.length}`);
+      }
+      params.push(normalized.limit);
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                baseline_id,
+                status,
+                parameters,
+                summary_payload,
+                diff_payload,
+                error,
+                started_at,
+                finished_at,
+                created_at,
+                updated_at
+         FROM replay_jobs
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY created_at DESC, id DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      return result.rows.map(mapReplayJobRow);
+    } catch (error) {
+      this.disableDb(error, "查询 replay_jobs 失败");
+      return this.listReplayJobsFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
+  async getReplayJobById(tenantId: string, replayJobId: string): Promise<ReplayJob | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedReplayJobId = firstNonEmptyString(replayJobId);
+    if (!normalizedReplayJobId) {
+      return null;
+    }
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getReplayJobByIdFromMemory(normalizedTenantId, normalizedReplayJobId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                baseline_id,
+                status,
+                parameters,
+                summary_payload,
+                diff_payload,
+                error,
+                started_at,
+                finished_at,
+                created_at,
+                updated_at
+         FROM replay_jobs
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedReplayJobId]
+      );
+      const row = result.rows[0];
+      return row ? mapReplayJobRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询 replay_jobs 单条记录失败");
+      return this.getReplayJobByIdFromMemory(normalizedTenantId, normalizedReplayJobId);
+    }
+  }
+
+  async getReplayJobDiff(
+    tenantId: string,
+    replayJobId: string
+  ): Promise<Record<string, unknown> | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedReplayJobId = firstNonEmptyString(replayJobId);
+    if (!normalizedReplayJobId) {
+      return null;
+    }
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getReplayJobDiffFromMemory(normalizedTenantId, normalizedReplayJobId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT diff_payload
+         FROM replay_jobs
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedReplayJobId]
+      );
+      const row = result.rows[0];
+      return row ? toDbRow(row.diff_payload) ?? {} : null;
+    } catch (error) {
+      this.disableDb(error, "查询 replay_jobs diff 失败");
+      return this.getReplayJobDiffFromMemory(normalizedTenantId, normalizedReplayJobId);
+    }
+  }
+
   private async getPool(): Promise<PgPool | null> {
     await this.ensureInitialized();
     return this.pool;
@@ -7966,6 +11775,652 @@ class ControlPlaneRepository {
     );
 
     await pool.query(
+      `CREATE TABLE IF NOT EXISTS alert_orchestration_rules (
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         id TEXT NOT NULL,
+         name TEXT NOT NULL,
+         enabled BOOLEAN NOT NULL DEFAULT TRUE,
+         event_type TEXT NOT NULL DEFAULT 'alert',
+         severity TEXT,
+         source_id TEXT,
+         dedupe_window_seconds INTEGER NOT NULL DEFAULT 0,
+         suppression_window_seconds INTEGER NOT NULL DEFAULT 0,
+         merge_window_seconds INTEGER NOT NULL DEFAULT 0,
+         sla_minutes INTEGER,
+         channels JSONB NOT NULL DEFAULT '[]'::jsonb,
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         PRIMARY KEY (tenant_id, id)
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE alert_orchestration_rules
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS id TEXT,
+         ADD COLUMN IF NOT EXISTS name TEXT,
+         ADD COLUMN IF NOT EXISTS enabled BOOLEAN,
+         ADD COLUMN IF NOT EXISTS event_type TEXT,
+         ADD COLUMN IF NOT EXISTS severity TEXT,
+         ADD COLUMN IF NOT EXISTS source_id TEXT,
+         ADD COLUMN IF NOT EXISTS dedupe_window_seconds INTEGER,
+         ADD COLUMN IF NOT EXISTS suppression_window_seconds INTEGER,
+         ADD COLUMN IF NOT EXISTS merge_window_seconds INTEGER,
+         ADD COLUMN IF NOT EXISTS sla_minutes INTEGER,
+         ADD COLUMN IF NOT EXISTS channels JSONB,
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ`
+    );
+
+    await pool.query(
+      `UPDATE alert_orchestration_rules
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           id = COALESCE(
+             NULLIF(id, ''),
+             md5(random()::text || clock_timestamp()::text)
+           ),
+           name = COALESCE(NULLIF(name, ''), 'unnamed-rule'),
+           enabled = COALESCE(enabled, TRUE),
+           event_type = CASE
+             WHEN event_type IN ('alert', 'weekly') THEN event_type
+             ELSE 'alert'
+           END,
+           severity = CASE
+             WHEN severity IN ('warning', 'critical') THEN severity
+             WHEN NULLIF(severity, '') IS NULL THEN NULL
+             ELSE NULL
+           END,
+           source_id = NULLIF(source_id, ''),
+           dedupe_window_seconds = GREATEST(COALESCE(dedupe_window_seconds, 0), 0),
+           suppression_window_seconds = GREATEST(COALESCE(suppression_window_seconds, 0), 0),
+           merge_window_seconds = GREATEST(COALESCE(merge_window_seconds, 0), 0),
+           sla_minutes = CASE
+             WHEN sla_minutes IS NULL THEN NULL
+             WHEN sla_minutes < 0 THEN 0
+             ELSE sla_minutes
+           END,
+           channels = CASE
+             WHEN jsonb_typeof(channels) = 'array' THEN channels
+             ELSE '[]'::jsonb
+           END,
+           updated_at = COALESCE(updated_at, created_at, NOW()),
+           created_at = COALESCE(created_at, updated_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR id IS NULL
+          OR id = ''
+          OR name IS NULL
+          OR name = ''
+          OR enabled IS NULL
+          OR event_type IS NULL
+          OR event_type NOT IN ('alert', 'weekly')
+          OR severity = ''
+          OR source_id = ''
+          OR dedupe_window_seconds IS NULL
+          OR dedupe_window_seconds < 0
+          OR suppression_window_seconds IS NULL
+          OR suppression_window_seconds < 0
+          OR merge_window_seconds IS NULL
+          OR merge_window_seconds < 0
+          OR sla_minutes < 0
+          OR channels IS NULL
+          OR jsonb_typeof(channels) <> 'array'
+          OR updated_at IS NULL
+          OR created_at IS NULL`
+    );
+
+    await pool.query(
+      `WITH ranked AS (
+         SELECT ctid,
+                ROW_NUMBER() OVER (
+                  PARTITION BY tenant_id, id
+                  ORDER BY updated_at DESC, created_at DESC, ctid DESC
+                ) AS row_index
+         FROM alert_orchestration_rules
+       )
+       DELETE FROM alert_orchestration_rules AS rules
+       USING ranked
+       WHERE rules.ctid = ranked.ctid
+         AND ranked.row_index > 1`
+    );
+
+    await pool.query(
+      `ALTER TABLE alert_orchestration_rules
+         ALTER COLUMN tenant_id SET DEFAULT '${DEFAULT_TENANT_ID}',
+         ALTER COLUMN tenant_id SET NOT NULL,
+         ALTER COLUMN id SET NOT NULL,
+         ALTER COLUMN name SET NOT NULL,
+         ALTER COLUMN enabled SET DEFAULT TRUE,
+         ALTER COLUMN enabled SET NOT NULL,
+         ALTER COLUMN event_type SET DEFAULT 'alert',
+         ALTER COLUMN event_type SET NOT NULL,
+         ALTER COLUMN dedupe_window_seconds SET DEFAULT 0,
+         ALTER COLUMN dedupe_window_seconds SET NOT NULL,
+         ALTER COLUMN suppression_window_seconds SET DEFAULT 0,
+         ALTER COLUMN suppression_window_seconds SET NOT NULL,
+         ALTER COLUMN merge_window_seconds SET DEFAULT 0,
+         ALTER COLUMN merge_window_seconds SET NOT NULL,
+         ALTER COLUMN channels SET DEFAULT '[]'::jsonb,
+         ALTER COLUMN channels SET NOT NULL,
+         ALTER COLUMN updated_at SET DEFAULT NOW(),
+         ALTER COLUMN updated_at SET NOT NULL,
+         ALTER COLUMN created_at SET DEFAULT NOW(),
+         ALTER COLUMN created_at SET NOT NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_orchestration_rules_tenant_rule
+       ON alert_orchestration_rules (tenant_id, id)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_alert_orchestration_rules_tenant_updated_at
+       ON alert_orchestration_rules (tenant_id, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_alert_orchestration_rules_filters
+       ON alert_orchestration_rules (
+         tenant_id,
+         event_type,
+         enabled,
+         severity,
+         source_id,
+         updated_at DESC
+       )`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS tenant_residency_policies (
+         tenant_id TEXT PRIMARY KEY,
+         mode TEXT NOT NULL DEFAULT 'single_region',
+         primary_region TEXT NOT NULL DEFAULT 'cn-hangzhou',
+         replica_regions JSONB NOT NULL DEFAULT '[]'::jsonb,
+         allow_cross_region_transfer BOOLEAN NOT NULL DEFAULT FALSE,
+         require_transfer_approval BOOLEAN NOT NULL DEFAULT FALSE,
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE tenant_residency_policies
+         ADD COLUMN IF NOT EXISTS mode TEXT,
+         ADD COLUMN IF NOT EXISTS primary_region TEXT,
+         ADD COLUMN IF NOT EXISTS replica_regions JSONB,
+         ADD COLUMN IF NOT EXISTS allow_cross_region_transfer BOOLEAN,
+         ADD COLUMN IF NOT EXISTS require_transfer_approval BOOLEAN,
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ`
+    );
+
+    await pool.query(
+      `UPDATE tenant_residency_policies
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           mode = CASE
+             WHEN mode IN ('single_region', 'active_active') THEN mode
+             ELSE 'single_region'
+           END,
+           primary_region = COALESCE(NULLIF(primary_region, ''), 'cn-hangzhou'),
+           replica_regions = CASE
+             WHEN jsonb_typeof(replica_regions) = 'array' THEN replica_regions
+             ELSE '[]'::jsonb
+           END,
+           allow_cross_region_transfer = COALESCE(allow_cross_region_transfer, FALSE),
+           require_transfer_approval = COALESCE(require_transfer_approval, FALSE),
+           updated_at = COALESCE(updated_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR mode IS NULL
+          OR mode NOT IN ('single_region', 'active_active')
+          OR primary_region IS NULL
+          OR primary_region = ''
+          OR replica_regions IS NULL
+          OR jsonb_typeof(replica_regions) <> 'array'
+          OR allow_cross_region_transfer IS NULL
+          OR require_transfer_approval IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS residency_replication_jobs (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         source_region TEXT NOT NULL DEFAULT 'cn-hangzhou',
+         target_region TEXT NOT NULL DEFAULT 'cn-shanghai',
+         status TEXT NOT NULL DEFAULT 'pending',
+         reason TEXT,
+         created_by_user_id TEXT,
+         approved_by_user_id TEXT,
+         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         started_at TIMESTAMPTZ,
+         finished_at TIMESTAMPTZ
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE residency_replication_jobs
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS source_region TEXT,
+         ADD COLUMN IF NOT EXISTS target_region TEXT,
+         ADD COLUMN IF NOT EXISTS status TEXT,
+         ADD COLUMN IF NOT EXISTS reason TEXT,
+         ADD COLUMN IF NOT EXISTS created_by_user_id TEXT,
+         ADD COLUMN IF NOT EXISTS approved_by_user_id TEXT,
+         ADD COLUMN IF NOT EXISTS metadata JSONB,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ`
+    );
+
+    await pool.query(
+      `UPDATE residency_replication_jobs
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           source_region = COALESCE(NULLIF(source_region, ''), 'cn-hangzhou'),
+           target_region = COALESCE(NULLIF(target_region, ''), 'cn-shanghai'),
+           status = CASE
+             WHEN status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled') THEN status
+             ELSE 'pending'
+           END,
+           reason = NULLIF(reason, ''),
+           created_by_user_id = NULLIF(created_by_user_id, ''),
+           approved_by_user_id = NULLIF(approved_by_user_id, ''),
+           metadata = COALESCE(metadata, '{}'::jsonb),
+           created_at = COALESCE(created_at, NOW()),
+           updated_at = COALESCE(updated_at, created_at, NOW()),
+           started_at = started_at,
+           finished_at = finished_at
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR source_region IS NULL
+          OR source_region = ''
+          OR target_region IS NULL
+          OR target_region = ''
+          OR status IS NULL
+          OR status NOT IN ('pending', 'running', 'succeeded', 'failed', 'cancelled')
+          OR metadata IS NULL
+          OR created_at IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_residency_replication_jobs_tenant_created_at
+       ON residency_replication_jobs (tenant_id, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_residency_replication_jobs_tenant_status_updated_at
+       ON residency_replication_jobs (tenant_id, status, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS rule_assets (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         name TEXT NOT NULL,
+         description TEXT,
+         status TEXT NOT NULL DEFAULT 'draft',
+         latest_version INTEGER NOT NULL DEFAULT 0,
+         published_version INTEGER,
+         scope_binding JSONB NOT NULL DEFAULT '{}'::jsonb,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE rule_assets
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS name TEXT,
+         ADD COLUMN IF NOT EXISTS description TEXT,
+         ADD COLUMN IF NOT EXISTS status TEXT,
+         ADD COLUMN IF NOT EXISTS latest_version INTEGER,
+         ADD COLUMN IF NOT EXISTS published_version INTEGER,
+         ADD COLUMN IF NOT EXISTS scope_binding JSONB,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ`
+    );
+
+    await pool.query(
+      `UPDATE rule_assets
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           name = COALESCE(NULLIF(name, ''), id),
+           description = NULLIF(description, ''),
+           status = CASE
+             WHEN status IN ('draft', 'published', 'deprecated') THEN status
+             ELSE 'draft'
+           END,
+           latest_version = GREATEST(COALESCE(latest_version, 0), 0),
+           published_version = CASE
+             WHEN published_version IS NULL THEN NULL
+             ELSE GREATEST(published_version, 0)
+           END,
+           scope_binding = CASE
+             WHEN jsonb_typeof(scope_binding) = 'object' THEN scope_binding
+             ELSE '{}'::jsonb
+           END,
+           created_at = COALESCE(created_at, NOW()),
+           updated_at = COALESCE(updated_at, created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR name IS NULL
+          OR name = ''
+          OR status IS NULL
+          OR status NOT IN ('draft', 'published', 'deprecated')
+          OR latest_version IS NULL
+          OR latest_version < 0
+          OR published_version < 0
+          OR scope_binding IS NULL
+          OR jsonb_typeof(scope_binding) <> 'object'
+          OR created_at IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_rule_assets_tenant_updated_at
+       ON rule_assets (tenant_id, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_rule_assets_tenant_status_updated_at
+       ON rule_assets (tenant_id, status, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS rule_asset_versions (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         asset_id TEXT NOT NULL,
+         version INTEGER NOT NULL,
+         content TEXT NOT NULL,
+         changelog TEXT,
+         created_by_user_id TEXT,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE rule_asset_versions
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS asset_id TEXT,
+         ADD COLUMN IF NOT EXISTS version INTEGER,
+         ADD COLUMN IF NOT EXISTS content TEXT,
+         ADD COLUMN IF NOT EXISTS changelog TEXT,
+         ADD COLUMN IF NOT EXISTS created_by_user_id TEXT,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ`
+    );
+
+    await pool.query(
+      `UPDATE rule_asset_versions
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           asset_id = COALESCE(NULLIF(asset_id, ''), 'unknown'),
+           version = GREATEST(COALESCE(version, 1), 1),
+           content = COALESCE(content, ''),
+           changelog = NULLIF(changelog, ''),
+           created_by_user_id = NULLIF(created_by_user_id, ''),
+           created_at = COALESCE(created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR asset_id IS NULL
+          OR asset_id = ''
+          OR version IS NULL
+          OR version < 1
+          OR content IS NULL
+          OR created_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_asset_versions_tenant_asset_version
+       ON rule_asset_versions (tenant_id, asset_id, version)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_rule_asset_versions_tenant_asset_created_at
+       ON rule_asset_versions (tenant_id, asset_id, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS rule_approvals (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         asset_id TEXT NOT NULL,
+         version INTEGER NOT NULL,
+         approver_user_id TEXT NOT NULL,
+         approver_email TEXT,
+         decision TEXT NOT NULL DEFAULT 'approved',
+         reason TEXT,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE rule_approvals
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS asset_id TEXT,
+         ADD COLUMN IF NOT EXISTS version INTEGER,
+         ADD COLUMN IF NOT EXISTS approver_user_id TEXT,
+         ADD COLUMN IF NOT EXISTS approver_email TEXT,
+         ADD COLUMN IF NOT EXISTS decision TEXT,
+         ADD COLUMN IF NOT EXISTS reason TEXT,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ`
+    );
+
+    await pool.query(
+      `UPDATE rule_approvals
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           asset_id = COALESCE(NULLIF(asset_id, ''), 'unknown'),
+           version = GREATEST(COALESCE(version, 1), 1),
+           approver_user_id = COALESCE(NULLIF(approver_user_id, ''), 'unknown'),
+           approver_email = NULLIF(approver_email, ''),
+           decision = CASE
+             WHEN decision IN ('approved', 'rejected') THEN decision
+             ELSE 'approved'
+           END,
+           reason = NULLIF(reason, ''),
+           created_at = COALESCE(created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR asset_id IS NULL
+          OR asset_id = ''
+          OR version IS NULL
+          OR version < 1
+          OR approver_user_id IS NULL
+          OR approver_user_id = ''
+          OR decision IS NULL
+          OR decision NOT IN ('approved', 'rejected')
+          OR created_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_approvals_tenant_asset_version_approver
+       ON rule_approvals (tenant_id, asset_id, version, approver_user_id)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_rule_approvals_tenant_asset_created_at
+       ON rule_approvals (tenant_id, asset_id, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS mcp_tool_policies (
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         tool_id TEXT NOT NULL,
+         risk_level TEXT NOT NULL DEFAULT 'medium',
+         decision TEXT NOT NULL DEFAULT 'require_approval',
+         reason TEXT,
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         PRIMARY KEY (tenant_id, tool_id)
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE mcp_tool_policies
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS tool_id TEXT,
+         ADD COLUMN IF NOT EXISTS risk_level TEXT,
+         ADD COLUMN IF NOT EXISTS decision TEXT,
+         ADD COLUMN IF NOT EXISTS reason TEXT,
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ`
+    );
+
+    await pool.query(
+      `UPDATE mcp_tool_policies
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           tool_id = COALESCE(NULLIF(tool_id, ''), 'unknown'),
+           risk_level = CASE
+             WHEN risk_level IN ('low', 'medium', 'high') THEN risk_level
+             ELSE 'medium'
+           END,
+           decision = CASE
+             WHEN decision IN ('allow', 'deny', 'require_approval') THEN decision
+             ELSE 'require_approval'
+           END,
+           reason = NULLIF(reason, ''),
+           updated_at = COALESCE(updated_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR tool_id IS NULL
+          OR tool_id = ''
+          OR risk_level IS NULL
+          OR risk_level NOT IN ('low', 'medium', 'high')
+          OR decision IS NULL
+          OR decision NOT IN ('allow', 'deny', 'require_approval')
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_mcp_tool_policies_tenant_updated_at
+       ON mcp_tool_policies (tenant_id, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS mcp_approval_requests (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         tool_id TEXT NOT NULL,
+         status TEXT NOT NULL DEFAULT 'pending',
+         requested_by_user_id TEXT NOT NULL,
+         requested_by_email TEXT,
+         reason TEXT,
+         reviewed_by_user_id TEXT,
+         reviewed_by_email TEXT,
+         review_reason TEXT,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE mcp_approval_requests
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS tool_id TEXT,
+         ADD COLUMN IF NOT EXISTS status TEXT,
+         ADD COLUMN IF NOT EXISTS requested_by_user_id TEXT,
+         ADD COLUMN IF NOT EXISTS requested_by_email TEXT,
+         ADD COLUMN IF NOT EXISTS reason TEXT,
+         ADD COLUMN IF NOT EXISTS reviewed_by_user_id TEXT,
+         ADD COLUMN IF NOT EXISTS reviewed_by_email TEXT,
+         ADD COLUMN IF NOT EXISTS review_reason TEXT,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ`
+    );
+
+    await pool.query(
+      `UPDATE mcp_approval_requests
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           tool_id = COALESCE(NULLIF(tool_id, ''), 'unknown'),
+           status = CASE
+             WHEN status IN ('pending', 'approved', 'rejected') THEN status
+             ELSE 'pending'
+           END,
+           requested_by_user_id = COALESCE(NULLIF(requested_by_user_id, ''), 'unknown'),
+           requested_by_email = NULLIF(requested_by_email, ''),
+           reason = NULLIF(reason, ''),
+           reviewed_by_user_id = NULLIF(reviewed_by_user_id, ''),
+           reviewed_by_email = NULLIF(reviewed_by_email, ''),
+           review_reason = NULLIF(review_reason, ''),
+           created_at = COALESCE(created_at, NOW()),
+           updated_at = COALESCE(updated_at, created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR tool_id IS NULL
+          OR tool_id = ''
+          OR status IS NULL
+          OR status NOT IN ('pending', 'approved', 'rejected')
+          OR requested_by_user_id IS NULL
+          OR requested_by_user_id = ''
+          OR created_at IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_mcp_approval_requests_tenant_status_updated_at
+       ON mcp_approval_requests (tenant_id, status, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS mcp_invocation_audits (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         tool_id TEXT NOT NULL,
+         decision TEXT NOT NULL DEFAULT 'require_approval',
+         result TEXT NOT NULL DEFAULT 'allowed',
+         approval_request_id TEXT,
+         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE mcp_invocation_audits
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS tool_id TEXT,
+         ADD COLUMN IF NOT EXISTS decision TEXT,
+         ADD COLUMN IF NOT EXISTS result TEXT,
+         ADD COLUMN IF NOT EXISTS approval_request_id TEXT,
+         ADD COLUMN IF NOT EXISTS metadata JSONB,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ`
+    );
+
+    await pool.query(
+      `UPDATE mcp_invocation_audits
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           tool_id = COALESCE(NULLIF(tool_id, ''), 'unknown'),
+           decision = CASE
+             WHEN decision IN ('allow', 'deny', 'require_approval') THEN decision
+             ELSE 'require_approval'
+           END,
+           result = CASE
+             WHEN result IN ('allowed', 'blocked', 'approved') THEN result
+             ELSE 'allowed'
+           END,
+           approval_request_id = NULLIF(approval_request_id, ''),
+           metadata = COALESCE(metadata, '{}'::jsonb),
+           created_at = COALESCE(created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR tool_id IS NULL
+          OR tool_id = ''
+          OR decision IS NULL
+          OR decision NOT IN ('allow', 'deny', 'require_approval')
+          OR result IS NULL
+          OR result NOT IN ('allowed', 'blocked', 'approved')
+          OR metadata IS NULL
+          OR created_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_mcp_invocation_audits_tenant_created_at
+       ON mcp_invocation_audits (tenant_id, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_mcp_invocation_audits_tenant_tool_created_at
+       ON mcp_invocation_audits (tenant_id, tool_id, created_at DESC)`
+    );
+
+    await pool.query(
       `CREATE TABLE IF NOT EXISTS budget_release_requests (
          id TEXT PRIMARY KEY,
          tenant_id TEXT NOT NULL DEFAULT 'default',
@@ -8904,6 +13359,445 @@ class ControlPlaneRepository {
       `CREATE INDEX IF NOT EXISTS idx_identity_source_bindings_tenant_device_updated_at
        ON identity_source_bindings (tenant_id, device_id, updated_at DESC)`
     );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS api_keys (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         name TEXT NOT NULL DEFAULT '',
+         key_hash TEXT NOT NULL,
+         scopes JSONB NOT NULL DEFAULT '[]'::jsonb,
+         last_used_at TIMESTAMPTZ,
+         revoked_at TIMESTAMPTZ,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE api_keys
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS name TEXT,
+         ADD COLUMN IF NOT EXISTS key_hash TEXT,
+         ADD COLUMN IF NOT EXISTS scopes JSONB NOT NULL DEFAULT '[]'::jsonb,
+         ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE api_keys
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           name = COALESCE(NULLIF(name, ''), id),
+           key_hash = COALESCE(
+             NULLIF(key_hash, ''),
+             md5(COALESCE(NULLIF(id, ''), random()::text) || ':' || COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'))
+           ),
+           scopes = CASE
+             WHEN jsonb_typeof(scopes) = 'array' THEN scopes
+             ELSE '[]'::jsonb
+           END,
+           created_at = COALESCE(created_at, NOW()),
+           updated_at = COALESCE(updated_at, created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR name IS NULL
+          OR name = ''
+          OR key_hash IS NULL
+          OR key_hash = ''
+          OR scopes IS NULL
+          OR jsonb_typeof(scopes) <> 'array'
+          OR created_at IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_tenant_id_unique
+       ON api_keys (tenant_id, id)`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_tenant_hash_unique
+       ON api_keys (tenant_id, key_hash)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_api_keys_tenant_created_at
+       ON api_keys (tenant_id, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_api_keys_tenant_revoked_at_updated_at
+       ON api_keys (tenant_id, revoked_at, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS webhook_endpoints (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         name TEXT NOT NULL DEFAULT '',
+         url TEXT NOT NULL DEFAULT '',
+         enabled BOOLEAN NOT NULL DEFAULT TRUE,
+         event_types JSONB NOT NULL DEFAULT '[]'::jsonb,
+         secret_hash TEXT,
+         headers JSONB NOT NULL DEFAULT '{}'::jsonb,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE webhook_endpoints
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS name TEXT,
+         ADD COLUMN IF NOT EXISTS url TEXT,
+         ADD COLUMN IF NOT EXISTS enabled BOOLEAN,
+         ADD COLUMN IF NOT EXISTS event_types JSONB NOT NULL DEFAULT '[]'::jsonb,
+         ADD COLUMN IF NOT EXISTS secret_hash TEXT,
+         ADD COLUMN IF NOT EXISTS headers JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE webhook_endpoints
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           name = COALESCE(NULLIF(name, ''), id),
+           url = COALESCE(NULLIF(url, ''), 'http://localhost'),
+           enabled = COALESCE(enabled, TRUE),
+           event_types = CASE
+             WHEN jsonb_typeof(event_types) = 'array' THEN event_types
+             ELSE '[]'::jsonb
+           END,
+           secret_hash = NULLIF(secret_hash, ''),
+           headers = CASE
+             WHEN jsonb_typeof(headers) = 'object' THEN headers
+             ELSE '{}'::jsonb
+           END,
+           created_at = COALESCE(created_at, NOW()),
+           updated_at = COALESCE(updated_at, created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR name IS NULL
+          OR name = ''
+          OR url IS NULL
+          OR url = ''
+          OR enabled IS NULL
+          OR event_types IS NULL
+          OR jsonb_typeof(event_types) <> 'array'
+          OR secret_hash = ''
+          OR headers IS NULL
+          OR jsonb_typeof(headers) <> 'object'
+          OR created_at IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_endpoints_tenant_id_unique
+       ON webhook_endpoints (tenant_id, id)`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_endpoints_tenant_name_unique
+       ON webhook_endpoints (tenant_id, name)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_webhook_endpoints_tenant_enabled_updated_at
+       ON webhook_endpoints (tenant_id, enabled, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS quality_events (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         scorecard_key TEXT NOT NULL DEFAULT 'default',
+         metric_key TEXT,
+         score NUMERIC(10, 6) NOT NULL DEFAULT 0,
+         passed BOOLEAN NOT NULL DEFAULT FALSE,
+         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE quality_events
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS scorecard_key TEXT,
+         ADD COLUMN IF NOT EXISTS metric_key TEXT,
+         ADD COLUMN IF NOT EXISTS score NUMERIC(10, 6),
+         ADD COLUMN IF NOT EXISTS passed BOOLEAN,
+         ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE quality_events
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           scorecard_key = COALESCE(NULLIF(scorecard_key, ''), 'default'),
+           metric_key = NULLIF(metric_key, ''),
+           score = GREATEST(COALESCE(score, 0), 0),
+           passed = COALESCE(passed, FALSE),
+           metadata = COALESCE(metadata, '{}'::jsonb),
+           created_at = COALESCE(created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR scorecard_key IS NULL
+          OR scorecard_key = ''
+          OR metric_key = ''
+          OR score IS NULL
+          OR score < 0
+          OR passed IS NULL
+          OR metadata IS NULL
+          OR created_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_quality_events_tenant_id_unique
+       ON quality_events (tenant_id, id)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_quality_events_tenant_created_at
+       ON quality_events (tenant_id, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_quality_events_tenant_scorecard_created_at
+       ON quality_events (tenant_id, scorecard_key, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS quality_scorecards (
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         scorecard_key TEXT NOT NULL,
+         title TEXT NOT NULL DEFAULT '',
+         description TEXT,
+         score NUMERIC(10, 6) NOT NULL DEFAULT 0,
+         dimensions JSONB NOT NULL DEFAULT '{}'::jsonb,
+         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         PRIMARY KEY (tenant_id, scorecard_key)
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE quality_scorecards
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS scorecard_key TEXT,
+         ADD COLUMN IF NOT EXISTS title TEXT,
+         ADD COLUMN IF NOT EXISTS description TEXT,
+         ADD COLUMN IF NOT EXISTS score NUMERIC(10, 6),
+         ADD COLUMN IF NOT EXISTS dimensions JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE quality_scorecards
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           scorecard_key = COALESCE(NULLIF(scorecard_key, ''), 'default'),
+           title = COALESCE(NULLIF(title, ''), scorecard_key),
+           description = NULLIF(description, ''),
+           score = GREATEST(COALESCE(score, 0), 0),
+           dimensions = CASE
+             WHEN jsonb_typeof(dimensions) = 'object' THEN dimensions
+             ELSE '{}'::jsonb
+           END,
+           metadata = CASE
+             WHEN jsonb_typeof(metadata) = 'object' THEN metadata
+             ELSE '{}'::jsonb
+           END,
+           created_at = COALESCE(created_at, NOW()),
+           updated_at = COALESCE(updated_at, created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR scorecard_key IS NULL
+          OR scorecard_key = ''
+          OR title IS NULL
+          OR title = ''
+          OR description = ''
+          OR score IS NULL
+          OR score < 0
+          OR dimensions IS NULL
+          OR jsonb_typeof(dimensions) <> 'object'
+          OR metadata IS NULL
+          OR jsonb_typeof(metadata) <> 'object'
+          OR created_at IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_quality_scorecards_tenant_key_unique
+       ON quality_scorecards (tenant_id, scorecard_key)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_quality_scorecards_tenant_updated_at
+       ON quality_scorecards (tenant_id, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS replay_baselines (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         name TEXT NOT NULL DEFAULT '',
+         description TEXT,
+         dataset_ref TEXT,
+         scenario_count INTEGER NOT NULL DEFAULT 0,
+         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE replay_baselines
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS name TEXT,
+         ADD COLUMN IF NOT EXISTS description TEXT,
+         ADD COLUMN IF NOT EXISTS dataset_ref TEXT,
+         ADD COLUMN IF NOT EXISTS scenario_count INTEGER,
+         ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE replay_baselines
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           name = COALESCE(NULLIF(name, ''), id),
+           description = NULLIF(description, ''),
+           dataset_ref = NULLIF(dataset_ref, ''),
+           scenario_count = GREATEST(COALESCE(scenario_count, 0), 0),
+           metadata = CASE
+             WHEN jsonb_typeof(metadata) = 'object' THEN metadata
+             ELSE '{}'::jsonb
+           END,
+           created_at = COALESCE(created_at, NOW()),
+           updated_at = COALESCE(updated_at, created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR name IS NULL
+          OR name = ''
+          OR description = ''
+          OR dataset_ref = ''
+          OR scenario_count IS NULL
+          OR scenario_count < 0
+          OR metadata IS NULL
+          OR jsonb_typeof(metadata) <> 'object'
+          OR created_at IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_replay_baselines_tenant_id_unique
+       ON replay_baselines (tenant_id, id)`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_replay_baselines_tenant_name_unique
+       ON replay_baselines (tenant_id, name)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_replay_baselines_tenant_updated_at
+       ON replay_baselines (tenant_id, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS replay_jobs (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         baseline_id TEXT NOT NULL,
+         status TEXT NOT NULL DEFAULT 'pending',
+         parameters JSONB NOT NULL DEFAULT '{}'::jsonb,
+         summary_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+         diff_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+         error TEXT,
+         started_at TIMESTAMPTZ,
+         finished_at TIMESTAMPTZ,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE replay_jobs
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS baseline_id TEXT,
+         ADD COLUMN IF NOT EXISTS status TEXT,
+         ADD COLUMN IF NOT EXISTS parameters JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS summary_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS diff_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS error TEXT,
+         ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE replay_jobs
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           baseline_id = COALESCE(NULLIF(baseline_id, ''), id),
+           status = CASE
+             WHEN status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled') THEN status
+             WHEN status = 'success' THEN 'succeeded'
+             WHEN status = 'canceled' THEN 'cancelled'
+             ELSE 'pending'
+           END,
+           parameters = CASE
+             WHEN jsonb_typeof(parameters) = 'object' THEN parameters
+             ELSE '{}'::jsonb
+           END,
+           summary_payload = CASE
+             WHEN jsonb_typeof(summary_payload) = 'object' THEN summary_payload
+             ELSE '{}'::jsonb
+           END,
+           diff_payload = CASE
+             WHEN jsonb_typeof(diff_payload) = 'object' THEN diff_payload
+             ELSE '{}'::jsonb
+           END,
+           error = NULLIF(error, ''),
+           started_at = started_at,
+           finished_at = finished_at,
+           created_at = COALESCE(created_at, NOW()),
+           updated_at = COALESCE(updated_at, created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR baseline_id IS NULL
+          OR baseline_id = ''
+          OR status IS NULL
+          OR status NOT IN ('pending', 'running', 'succeeded', 'failed', 'cancelled')
+          OR parameters IS NULL
+          OR jsonb_typeof(parameters) <> 'object'
+          OR summary_payload IS NULL
+          OR jsonb_typeof(summary_payload) <> 'object'
+          OR diff_payload IS NULL
+          OR jsonb_typeof(diff_payload) <> 'object'
+          OR error = ''
+          OR created_at IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_replay_jobs_tenant_id_unique
+       ON replay_jobs (tenant_id, id)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_replay_jobs_tenant_baseline_created_at
+       ON replay_jobs (tenant_id, baseline_id, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_replay_jobs_tenant_status_updated_at
+       ON replay_jobs (tenant_id, status, updated_at DESC)`
+    );
   }
 
   private disableDb(error: unknown, reason: string): void {
@@ -8928,6 +13822,459 @@ class ControlPlaneRepository {
     return (
       firstNonEmptyString(this.memorySourceTenantById.get(sourceId)) ?? DEFAULT_TENANT_ID
     );
+  }
+
+  private cloneApiKey(apiKey: ApiKey): ApiKey {
+    return {
+      ...apiKey,
+      scopes: [...apiKey.scopes],
+    };
+  }
+
+  private listApiKeysFromMemory(tenantId: string): ApiKey[] {
+    return this.memoryApiKeys
+      .filter((apiKey) => apiKey.tenantId === tenantId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .map((apiKey) => this.cloneApiKey(apiKey));
+  }
+
+  private createApiKeyToMemory(apiKey: ApiKey): ApiKey {
+    const lookupKey = buildTenantScopedLookupKey(apiKey.tenantId, apiKey.keyHash);
+    const existingByHash = this.memoryApiKeyByHash.get(lookupKey);
+    if (existingByHash && existingByHash.apiKeyId !== apiKey.id) {
+      throw new Error(`api_key_hash_already_exists:${apiKey.tenantId}:${apiKey.keyHash}`);
+    }
+
+    const existingByIdIndex = this.memoryApiKeys.findIndex(
+      (item) => item.tenantId === apiKey.tenantId && item.id === apiKey.id
+    );
+    if (existingByIdIndex >= 0) {
+      const existingById = this.memoryApiKeys[existingByIdIndex];
+      if (existingById) {
+        this.memoryApiKeyByHash.delete(
+          buildTenantScopedLookupKey(existingById.tenantId, existingById.keyHash)
+        );
+      }
+      this.memoryApiKeys.splice(existingByIdIndex, 1);
+    }
+
+    this.memoryApiKeys.unshift(this.cloneApiKey(apiKey));
+    this.memoryApiKeyByHash.set(lookupKey, {
+      tenantId: apiKey.tenantId,
+      apiKeyId: apiKey.id,
+    });
+    return this.cloneApiKey(apiKey);
+  }
+
+  private revokeApiKeyFromMemory(
+    tenantId: string,
+    apiKeyId: string,
+    revokedAt: string
+  ): ApiKey | null {
+    const index = this.memoryApiKeys.findIndex(
+      (item) => item.tenantId === tenantId && item.id === apiKeyId
+    );
+    if (index < 0) {
+      return null;
+    }
+    const current = this.memoryApiKeys[index];
+    if (!current) {
+      return null;
+    }
+    if (current.revokedAt) {
+      return this.cloneApiKey(current);
+    }
+    const updated: ApiKey = {
+      ...current,
+      revokedAt,
+      updatedAt: revokedAt,
+      scopes: [...current.scopes],
+    };
+    this.memoryApiKeys[index] = updated;
+    return this.cloneApiKey(updated);
+  }
+
+  private touchApiKeyUsageFromMemory(
+    tenantId: string,
+    apiKeyId: string,
+    touchedAt: string
+  ): ApiKey | null {
+    const index = this.memoryApiKeys.findIndex(
+      (item) => item.tenantId === tenantId && item.id === apiKeyId
+    );
+    if (index < 0) {
+      return null;
+    }
+    const current = this.memoryApiKeys[index];
+    if (!current) {
+      return null;
+    }
+    if (current.revokedAt) {
+      return this.cloneApiKey(current);
+    }
+    const currentLastUsedAtTimestamp = current.lastUsedAt
+      ? Date.parse(current.lastUsedAt)
+      : Number.NaN;
+    const touchedAtTimestamp = Date.parse(touchedAt);
+    const nextLastUsedAt =
+      Number.isFinite(currentLastUsedAtTimestamp) &&
+      Number.isFinite(touchedAtTimestamp) &&
+      currentLastUsedAtTimestamp > touchedAtTimestamp
+        ? current.lastUsedAt
+        : touchedAt;
+    const updated: ApiKey = {
+      ...current,
+      lastUsedAt: nextLastUsedAt,
+      updatedAt: touchedAt,
+      scopes: [...current.scopes],
+    };
+    this.memoryApiKeys[index] = updated;
+    return this.cloneApiKey(updated);
+  }
+
+  private findApiKeyByHashFromMemory(tenantId: string, keyHash: string): ApiKey | null {
+    const lookupKey = buildTenantScopedLookupKey(tenantId, keyHash);
+    const indexed = this.memoryApiKeyByHash.get(lookupKey);
+    if (indexed) {
+      const found = this.memoryApiKeys.find(
+        (item) => item.tenantId === indexed.tenantId && item.id === indexed.apiKeyId
+      );
+      if (found) {
+        return this.cloneApiKey(found);
+      }
+      this.memoryApiKeyByHash.delete(lookupKey);
+    }
+
+    const matched = this.memoryApiKeys.find(
+      (item) => item.tenantId === tenantId && item.keyHash === keyHash
+    );
+    if (!matched) {
+      return null;
+    }
+    this.memoryApiKeyByHash.set(lookupKey, {
+      tenantId,
+      apiKeyId: matched.id,
+    });
+    return this.cloneApiKey(matched);
+  }
+
+  private cloneWebhookEndpoint(endpoint: WebhookEndpoint): WebhookEndpoint {
+    return {
+      ...endpoint,
+      eventTypes: [...endpoint.eventTypes],
+      headers: { ...endpoint.headers },
+    };
+  }
+
+  private listWebhookEndpointsFromMemory(tenantId: string, limit: number): WebhookEndpoint[] {
+    return this.memoryWebhookEndpoints
+      .filter((endpoint) => endpoint.tenantId === tenantId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id))
+      .slice(0, limit)
+      .map((endpoint) => this.cloneWebhookEndpoint(endpoint));
+  }
+
+  private createWebhookEndpointToMemory(endpoint: WebhookEndpoint): WebhookEndpoint {
+    const existing = this.memoryWebhookEndpoints.find(
+      (item) => item.tenantId === endpoint.tenantId && item.name === endpoint.name
+    );
+    if (existing) {
+      throw new Error(`webhook_endpoint_name_already_exists:${endpoint.tenantId}:${endpoint.name}`);
+    }
+    this.memoryWebhookEndpoints.unshift(this.cloneWebhookEndpoint(endpoint));
+    return this.cloneWebhookEndpoint(endpoint);
+  }
+
+  private updateWebhookEndpointInMemory(
+    tenantId: string,
+    endpointId: string,
+    input: UpdateWebhookEndpointInput,
+    hasSecretHash: boolean,
+    updatedAt: string
+  ): WebhookEndpoint | null {
+    const index = this.memoryWebhookEndpoints.findIndex(
+      (endpoint) => endpoint.tenantId === tenantId && endpoint.id === endpointId
+    );
+    if (index < 0) {
+      return null;
+    }
+    const current = this.memoryWebhookEndpoints[index];
+    if (!current) {
+      return null;
+    }
+
+    const nextName = input.name ?? current.name;
+    const duplicated = this.memoryWebhookEndpoints.find(
+      (endpoint) =>
+        endpoint.tenantId === tenantId &&
+        endpoint.name === nextName &&
+        endpoint.id !== endpointId
+    );
+    if (duplicated) {
+      throw new Error(`webhook_endpoint_name_already_exists:${tenantId}:${nextName}`);
+    }
+
+    const next: WebhookEndpoint = {
+      ...current,
+      name: nextName,
+      url: input.url ?? current.url,
+      enabled: input.enabled ?? current.enabled,
+      eventTypes: input.eventTypes ? [...input.eventTypes] : [...current.eventTypes],
+      secretHash: hasSecretHash
+        ? firstNonEmptyString(input.secretHash ?? undefined) ?? undefined
+        : current.secretHash,
+      headers: input.headers ? { ...input.headers } : { ...current.headers },
+      updatedAt,
+    };
+    this.memoryWebhookEndpoints[index] = next;
+    return this.cloneWebhookEndpoint(next);
+  }
+
+  private deleteWebhookEndpointFromMemory(tenantId: string, endpointId: string): boolean {
+    const index = this.memoryWebhookEndpoints.findIndex(
+      (endpoint) => endpoint.tenantId === tenantId && endpoint.id === endpointId
+    );
+    if (index < 0) {
+      return false;
+    }
+    this.memoryWebhookEndpoints.splice(index, 1);
+    return true;
+  }
+
+  private cloneQualityEvent(qualityEvent: QualityEvent): QualityEvent {
+    return {
+      ...qualityEvent,
+      metadata: { ...qualityEvent.metadata },
+    };
+  }
+
+  private createQualityEventToMemory(qualityEvent: QualityEvent): QualityEvent {
+    this.memoryQualityEvents.unshift(this.cloneQualityEvent(qualityEvent));
+    return this.cloneQualityEvent(qualityEvent);
+  }
+
+  private listQualityDailyMetricsFromMemory(
+    tenantId: string,
+    input: NormalizedQualityDailyMetricsInput
+  ): QualityDailyMetric[] {
+    const fromTimestamp = input.from ? Date.parse(input.from) : undefined;
+    const toTimestamp = input.to ? Date.parse(input.to) : undefined;
+    const buckets = new Map<
+      string,
+      {
+        total: number;
+        passed: number;
+        failed: number;
+        scoreSum: number;
+      }
+    >();
+
+    for (const qualityEvent of this.memoryQualityEvents) {
+      if (qualityEvent.tenantId !== tenantId) {
+        continue;
+      }
+      if (input.scorecardKey && qualityEvent.scorecardKey !== input.scorecardKey) {
+        continue;
+      }
+      const createdAtTimestamp = Date.parse(qualityEvent.createdAt);
+      if (fromTimestamp !== undefined && createdAtTimestamp < fromTimestamp) {
+        continue;
+      }
+      if (toTimestamp !== undefined && createdAtTimestamp > toTimestamp) {
+        continue;
+      }
+
+      const dateKey = qualityEvent.createdAt.slice(0, 10);
+      const bucket = buckets.get(dateKey) ?? {
+        total: 0,
+        passed: 0,
+        failed: 0,
+        scoreSum: 0,
+      };
+      bucket.total += 1;
+      if (qualityEvent.passed) {
+        bucket.passed += 1;
+      } else {
+        bucket.failed += 1;
+      }
+      bucket.scoreSum += normalizeQualityScore(qualityEvent.score);
+      buckets.set(dateKey, bucket);
+    }
+
+    return [...buckets.entries()]
+      .map(([date, bucket]) => ({
+        date,
+        total: bucket.total,
+        passed: bucket.passed,
+        failed: bucket.failed,
+        averageScore:
+          bucket.total > 0 ? Number((bucket.scoreSum / bucket.total).toFixed(6)) : 0,
+      }))
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, input.limit);
+  }
+
+  private cloneQualityScorecard(qualityScorecard: QualityScorecard): QualityScorecard {
+    return {
+      ...qualityScorecard,
+      dimensions: { ...qualityScorecard.dimensions },
+      metadata: { ...qualityScorecard.metadata },
+    };
+  }
+
+  private listQualityScorecardsFromMemory(
+    tenantId: string,
+    input: NormalizedQualityScorecardListInput
+  ): QualityScorecard[] {
+    return this.memoryQualityScorecards
+      .filter((qualityScorecard) => {
+        if (qualityScorecard.tenantId !== tenantId) {
+          return false;
+        }
+        if (input.scorecardKey && qualityScorecard.scorecardKey !== input.scorecardKey) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.scorecardKey.localeCompare(b.scorecardKey))
+      .slice(0, input.limit)
+      .map((qualityScorecard) => this.cloneQualityScorecard(qualityScorecard));
+  }
+
+  private upsertQualityScorecardToMemory(qualityScorecard: QualityScorecard): QualityScorecard {
+    const index = this.memoryQualityScorecards.findIndex(
+      (item) =>
+        item.tenantId === qualityScorecard.tenantId &&
+        item.scorecardKey === qualityScorecard.scorecardKey
+    );
+    if (index >= 0) {
+      const current = this.memoryQualityScorecards[index];
+      if (current) {
+        qualityScorecard.createdAt = current.createdAt;
+      }
+      this.memoryQualityScorecards.splice(index, 1);
+    }
+    this.memoryQualityScorecards.unshift(this.cloneQualityScorecard(qualityScorecard));
+    return this.cloneQualityScorecard(qualityScorecard);
+  }
+
+  private cloneReplayBaseline(replayBaseline: ReplayBaseline): ReplayBaseline {
+    return {
+      ...replayBaseline,
+      metadata: { ...replayBaseline.metadata },
+    };
+  }
+
+  private createReplayBaselineToMemory(replayBaseline: ReplayBaseline): ReplayBaseline {
+    const existing = this.memoryReplayBaselines.find(
+      (item) => item.tenantId === replayBaseline.tenantId && item.name === replayBaseline.name
+    );
+    if (existing) {
+      throw new Error(
+        `replay_baseline_name_already_exists:${replayBaseline.tenantId}:${replayBaseline.name}`
+      );
+    }
+    this.memoryReplayBaselines.unshift(this.cloneReplayBaseline(replayBaseline));
+    return this.cloneReplayBaseline(replayBaseline);
+  }
+
+  private listReplayBaselinesFromMemory(
+    tenantId: string,
+    input: NormalizedReplayBaselineListInput
+  ): ReplayBaseline[] {
+    const keyword = input.keyword?.toLowerCase();
+    return this.memoryReplayBaselines
+      .filter((replayBaseline) => {
+        if (replayBaseline.tenantId !== tenantId) {
+          return false;
+        }
+        if (!keyword) {
+          return true;
+        }
+        return (
+          replayBaseline.name.toLowerCase().includes(keyword) ||
+          (replayBaseline.description ?? "").toLowerCase().includes(keyword)
+        );
+      })
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id))
+      .slice(0, input.limit)
+      .map((replayBaseline) => this.cloneReplayBaseline(replayBaseline));
+  }
+
+  private cloneReplayJob(replayJob: ReplayJob): ReplayJob {
+    return {
+      ...replayJob,
+      parameters: { ...replayJob.parameters },
+      summary: { ...replayJob.summary },
+      diff: { ...replayJob.diff },
+    };
+  }
+
+  private createReplayJobToMemory(replayJob: ReplayJob): ReplayJob {
+    const baselineExists = this.memoryReplayBaselines.some(
+      (item) => item.tenantId === replayJob.tenantId && item.id === replayJob.baselineId
+    );
+    if (!baselineExists) {
+      throw new Error(`replay_baseline_not_found:${replayJob.tenantId}:${replayJob.baselineId}`);
+    }
+    this.memoryReplayJobs.unshift(this.cloneReplayJob(replayJob));
+    this.memoryReplayJobDiffById.set(
+      buildTenantScopedLookupKey(replayJob.tenantId, replayJob.id),
+      {
+        tenantId: replayJob.tenantId,
+        replayJobId: replayJob.id,
+        diff: { ...replayJob.diff },
+      }
+    );
+    return this.cloneReplayJob(replayJob);
+  }
+
+  private listReplayJobsFromMemory(
+    tenantId: string,
+    input: NormalizedReplayJobListInput
+  ): ReplayJob[] {
+    return this.memoryReplayJobs
+      .filter((replayJob) => {
+        if (replayJob.tenantId !== tenantId) {
+          return false;
+        }
+        if (input.baselineId && replayJob.baselineId !== input.baselineId) {
+          return false;
+        }
+        if (input.status && replayJob.status !== input.status) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(0, input.limit)
+      .map((replayJob) => this.cloneReplayJob(replayJob));
+  }
+
+  private getReplayJobByIdFromMemory(tenantId: string, replayJobId: string): ReplayJob | null {
+    const matched = this.memoryReplayJobs.find(
+      (replayJob) => replayJob.tenantId === tenantId && replayJob.id === replayJobId
+    );
+    return matched ? this.cloneReplayJob(matched) : null;
+  }
+
+  private getReplayJobDiffFromMemory(
+    tenantId: string,
+    replayJobId: string
+  ): Record<string, unknown> | null {
+    const lookupKey = buildTenantScopedLookupKey(tenantId, replayJobId);
+    const indexed = this.memoryReplayJobDiffById.get(lookupKey);
+    if (indexed) {
+      return { ...indexed.diff };
+    }
+
+    const matched = this.memoryReplayJobs.find(
+      (replayJob) => replayJob.tenantId === tenantId && replayJob.id === replayJobId
+    );
+    if (!matched) {
+      return null;
+    }
+    return { ...matched.diff };
   }
 
   private listSourcesFromMemory(tenantId: string): Source[] {
@@ -10270,6 +15617,609 @@ class ControlPlaneRepository {
     return {
       ...stored,
       response: { ...stored.response },
+    };
+  }
+
+  private cloneAlertOrchestrationRule(rule: AlertOrchestrationRule): AlertOrchestrationRule {
+    return {
+      ...rule,
+      channels: [...rule.channels],
+    };
+  }
+
+  private listAlertOrchestrationRulesFromMemory(
+    tenantId: string,
+    input: NormalizedAlertOrchestrationRuleListInput
+  ): AlertOrchestrationRuleListResult {
+    const items = this.memoryAlertOrchestrationRules
+      .filter((rule) => {
+        if (rule.tenantId !== tenantId) {
+          return false;
+        }
+        if (input.eventType && rule.eventType !== input.eventType) {
+          return false;
+        }
+        if (input.enabled !== undefined && rule.enabled !== input.enabled) {
+          return false;
+        }
+        if (input.severity && rule.severity !== input.severity) {
+          return false;
+        }
+        if (input.sourceId && rule.sourceId !== input.sourceId) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id))
+      .map((rule) => this.cloneAlertOrchestrationRule(rule));
+
+    return {
+      items,
+      total: items.length,
+    };
+  }
+
+  private getAlertOrchestrationRuleByIdFromMemory(
+    tenantId: string,
+    ruleId: string
+  ): AlertOrchestrationRule | null {
+    const matched = this.memoryAlertOrchestrationRules.find(
+      (rule) => rule.tenantId === tenantId && rule.id === ruleId
+    );
+    return matched ? this.cloneAlertOrchestrationRule(matched) : null;
+  }
+
+  private upsertAlertOrchestrationRuleToMemory(
+    tenantId: string,
+    input: AlertOrchestrationRuleUpsertInput
+  ): AlertOrchestrationRule {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedId = firstNonEmptyString(input.id) ?? crypto.randomUUID();
+    const channels: AlertOrchestrationChannel[] = [];
+    const channelSet = new Set<AlertOrchestrationChannel>();
+    for (const channel of Array.isArray(input.channels) ? input.channels : []) {
+      const normalizedChannel = firstNonEmptyString(channel);
+      if (!normalizedChannel) {
+        continue;
+      }
+      const mappedChannel = toAlertOrchestrationChannel(normalizedChannel.toLowerCase());
+      if (!mappedChannel) {
+        continue;
+      }
+      if (channelSet.has(mappedChannel)) {
+        continue;
+      }
+      channelSet.add(mappedChannel);
+      channels.push(mappedChannel);
+    }
+
+    const stored: AlertOrchestrationRule = {
+      id: normalizedId,
+      tenantId: normalizedTenantId,
+      name: firstNonEmptyString(input.name) ?? normalizedId,
+      enabled: input.enabled === true,
+      eventType: toAlertOrchestrationEventType(input.eventType),
+      severity: firstNonEmptyString(input.severity)
+        ? toAlertSeverity(input.severity)
+        : undefined,
+      sourceId: firstNonEmptyString(input.sourceId) ?? undefined,
+      dedupeWindowSeconds: toOptionalNonNegativeInteger(input.dedupeWindowSeconds) ?? 0,
+      suppressionWindowSeconds: toOptionalNonNegativeInteger(input.suppressionWindowSeconds) ?? 0,
+      mergeWindowSeconds: toOptionalNonNegativeInteger(input.mergeWindowSeconds) ?? 0,
+      slaMinutes: toOptionalNonNegativeInteger(input.slaMinutes),
+      channels,
+      updatedAt: toIsoString(input.updatedAt) ?? new Date().toISOString(),
+    };
+
+    const existingIndex = this.memoryAlertOrchestrationRules.findIndex(
+      (rule) => rule.tenantId === normalizedTenantId && rule.id === normalizedId
+    );
+    if (existingIndex >= 0) {
+      this.memoryAlertOrchestrationRules.splice(existingIndex, 1);
+    }
+    this.memoryAlertOrchestrationRules.unshift(stored);
+    return this.cloneAlertOrchestrationRule(stored);
+  }
+
+  private cloneRuleScopeBinding(scopeBinding: RuleScopeBinding): RuleScopeBinding {
+    return {
+      organizations: scopeBinding.organizations ? [...scopeBinding.organizations] : undefined,
+      projects: scopeBinding.projects ? [...scopeBinding.projects] : undefined,
+      clients: scopeBinding.clients ? [...scopeBinding.clients] : undefined,
+    };
+  }
+
+  private cloneTenantResidencyPolicy(policy: TenantResidencyPolicy): TenantResidencyPolicy {
+    return {
+      ...policy,
+      replicaRegions: [...policy.replicaRegions],
+    };
+  }
+
+  private getTenantResidencyPolicyFromMemory(tenantId: string): TenantResidencyPolicy | null {
+    const matched = this.memoryResidencyPolicies.find((item) => item.tenantId === tenantId);
+    return matched ? this.cloneTenantResidencyPolicy(matched) : null;
+  }
+
+  private upsertTenantResidencyPolicyToMemory(policy: TenantResidencyPolicy): TenantResidencyPolicy {
+    const index = this.memoryResidencyPolicies.findIndex((item) => item.tenantId === policy.tenantId);
+    if (index >= 0) {
+      this.memoryResidencyPolicies.splice(index, 1);
+    }
+    this.memoryResidencyPolicies.unshift(this.cloneTenantResidencyPolicy(policy));
+    return this.cloneTenantResidencyPolicy(policy);
+  }
+
+  private cloneReplicationJob(job: ReplicationJob): ReplicationJob {
+    return {
+      ...job,
+      metadata: { ...job.metadata },
+    };
+  }
+
+  private saveReplicationJobToMemory(job: ReplicationJob): ReplicationJob {
+    const index = this.memoryReplicationJobs.findIndex(
+      (item) => item.tenantId === job.tenantId && item.id === job.id
+    );
+    if (index >= 0) {
+      this.memoryReplicationJobs.splice(index, 1);
+    }
+    this.memoryReplicationJobs.unshift(this.cloneReplicationJob(job));
+    return this.cloneReplicationJob(job);
+  }
+
+  private listReplicationJobsFromMemory(
+    tenantId: string,
+    input: NormalizedReplicationJobListInput
+  ): ReplicationJobListResult {
+    const items = this.memoryReplicationJobs
+      .filter((job) => {
+        if (job.tenantId !== tenantId) {
+          return false;
+        }
+        if (input.status && job.status !== input.status) {
+          return false;
+        }
+        if (input.sourceRegion && job.sourceRegion !== input.sourceRegion) {
+          return false;
+        }
+        if (input.targetRegion && job.targetRegion !== input.targetRegion) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(0, input.limit)
+      .map((job) => this.cloneReplicationJob(job));
+    return {
+      items,
+      total: items.length,
+    };
+  }
+
+  private getReplicationJobByIdFromMemory(tenantId: string, jobId: string): ReplicationJob | null {
+    const matched = this.memoryReplicationJobs.find(
+      (job) => job.tenantId === tenantId && job.id === jobId
+    );
+    return matched ? this.cloneReplicationJob(matched) : null;
+  }
+
+  private cancelReplicationJobInMemory(
+    tenantId: string,
+    jobId: string,
+    reason: string | undefined,
+    userId: string | undefined,
+    updatedAt: string
+  ): ReplicationJob | null {
+    const index = this.memoryReplicationJobs.findIndex(
+      (job) => job.tenantId === tenantId && job.id === jobId
+    );
+    if (index < 0) {
+      return null;
+    }
+    const current = this.memoryReplicationJobs[index];
+    if (!current) {
+      return null;
+    }
+    if (current.status !== "pending" && current.status !== "running") {
+      return this.cloneReplicationJob(current);
+    }
+    const updated: ReplicationJob = {
+      ...current,
+      status: "cancelled",
+      reason: reason ?? current.reason,
+      approvedByUserId: userId ?? current.approvedByUserId,
+      finishedAt: current.finishedAt ?? updatedAt,
+      updatedAt,
+      metadata: { ...current.metadata },
+    };
+    this.memoryReplicationJobs[index] = updated;
+    return this.cloneReplicationJob(updated);
+  }
+
+  private cloneRuleAsset(asset: RuleAsset): RuleAsset {
+    return {
+      ...asset,
+      scopeBinding: this.cloneRuleScopeBinding(asset.scopeBinding),
+    };
+  }
+
+  private saveRuleAssetToMemory(asset: RuleAsset): RuleAsset {
+    const index = this.memoryRuleAssets.findIndex(
+      (item) => item.tenantId === asset.tenantId && item.id === asset.id
+    );
+    if (index >= 0) {
+      this.memoryRuleAssets.splice(index, 1);
+    }
+    this.memoryRuleAssets.unshift(this.cloneRuleAsset(asset));
+    return this.cloneRuleAsset(asset);
+  }
+
+  private listRuleAssetsFromMemory(
+    tenantId: string,
+    input: NormalizedRuleAssetListInput
+  ): RuleAssetListResult {
+    const keyword = input.keyword?.toLowerCase();
+    const items = this.memoryRuleAssets
+      .filter((asset) => {
+        if (asset.tenantId !== tenantId) {
+          return false;
+        }
+        if (input.status && asset.status !== input.status) {
+          return false;
+        }
+        if (keyword) {
+          const name = asset.name.toLowerCase();
+          const description = (asset.description ?? "").toLowerCase();
+          if (!name.includes(keyword) && !description.includes(keyword)) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id))
+      .slice(0, input.limit)
+      .map((asset) => this.cloneRuleAsset(asset));
+    return {
+      items,
+      total: items.length,
+    };
+  }
+
+  private getRuleAssetByIdFromMemory(tenantId: string, assetId: string): RuleAsset | null {
+    const matched = this.memoryRuleAssets.find(
+      (asset) => asset.tenantId === tenantId && asset.id === assetId
+    );
+    return matched ? this.cloneRuleAsset(matched) : null;
+  }
+
+  private cloneRuleAssetVersion(version: RuleAssetVersion): RuleAssetVersion {
+    return { ...version };
+  }
+
+  private listRuleAssetVersionsFromMemory(
+    tenantId: string,
+    assetId: string,
+    limit: number
+  ): RuleAssetVersion[] {
+    return this.memoryRuleAssetVersions
+      .filter((item) => item.tenantId === tenantId && item.assetId === assetId)
+      .sort((a, b) => b.version - a.version || b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit)
+      .map((item) => this.cloneRuleAssetVersion(item));
+  }
+
+  private createRuleAssetVersionToMemory(
+    tenantId: string,
+    assetId: string,
+    content: string,
+    changelog: string | undefined,
+    createdByUserId: string | undefined,
+    createdAt: string
+  ): RuleAssetVersion | null {
+    const assetIndex = this.memoryRuleAssets.findIndex(
+      (asset) => asset.tenantId === tenantId && asset.id === assetId
+    );
+    if (assetIndex < 0) {
+      return null;
+    }
+    const currentMaxVersion = this.memoryRuleAssetVersions
+      .filter((item) => item.tenantId === tenantId && item.assetId === assetId)
+      .reduce((maxVersion, item) => Math.max(maxVersion, item.version), 0);
+    const version: RuleAssetVersion = {
+      id: crypto.randomUUID(),
+      tenantId,
+      assetId,
+      version: currentMaxVersion + 1,
+      content,
+      changelog,
+      createdByUserId,
+      createdAt,
+    };
+    this.memoryRuleAssetVersions.unshift(this.cloneRuleAssetVersion(version));
+    const currentAsset = this.memoryRuleAssets[assetIndex];
+    if (currentAsset) {
+      this.memoryRuleAssets[assetIndex] = {
+        ...currentAsset,
+        latestVersion: version.version,
+        status: currentAsset.status === "deprecated" ? "draft" : currentAsset.status,
+        updatedAt: createdAt,
+        scopeBinding: this.cloneRuleScopeBinding(currentAsset.scopeBinding),
+      };
+    }
+    return this.cloneRuleAssetVersion(version);
+  }
+
+  private publishRuleAssetVersionFromMemory(
+    tenantId: string,
+    assetId: string,
+    version: number,
+    updatedAt: string
+  ): RuleAsset | null {
+    const hasVersion = this.memoryRuleAssetVersions.some(
+      (item) => item.tenantId === tenantId && item.assetId === assetId && item.version === version
+    );
+    const assetIndex = this.memoryRuleAssets.findIndex(
+      (asset) => asset.tenantId === tenantId && asset.id === assetId
+    );
+    if (assetIndex < 0) {
+      return null;
+    }
+    const asset = this.memoryRuleAssets[assetIndex];
+    if (!asset) {
+      return null;
+    }
+    if (!hasVersion) {
+      return this.cloneRuleAsset(asset);
+    }
+    const next: RuleAsset = {
+      ...asset,
+      publishedVersion: version,
+      status: "published",
+      updatedAt,
+      scopeBinding: this.cloneRuleScopeBinding(asset.scopeBinding),
+    };
+    this.memoryRuleAssets[assetIndex] = next;
+    return this.cloneRuleAsset(next);
+  }
+
+  private cloneRuleApproval(approval: RuleApproval): RuleApproval {
+    return { ...approval };
+  }
+
+  private listRuleApprovalsFromMemory(
+    tenantId: string,
+    assetId: string,
+    input: NormalizedRuleApprovalListInput
+  ): RuleApprovalListResult {
+    const items = this.memoryRuleApprovals
+      .filter((approval) => {
+        if (approval.tenantId !== tenantId || approval.assetId !== assetId) {
+          return false;
+        }
+        if (input.version !== undefined && approval.version !== input.version) {
+          return false;
+        }
+        if (input.decision && approval.decision !== input.decision) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(0, input.limit)
+      .map((approval) => this.cloneRuleApproval(approval));
+    return {
+      items,
+      total: items.length,
+    };
+  }
+
+  private createRuleApprovalToMemory(approval: RuleApproval): RuleApproval | null {
+    const versionExists = this.memoryRuleAssetVersions.some(
+      (item) =>
+        item.tenantId === approval.tenantId &&
+        item.assetId === approval.assetId &&
+        item.version === approval.version
+    );
+    if (!versionExists) {
+      return null;
+    }
+    const index = this.memoryRuleApprovals.findIndex(
+      (item) =>
+        item.tenantId === approval.tenantId &&
+        item.assetId === approval.assetId &&
+        item.version === approval.version &&
+        item.approverUserId === approval.approverUserId
+    );
+    if (index >= 0) {
+      this.memoryRuleApprovals.splice(index, 1);
+    }
+    this.memoryRuleApprovals.unshift(this.cloneRuleApproval(approval));
+    return this.cloneRuleApproval(approval);
+  }
+
+  private cloneMcpToolPolicy(policy: McpToolPolicy): McpToolPolicy {
+    return { ...policy };
+  }
+
+  private listMcpToolPoliciesFromMemory(
+    tenantId: string,
+    input: NormalizedMcpToolPolicyListInput
+  ): McpToolPolicyListResult {
+    const keyword = input.keyword?.toLowerCase();
+    const items = this.memoryMcpToolPolicies
+      .filter((policy) => {
+        if (policy.tenantId !== tenantId) {
+          return false;
+        }
+        if (input.riskLevel && policy.riskLevel !== input.riskLevel) {
+          return false;
+        }
+        if (input.decision && policy.decision !== input.decision) {
+          return false;
+        }
+        if (keyword) {
+          const toolId = policy.toolId.toLowerCase();
+          const reason = (policy.reason ?? "").toLowerCase();
+          if (!toolId.includes(keyword) && !reason.includes(keyword)) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.toolId.localeCompare(b.toolId))
+      .slice(0, input.limit)
+      .map((policy) => this.cloneMcpToolPolicy(policy));
+    return {
+      items,
+      total: items.length,
+    };
+  }
+
+  private upsertMcpToolPolicyToMemory(policy: McpToolPolicy): McpToolPolicy {
+    const index = this.memoryMcpToolPolicies.findIndex(
+      (item) => item.tenantId === policy.tenantId && item.toolId === policy.toolId
+    );
+    if (index >= 0) {
+      this.memoryMcpToolPolicies.splice(index, 1);
+    }
+    this.memoryMcpToolPolicies.unshift(this.cloneMcpToolPolicy(policy));
+    return this.cloneMcpToolPolicy(policy);
+  }
+
+  private cloneMcpApprovalRequest(request: McpApprovalRequest): McpApprovalRequest {
+    return { ...request };
+  }
+
+  private saveMcpApprovalRequestToMemory(request: McpApprovalRequest): McpApprovalRequest {
+    const index = this.memoryMcpApprovalRequests.findIndex(
+      (item) => item.tenantId === request.tenantId && item.id === request.id
+    );
+    if (index >= 0) {
+      this.memoryMcpApprovalRequests.splice(index, 1);
+    }
+    this.memoryMcpApprovalRequests.unshift(this.cloneMcpApprovalRequest(request));
+    return this.cloneMcpApprovalRequest(request);
+  }
+
+  private getMcpApprovalRequestByIdFromMemory(
+    tenantId: string,
+    requestId: string
+  ): McpApprovalRequest | null {
+    const matched = this.memoryMcpApprovalRequests.find(
+      (request) => request.tenantId === tenantId && request.id === requestId
+    );
+    return matched ? this.cloneMcpApprovalRequest(matched) : null;
+  }
+
+  private listMcpApprovalRequestsFromMemory(
+    tenantId: string,
+    status: McpApprovalStatus | undefined,
+    limit: number
+  ): McpApprovalRequestListResult {
+    const items = this.memoryMcpApprovalRequests
+      .filter((request) => {
+        if (request.tenantId !== tenantId) {
+          return false;
+        }
+        if (status && request.status !== status) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id))
+      .slice(0, limit)
+      .map((request) => this.cloneMcpApprovalRequest(request));
+    return {
+      items,
+      total: items.length,
+    };
+  }
+
+  private reviewMcpApprovalRequestInMemory(
+    tenantId: string,
+    requestId: string,
+    nextStatus: "approved" | "rejected",
+    reviewedByUserId: string,
+    reviewedByEmail: string | undefined,
+    reviewReason: string | undefined,
+    updatedAt: string
+  ): McpApprovalRequest | null {
+    const index = this.memoryMcpApprovalRequests.findIndex(
+      (request) => request.tenantId === tenantId && request.id === requestId
+    );
+    if (index < 0) {
+      return null;
+    }
+    const current = this.memoryMcpApprovalRequests[index];
+    if (!current) {
+      return null;
+    }
+    if (current.status !== "pending") {
+      return this.cloneMcpApprovalRequest(current);
+    }
+    const next: McpApprovalRequest = {
+      ...current,
+      status: nextStatus,
+      reviewedByUserId,
+      reviewedByEmail,
+      reviewReason,
+      updatedAt,
+    };
+    this.memoryMcpApprovalRequests[index] = next;
+    return this.cloneMcpApprovalRequest(next);
+  }
+
+  private cloneMcpInvocationAudit(invocation: McpInvocationAudit): McpInvocationAudit {
+    return {
+      ...invocation,
+      metadata: { ...invocation.metadata },
+    };
+  }
+
+  private saveMcpInvocationAuditToMemory(invocation: McpInvocationAudit): McpInvocationAudit {
+    const index = this.memoryMcpInvocations.findIndex(
+      (item) => item.tenantId === invocation.tenantId && item.id === invocation.id
+    );
+    if (index >= 0) {
+      this.memoryMcpInvocations.splice(index, 1);
+    }
+    this.memoryMcpInvocations.unshift(this.cloneMcpInvocationAudit(invocation));
+    return this.cloneMcpInvocationAudit(invocation);
+  }
+
+  private listMcpInvocationAuditsFromMemory(
+    tenantId: string,
+    input: NormalizedMcpInvocationListInput
+  ): McpInvocationListResult {
+    const fromTimestamp = input.from ? Date.parse(input.from) : undefined;
+    const toTimestamp = input.to ? Date.parse(input.to) : undefined;
+    const items = this.memoryMcpInvocations
+      .filter((invocation) => {
+        if (invocation.tenantId !== tenantId) {
+          return false;
+        }
+        if (input.toolId && invocation.toolId !== input.toolId) {
+          return false;
+        }
+        if (input.decision && invocation.decision !== input.decision) {
+          return false;
+        }
+        const createdAtTimestamp = Date.parse(invocation.createdAt);
+        if (fromTimestamp !== undefined && createdAtTimestamp < fromTimestamp) {
+          return false;
+        }
+        if (toTimestamp !== undefined && createdAtTimestamp > toTimestamp) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(0, input.limit)
+      .map((invocation) => this.cloneMcpInvocationAudit(invocation));
+    return {
+      items,
+      total: items.length,
     };
   }
 
