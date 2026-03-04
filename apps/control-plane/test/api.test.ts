@@ -2694,6 +2694,43 @@ describe("Control Plane API", () => {
     }
   });
 
+  test("AUTH_DISABLE_LOCAL_LOGIN=true 时拦截本地 register/login 接口", async () => {
+    const originalDisableLocal = Bun.env.AUTH_DISABLE_LOCAL_LOGIN;
+    Bun.env.AUTH_DISABLE_LOCAL_LOGIN = "true";
+
+    try {
+      const nonce = createNonce("auth-local-disabled");
+      const registerResult = await registerLocalUser({
+        email: `disabled-register-${nonce}@example.com`,
+        password: `P@ssword-${nonce}`,
+        displayName: `禁用本地登录-${nonce}`,
+      });
+      expect(registerResult.response.status).toBe(403);
+      if (isRecord(registerResult.payload)) {
+        expect(pickString(registerResult.payload, ["message"])).toContain(
+          "本地账号登录已禁用"
+        );
+      }
+
+      const loginResult = await loginLocalUser({
+        email: `disabled-login-${nonce}@example.com`,
+        password: `P@ssword-${nonce}`,
+      });
+      expect(loginResult.response.status).toBe(403);
+      if (isRecord(loginResult.payload)) {
+        expect(pickString(loginResult.payload, ["message"])).toContain(
+          "本地账号登录已禁用"
+        );
+      }
+    } finally {
+      if (originalDisableLocal === undefined) {
+        delete Bun.env.AUTH_DISABLE_LOCAL_LOGIN;
+      } else {
+        Bun.env.AUTH_DISABLE_LOCAL_LOGIN = originalDisableLocal;
+      }
+    }
+  });
+
   test("POST /api/v1/auth/external/login 支持外部断言登录与签发会话", async () => {
     const nonce = createNonce("auth-external-login");
     const secret = `external-secret-${nonce}`;

@@ -120,6 +120,16 @@ function conflict(c: Context<AppEnv>, message: string) {
   );
 }
 
+function forbidden(c: Context<AppEnv>, message: string) {
+  return c.json(
+    {
+      message,
+      requestId: c.get("requestId"),
+    },
+    403
+  );
+}
+
 function badGateway(c: Context<AppEnv>, message: string) {
   return c.json(
     {
@@ -133,6 +143,10 @@ function badGateway(c: Context<AppEnv>, message: string) {
 function parseBooleanEnv(raw: string | undefined): boolean {
   const normalized = (raw ?? "").trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function isLocalLoginDisabled(): boolean {
+  return parseBooleanEnv(Bun.env[AUTH_DISABLE_LOCAL_LOGIN_ENV]);
 }
 
 function normalizeOptionalString(value: unknown): string | undefined {
@@ -295,7 +309,7 @@ function resolveExternalAuthProvidersFromEnv(): ExternalAuthProviderConfig[] {
 
 function resolveAuthProviders(): AuthProviderItem[] {
   const providers: AuthProviderItem[] = [];
-  if (!parseBooleanEnv(Bun.env[AUTH_DISABLE_LOCAL_LOGIN_ENV])) {
+  if (!isLocalLoginDisabled()) {
     providers.push({
       id: "local",
       type: "local",
@@ -848,6 +862,10 @@ authRoutes.get("/providers", (c) => {
 });
 
 authRoutes.post("/register", async (c) => {
+  if (isLocalLoginDisabled()) {
+    return forbidden(c, "本地账号登录已禁用，请使用企业登录。");
+  }
+
   const body = await c.req.json().catch(() => undefined);
   const result = validateAuthRegisterInput(body);
   if (!result.success) {
@@ -886,6 +904,10 @@ authRoutes.post("/register", async (c) => {
 });
 
 authRoutes.post("/login", async (c) => {
+  if (isLocalLoginDisabled()) {
+    return forbidden(c, "本地账号登录已禁用，请使用企业登录。");
+  }
+
   const body = await c.req.json().catch(() => undefined);
   const result = validateAuthLoginInput(body);
   if (!result.success) {

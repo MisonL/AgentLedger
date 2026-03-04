@@ -1235,6 +1235,77 @@ describe("Web Console", () => {
     window.location.hash = originalHash;
   });
 
+  test("外部登录回调兼容 ?code=...#/auth/callback 形态", async () => {
+    const originalHref = window.location.href;
+    const originalHash = window.location.hash;
+    window.history.replaceState(
+      {},
+      "",
+      "/?code=authorization-code-search-1&state=corp-oidc:nonce-search-1#/auth/callback"
+    );
+    window.sessionStorage.setItem(
+      "agentledger.web-console.auth.external.pending",
+      JSON.stringify({
+        providerId: "corp-oidc",
+        state: "corp-oidc:nonce-search-1",
+        redirectUri: "http://localhost:5173/#/auth/callback",
+        codeVerifier: "pkce-code-verifier-search-1",
+        createdAt: Date.now(),
+      })
+    );
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/auth/providers") && method === "GET") {
+        return mockAuthProvidersResponse();
+      }
+
+      if (url.endsWith("/api/v1/auth/external/exchange") && method === "POST") {
+        const payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        expect(payload.providerId).toBe("corp-oidc");
+        expect(payload.code).toBe("authorization-code-search-1");
+        expect(payload.state).toBe("corp-oidc:nonce-search-1");
+        expect(payload.codeVerifier).toBe("pkce-code-verifier-search-1");
+        return mockJsonResponse({
+          user: {
+            userId: "user-external-search-1",
+            email: "owner@example.com",
+            displayName: "Owner",
+            tenantId: "default",
+            tenantRole: "owner",
+          },
+          tokens: {
+            accessToken: "access-token-external-search",
+            refreshToken: "refresh-token-external-search",
+            expiresIn: 1800,
+            tokenType: "Bearer",
+          },
+        });
+      }
+
+      if (url.endsWith("/api/v1/sources") && method === "GET") {
+        return mockJsonResponse({ items: [], total: 0 });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "AI 使用热力图" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.stringContaining("/api/v1/auth/external/exchange"),
+        expect.objectContaining({ method: "POST" })
+      );
+    });
+
+    window.history.replaceState({}, "", originalHref);
+    window.location.hash = originalHash;
+  });
+
   test("治理页展示告警工作台与导出中心", async () => {
     window.location.hash = "#/governance";
     setAuthTokens({

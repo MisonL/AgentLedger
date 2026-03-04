@@ -374,25 +374,38 @@ interface AuthCallbackPayload {
   errorDescription?: string;
 }
 
-function parseAuthCallbackPayloadFromHash(hash: string): AuthCallbackPayload | null {
+function parseAuthCallbackPayload(
+  hash: string,
+  search: string
+): AuthCallbackPayload | null {
   const normalized = hash.replace(/^#/, "");
   const [path, query = ""] = normalized.split("?", 2);
   if (path !== AUTH_CALLBACK_HASH_ROUTE) {
     return null;
   }
 
-  const params = new URLSearchParams(query);
-  const code = params.get("code")?.trim() ?? "";
-  const state = params.get("state")?.trim() ?? undefined;
+  const hashParams = new URLSearchParams(query);
+  const searchParams = new URLSearchParams(search.replace(/^\?/, ""));
+  const readParam = (...keys: string[]): string | undefined => {
+    for (const key of keys) {
+      const hashValue = hashParams.get(key)?.trim();
+      if (hashValue) {
+        return hashValue;
+      }
+      const searchValue = searchParams.get(key)?.trim();
+      if (searchValue) {
+        return searchValue;
+      }
+    }
+    return undefined;
+  };
+
+  const code = readParam("code") ?? "";
+  const state = readParam("state");
   const providerId =
-    params.get("providerId")?.trim() ??
-    params.get("provider")?.trim() ??
-    undefined;
-  const error = params.get("error")?.trim() ?? undefined;
-  const errorDescription =
-    params.get("error_description")?.trim() ??
-    params.get("errorDescription")?.trim() ??
-    undefined;
+    readParam("providerId", "provider");
+  const error = readParam("error");
+  const errorDescription = readParam("error_description", "errorDescription");
 
   return {
     code,
@@ -826,7 +839,7 @@ function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
     if (typeof window === "undefined") {
       return null;
     }
-    return parseAuthCallbackPayloadFromHash(window.location.hash);
+    return parseAuthCallbackPayload(window.location.hash, window.location.search);
   });
 
   const providersQuery = useQuery({
@@ -895,7 +908,9 @@ function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
     }
 
     const handleHashChange = () => {
-      setAuthCallback(parseAuthCallbackPayloadFromHash(window.location.hash));
+      setAuthCallback(
+        parseAuthCallbackPayload(window.location.hash, window.location.search)
+      );
     };
 
     window.addEventListener("hashchange", handleHashChange);
