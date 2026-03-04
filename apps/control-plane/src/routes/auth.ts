@@ -54,6 +54,14 @@ interface RefreshFailureAuditContext {
   error: string;
 }
 
+interface ExternalLoginFailureAuditContext {
+  providerId?: string;
+  externalUserId?: string;
+  email?: string;
+  tenantId?: string;
+  reason: string;
+}
+
 interface VerifyRefreshSessionOptions {
   onFailure?: (context: RefreshFailureAuditContext) => Promise<void> | void;
 }
@@ -348,6 +356,34 @@ async function appendRefreshFailureAuditLog(
   });
 }
 
+async function appendExternalLoginFailureAuditLog(
+  c: Context<AppEnv>,
+  context: ExternalLoginFailureAuditContext
+): Promise<void> {
+  const requestId = c.get("requestId");
+  const tenantId =
+    typeof context.tenantId === "string" && context.tenantId.trim().length > 0
+      ? context.tenantId
+      : DEFAULT_TENANT_ID;
+
+  await appendAuditLogSafely({
+    tenantId,
+    eventId: `cp:${requestId}:auth-external-login`,
+    action: "auth.external_login_failed",
+    level: "warning",
+    detail: `外部登录失败：${context.reason}`,
+    metadata: {
+      requestId,
+      reason: context.reason,
+      providerId: context.providerId,
+      externalUserId: context.externalUserId,
+      email: context.email,
+      tenantId,
+      route: "/api/v1/auth/external/login",
+    },
+  });
+}
+
 async function reportRefreshVerificationFailure(
   options: VerifyRefreshSessionOptions | undefined,
   context: RefreshFailureAuditContext
@@ -608,11 +644,21 @@ authRoutes.post("/external/login", async (c) => {
   const body = await c.req.json().catch(() => undefined);
   const result = validateAuthExternalLoginInput(body);
   if (!result.success) {
+    await appendExternalLoginFailureAuditLog(c, {
+      reason: result.error,
+    });
     return badRequest(c, result.error);
   }
 
   const provider = findEnabledExternalProvider(result.data.providerId);
   if (!provider) {
+    await appendExternalLoginFailureAuditLog(c, {
+      providerId: result.data.providerId,
+      externalUserId: result.data.externalUserId,
+      email: result.data.email,
+      tenantId: result.data.tenantId,
+      reason: "外部登录提供方未启用或不存在。",
+    });
     return unauthorized(c, "外部登录提供方未启用或不存在。");
   }
 
@@ -621,6 +667,13 @@ authRoutes.post("/external/login", async (c) => {
     console.warn(
       `[control-plane] ${AUTH_EXTERNAL_ASSERTION_SECRET_ENV} 未配置，拒绝外部登录请求。`
     );
+    await appendExternalLoginFailureAuditLog(c, {
+      providerId: result.data.providerId,
+      externalUserId: result.data.externalUserId,
+      email: result.data.email,
+      tenantId: result.data.tenantId,
+      reason: "外部登录签名密钥未配置。",
+    });
     return c.json(
       {
         message: "外部登录暂不可用，请联系管理员配置签名密钥。",
@@ -632,6 +685,13 @@ authRoutes.post("/external/login", async (c) => {
 
   const timestampMs = Date.parse(result.data.timestamp);
   if (!Number.isFinite(timestampMs)) {
+    await appendExternalLoginFailureAuditLog(c, {
+      providerId: result.data.providerId,
+      externalUserId: result.data.externalUserId,
+      email: result.data.email,
+      tenantId: result.data.tenantId,
+      reason: "外部登录断言时间戳非法。",
+    });
     return unauthorized(c, "外部登录断言时间戳非法。");
   }
 
@@ -639,6 +699,13 @@ authRoutes.post("/external/login", async (c) => {
   const ttlMs = ttlSeconds * 1000;
   const nowMs = Date.now();
   if (Math.abs(nowMs - timestampMs) > ttlMs) {
+    await appendExternalLoginFailureAuditLog(c, {
+      providerId: result.data.providerId,
+      externalUserId: result.data.externalUserId,
+      email: result.data.email,
+      tenantId: result.data.tenantId,
+      reason: "外部登录断言已过期。",
+    });
     return unauthorized(c, "外部登录断言已过期。");
   }
 
@@ -657,10 +724,24 @@ authRoutes.post("/external/login", async (c) => {
       assertionSecret
     )
   ) {
+    await appendExternalLoginFailureAuditLog(c, {
+      providerId: result.data.providerId,
+      externalUserId: result.data.externalUserId,
+      email: result.data.email,
+      tenantId: result.data.tenantId,
+      reason: "外部登录签名校验失败。",
+    });
     return unauthorized(c, "外部登录签名校验失败。");
   }
 
   if (!claimExternalAssertionNonce(result.data.providerId, result.data.nonce, nowMs, ttlMs)) {
+    await appendExternalLoginFailureAuditLog(c, {
+      providerId: result.data.providerId,
+      externalUserId: result.data.externalUserId,
+      email: result.data.email,
+      tenantId: result.data.tenantId,
+      reason: "外部登录请求疑似重放。",
+    });
     return unauthorized(c, "外部登录请求疑似重放，已拒绝。");
   }
 
@@ -679,6 +760,13 @@ authRoutes.post("/external/login", async (c) => {
 
   const tenantAccess = await resolveTenantAccessForLogin(user.id, result.data.tenantId);
   if (!tenantAccess) {
+    await appendExternalLoginFailureAuditLog(c, {
+      providerId: result.data.providerId,
+      externalUserId: result.data.externalUserId,
+      email: result.data.email,
+      tenantId: result.data.tenantId,
+      reason: "外部账号未绑定到指定租户。",
+    });
     return c.json(
       {
         message: "外部账号未绑定到指定租户，无法登录。",

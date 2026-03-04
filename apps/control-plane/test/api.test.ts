@@ -2850,6 +2850,20 @@ describe("Control Plane API", () => {
         }),
       });
       expect(replayResponse.status).toBe(401);
+
+      const auth = await getDefaultAuthContext();
+      const audits = await queryAuditByAction(
+        "auth.external_login_failed",
+        "/api/v1/auth/external/login",
+        auth.accessToken,
+        auth.userId,
+      );
+      const matched = audits.items.some(
+        (item) =>
+          item.action === "auth.external_login_failed" &&
+          item.metadata.route === "/api/v1/auth/external/login",
+      );
+      expect(matched).toBe(true);
     } finally {
       if (originalProviders === undefined) {
         delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
