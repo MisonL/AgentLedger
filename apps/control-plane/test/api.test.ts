@@ -9,6 +9,8 @@ import {
 } from "../src/contracts";
 import type {
   Alert,
+  AlertOrchestrationRule,
+  AlertOrchestrationRuleListInput,
   AlertListInput,
   AuditListInput,
   AuditListResponse,
@@ -10478,6 +10480,199 @@ describe("Control Plane API", () => {
     expect(body.message).toContain("未找到告警");
   });
 
+  test("alerts/orchestration GET /api/v1/alerts/orchestration/rules 未认证返回 401", async () => {
+    const response = await app.request("/api/v1/alerts/orchestration/rules");
+    const body = (await response.json()) as { message: string };
+
+    expect(response.status).toBe(401);
+    expect(body.message).toContain("认证");
+  });
+
+  test("alerts/orchestration GET /api/v1/alerts/orchestration/rules 参数非法返回 400", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const response = await app.request("/api/v1/alerts/orchestration/rules?enabled=invalid", {
+      headers: authHeaders,
+    });
+    const body = (await response.json()) as { message: string };
+
+    expect(response.status).toBe(400);
+    expect(body.message).toContain("enabled");
+  });
+
+  test("alerts/orchestration PUT /api/v1/alerts/orchestration/rules/:id channels 非法返回 400", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const nonce = createNonce("alerts-orchestration-invalid-channel");
+    const ruleId = `rule-invalid-channel-${nonce}`;
+
+    const response = await app.request(
+      `/api/v1/alerts/orchestration/rules/${encodeURIComponent(ruleId)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          name: `编排规则-${nonce}`,
+          enabled: true,
+          eventType: "alert",
+          dedupeWindowSeconds: 60,
+          suppressionWindowSeconds: 120,
+          mergeWindowSeconds: 180,
+          channels: ["slack"],
+        }),
+      },
+    );
+    const body = (await response.json()) as { message: string };
+
+    expect(response.status).toBe(400);
+    expect(body.message).toContain("channels");
+  });
+
+  test("alerts/orchestration PUT 后 GET list 可见", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const nonce = createNonce("alerts-orchestration-list-visible");
+    const ruleId = `rule-${nonce}`;
+    const sourceId = `source-${nonce}`;
+
+    const upsertResponse = await app.request(
+      `/api/v1/alerts/orchestration/rules/${encodeURIComponent(ruleId)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          name: `编排规则-${nonce}`,
+          enabled: true,
+          eventType: "alert",
+          severity: "critical",
+          sourceId,
+          dedupeWindowSeconds: 60,
+          suppressionWindowSeconds: 120,
+          mergeWindowSeconds: 180,
+          slaMinutes: 30,
+          channels: ["wecom", "webhook"],
+        }),
+      },
+    );
+    const upsertBody = (await upsertResponse.json()) as AlertOrchestrationRule;
+    expect(upsertResponse.status).toBe(200);
+    expect(upsertBody.id).toBe(ruleId);
+    expect(upsertBody.tenantId).toBe(tenantId);
+
+    const listResponse = await app.request(
+      `/api/v1/alerts/orchestration/rules?eventType=alert&enabled=true&severity=critical&sourceId=${encodeURIComponent(
+        sourceId,
+      )}`,
+      {
+        headers: authHeaders,
+      },
+    );
+    const listBody = (await listResponse.json()) as {
+      items: AlertOrchestrationRule[];
+      total: number;
+      filters: AlertOrchestrationRuleListInput;
+    };
+
+    expect(listResponse.status).toBe(200);
+    expect(listBody.filters.eventType).toBe("alert");
+    expect(listBody.filters.enabled).toBe(true);
+    expect(listBody.filters.severity).toBe("critical");
+    expect(listBody.filters.sourceId).toBe(sourceId);
+    const target = listBody.items.find((item) => item.id === ruleId);
+    expect(target).toBeDefined();
+    expect(target?.channels).toEqual(["wecom", "webhook"]);
+  });
+
+  test("alerts/orchestration 租户隔离：tenant A upsert 的规则 tenant B 不可见", async () => {
+    const nonce = createNonce("alerts-orchestration-cross-tenant");
+    const auth = await getDefaultAuthContext();
+
+    const tenantAResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Alerts Orchestration Tenant A ${nonce}`,
+        slug: `alerts-orch-a-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantAResult, [201]);
+    const tenantAId = extractEntityId(tenantAResult.payload);
+    if (!tenantAId) {
+      throw new Error("租户 A 创建响应缺少 tenantId。");
+    }
+
+    const tenantBResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Alerts Orchestration Tenant B ${nonce}`,
+        slug: `alerts-orch-b-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantBResult, [201]);
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error("租户 B 创建响应缺少 tenantId。");
+    }
+
+    const tenantAHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      auth.accessToken,
+      auth.userId,
+    );
+    const tenantBHeaders = await issueTenantScopedAuthHeaders(
+      tenantBId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const ruleId = `cross-tenant-rule-${nonce}`;
+    const upsertResponse = await app.request(
+      `/api/v1/alerts/orchestration/rules/${encodeURIComponent(ruleId)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          name: `跨租户隔离规则-${nonce}`,
+          enabled: true,
+          eventType: "weekly",
+          dedupeWindowSeconds: 3600,
+          suppressionWindowSeconds: 7200,
+          mergeWindowSeconds: 1800,
+          channels: ["email"],
+        }),
+      },
+    );
+    expect(upsertResponse.status).toBe(200);
+    const upsertBody = (await upsertResponse.json()) as AlertOrchestrationRule;
+    expect(upsertBody.tenantId).toBe(tenantAId);
+
+    const listAResponse = await app.request("/api/v1/alerts/orchestration/rules", {
+      headers: tenantAHeaders,
+    });
+    expect(listAResponse.status).toBe(200);
+    const listABody = (await listAResponse.json()) as {
+      items: AlertOrchestrationRule[];
+    };
+    expect(listABody.items.some((item) => item.id === ruleId)).toBe(true);
+
+    const listBResponse = await app.request("/api/v1/alerts/orchestration/rules", {
+      headers: tenantBHeaders,
+    });
+    expect(listBResponse.status).toBe(200);
+    const listBBody = (await listBResponse.json()) as {
+      items: AlertOrchestrationRule[];
+    };
+    expect(listBBody.items.some((item) => item.id === ruleId)).toBe(false);
+  });
+
   test("GET /api/v1/audits 返回结构包含 items/total/filters", async () => {
     const authHeaders = await resolveAuthHeaders();
     const response = await app.request("/api/v1/audits", {
@@ -11267,5 +11462,897 @@ describe("Control Plane API", () => {
         Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY = originalSigningKey;
       }
     }
+  });
+
+  test("residency 路由：401/400/创建后可查询并按租户隔离", async () => {
+    const unauthorizedResponse = await app.request("/api/v1/residency/policy");
+    expect(unauthorizedResponse.status).toBe(401);
+
+    const nonce = createNonce("residency-routes");
+    const auth = await getDefaultAuthContext();
+
+    const tenantAResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Residency Tenant A ${nonce}`,
+        slug: `residency-a-${nonce}`,
+      },
+      auth.userId
+    );
+    assertApiStatus(tenantAResult, [201]);
+    const tenantAId = extractEntityId(tenantAResult.payload);
+    if (!tenantAId) {
+      throw new Error("租户 A 创建失败，缺少 tenantId。");
+    }
+
+    const tenantBResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Residency Tenant B ${nonce}`,
+        slug: `residency-b-${nonce}`,
+      },
+      auth.userId
+    );
+    assertApiStatus(tenantBResult, [201]);
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error("租户 B 创建失败，缺少 tenantId。");
+    }
+
+    const tenantAHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      auth.accessToken,
+      auth.userId
+    );
+    const tenantBHeaders = await issueTenantScopedAuthHeaders(
+      tenantBId,
+      auth.accessToken,
+      auth.userId
+    );
+
+    const badPolicyResponse = await app.request("/api/v1/residency/policy", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        mode: "invalid",
+      }),
+    });
+    expect(badPolicyResponse.status).toBe(400);
+
+    const policyResponse = await app.request("/api/v1/residency/policy", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        mode: "active_active",
+        primaryRegion: "cn-hangzhou",
+        replicaRegions: ["cn-shanghai", "ap-southeast-1"],
+        allowCrossRegionTransfer: true,
+        requireTransferApproval: true,
+      }),
+    });
+    expect(policyResponse.status).toBe(200);
+    const policyBody = (await policyResponse.json()) as {
+      tenantId: string;
+      mode: string;
+      replicaRegions: string[];
+    };
+    expect(policyBody.tenantId).toBe(tenantAId);
+    expect(policyBody.mode).toBe("active_active");
+    expect(policyBody.replicaRegions).toContain("cn-shanghai");
+
+    const createJobResponse = await app.request("/api/v1/residency/replication-jobs", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        sourceRegion: "cn-hangzhou",
+        targetRegion: "cn-shanghai",
+        reason: "验证租户隔离",
+      }),
+    });
+    expect(createJobResponse.status).toBe(201);
+    const jobBody = (await createJobResponse.json()) as {
+      id: string;
+      tenantId: string;
+    };
+    expect(jobBody.tenantId).toBe(tenantAId);
+
+    const listAResponse = await app.request("/api/v1/residency/replication-jobs", {
+      headers: tenantAHeaders,
+    });
+    expect(listAResponse.status).toBe(200);
+    const listABody = (await listAResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(listABody.items.some((item) => item.id === jobBody.id)).toBe(true);
+
+    const listBResponse = await app.request("/api/v1/residency/replication-jobs", {
+      headers: tenantBHeaders,
+    });
+    expect(listBResponse.status).toBe(200);
+    const listBBody = (await listBResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(listBBody.items.some((item) => item.id === jobBody.id)).toBe(false);
+  });
+
+  test("rule hub 路由：400/创建资产版本发布审批与租户隔离", async () => {
+    const nonce = createNonce("rule-hub-routes");
+    const auth = await getDefaultAuthContext();
+
+    const tenantAResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `RuleHub Tenant A ${nonce}`,
+        slug: `rulehub-a-${nonce}`,
+      },
+      auth.userId
+    );
+    assertApiStatus(tenantAResult, [201]);
+    const tenantAId = extractEntityId(tenantAResult.payload);
+    if (!tenantAId) {
+      throw new Error("租户 A 创建失败，缺少 tenantId。");
+    }
+
+    const tenantBResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `RuleHub Tenant B ${nonce}`,
+        slug: `rulehub-b-${nonce}`,
+      },
+      auth.userId
+    );
+    assertApiStatus(tenantBResult, [201]);
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error("租户 B 创建失败，缺少 tenantId。");
+    }
+
+    const tenantAHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      auth.accessToken,
+      auth.userId
+    );
+    const tenantBHeaders = await issueTenantScopedAuthHeaders(
+      tenantBId,
+      auth.accessToken,
+      auth.userId
+    );
+
+    const badCreateResponse = await app.request("/api/v1/rules/assets", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({}),
+    });
+    expect(badCreateResponse.status).toBe(400);
+
+    const createAssetResponse = await app.request("/api/v1/rules/assets", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        name: `Prompt 审计规则 ${nonce}`,
+        description: "用于验证规则资产闭环",
+      }),
+    });
+    expect(createAssetResponse.status).toBe(201);
+    const asset = (await createAssetResponse.json()) as {
+      id: string;
+      tenantId: string;
+      status: string;
+    };
+    expect(asset.tenantId).toBe(tenantAId);
+    expect(asset.status).toBe("draft");
+
+    const createVersionResponse = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/versions`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          content: "deny tool=github.delete_repo when risk=high",
+          changelog: "init version",
+        }),
+      }
+    );
+    expect(createVersionResponse.status).toBe(201);
+    const version = (await createVersionResponse.json()) as { version: number };
+    expect(version.version).toBe(1);
+
+    const publishResponse = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/publish`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          version: 1,
+        }),
+      }
+    );
+    expect(publishResponse.status).toBe(200);
+    const publishedAsset = (await publishResponse.json()) as {
+      publishedVersion?: number;
+      status: string;
+    };
+    expect(publishedAsset.publishedVersion).toBe(1);
+    expect(publishedAsset.status).toBe("published");
+
+    const createApprovalResponse = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/approvals`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          version: 1,
+          decision: "approved",
+          reason: "通过验证",
+        }),
+      }
+    );
+    expect(createApprovalResponse.status).toBe(201);
+
+    const listApprovalsResponse = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/approvals?version=1`,
+      {
+        headers: tenantAHeaders,
+      }
+    );
+    expect(listApprovalsResponse.status).toBe(200);
+    const listApprovalsBody = (await listApprovalsResponse.json()) as {
+      items: Array<{ version: number; decision: string }>;
+    };
+    expect(
+      listApprovalsBody.items.some((item) => item.version === 1 && item.decision === "approved")
+    ).toBe(true);
+
+    const listBResponse = await app.request("/api/v1/rules/assets", {
+      headers: tenantBHeaders,
+    });
+    expect(listBResponse.status).toBe(200);
+    const listBBody = (await listBResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(listBBody.items.some((item) => item.id === asset.id)).toBe(false);
+  });
+
+  test("mcp 路由：401/400/策略审批审计链路与租户隔离", async () => {
+    const unauthorizedResponse = await app.request("/api/v1/mcp/policies");
+    expect(unauthorizedResponse.status).toBe(401);
+
+    const nonce = createNonce("mcp-routes");
+    const auth = await getDefaultAuthContext();
+
+    const tenantAResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `MCP Tenant A ${nonce}`,
+        slug: `mcp-a-${nonce}`,
+      },
+      auth.userId
+    );
+    assertApiStatus(tenantAResult, [201]);
+    const tenantAId = extractEntityId(tenantAResult.payload);
+    if (!tenantAId) {
+      throw new Error("租户 A 创建失败，缺少 tenantId。");
+    }
+
+    const tenantBResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `MCP Tenant B ${nonce}`,
+        slug: `mcp-b-${nonce}`,
+      },
+      auth.userId
+    );
+    assertApiStatus(tenantBResult, [201]);
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error("租户 B 创建失败，缺少 tenantId。");
+    }
+
+    const tenantAHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      auth.accessToken,
+      auth.userId
+    );
+    const tenantBHeaders = await issueTenantScopedAuthHeaders(
+      tenantBId,
+      auth.accessToken,
+      auth.userId
+    );
+
+    const badPolicyResponse = await app.request(
+      `/api/v1/mcp/policies/${encodeURIComponent(`tool-${nonce}`)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          riskLevel: "invalid",
+          decision: "invalid",
+        }),
+      }
+    );
+    expect(badPolicyResponse.status).toBe(400);
+
+    const policyResponse = await app.request(
+      `/api/v1/mcp/policies/${encodeURIComponent(`tool-${nonce}`)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          riskLevel: "high",
+          decision: "require_approval",
+          reason: "高风险工具需要审批",
+        }),
+      }
+    );
+    expect(policyResponse.status).toBe(200);
+
+    const createApprovalResponse = await app.request("/api/v1/mcp/approvals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        toolId: `tool-${nonce}`,
+        reason: "临时申请",
+      }),
+    });
+    expect(createApprovalResponse.status).toBe(201);
+    const approval = (await createApprovalResponse.json()) as {
+      id: string;
+      status: string;
+    };
+    expect(approval.status).toBe("pending");
+
+    const approveResponse = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(approval.id)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          reason: "审核通过",
+        }),
+      }
+    );
+    expect(approveResponse.status).toBe(200);
+    const approved = (await approveResponse.json()) as { status: string };
+    expect(approved.status).toBe("approved");
+
+    const invocationResponse = await app.request("/api/v1/mcp/invocations", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        toolId: `tool-${nonce}`,
+        decision: "require_approval",
+        result: "approved",
+        approvalRequestId: approval.id,
+        metadata: {
+          scenario: "unit-test",
+        },
+      }),
+    });
+    expect(invocationResponse.status).toBe(201);
+    const invocation = (await invocationResponse.json()) as { id: string };
+
+    const listAResponse = await app.request("/api/v1/mcp/invocations", {
+      headers: tenantAHeaders,
+    });
+    expect(listAResponse.status).toBe(200);
+    const listABody = (await listAResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(listABody.items.some((item) => item.id === invocation.id)).toBe(true);
+
+    const listBResponse = await app.request("/api/v1/mcp/invocations", {
+      headers: tenantBHeaders,
+    });
+    expect(listBResponse.status).toBe(200);
+    const listBBody = (await listBResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(listBBody.items.some((item) => item.id === invocation.id)).toBe(false);
+  });
+
+  test("open-platform 路由：401/403/400/主流程与租户隔离", async () => {
+    const unauthorizedResponse = await app.request("/api/v1/api-keys");
+    expect(unauthorizedResponse.status).toBe(401);
+
+    const nonce = createNonce("open-platform-routes");
+    const auth = await getDefaultAuthContext();
+    const member = await registerAndLoginUser(`${nonce}-member`);
+    if (!member.userId) {
+      throw new Error("open-platform 测试用户缺少 userId。");
+    }
+
+    const tenantAResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `OpenPlatform Tenant A ${nonce}`,
+        slug: `open-platform-a-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantAResult, [201]);
+    const tenantAId = extractEntityId(tenantAResult.payload);
+    if (!tenantAId) {
+      throw new Error("租户 A 创建失败，缺少 tenantId。");
+    }
+
+    const tenantBResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `OpenPlatform Tenant B ${nonce}`,
+        slug: `open-platform-b-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantBResult, [201]);
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error("租户 B 创建失败，缺少 tenantId。");
+    }
+
+    const addMemberResult = await addTenantMemberByAuth(
+      auth.accessToken,
+      {
+        tenantId: tenantAId,
+        userId: member.userId,
+        tenantRole: "member",
+      },
+      auth.userId,
+    );
+    assertApiStatus(addMemberResult, [201]);
+
+    const tenantAHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      auth.accessToken,
+      auth.userId,
+    );
+    const tenantAMemberHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      member.accessToken,
+      member.userId,
+    );
+    const tenantBHeaders = await issueTenantScopedAuthHeaders(
+      tenantBId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const openapiResponse = await app.request("/api/v1/openapi.json", {
+      headers: tenantAHeaders,
+    });
+    expect(openapiResponse.status).toBe(200);
+    const openapiBody = (await openapiResponse.json()) as {
+      paths?: Record<string, unknown>;
+    };
+    expect(Boolean(openapiBody.paths?.["/api/v1/replay/jobs"])).toBe(true);
+
+    const forbiddenCreateKeyResponse = await app.request("/api/v1/api-keys", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAMemberHeaders,
+      },
+      body: JSON.stringify({
+        name: `forbidden-member-key-${nonce}`,
+      }),
+    });
+    expect(forbiddenCreateKeyResponse.status).toBe(403);
+
+    const badCreateKeyResponse = await app.request("/api/v1/api-keys", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({}),
+    });
+    expect(badCreateKeyResponse.status).toBe(400);
+
+    const createKeyResponse = await app.request("/api/v1/api-keys", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        name: `open-key-${nonce}`,
+        scope: "write",
+      }),
+    });
+    expect(createKeyResponse.status).toBe(201);
+    const createdKey = (await createKeyResponse.json()) as {
+      id: string;
+      tenantId: string;
+    };
+    expect(createdKey.tenantId).toBe(tenantAId);
+
+    const listKeysResponse = await app.request("/api/v1/api-keys", {
+      headers: tenantAHeaders,
+    });
+    expect(listKeysResponse.status).toBe(200);
+    const listKeysBody = (await listKeysResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(listKeysBody.items.some((item) => item.id === createdKey.id)).toBe(true);
+
+    const revokeResponse = await app.request(
+      `/api/v1/api-keys/${encodeURIComponent(createdKey.id)}/revoke`,
+      {
+        method: "POST",
+        headers: tenantAHeaders,
+      },
+    );
+    expect(revokeResponse.status).toBe(200);
+
+    const badWebhookResponse = await app.request("/api/v1/webhooks", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        name: "bad-webhook",
+        url: "not-a-url",
+        events: ["quality.event.created"],
+      }),
+    });
+    expect(badWebhookResponse.status).toBe(400);
+
+    const createWebhookResponse = await app.request("/api/v1/webhooks", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        name: `Open Webhook ${nonce}`,
+        url: "https://example.com/webhook",
+        events: ["quality.event.created", "replay.job.completed"],
+      }),
+    });
+    expect(createWebhookResponse.status).toBe(201);
+    const createdWebhook = (await createWebhookResponse.json()) as { id: string };
+
+    const listWebhookTenantBResponse = await app.request("/api/v1/webhooks", {
+      headers: tenantBHeaders,
+    });
+    expect(listWebhookTenantBResponse.status).toBe(200);
+    const listWebhookTenantBBody = (await listWebhookTenantBResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(
+      listWebhookTenantBBody.items.some((item) => item.id === createdWebhook.id),
+    ).toBe(false);
+  });
+
+  test("quality 路由：400/201/200 与租户隔离", async () => {
+    const nonce = createNonce("quality-routes");
+    const auth = await getDefaultAuthContext();
+
+    const tenantAResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Quality Tenant A ${nonce}`,
+        slug: `quality-a-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantAResult, [201]);
+    const tenantAId = extractEntityId(tenantAResult.payload);
+    if (!tenantAId) {
+      throw new Error("租户 A 创建失败，缺少 tenantId。");
+    }
+
+    const tenantBResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Quality Tenant B ${nonce}`,
+        slug: `quality-b-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantBResult, [201]);
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error("租户 B 创建失败，缺少 tenantId。");
+    }
+
+    const tenantAHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      auth.accessToken,
+      auth.userId,
+    );
+    const tenantBHeaders = await issueTenantScopedAuthHeaders(
+      tenantBId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const badEventResponse = await app.request("/api/v1/quality/events", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        eventType: "answer.correctness",
+        score: 120,
+      }),
+    });
+    expect(badEventResponse.status).toBe(400);
+
+    const createEventResponse = await app.request("/api/v1/quality/events", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        sessionId: `sess-${nonce}`,
+        metric: "accuracy",
+        score: 86,
+        sampleCount: 12,
+        occurredAt: "2026-03-04T08:00:00.000Z",
+      }),
+    });
+    expect(createEventResponse.status).toBe(201);
+
+    const badDailyMetricsResponse = await app.request(
+      "/api/v1/quality/metrics/daily?from=2026-03-06&to=2026-03-01",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(badDailyMetricsResponse.status).toBe(400);
+
+    const dailyMetricsResponse = await app.request(
+      "/api/v1/quality/metrics/daily?from=2026-03-04&to=2026-03-04",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(dailyMetricsResponse.status).toBe(200);
+    const dailyMetricsBody = (await dailyMetricsResponse.json()) as {
+      items: Array<{ date: string; totalEvents: number }>;
+    };
+    expect(
+      dailyMetricsBody.items.some(
+        (item) => item.date === "2026-03-04" && item.totalEvents >= 1,
+      ),
+    ).toBe(true);
+
+    const scorecardId = "accuracy";
+    const upsertScorecardResponse = await app.request(
+      `/api/v1/quality/scorecards/${encodeURIComponent(scorecardId)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          targetScore: 90,
+          warningScore: 75,
+          criticalScore: 60,
+          weight: 1,
+          enabled: true,
+          updatedAt: "2026-03-04T08:10:00.000Z",
+        }),
+      },
+    );
+    expect(upsertScorecardResponse.status).toBe(200);
+
+    const listScorecardsAResponse = await app.request("/api/v1/quality/scorecards", {
+      headers: tenantAHeaders,
+    });
+    expect(listScorecardsAResponse.status).toBe(200);
+    const listScorecardsABody = (await listScorecardsAResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(listScorecardsABody.items.some((item) => item.id === scorecardId)).toBe(true);
+
+    const listScorecardsBResponse = await app.request("/api/v1/quality/scorecards", {
+      headers: tenantBHeaders,
+    });
+    expect(listScorecardsBResponse.status).toBe(200);
+    const listScorecardsBBody = (await listScorecardsBResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(listScorecardsBBody.items.some((item) => item.id === scorecardId)).toBe(false);
+  });
+
+  test("replay 路由：400/201/200 与租户隔离", async () => {
+    const nonce = createNonce("replay-routes");
+    const auth = await getDefaultAuthContext();
+
+    const tenantAResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Replay Tenant A ${nonce}`,
+        slug: `replay-a-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantAResult, [201]);
+    const tenantAId = extractEntityId(tenantAResult.payload);
+    if (!tenantAId) {
+      throw new Error("租户 A 创建失败，缺少 tenantId。");
+    }
+
+    const tenantBResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Replay Tenant B ${nonce}`,
+        slug: `replay-b-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantBResult, [201]);
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error("租户 B 创建失败，缺少 tenantId。");
+    }
+
+    const tenantAHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      auth.accessToken,
+      auth.userId,
+    );
+    const tenantBHeaders = await issueTenantScopedAuthHeaders(
+      tenantBId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const badBaselineResponse = await app.request("/api/v1/replay/baselines", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({}),
+    });
+    expect(badBaselineResponse.status).toBe(400);
+
+    const createBaselineResponse = await app.request("/api/v1/replay/baselines", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        name: `Regression Baseline ${nonce}`,
+        datasetId: "golden-set-v1",
+        model: "gpt-4.1",
+        sampleCount: 12,
+      }),
+    });
+    expect(createBaselineResponse.status).toBe(201);
+    const baseline = (await createBaselineResponse.json()) as {
+      id: string;
+      tenantId: string;
+    };
+    expect(baseline.tenantId).toBe(tenantAId);
+
+    const badCreateJobResponse = await app.request("/api/v1/replay/jobs", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        baselineId: baseline.id,
+        candidateLabel: "candidate-bad",
+        sampleLimit: 0,
+      }),
+    });
+    expect(badCreateJobResponse.status).toBe(400);
+
+    const createJobResponse = await app.request("/api/v1/replay/jobs", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        baselineId: baseline.id,
+        candidateLabel: "candidate-v2",
+        sampleLimit: 12,
+      }),
+    });
+    expect(createJobResponse.status).toBe(201);
+    const replayJob = (await createJobResponse.json()) as {
+      id: string;
+      totalCases: number;
+      baselineId: string;
+    };
+    expect(replayJob.baselineId).toBe(baseline.id);
+    expect(replayJob.totalCases).toBe(12);
+
+    const listJobsAResponse = await app.request("/api/v1/replay/jobs", {
+      headers: tenantAHeaders,
+    });
+    expect(listJobsAResponse.status).toBe(200);
+    const listJobsABody = (await listJobsAResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(listJobsABody.items.some((item) => item.id === replayJob.id)).toBe(true);
+
+    const getJobAResponse = await app.request(
+      `/api/v1/replay/jobs/${encodeURIComponent(replayJob.id)}`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(getJobAResponse.status).toBe(200);
+
+    const diffResponse = await app.request(
+      `/api/v1/replay/jobs/${encodeURIComponent(replayJob.id)}/diff`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(diffResponse.status).toBe(200);
+    const diffBody = (await diffResponse.json()) as {
+      jobId: string;
+      summary: { totalCases: number };
+    };
+    expect(diffBody.jobId).toBe(replayJob.id);
+    expect(diffBody.summary.totalCases).toBe(12);
+
+    const listJobsBResponse = await app.request("/api/v1/replay/jobs", {
+      headers: tenantBHeaders,
+    });
+    expect(listJobsBResponse.status).toBe(200);
+    const listJobsBBody = (await listJobsBResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(listJobsBBody.items.some((item) => item.id === replayJob.id)).toBe(false);
+
+    const getJobBResponse = await app.request(
+      `/api/v1/replay/jobs/${encodeURIComponent(replayJob.id)}`,
+      {
+        headers: tenantBHeaders,
+      },
+    );
+    expect(getJobBResponse.status).toBe(404);
   });
 });
