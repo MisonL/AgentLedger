@@ -10,7 +10,10 @@ import {
 import {
   ApiError,
   createSource,
+  exportSessions,
+  exportUsage,
   exchangeExternalAuthCode,
+  fetchAlerts,
   fetchAuthProviders,
   fetchSourceHealth,
   fetchSourceParseFailures,
@@ -28,12 +31,18 @@ import {
   searchSessions,
   setUnauthorizedHandler,
   testSourceConnection,
+  updateAlertStatus,
   upsertPricingCatalog,
 } from "./api";
 import type {
+  AlertItem,
+  AlertMutableStatus,
+  AlertSeverity,
+  AlertStatus,
   AuthProviderItem,
   AuthLoginInput,
   CreateSourceInput,
+  ExportFormat,
   HeatmapCell,
   MetricKey,
   PricingCatalogEntry,
@@ -47,6 +56,7 @@ import type {
   SourceType,
   UsageAggregateFilters,
   UsageCostMode,
+  UsageExportDimension,
 } from "./types";
 import "./App.css";
 
@@ -56,7 +66,13 @@ const SOURCE_TYPE_OPTIONS: Array<{ value: SourceType; label: string }> = [
   { value: "sync-cache", label: "同步缓存（sync-cache）" },
 ];
 
-type ConsoleRoute = "dashboard" | "sessions" | "analytics" | "sources" | "pricing";
+type ConsoleRoute =
+  | "dashboard"
+  | "sessions"
+  | "analytics"
+  | "governance"
+  | "sources"
+  | "pricing";
 
 const ROUTE_ITEMS: Array<{
   key: ConsoleRoute;
@@ -81,6 +97,12 @@ const ROUTE_ITEMS: Array<{
     label: "Analytics",
     title: "聚合分析",
     subtitle: "接入 daily/monthly/models/sessions 聚合接口。",
+  },
+  {
+    key: "governance",
+    label: "Governance",
+    title: "治理中心",
+    subtitle: "告警工作台与导出入口。",
   },
   {
     key: "sources",
@@ -163,6 +185,34 @@ const EMPTY_SESSION_SEARCH_FILTERS: SessionSearchFilters = {
   model: "",
   project: "",
 };
+
+const ALERT_STATUS_FILTER_OPTIONS: Array<{ value: ""; label: string } | { value: AlertStatus; label: string }> = [
+  { value: "", label: "全部状态" },
+  { value: "open", label: "open" },
+  { value: "acknowledged", label: "acknowledged" },
+  { value: "resolved", label: "resolved" },
+];
+
+const ALERT_SEVERITY_FILTER_OPTIONS: Array<
+  { value: ""; label: string } | { value: AlertSeverity; label: string }
+> = [
+  { value: "", label: "全部级别" },
+  { value: "warning", label: "warning" },
+  { value: "critical", label: "critical" },
+];
+
+const EXPORT_FORMAT_OPTIONS: Array<{ value: ExportFormat; label: string }> = [
+  { value: "json", label: "JSON" },
+  { value: "csv", label: "CSV" },
+];
+
+const USAGE_EXPORT_DIMENSION_OPTIONS: Array<{ value: UsageExportDimension; label: string }> = [
+  { value: "daily", label: "daily" },
+  { value: "monthly", label: "monthly" },
+  { value: "models", label: "models" },
+  { value: "sessions", label: "sessions" },
+  { value: "heatmap", label: "heatmap" },
+];
 
 function createEmptyPricingEntry(): PricingEntryFormState {
   return {
@@ -415,6 +465,25 @@ function formatSourceFreshness(item: SessionSourceFreshness): string {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "未知错误";
+}
+
+function triggerBrowserDownload(file: { blob: Blob; filename: string }) {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return;
+  }
+  if (typeof URL.createObjectURL !== "function") {
+    return;
+  }
+
+  const objectUrl = URL.createObjectURL(file.blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = file.filename;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(objectUrl);
 }
 
 function toTimeMs(value: string | null): number | null {
@@ -2082,6 +2151,305 @@ function AnalyticsPage() {
   );
 }
 
+function GovernancePage() {
+  const queryClient = useQueryClient();
+  const [statusFilter, setStatusFilter] = useState<AlertStatus | "">("");
+  const [severityFilter, setSeverityFilter] = useState<AlertSeverity | "">("");
+  const [alertFeedback, setAlertFeedback] = useState<string | null>(null);
+  const [sessionExportFormat, setSessionExportFormat] = useState<ExportFormat>("csv");
+  const [usageExportFormat, setUsageExportFormat] = useState<ExportFormat>("csv");
+  const [usageExportDimension, setUsageExportDimension] =
+    useState<UsageExportDimension>("daily");
+  const [exportFeedback, setExportFeedback] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const alertQueryInput = useMemo(
+    () => ({
+      limit: 50,
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(severityFilter ? { severity: severityFilter } : {}),
+    }),
+    [severityFilter, statusFilter]
+  );
+
+  const alertsQuery = useQuery({
+    queryKey: ["alerts", alertQueryInput],
+    queryFn: ({ signal }) => fetchAlerts(alertQueryInput, signal),
+    staleTime: 20_000,
+  });
+
+  const updateAlertStatusMutation = useMutation({
+    mutationFn: ({ alertId, status }: { alertId: string; status: AlertMutableStatus }) =>
+      updateAlertStatus(alertId, status),
+    onSuccess: async (alert) => {
+      setAlertFeedback(`告警 ${alert.id} 已更新为 ${alert.status}。`);
+      await queryClient.invalidateQueries({ queryKey: ["alerts"] });
+    },
+  });
+
+  const exportSessionsMutation = useMutation({
+    mutationFn: (format: ExportFormat) => exportSessions(format, { limit: 200 }),
+    onSuccess: (file) => {
+      setExportError(null);
+      setExportFeedback(`Sessions 导出成功：${file.filename}`);
+      triggerBrowserDownload(file);
+    },
+    onError: (error) => {
+      setExportFeedback(null);
+      setExportError(`Sessions 导出失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const exportUsageMutation = useMutation({
+    mutationFn: (input: { format: ExportFormat; dimension: UsageExportDimension }) =>
+      exportUsage(input.format, {
+        dimension: input.dimension,
+        limit: 200,
+      }),
+    onSuccess: (file) => {
+      setExportError(null);
+      setExportFeedback(`Usage 导出成功：${file.filename}`);
+      triggerBrowserDownload(file);
+    },
+    onError: (error) => {
+      setExportFeedback(null);
+      setExportError(`Usage 导出失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const alertItems = alertsQuery.data?.items ?? [];
+
+  return (
+    <>
+      <section className="panel">
+        <header>
+          <h2>告警工作台</h2>
+          <p>共 {alertsQuery.data?.total ?? alertItems.length} 条</p>
+        </header>
+
+        <div className="filters-row">
+          <label className="inline-field" htmlFor="alerts-severity-filter">
+            级别
+            <select
+              id="alerts-severity-filter"
+              value={severityFilter}
+              onChange={(event) => {
+                setSeverityFilter(event.target.value as AlertSeverity | "");
+                setAlertFeedback(null);
+              }}
+            >
+              {ALERT_SEVERITY_FILTER_OPTIONS.map((option) => (
+                <option key={option.value || "all"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="alerts-status-filter">
+            状态
+            <select
+              id="alerts-status-filter"
+              value={statusFilter}
+              onChange={(event) => {
+                setStatusFilter(event.target.value as AlertStatus | "");
+                setAlertFeedback(null);
+              }}
+            >
+              {ALERT_STATUS_FILTER_OPTIONS.map((option) => (
+                <option key={option.value || "all"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {alertsQuery.isLoading ? <p className="feedback info">告警加载中...</p> : null}
+        {alertsQuery.isError ? (
+          <p className="feedback error">告警加载失败：{toErrorMessage(alertsQuery.error)}</p>
+        ) : null}
+        {alertFeedback ? <p className="feedback success">{alertFeedback}</p> : null}
+        {updateAlertStatusMutation.isError ? (
+          <p className="feedback error">
+            告警状态更新失败：{toErrorMessage(updateAlertStatusMutation.error)}
+          </p>
+        ) : null}
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>级别</th>
+                <th>状态</th>
+                <th>消息</th>
+                <th>更新时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {alertItems.length === 0 ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={6}>
+                    暂无告警
+                  </td>
+                </tr>
+              ) : (
+                alertItems.map((alert: AlertItem) => {
+                  const isUpdating =
+                    updateAlertStatusMutation.isPending &&
+                    updateAlertStatusMutation.variables?.alertId === alert.id;
+
+                  return (
+                    <tr key={alert.id}>
+                      <td>{alert.id}</td>
+                      <td>{alert.severity}</td>
+                      <td>{alert.status}</td>
+                      <td>{alert.message}</td>
+                      <td>{formatDateTime(alert.updatedAt)}</td>
+                      <td>
+                        <div className="governance-action-row">
+                          {alert.status === "open" ? (
+                            <button
+                              type="button"
+                              className="table-action"
+                              disabled={isUpdating}
+                              onClick={() =>
+                                updateAlertStatusMutation.mutate({
+                                  alertId: alert.id,
+                                  status: "acknowledged",
+                                })
+                              }
+                            >
+                              ACK
+                            </button>
+                          ) : null}
+                          {alert.status !== "resolved" ? (
+                            <button
+                              type="button"
+                              className="table-action"
+                              disabled={isUpdating}
+                              onClick={() =>
+                                updateAlertStatusMutation.mutate({
+                                  alertId: alert.id,
+                                  status: "resolved",
+                                })
+                              }
+                            >
+                              Resolve
+                            </button>
+                          ) : (
+                            <span className="tiny-feedback tiny-feedback-success">已完成</span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel">
+        <header>
+          <h2>导出中心</h2>
+          <p>支持 sessions/usage 一键下载 JSON 或 CSV。</p>
+        </header>
+
+        <div className="governance-export-grid">
+          <article className="governance-export-card">
+            <h3>Sessions 导出</h3>
+            <label className="inline-field" htmlFor="sessions-export-format">
+              格式
+              <select
+                id="sessions-export-format"
+                value={sessionExportFormat}
+                onChange={(event) => setSessionExportFormat(event.target.value as ExportFormat)}
+              >
+                {EXPORT_FORMAT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="submit-button"
+              onClick={() => {
+                setExportFeedback(null);
+                setExportError(null);
+                exportSessionsMutation.mutate(sessionExportFormat);
+              }}
+              disabled={exportSessionsMutation.isPending}
+            >
+              {exportSessionsMutation.isPending ? "导出中..." : "导出 Sessions"}
+            </button>
+          </article>
+
+          <article className="governance-export-card">
+            <h3>Usage 导出</h3>
+            <div className="filters-row">
+              <label className="inline-field" htmlFor="usage-export-dimension">
+                维度
+                <select
+                  id="usage-export-dimension"
+                  value={usageExportDimension}
+                  onChange={(event) =>
+                    setUsageExportDimension(event.target.value as UsageExportDimension)
+                  }
+                >
+                  {USAGE_EXPORT_DIMENSION_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="inline-field" htmlFor="usage-export-format">
+                格式
+                <select
+                  id="usage-export-format"
+                  value={usageExportFormat}
+                  onChange={(event) => setUsageExportFormat(event.target.value as ExportFormat)}
+                >
+                  {EXPORT_FORMAT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <button
+              type="button"
+              className="submit-button"
+              onClick={() => {
+                setExportFeedback(null);
+                setExportError(null);
+                exportUsageMutation.mutate({
+                  format: usageExportFormat,
+                  dimension: usageExportDimension,
+                });
+              }}
+              disabled={exportUsageMutation.isPending}
+            >
+              {exportUsageMutation.isPending ? "导出中..." : "导出 Usage"}
+            </button>
+          </article>
+        </div>
+
+        {exportFeedback ? <p className="feedback success">{exportFeedback}</p> : null}
+        {exportError ? <p className="feedback error">{exportError}</p> : null}
+      </section>
+    </>
+  );
+}
+
 function SourcesPage() {
   const [sourceForm, setSourceForm] = useState<SourceFormState>(INITIAL_SOURCE_FORM);
   const [sourceFormError, setSourceFormError] = useState<string | null>(null);
@@ -2694,6 +3062,7 @@ function Workspace({
       ) : null}
       {route === "sessions" ? <SessionsPage initialDateKey={sessionsDateKey} /> : null}
       {route === "analytics" ? <AnalyticsPage /> : null}
+      {route === "governance" ? <GovernancePage /> : null}
       {route === "sources" ? <SourcesPage /> : null}
       {route === "pricing" ? <PricingPage /> : null}
     </main>

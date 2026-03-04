@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   clearAuthTokens,
+  exportSessions,
+  exportUsage,
   exchangeExternalAuthCode,
+  fetchAlerts,
   fetchAuthProviders,
   fetchPricingCatalog,
   fetchSourceHealth,
@@ -20,6 +23,7 @@ import {
   setAuthTokens,
   setUnauthorizedHandler,
   testSourceConnection,
+  updateAlertStatus,
   upsertPricingCatalog,
 } from "../src/api";
 import type { SessionSearchInput } from "../src/types";
@@ -75,6 +79,43 @@ function mockJsonResponse(data: unknown, status = 200): Response {
     },
     json: async () => data,
     text: async () => JSON.stringify(data),
+  } as Response;
+}
+
+function mockFileResponse(
+  content: string,
+  options?: {
+    status?: number;
+    contentType?: string;
+    contentDisposition?: string;
+  }
+): Response {
+  const status = options?.status ?? 200;
+  const contentType = options?.contentType ?? "text/csv; charset=utf-8";
+  const blob = new Blob([content], { type: contentType });
+  const contentDisposition =
+    options?.contentDisposition ?? 'attachment; filename="export.csv"';
+
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: {
+      get: (name: string) => {
+        const normalized = name.toLowerCase();
+        if (normalized === "content-type") {
+          return contentType;
+        }
+        if (normalized === "content-disposition") {
+          return contentDisposition;
+        }
+        return null;
+      },
+    },
+    blob: async () => blob,
+    text: async () => content,
+    json: async () => {
+      throw new Error("not json");
+    },
   } as Response;
 }
 
@@ -821,5 +862,174 @@ describe("api mock fallback gate", () => {
 
     expect(hasAccessToken()).toBe(true);
     expect(getAccessToken()).toBe("access-token-external");
+  });
+
+  test("fetchAlerts 成功解析列表结果", async () => {
+    env.DEV = false;
+    setAuthTokens({
+      accessToken: "access-token-alerts",
+      refreshToken: "refresh-token-alerts",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (url.includes("/api/v1/alerts") && method === "GET") {
+        return mockJsonResponse({
+          items: [
+            {
+              id: "alert-1",
+              tenantId: "default",
+              budgetId: "budget-1",
+              scope: "tenant",
+              scopeRef: "default",
+              severity: "critical",
+              status: "open",
+              message: "cost exceeded",
+              threshold: 0.8,
+              value: 0.91,
+              createdAt: "2026-03-01T10:00:00.000Z",
+              updatedAt: "2026-03-01T10:05:00.000Z",
+              metadata: {},
+            },
+          ],
+          total: 1,
+          filters: {
+            severity: "critical",
+          },
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    await expect(fetchAlerts({ severity: "critical", limit: 10 })).resolves.toEqual(
+      expect.objectContaining({
+        total: 1,
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            id: "alert-1",
+            severity: "critical",
+          }),
+        ]),
+      })
+    );
+  });
+
+  test("updateAlertStatus 会发起 PATCH 并提交 status", async () => {
+    env.DEV = false;
+    setAuthTokens({
+      accessToken: "access-token-alert-update",
+      refreshToken: "refresh-token-alert-update",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (url.endsWith("/api/v1/alerts/alert-2/status") && method === "PATCH") {
+        return mockJsonResponse({
+          id: "alert-2",
+          tenantId: "default",
+          budgetId: "budget-2",
+          scope: "tenant",
+          scopeRef: "default",
+          severity: "warning",
+          status: "acknowledged",
+          message: "near threshold",
+          threshold: 0.7,
+          value: 0.72,
+          createdAt: "2026-03-01T10:00:00.000Z",
+          updatedAt: "2026-03-01T10:05:00.000Z",
+          metadata: {},
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    await expect(updateAlertStatus("alert-2", "acknowledged")).resolves.toEqual(
+      expect.objectContaining({
+        id: "alert-2",
+        status: "acknowledged",
+      })
+    );
+
+    const [, init] = fetchSpy.mock.calls[0] ?? [];
+    expect((init as RequestInit | undefined)?.method).toBe("PATCH");
+    expect(JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}"))).toEqual({
+      status: "acknowledged",
+    });
+  });
+
+  test("exportSessions 与 exportUsage 支持 csv 下载", async () => {
+    env.DEV = false;
+    setAuthTokens({
+      accessToken: "access-token-export",
+      refreshToken: "refresh-token-export",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.includes("/api/v1/exports/sessions") && method === "GET") {
+        return mockFileResponse("id,tool\ns1,codex\n", {
+          contentType: "text/csv; charset=utf-8",
+          contentDisposition: 'attachment; filename="sessions-2026.csv"',
+        });
+      }
+
+      if (url.includes("/api/v1/exports/usage") && method === "GET") {
+        return mockFileResponse("date,tokens\n2026-03-01,1000\n", {
+          contentType: "text/csv; charset=utf-8",
+          contentDisposition: 'attachment; filename="usage-daily-2026.csv"',
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    await expect(exportSessions("csv", { limit: 20 })).resolves.toEqual(
+      expect.objectContaining({
+        filename: "sessions-2026.csv",
+        contentType: expect.stringContaining("text/csv"),
+        blob: expect.any(Blob),
+      })
+    );
+
+    await expect(
+      exportUsage("csv", {
+        dimension: "daily",
+        limit: 10,
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        filename: "usage-daily-2026.csv",
+        contentType: expect.stringContaining("text/csv"),
+        blob: expect.any(Blob),
+      })
+    );
+  });
+
+  test("exportUsage 缺少合法 dimension 时抛错", async () => {
+    env.DEV = false;
+    setAuthTokens({
+      accessToken: "access-token-export-invalid",
+      refreshToken: "refresh-token-export-invalid",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    await expect(
+      exportUsage("csv", {
+        dimension: "invalid" as never,
+      })
+    ).rejects.toThrow("dimension 必须是 daily/monthly/models/sessions/heatmap。");
   });
 });

@@ -726,6 +726,33 @@
   flex-wrap: wrap;
 }
 
+.governance-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.governance-export-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.governance-export-card {
+  border: 1px solid rgba(183, 201, 220, 0.85);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  display: grid;
+  gap: 10px;
+}
+
+.governance-export-card h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
 .secondary-button {
   background: #fff;
   color: #184567;
@@ -770,6 +797,10 @@
   }
 
   .analytics-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .governance-export-grid {
     grid-template-columns: 1fr;
   }
 }

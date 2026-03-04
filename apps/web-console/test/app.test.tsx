@@ -1087,4 +1087,232 @@ describe("Web Console", () => {
 
     window.location.hash = originalHash;
   });
+
+  test("治理页展示告警工作台与导出中心", async () => {
+    window.location.hash = "#/governance";
+    setAuthTokens({
+      accessToken: "access-token-governance-overview",
+      refreshToken: "refresh-token-governance-overview",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.includes("/api/v1/alerts") && method === "GET") {
+        return mockJsonResponse({
+          items: [],
+          total: 0,
+          filters: {},
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "治理中心" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "告警工作台", level: 2 })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "导出中心", level: 2 })).toBeInTheDocument();
+  });
+
+  test("治理页支持 ACK 告警状态", async () => {
+    window.location.hash = "#/governance";
+    setAuthTokens({
+      accessToken: "access-token-governance-alert",
+      refreshToken: "refresh-token-governance-alert",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.includes("/api/v1/alerts") && method === "GET") {
+        return mockJsonResponse({
+          items: [
+            {
+              id: "alert-ui-1",
+              tenantId: "default",
+              budgetId: "budget-ui-1",
+              scope: "tenant",
+              scopeRef: "default",
+              severity: "critical",
+              status: "open",
+              message: "critical threshold reached",
+              threshold: 0.8,
+              value: 0.92,
+              createdAt: "2026-03-01T10:00:00.000Z",
+              updatedAt: "2026-03-01T10:05:00.000Z",
+              metadata: {},
+            },
+          ],
+          total: 1,
+        });
+      }
+
+      if (url.endsWith("/api/v1/alerts/alert-ui-1/status") && method === "PATCH") {
+        return mockJsonResponse({
+          id: "alert-ui-1",
+          tenantId: "default",
+          budgetId: "budget-ui-1",
+          scope: "tenant",
+          scopeRef: "default",
+          severity: "critical",
+          status: "acknowledged",
+          message: "critical threshold reached",
+          threshold: 0.8,
+          value: 0.92,
+          createdAt: "2026-03-01T10:00:00.000Z",
+          updatedAt: "2026-03-01T10:06:00.000Z",
+          metadata: {},
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "ACK" }));
+    expect(await screen.findByText("告警 alert-ui-1 已更新为 acknowledged。")).toBeInTheDocument();
+
+    const patchCall = fetchSpy.mock.calls.find(
+      ([url, init]) =>
+        toUrl(url).endsWith("/api/v1/alerts/alert-ui-1/status") &&
+        (init as RequestInit | undefined)?.method === "PATCH"
+    );
+    expect(patchCall).toBeTruthy();
+  });
+
+  test("治理页支持 Sessions/Usage 导出", async () => {
+    window.location.hash = "#/governance";
+    setAuthTokens({
+      accessToken: "access-token-governance-export",
+      refreshToken: "refresh-token-governance-export",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    const createObjectURLSpy = vi.fn(() => "blob:mock-download-url");
+    const revokeObjectURLSpy = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      writable: true,
+      value: createObjectURLSpy,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      writable: true,
+      value: revokeObjectURLSpy,
+    });
+    const anchorClickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.includes("/api/v1/alerts") && method === "GET") {
+        return mockJsonResponse({ items: [], total: 0 });
+      }
+
+      if (url.includes("/api/v1/exports/sessions") && method === "GET") {
+        return {
+          ok: true,
+          status: 200,
+          headers: {
+            get: (name: string) => {
+              const normalized = name.toLowerCase();
+              if (normalized === "content-type") {
+                return "text/csv; charset=utf-8";
+              }
+              if (normalized === "content-disposition") {
+                return 'attachment; filename="sessions-ui.csv"';
+              }
+              return null;
+            },
+          },
+          blob: async () => new Blob(["id,tool\ns1,codex\n"], { type: "text/csv" }),
+          json: async () => ({}),
+          text: async () => "id,tool\ns1,codex\n",
+        } as Response;
+      }
+
+      if (url.includes("/api/v1/exports/usage") && method === "GET") {
+        return {
+          ok: true,
+          status: 200,
+          headers: {
+            get: (name: string) => {
+              const normalized = name.toLowerCase();
+              if (normalized === "content-type") {
+                return "text/csv; charset=utf-8";
+              }
+              if (normalized === "content-disposition") {
+                return 'attachment; filename="usage-ui.csv"';
+              }
+              return null;
+            },
+          },
+          blob: async () => new Blob(["date,tokens\n2026-03-01,100\n"], { type: "text/csv" }),
+          json: async () => ({}),
+          text: async () => "date,tokens\n2026-03-01,100\n",
+        } as Response;
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    try {
+      render(<App />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "导出 Sessions" }));
+      expect(await screen.findByText("Sessions 导出成功：sessions-ui.csv")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "导出 Usage" }));
+      expect(await screen.findByText("Usage 导出成功：usage-ui.csv")).toBeInTheDocument();
+
+      expect(
+        fetchSpy.mock.calls.some(([url, init]) => {
+          const requestInit = init as RequestInit | undefined;
+          return (
+            toUrl(url).includes("/api/v1/exports/sessions?format=csv") &&
+            (requestInit?.method ?? "GET").toUpperCase() === "GET"
+          );
+        })
+      ).toBe(true);
+      expect(
+        fetchSpy.mock.calls.some(([url, init]) => {
+          const requestInit = init as RequestInit | undefined;
+          return (
+            toUrl(url).includes("/api/v1/exports/usage?format=csv&dimension=daily") &&
+            (requestInit?.method ?? "GET").toUpperCase() === "GET"
+          );
+        })
+      ).toBe(true);
+      expect(createObjectURLSpy).toHaveBeenCalledTimes(2);
+      expect(revokeObjectURLSpy).toHaveBeenCalledTimes(2);
+      expect(anchorClickSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      anchorClickSpy.mockRestore();
+      Object.defineProperty(URL, "createObjectURL", {
+        configurable: true,
+        writable: true,
+        value: originalCreateObjectURL,
+      });
+      Object.defineProperty(URL, "revokeObjectURL", {
+        configurable: true,
+        writable: true,
+        value: originalRevokeObjectURL,
+      });
+    }
+  });
 });

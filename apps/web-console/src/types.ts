@@ -177,6 +177,43 @@ export interface SessionDetailResponse extends SessionDetail {
   sourceTrace: SessionSourceTrace;
 }
 
+export type AlertSeverity = "warning" | "critical";
+export type AlertStatus = "open" | "acknowledged" | "resolved";
+export type AlertMutableStatus = "acknowledged" | "resolved";
+
+export interface AlertListInput {
+  status?: AlertStatus;
+  severity?: AlertSeverity;
+  scope?: string;
+  scopeRef?: string;
+  budgetId?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
+export interface AlertItem {
+  id: string;
+  tenantId: string;
+  budgetId: string;
+  scope: string;
+  scopeRef: string;
+  severity: AlertSeverity;
+  status: AlertStatus;
+  message: string;
+  threshold: number;
+  value: number;
+  createdAt: string;
+  updatedAt: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface AlertListResponse {
+  items: AlertItem[];
+  total: number;
+  filters?: AlertListInput;
+}
+
 export interface SessionEvent {
   id: string;
   sessionId: string;
@@ -213,6 +250,28 @@ export interface UsageAggregateResponse<TItem> {
   items: TItem[];
   total: number;
   filters?: UsageAggregateFilters;
+}
+
+export type ExportFormat = "json" | "csv";
+export type UsageExportDimension =
+  | "daily"
+  | "monthly"
+  | "models"
+  | "sessions"
+  | "heatmap";
+
+export interface UsageExportQueryInput {
+  dimension: UsageExportDimension;
+  from?: string;
+  to?: string;
+  limit?: number;
+  timezone?: string;
+}
+
+export interface DownloadFile {
+  blob: Blob;
+  filename: string;
+  contentType: string;
 }
 
 export type UsageCostMode = "raw" | "estimated" | "reported" | "mixed" | "none";

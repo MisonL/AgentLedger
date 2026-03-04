@@ -1,4 +1,8 @@
 import type {
+  AlertItem,
+  AlertListInput,
+  AlertListResponse,
+  AlertMutableStatus,
   AuthExternalExchangeInput,
   AuthLoginInput,
   AuthLoginResponse,
@@ -8,6 +12,8 @@ import type {
   AuthRefreshResponse,
   AuthTokens,
   CreateSourceInput,
+  DownloadFile,
+  ExportFormat,
   HeatmapCell,
   AuthUserProfile,
   PricingCatalog,
@@ -28,6 +34,8 @@ import type {
   SessionSearchInput,
   SessionSearchResponse,
   SessionSourceFreshness,
+  UsageExportDimension,
+  UsageExportQueryInput,
   UsageAggregateFilters,
   UsageAggregateResponse,
   UsageDailyItem,
@@ -52,6 +60,17 @@ function toDateKey(iso: string): string {
 }
 
 const SOURCE_TYPES: SourceType[] = ["local", "ssh", "sync-cache"];
+const ALERT_SEVERITIES = ["warning", "critical"] as const;
+const ALERT_STATUSES = ["open", "acknowledged", "resolved"] as const;
+const ALERT_MUTABLE_STATUSES = ["acknowledged", "resolved"] as const;
+const EXPORT_FORMATS = ["json", "csv"] as const;
+const USAGE_EXPORT_DIMENSIONS = [
+  "daily",
+  "monthly",
+  "models",
+  "sessions",
+  "heatmap",
+] as const;
 
 function daysAgo(days: number): Date {
   const date = new Date();
@@ -385,6 +404,97 @@ function isSourceParseFailureListResponse(
   );
 }
 
+function isAlertSeverity(value: unknown): value is AlertItem["severity"] {
+  return typeof value === "string" && ALERT_SEVERITIES.includes(value as AlertItem["severity"]);
+}
+
+function isAlertStatus(value: unknown): value is AlertItem["status"] {
+  return typeof value === "string" && ALERT_STATUSES.includes(value as AlertItem["status"]);
+}
+
+function isAlertMutableStatus(value: unknown): value is AlertMutableStatus {
+  return typeof value === "string" && ALERT_MUTABLE_STATUSES.includes(value as AlertMutableStatus);
+}
+
+function isExportFormat(value: unknown): value is ExportFormat {
+  return typeof value === "string" && EXPORT_FORMATS.includes(value as ExportFormat);
+}
+
+function isUsageExportDimension(value: unknown): value is UsageExportDimension {
+  return (
+    typeof value === "string" &&
+    USAGE_EXPORT_DIMENSIONS.includes(value as UsageExportDimension)
+  );
+}
+
+function isAlertListInput(value: unknown): value is AlertListInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const statusOk = value.status === undefined || isAlertStatus(value.status);
+  const severityOk = value.severity === undefined || isAlertSeverity(value.severity);
+  const scopeOk = value.scope === undefined || typeof value.scope === "string";
+  const scopeRefOk = value.scopeRef === undefined || typeof value.scopeRef === "string";
+  const budgetIdOk = value.budgetId === undefined || typeof value.budgetId === "string";
+  const fromOk = value.from === undefined || isISODateString(value.from);
+  const toOk = value.to === undefined || isISODateString(value.to);
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" &&
+      Number.isInteger(value.limit) &&
+      value.limit > 0);
+
+  return (
+    statusOk &&
+    severityOk &&
+    scopeOk &&
+    scopeRefOk &&
+    budgetIdOk &&
+    fromOk &&
+    toOk &&
+    limitOk
+  );
+}
+
+function isAlertItem(value: unknown): value is AlertItem {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.tenantId === "string" &&
+    typeof value.budgetId === "string" &&
+    typeof value.scope === "string" &&
+    typeof value.scopeRef === "string" &&
+    isAlertSeverity(value.severity) &&
+    isAlertStatus(value.status) &&
+    typeof value.message === "string" &&
+    typeof value.threshold === "number" &&
+    Number.isFinite(value.threshold) &&
+    typeof value.value === "number" &&
+    Number.isFinite(value.value) &&
+    isISODateString(value.createdAt) &&
+    isISODateString(value.updatedAt) &&
+    isRecord(value.metadata)
+  );
+}
+
+function isAlertListResponse(value: unknown): value is AlertListResponse {
+  if (!isRecord(value) || !Array.isArray(value.items)) {
+    return false;
+  }
+  const filtersOk = value.filters === undefined || isAlertListInput(value.filters);
+  return (
+    value.items.every((item) => isAlertItem(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    filtersOk
+  );
+}
+
 function isSessionSearchResponse(value: unknown): value is SessionSearchResponse {
   if (!isRecord(value)) {
     return false;
@@ -454,6 +564,113 @@ function buildSourceParseFailureQuery(input?: SourceParseFailureQueryInput): str
 
   const query = params.toString();
   return query.length > 0 ? `?${query}` : "";
+}
+
+function buildAlertListQuery(input?: AlertListInput): string {
+  if (!input) {
+    return "";
+  }
+
+  const params = new URLSearchParams();
+  if (input.status) {
+    params.set("status", input.status);
+  }
+  if (input.severity) {
+    params.set("severity", input.severity);
+  }
+  if (typeof input.scope === "string" && input.scope.trim().length > 0) {
+    params.set("scope", input.scope.trim());
+  }
+  if (typeof input.scopeRef === "string" && input.scopeRef.trim().length > 0) {
+    params.set("scopeRef", input.scopeRef.trim());
+  }
+  if (typeof input.budgetId === "string" && input.budgetId.trim().length > 0) {
+    params.set("budgetId", input.budgetId.trim());
+  }
+  if (typeof input.from === "string" && input.from.trim().length > 0) {
+    params.set("from", input.from.trim());
+  }
+  if (typeof input.to === "string" && input.to.trim().length > 0) {
+    params.set("to", input.to.trim());
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit > 0) {
+    params.set("limit", String(input.limit));
+  }
+
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildSessionExportQuery(format: ExportFormat, input?: SessionSearchInput): string {
+  const params = new URLSearchParams();
+  params.set("format", format);
+
+  if (input) {
+    if (typeof input.sourceId === "string" && input.sourceId.trim().length > 0) {
+      params.set("sourceId", input.sourceId.trim());
+    }
+    if (typeof input.keyword === "string" && input.keyword.trim().length > 0) {
+      params.set("keyword", input.keyword.trim());
+    }
+    if (typeof input.clientType === "string" && input.clientType.trim().length > 0) {
+      params.set("clientType", input.clientType.trim());
+    }
+    if (typeof input.tool === "string" && input.tool.trim().length > 0) {
+      params.set("tool", input.tool.trim());
+    }
+    if (typeof input.host === "string" && input.host.trim().length > 0) {
+      params.set("host", input.host.trim());
+    }
+    if (typeof input.model === "string" && input.model.trim().length > 0) {
+      params.set("model", input.model.trim());
+    }
+    if (typeof input.project === "string" && input.project.trim().length > 0) {
+      params.set("project", input.project.trim());
+    }
+    if (typeof input.from === "string" && input.from.trim().length > 0) {
+      params.set("from", input.from.trim());
+    }
+    if (typeof input.to === "string" && input.to.trim().length > 0) {
+      params.set("to", input.to.trim());
+    }
+    if (
+      typeof input.limit === "number" &&
+      Number.isInteger(input.limit) &&
+      input.limit > 0
+    ) {
+      params.set("limit", String(input.limit));
+    }
+    if (typeof input.cursor === "string" && input.cursor.trim().length > 0) {
+      params.set("cursor", input.cursor.trim());
+    }
+  }
+
+  return `?${params.toString()}`;
+}
+
+function buildUsageExportQuery(format: ExportFormat, input: UsageExportQueryInput): string {
+  const params = new URLSearchParams();
+  params.set("format", format);
+  params.set("dimension", input.dimension);
+
+  if (typeof input.from === "string" && input.from.trim().length > 0) {
+    params.set("from", input.from.trim());
+  }
+  if (typeof input.to === "string" && input.to.trim().length > 0) {
+    params.set("to", input.to.trim());
+  }
+  if (
+    typeof input.limit === "number" &&
+    Number.isInteger(input.limit) &&
+    input.limit > 0
+  ) {
+    params.set("limit", String(input.limit));
+  }
+  if (typeof input.timezone === "string" && input.timezone.trim().length > 0) {
+    params.set("timezone", input.timezone.trim());
+  }
+
+  return `?${params.toString()}`;
 }
 
 function isUsageAggregateResponse<TItem>(
@@ -769,6 +986,50 @@ async function requestJson<T>(
   return requestJsonInternal(path, init, signal, options, false);
 }
 
+function parseContentDispositionFilename(headerValue: string | null): string | null {
+  if (!headerValue) {
+    return null;
+  }
+
+  const encodedMatch = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encodedMatch?.[1]) {
+    try {
+      const decoded = decodeURIComponent(encodedMatch[1]);
+      const sanitized = decoded.replace(/["\r\n]/g, "").trim();
+      return sanitized.length > 0 ? sanitized : null;
+    } catch {
+      // fall through and try plain filename
+    }
+  }
+
+  const plainMatch = headerValue.match(/filename="?([^"]+)"?/i);
+  if (!plainMatch?.[1]) {
+    return null;
+  }
+  const sanitized = plainMatch[1].replace(/["\r\n]/g, "").trim();
+  return sanitized.length > 0 ? sanitized : null;
+}
+
+async function requestBlob(
+  path: string,
+  defaultFilename: string,
+  init?: RequestInit,
+  signal?: AbortSignal,
+  options?: RequestOptions
+): Promise<DownloadFile> {
+  const response = await requestResponseInternal(path, init, signal, options, false);
+  const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+  const filename =
+    parseContentDispositionFilename(response.headers.get("content-disposition")) ??
+    defaultFilename;
+  const blob = await response.blob();
+  return {
+    blob,
+    filename,
+    contentType,
+  };
+}
+
 function readMessageFromError(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     return error.message;
@@ -823,6 +1084,23 @@ async function requestJsonInternal<T>(
   options?: RequestOptions,
   hasRetriedUnauthorized = false
 ): Promise<T> {
+  const response = await requestResponseInternal(
+    path,
+    init,
+    signal,
+    options,
+    hasRetriedUnauthorized
+  );
+  return (await response.json()) as T;
+}
+
+async function requestResponseInternal(
+  path: string,
+  init?: RequestInit,
+  signal?: AbortSignal,
+  options?: RequestOptions,
+  hasRetriedUnauthorized = false
+): Promise<Response> {
   const headers = new Headers(init?.headers);
   if (!headers.has("content-type")) {
     headers.set("content-type", "application/json");
@@ -855,7 +1133,7 @@ async function requestJsonInternal<T>(
     if (canTryRefresh) {
       try {
         await refreshAuthTokens();
-        return await requestJsonInternal(path, init, signal, options, true);
+        return await requestResponseInternal(path, init, signal, options, true);
       } catch (refreshError) {
         const refreshMessage = readMessageFromError(refreshError, message);
         if (!options?.skipUnauthorizedHandling) {
@@ -876,7 +1154,7 @@ async function requestJsonInternal<T>(
     throw new ApiError(response.status, message, payload);
   }
 
-  return (await response.json()) as T;
+  return response;
 }
 
 export async function login(
@@ -1076,6 +1354,89 @@ export async function createSource(
   }
 
   throw new Error("sources.create 返回结构不合法");
+}
+
+export async function fetchAlerts(
+  input?: AlertListInput,
+  signal?: AbortSignal
+): Promise<AlertListResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v1/alerts${buildAlertListQuery(input)}`,
+    undefined,
+    signal
+  );
+
+  if (!isAlertListResponse(result)) {
+    throw new Error("alerts 返回结构不合法");
+  }
+  return result;
+}
+
+export async function updateAlertStatus(
+  alertId: string,
+  status: AlertMutableStatus,
+  signal?: AbortSignal
+): Promise<AlertItem> {
+  const normalizedAlertId = alertId.trim();
+  if (!normalizedAlertId) {
+    throw new Error("alertId 不能为空。");
+  }
+  if (!isAlertMutableStatus(status)) {
+    throw new Error("status 必须是 acknowledged 或 resolved。");
+  }
+
+  const result = await requestJson<unknown>(
+    `/api/v1/alerts/${encodeURIComponent(normalizedAlertId)}/status`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    },
+    signal
+  );
+
+  if (!isAlertItem(result)) {
+    throw new Error("alerts.status 返回结构不合法");
+  }
+  return result;
+}
+
+export async function exportSessions(
+  format: ExportFormat,
+  input?: SessionSearchInput,
+  signal?: AbortSignal
+): Promise<DownloadFile> {
+  if (!isExportFormat(format)) {
+    throw new Error("format 必须是 json 或 csv。");
+  }
+
+  const defaultFilename = `sessions-export.${format}`;
+  return requestBlob(
+    `/api/v1/exports/sessions${buildSessionExportQuery(format, input)}`,
+    defaultFilename,
+    undefined,
+    signal
+  );
+}
+
+export async function exportUsage(
+  format: ExportFormat,
+  input: UsageExportQueryInput,
+  signal?: AbortSignal
+): Promise<DownloadFile> {
+  if (!isExportFormat(format)) {
+    throw new Error("format 必须是 json 或 csv。");
+  }
+  if (!isUsageExportDimension(input.dimension)) {
+    throw new Error("dimension 必须是 daily/monthly/models/sessions/heatmap。");
+  }
+
+  const defaultFilename = `usage-${input.dimension}-export.${format}`;
+  return requestBlob(
+    `/api/v1/exports/usage${buildUsageExportQuery(format, input)}`,
+    defaultFilename,
+    undefined,
+    signal
+  );
 }
 
 export async function searchSessions(
