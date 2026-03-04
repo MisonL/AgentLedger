@@ -275,6 +275,117 @@ func TestHandleMessageRetrySkipsChannelsAlreadySuccessful(t *testing.T) {
 	}
 }
 
+func TestHandleMessageSuppressDuplicateAlertsWithinDedupeWindow(t *testing.T) {
+	t.Parallel()
+
+	var webhookCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		webhookCalls.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	cfg := testHandleMessageConfig([]integrationChannel{channelWebhook})
+	cfg.ChannelURLs[channelWebhook] = server.URL
+	cfg.AlertDedupeWindow = time.Minute
+	cfg.AlertDedupeMaxEntries = 128
+
+	dispatcher := newTestDispatcherForHandleMessage(cfg, server.Client(), &fakeDLQPublisher{}, nil)
+	payload := []byte(`{"alert_id":1,"tenant_id":"tenant-a","budget_id":"budget-a","dedupe_key":"tenant-a:budget-a:warning","severity":"warning","stage":"warning"}`)
+	msg1 := &fakeJetStreamMsg{
+		data: payload,
+		metadata: &jetstream.MsgMetadata{
+			NumDelivered: 1,
+			Stream:       "GOVERNANCE_ALERTS",
+			Sequence: jetstream.SequencePair{
+				Stream:   4001,
+				Consumer: 1,
+			},
+		},
+	}
+	msg2 := &fakeJetStreamMsg{
+		data: payload,
+		metadata: &jetstream.MsgMetadata{
+			NumDelivered: 1,
+			Stream:       "GOVERNANCE_ALERTS",
+			Sequence: jetstream.SequencePair{
+				Stream:   4002,
+				Consumer: 1,
+			},
+		},
+	}
+
+	dispatcher.handleMessage(msg1, eventTypeAlert)
+	dispatcher.handleMessage(msg2, eventTypeAlert)
+
+	if msg1.ackCalls != 1 || msg2.ackCalls != 1 {
+		t.Fatalf("duplicate alerts should both ack: first=%d second=%d", msg1.ackCalls, msg2.ackCalls)
+	}
+	if got := webhookCalls.Load(); got != 1 {
+		t.Fatalf("duplicate alert within dedupe window should dispatch once, got %d", got)
+	}
+}
+
+func TestHandleMessageRetryAttemptBypassesDedupeSuppression(t *testing.T) {
+	t.Parallel()
+
+	var webhookCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		call := webhookCalls.Add(1)
+		if call == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, "temporary")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	cfg := testHandleMessageConfig([]integrationChannel{channelWebhook})
+	cfg.ChannelURLs[channelWebhook] = server.URL
+	cfg.AlertDedupeWindow = time.Minute
+	cfg.AlertDedupeMaxEntries = 128
+	cfg.RetryMax = 3
+
+	dispatcher := newTestDispatcherForHandleMessage(cfg, server.Client(), &fakeDLQPublisher{}, nil)
+	payload := []byte(`{"alert_id":2,"tenant_id":"tenant-a","budget_id":"budget-a","dedupe_key":"tenant-a:budget-a:critical","severity":"critical","stage":"critical"}`)
+	firstAttempt := &fakeJetStreamMsg{
+		data: payload,
+		metadata: &jetstream.MsgMetadata{
+			NumDelivered: 1,
+			Stream:       "GOVERNANCE_ALERTS",
+			Sequence: jetstream.SequencePair{
+				Stream:   4003,
+				Consumer: 1,
+			},
+		},
+	}
+	secondAttempt := &fakeJetStreamMsg{
+		data: payload,
+		metadata: &jetstream.MsgMetadata{
+			NumDelivered: 2,
+			Stream:       "GOVERNANCE_ALERTS",
+			Sequence: jetstream.SequencePair{
+				Stream:   4003,
+				Consumer: 2,
+			},
+		},
+	}
+
+	dispatcher.handleMessage(firstAttempt, eventTypeAlert)
+	dispatcher.handleMessage(secondAttempt, eventTypeAlert)
+
+	if firstAttempt.nakWithDelayCalls != 1 {
+		t.Fatalf("first attempt should be retried, got nakWithDelay=%d", firstAttempt.nakWithDelayCalls)
+	}
+	if secondAttempt.ackCalls != 1 {
+		t.Fatalf("second attempt should ack after retry, got ack=%d", secondAttempt.ackCalls)
+	}
+	if got := webhookCalls.Load(); got != 2 {
+		t.Fatalf("retry attempt should bypass dedupe suppression, got webhook calls %d", got)
+	}
+}
+
 func TestHandleWeeklyReportMessagePath(t *testing.T) {
 	t.Parallel()
 
@@ -658,6 +769,11 @@ func newTestDispatcherForHandleMessage(cfg integrationConfig, client *http.Clien
 		client = &http.Client{Timeout: time.Second}
 	}
 
+	var dedupe *alertDedupeStore
+	if cfg.AlertDedupeWindow > 0 {
+		dedupe = newAlertDedupeStore(cfg.AlertDedupeWindow, cfg.AlertDedupeMaxEntries)
+	}
+
 	return &alertDispatcher{
 		ctx:        context.Background(),
 		log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -666,6 +782,7 @@ func newTestDispatcherForHandleMessage(cfg integrationConfig, client *http.Clien
 		cfg:        cfg,
 		metrics:    metrics,
 		progress:   newDispatchProgressStore(),
+		dedupe:     dedupe,
 	}
 }
 

@@ -107,6 +107,8 @@ func main() {
 		"dlq_subject", cfg.DLQSubject,
 		"channels", channelsToStrings(cfg.Channels),
 		"routing_mode", cfg.RoutingMode,
+		"alert_dedupe_window", cfg.AlertDedupeWindow.String(),
+		"alert_dedupe_max_entries", cfg.AlertDedupeMaxEntries,
 		"webhook_host", webhookHost(cfg.ChannelURLs[channelWebhook]),
 		"retry_max", cfg.RetryMax,
 		"retry_base_delay", cfg.RetryBaseDelay.String(),

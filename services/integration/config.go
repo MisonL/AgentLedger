@@ -29,6 +29,8 @@ const (
 	defaultRetryMax               = 5
 	defaultRetryBaseDelay         = 2 * time.Second
 	defaultRetryMaxDelay          = 60 * time.Second
+	defaultAlertDedupeWindow      = 0 * time.Second
+	defaultAlertDedupeMaxEntries  = 20000
 	defaultConsumerAckWait        = 90 * time.Second
 	defaultDLQPublishTimeout      = 5 * time.Second
 	defaultIntegrationServiceName = "integration"
@@ -83,6 +85,9 @@ type integrationConfig struct {
 	RetryBaseDelay time.Duration
 	RetryMaxDelay  time.Duration
 
+	AlertDedupeWindow     time.Duration
+	AlertDedupeMaxEntries int
+
 	ConsumerAckWait   time.Duration
 	DLQPublishTimeout time.Duration
 }
@@ -115,10 +120,10 @@ func loadIntegrationConfig() (integrationConfig, error) {
 
 		DLQSubject: getEnv("INTEGRATION_DLQ_SUBJECT", defaultDLQSubject),
 
-		ControlPlaneBaseURL:   getEnv("CONTROL_PLANE_BASE_URL", ""),
-		CallbackPath:          getEnv("INTEGRATION_CALLBACK_PATH", defaultCallbackPath),
-		CallbackSecret:        strings.TrimSpace(os.Getenv("INTEGRATION_CALLBACK_SECRET")),
-		CallbackSignatureTTL:  defaultCallbackSignatureTTL,
+		ControlPlaneBaseURL:  getEnv("CONTROL_PLANE_BASE_URL", ""),
+		CallbackPath:         getEnv("INTEGRATION_CALLBACK_PATH", defaultCallbackPath),
+		CallbackSecret:       strings.TrimSpace(os.Getenv("INTEGRATION_CALLBACK_SECRET")),
+		CallbackSignatureTTL: defaultCallbackSignatureTTL,
 
 		ChannelURLs: map[integrationChannel]string{
 			channelWebhook:  getEnv("INTEGRATION_WEBHOOK_URL", ""),
@@ -127,12 +132,14 @@ func loadIntegrationConfig() (integrationConfig, error) {
 			channelFeishu:   getEnv("INTEGRATION_FEISHU_WEBHOOK_URL", ""),
 		},
 
-		WebhookTimeout:    defaultWebhookTimeout,
-		RetryMax:          defaultRetryMax,
-		RetryBaseDelay:    defaultRetryBaseDelay,
-		RetryMaxDelay:     defaultRetryMaxDelay,
-		ConsumerAckWait:   defaultConsumerAckWait,
-		DLQPublishTimeout: defaultDLQPublishTimeout,
+		WebhookTimeout:        defaultWebhookTimeout,
+		RetryMax:              defaultRetryMax,
+		RetryBaseDelay:        defaultRetryBaseDelay,
+		RetryMaxDelay:         defaultRetryMaxDelay,
+		AlertDedupeWindow:     defaultAlertDedupeWindow,
+		AlertDedupeMaxEntries: defaultAlertDedupeMaxEntries,
+		ConsumerAckWait:       defaultConsumerAckWait,
+		DLQPublishTimeout:     defaultDLQPublishTimeout,
 	}
 
 	cfg.Channels, err = channelsFromEnv("INTEGRATION_CHANNELS", defaultIntegrationChannels)
@@ -166,6 +173,16 @@ func loadIntegrationConfig() (integrationConfig, error) {
 	}
 
 	cfg.RetryMaxDelay, err = durationFromEnv("INTEGRATION_RETRY_MAX_DELAY", cfg.RetryMaxDelay)
+	if err != nil {
+		return integrationConfig{}, err
+	}
+
+	cfg.AlertDedupeWindow, err = durationFromEnv("INTEGRATION_ALERT_DEDUPE_WINDOW", cfg.AlertDedupeWindow)
+	if err != nil {
+		return integrationConfig{}, err
+	}
+
+	cfg.AlertDedupeMaxEntries, err = intFromEnv("INTEGRATION_ALERT_DEDUPE_MAX_ENTRIES", cfg.AlertDedupeMaxEntries)
 	if err != nil {
 		return integrationConfig{}, err
 	}
@@ -255,6 +272,12 @@ func loadIntegrationConfig() (integrationConfig, error) {
 	}
 	if cfg.RetryMaxDelay < cfg.RetryBaseDelay {
 		return integrationConfig{}, fmt.Errorf("invalid retry delay config: INTEGRATION_RETRY_MAX_DELAY(%s) < INTEGRATION_RETRY_BASE_DELAY(%s)", cfg.RetryMaxDelay, cfg.RetryBaseDelay)
+	}
+	if cfg.AlertDedupeWindow < 0 {
+		return integrationConfig{}, fmt.Errorf("invalid INTEGRATION_ALERT_DEDUPE_WINDOW: must be >= 0")
+	}
+	if cfg.AlertDedupeWindow > 0 && cfg.AlertDedupeMaxEntries <= 0 {
+		return integrationConfig{}, fmt.Errorf("invalid INTEGRATION_ALERT_DEDUPE_MAX_ENTRIES: must be > 0 when INTEGRATION_ALERT_DEDUPE_WINDOW > 0")
 	}
 	if cfg.WebhookTimeout <= 0 {
 		return integrationConfig{}, fmt.Errorf("invalid INTEGRATION_WEBHOOK_TIMEOUT: must be > 0")

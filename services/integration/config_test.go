@@ -280,6 +280,58 @@ func TestLoadIntegrationConfigCallbackSignatureTTLValidation(t *testing.T) {
 	}
 }
 
+func TestLoadIntegrationConfigAlertDedupeOverride(t *testing.T) {
+	setBaseIntegrationEnvs(t)
+	t.Setenv("INTEGRATION_CHANNELS", "webhook")
+	t.Setenv("INTEGRATION_WEBHOOK_URL", "https://example.com/webhook")
+	t.Setenv("INTEGRATION_ALERT_DEDUPE_WINDOW", "45s")
+	t.Setenv("INTEGRATION_ALERT_DEDUPE_MAX_ENTRIES", "256")
+
+	cfg, err := loadIntegrationConfig()
+	if err != nil {
+		t.Fatalf("loadIntegrationConfig returned error: %v", err)
+	}
+	if cfg.AlertDedupeWindow != 45*time.Second {
+		t.Fatalf("alert dedupe window mismatch: got %s want %s", cfg.AlertDedupeWindow, 45*time.Second)
+	}
+	if cfg.AlertDedupeMaxEntries != 256 {
+		t.Fatalf("alert dedupe max entries mismatch: got %d want %d", cfg.AlertDedupeMaxEntries, 256)
+	}
+}
+
+func TestLoadIntegrationConfigAlertDedupeValidation(t *testing.T) {
+	t.Run("negative window", func(t *testing.T) {
+		setBaseIntegrationEnvs(t)
+		t.Setenv("INTEGRATION_CHANNELS", "webhook")
+		t.Setenv("INTEGRATION_WEBHOOK_URL", "https://example.com/webhook")
+		t.Setenv("INTEGRATION_ALERT_DEDUPE_WINDOW", "-1s")
+
+		_, err := loadIntegrationConfig()
+		if err == nil {
+			t.Fatal("expected alert dedupe window validation to fail")
+		}
+		if !strings.Contains(err.Error(), "INTEGRATION_ALERT_DEDUPE_WINDOW") {
+			t.Fatalf("error mismatch: %v", err)
+		}
+	})
+
+	t.Run("positive window with non-positive max entries", func(t *testing.T) {
+		setBaseIntegrationEnvs(t)
+		t.Setenv("INTEGRATION_CHANNELS", "webhook")
+		t.Setenv("INTEGRATION_WEBHOOK_URL", "https://example.com/webhook")
+		t.Setenv("INTEGRATION_ALERT_DEDUPE_WINDOW", "30s")
+		t.Setenv("INTEGRATION_ALERT_DEDUPE_MAX_ENTRIES", "0")
+
+		_, err := loadIntegrationConfig()
+		if err == nil {
+			t.Fatal("expected alert dedupe max entries validation to fail")
+		}
+		if !strings.Contains(err.Error(), "INTEGRATION_ALERT_DEDUPE_MAX_ENTRIES") {
+			t.Fatalf("error mismatch: %v", err)
+		}
+	})
+}
+
 func TestLoadIntegrationConfigRequiresCallbackSecretOutsideTestEnv(t *testing.T) {
 	setBaseIntegrationEnvs(t)
 	t.Setenv("APP_ENV", "production")
@@ -349,6 +401,8 @@ func setBaseIntegrationEnvs(t *testing.T) {
 	t.Setenv("INTEGRATION_RETRY_MAX", "5")
 	t.Setenv("INTEGRATION_RETRY_BASE_DELAY", "2s")
 	t.Setenv("INTEGRATION_RETRY_MAX_DELAY", "60s")
+	t.Setenv("INTEGRATION_ALERT_DEDUPE_WINDOW", "")
+	t.Setenv("INTEGRATION_ALERT_DEDUPE_MAX_ENTRIES", "")
 	t.Setenv("INTEGRATION_CONSUMER_ACK_WAIT", "90s")
 	t.Setenv("INTEGRATION_DLQ_PUBLISH_TIMEOUT", "5s")
 }

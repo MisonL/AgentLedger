@@ -57,6 +57,7 @@ type alertDispatcher struct {
 	cfg        integrationConfig
 	metrics    *integrationMetrics
 	progress   *dispatchProgressStore
+	dedupe     *alertDedupeStore
 }
 
 type dispatchError struct {
@@ -110,6 +111,13 @@ type dispatchProgressEntry struct {
 	successful   map[integrationChannel]struct{}
 	dlqPublished bool
 	updatedAt    time.Time
+}
+
+type alertDedupeStore struct {
+	mu         sync.Mutex
+	items      map[string]time.Time
+	ttl        time.Duration
+	maxEntries int
 }
 
 type dispatchProgressCleanupResult struct {
@@ -197,6 +205,11 @@ func (e *multiDispatchError) channels() []integrationChannel {
 }
 
 func newAlertDispatcher(ctx context.Context, log *slog.Logger, js jetstream.JetStream, cfg integrationConfig, metrics *integrationMetrics) *alertDispatcher {
+	var dedupe *alertDedupeStore
+	if cfg.AlertDedupeWindow > 0 {
+		dedupe = newAlertDedupeStore(cfg.AlertDedupeWindow, cfg.AlertDedupeMaxEntries)
+	}
+
 	return &alertDispatcher{
 		ctx:        ctx,
 		log:        log,
@@ -205,6 +218,7 @@ func newAlertDispatcher(ctx context.Context, log *slog.Logger, js jetstream.JetS
 		cfg:        cfg,
 		metrics:    metrics,
 		progress:   newDispatchProgressStore(),
+		dedupe:     dedupe,
 	}
 }
 
@@ -417,6 +431,23 @@ func (d *alertDispatcher) handleMessage(msg jetstream.Msg, eventType string) {
 		return
 	}
 
+	if eventType == eventTypeAlert && attempt <= 1 && d.shouldSuppressAlert(payload) {
+		if ackErr := msg.Ack(); ackErr != nil {
+			d.log.Warn("ack suppressed alert message failed",
+				"error", ackErr,
+				"attempt", attempt,
+				"event_type", eventType,
+			)
+			return
+		}
+		d.observeSuccessMetrics(eventType, nil)
+		d.log.Info("alert message suppressed by dedupe window",
+			"attempt", attempt,
+			"event_type", eventType,
+		)
+		return
+	}
+
 	results, err := d.dispatchWithMessageKey(messageKey, payload, eventType)
 	if err != nil {
 		retryable := isRetryable(err)
@@ -580,6 +611,51 @@ func extractSeverity(payload []byte) string {
 		return ""
 	}
 	return strings.ToLower(strings.TrimSpace(envelope.Severity))
+}
+
+func (d *alertDispatcher) shouldSuppressAlert(payload []byte) bool {
+	if d == nil || d.dedupe == nil {
+		return false
+	}
+
+	key := buildAlertDedupeFingerprint(payload)
+	if key == "" {
+		return false
+	}
+
+	return d.dedupe.rememberOrSuppress(key, time.Now().UTC())
+}
+
+func buildAlertDedupeFingerprint(payload []byte) string {
+	var envelope struct {
+		TenantID  string `json:"tenant_id"`
+		BudgetID  string `json:"budget_id"`
+		DedupeKey string `json:"dedupe_key"`
+		Severity  string `json:"severity"`
+		Stage     string `json:"stage"`
+	}
+
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		return ""
+	}
+
+	tenantID := strings.TrimSpace(envelope.TenantID)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	severity := strings.ToLower(strings.TrimSpace(envelope.Severity))
+	stage := strings.ToLower(strings.TrimSpace(envelope.Stage))
+	dedupeKey := strings.TrimSpace(envelope.DedupeKey)
+	if dedupeKey != "" {
+		return strings.Join([]string{tenantID, dedupeKey, severity}, "|")
+	}
+
+	budgetID := strings.TrimSpace(envelope.BudgetID)
+	if budgetID != "" {
+		return strings.Join([]string{tenantID, budgetID, severity, stage}, "|")
+	}
+
+	return ""
 }
 
 func filterChannels(enabled []integrationChannel, targets ...integrationChannel) []integrationChannel {
@@ -1050,6 +1126,77 @@ func (d *alertDispatcher) publishDLQ(payload []byte, eventType string, dispatchE
 		return fmt.Errorf("publish to %s failed: %w", d.cfg.DLQSubject, err)
 	}
 	return nil
+}
+
+func newAlertDedupeStore(ttl time.Duration, maxEntries int) *alertDedupeStore {
+	if maxEntries <= 0 {
+		maxEntries = defaultAlertDedupeMaxEntries
+	}
+
+	return &alertDedupeStore{
+		items:      make(map[string]time.Time),
+		ttl:        ttl,
+		maxEntries: maxEntries,
+	}
+}
+
+func (s *alertDedupeStore) rememberOrSuppress(key string, now time.Time) bool {
+	if s == nil || key == "" || s.ttl <= 0 {
+		return false
+	}
+
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cleanupLocked(now)
+	if seenAt, ok := s.items[key]; ok && now.Sub(seenAt) < s.ttl {
+		s.items[key] = now
+		return true
+	}
+
+	s.items[key] = now
+	s.evictOverflowLocked()
+	return false
+}
+
+func (s *alertDedupeStore) cleanupLocked(now time.Time) {
+	if s == nil {
+		return
+	}
+
+	for key, seenAt := range s.items {
+		if now.Sub(seenAt) >= s.ttl {
+			delete(s.items, key)
+		}
+	}
+}
+
+func (s *alertDedupeStore) evictOverflowLocked() {
+	if s == nil || s.maxEntries <= 0 || len(s.items) <= s.maxEntries {
+		return
+	}
+
+	type keyedTime struct {
+		key string
+		at  time.Time
+	}
+
+	entries := make([]keyedTime, 0, len(s.items))
+	for key, at := range s.items {
+		entries = append(entries, keyedTime{key: key, at: at})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].at.Before(entries[j].at)
+	})
+
+	removeCount := len(entries) - s.maxEntries
+	for index := 0; index < removeCount; index += 1 {
+		delete(s.items, entries[index].key)
+	}
 }
 
 func newDispatchProgressStore() *dispatchProgressStore {
