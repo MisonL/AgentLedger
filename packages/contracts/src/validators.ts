@@ -190,6 +190,7 @@ const LOCAL_SOURCE_WHITELIST = [
   "~/.codebuddy-cli/sessions",
   "~/.cursor/sessions",
   "~/.vscode/sessions",
+  "~/.vscode-insiders/sessions",
   "~/.trae-ide/sessions",
   "~/.windsurf/sessions",
   "~/.lingma/sessions",

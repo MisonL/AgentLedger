@@ -33,6 +33,7 @@ func TestResolveCollectSources_DefaultAndOverride(t *testing.T) {
 		{Tool: collectToolCodeBuddyCLI, Dir: filepath.Join(homeDir, ".codebuddy-cli", "sessions")},
 		{Tool: collectToolCursor, Dir: filepath.Join(homeDir, ".cursor", "sessions")},
 		{Tool: collectToolVSCode, Dir: filepath.Join(homeDir, ".vscode", "sessions")},
+		{Tool: collectToolVSCode, Dir: filepath.Join(homeDir, ".vscode-insiders", "sessions")},
 		{Tool: collectToolTRAEIDE, Dir: filepath.Join(homeDir, ".trae-ide", "sessions")},
 		{Tool: collectToolWindsurf, Dir: filepath.Join(homeDir, ".windsurf", "sessions")},
 		{Tool: collectToolLingma, Dir: filepath.Join(homeDir, ".lingma", "sessions")},
@@ -56,6 +57,36 @@ func TestResolveCollectSources_DefaultAndOverride(t *testing.T) {
 
 	if _, err := resolveCollectSources("unknown", ""); err == nil {
 		t.Fatalf("resolveCollectSources(unknown) expected error, got nil")
+	}
+}
+
+func TestResolveCollectSources_VSCodeMultipleDefaults(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+
+	sources, err := resolveCollectSources("vscode", "")
+	if err != nil {
+		t.Fatalf("resolveCollectSources(vscode) unexpected error: %v", err)
+	}
+
+	want := []collectSource{
+		{Tool: collectToolVSCode, Dir: filepath.Join(homeDir, ".vscode", "sessions")},
+		{Tool: collectToolVSCode, Dir: filepath.Join(homeDir, ".vscode-insiders", "sessions")},
+	}
+	if !reflect.DeepEqual(sources, want) {
+		t.Fatalf("resolveCollectSources(vscode)=%#v, want=%#v", sources, want)
+	}
+
+	overrideSources, err := resolveCollectSources("vscode", "~/workspace/custom-vscode")
+	if err != nil {
+		t.Fatalf("resolveCollectSources(vscode, override) unexpected error: %v", err)
+	}
+	wantOverride := []collectSource{
+		{Tool: collectToolVSCode, Dir: filepath.Join(homeDir, "workspace", "custom-vscode")},
+	}
+	if !reflect.DeepEqual(overrideSources, wantOverride) {
+		t.Fatalf("resolveCollectSources(vscode, override)=%#v, want=%#v", overrideSources, wantOverride)
 	}
 }
 
@@ -113,6 +144,7 @@ func TestInferCollectTool_AutoPathHints(t *testing.T) {
 		{path: "/tmp/.codebuddy-cli/sessions/a.jsonl", want: collectToolCodeBuddyCLI},
 		{path: "/tmp/.cursor/sessions/a.jsonl", want: collectToolCursor},
 		{path: "/tmp/.vscode/sessions/a.jsonl", want: collectToolVSCode},
+		{path: "/tmp/.vscode-insiders/sessions/a.jsonl", want: collectToolVSCode},
 		{path: "/tmp/.trae-ide/sessions/a.jsonl", want: collectToolTRAEIDE},
 		{path: "/tmp/.windsurf/sessions/a.jsonl", want: collectToolWindsurf},
 		{path: "/tmp/.lingma/sessions/a.jsonl", want: collectToolLingma},
