@@ -1019,6 +1019,71 @@ describe("Web Console", () => {
     });
   });
 
+  test("登录页支持发起外部登录并携带 PKCE 参数", async () => {
+    const assignSpy = vi.fn();
+    vi.stubGlobal("location", {
+      ...window.location,
+      assign: assignSpy,
+    } as unknown as Location);
+
+    try {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const url = toUrl(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+
+        if (url.endsWith("/api/v1/auth/providers") && method === "GET") {
+          return mockAuthProvidersResponse();
+        }
+
+        throw new Error(`unexpected call: ${method} ${url}`);
+      });
+
+      render(<App />);
+
+      expect(await screen.findByRole("heading", { name: "登录控制台" })).toBeInTheDocument();
+      fireEvent.click(await screen.findByRole("button", { name: "企业 OIDC" }));
+
+      await waitFor(() => {
+        expect(assignSpy).toHaveBeenCalledTimes(1);
+      });
+
+      const assignedUrl = new URL(String(assignSpy.mock.calls[0]?.[0]));
+      const redirectUri = assignedUrl.searchParams.get("redirect_uri");
+      const state = assignedUrl.searchParams.get("state");
+      const codeChallenge = assignedUrl.searchParams.get("code_challenge");
+      const codeChallengeMethod = assignedUrl.searchParams.get("code_challenge_method");
+
+      expect(`${assignedUrl.origin}${assignedUrl.pathname}`).toBe(
+        "https://idp.example.com/oauth/authorize"
+      );
+      expect(assignedUrl.searchParams.get("response_type")).toBe("code");
+      expect(assignedUrl.searchParams.get("provider")).toBe("corp-oidc");
+      expect(redirectUri).toContain("#/auth/callback");
+      expect(state).toMatch(/^corp-oidc:/);
+      expect(codeChallenge).toBeTruthy();
+      expect(codeChallengeMethod).toBe("S256");
+
+      const pendingRaw = window.sessionStorage.getItem(
+        "agentledger.web-console.auth.external.pending"
+      );
+      expect(pendingRaw).toBeTruthy();
+      const pending = JSON.parse(String(pendingRaw)) as {
+        providerId: string;
+        state: string;
+        redirectUri: string;
+        codeVerifier: string;
+        createdAt: number;
+      };
+      expect(pending.providerId).toBe("corp-oidc");
+      expect(pending.state).toBe(state);
+      expect(pending.redirectUri).toContain("#/auth/callback");
+      expect(pending.codeVerifier.length).toBeGreaterThan(10);
+      expect(pending.createdAt).toBeGreaterThan(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   test("token 失效返回 401 时会提示重新登录，且可再次登录", async () => {
     setAuthTokens({
       accessToken: "expired-token",
