@@ -2424,7 +2424,7 @@ describe("Control Plane API", () => {
     userId?: string;
   }> {
     const email = `user-${nonce}@example.com`;
-    const password = `P@ssword-${nonce}`;
+    const password = `unit-test-pw-${nonce}`;
 
     const registerResult = await registerLocalUser({
       email,
@@ -2467,7 +2467,7 @@ describe("Control Plane API", () => {
   test("Auth 正常流：register -> login -> me -> refresh -> logout", async () => {
     const nonce = createNonce("auth-normal");
     const email = `auth-${nonce}@example.com`;
-    const password = `P@ssword-${nonce}`;
+    const password = `unit-test-pw-${nonce}`;
 
     const registerResult = await registerLocalUser({
       email,
@@ -2533,7 +2533,7 @@ describe("Control Plane API", () => {
   test("Auth 异常：login 密码错误返回 401", async () => {
     const nonce = createNonce("auth-wrong-password");
     const email = `auth-wrong-${nonce}@example.com`;
-    const password = `P@ssword-${nonce}`;
+    const password = `unit-test-pw-${nonce}`;
 
     const registerResult = await registerLocalUser({
       email,
@@ -2702,7 +2702,7 @@ describe("Control Plane API", () => {
       const nonce = createNonce("auth-local-disabled");
       const registerResult = await registerLocalUser({
         email: `disabled-register-${nonce}@example.com`,
-        password: `P@ssword-${nonce}`,
+        password: `unit-test-pw-${nonce}`,
         displayName: `禁用本地登录-${nonce}`,
       });
       expect(registerResult.response.status).toBe(403);
@@ -2714,7 +2714,7 @@ describe("Control Plane API", () => {
 
       const loginResult = await loginLocalUser({
         email: `disabled-login-${nonce}@example.com`,
-        password: `P@ssword-${nonce}`,
+        password: `unit-test-pw-${nonce}`,
       });
       expect(loginResult.response.status).toBe(403);
       if (isRecord(loginResult.payload)) {
