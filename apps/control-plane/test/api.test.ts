@@ -2693,6 +2693,177 @@ describe("Control Plane API", () => {
     }
   });
 
+  test("POST /api/v1/auth/external/login 支持外部断言登录与签发会话", async () => {
+    const nonce = createNonce("auth-external-login");
+    const secret = `external-secret-${nonce}`;
+    const originalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+    const originalSecret = Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET;
+    const originalTTL = Bun.env.AUTH_EXTERNAL_ASSERTION_TTL_SECONDS;
+    Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = JSON.stringify([
+      {
+        id: "corp-oidc",
+        type: "oidc",
+        displayName: "企业 OIDC",
+        enabled: true,
+      },
+    ]);
+    Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET = secret;
+    Bun.env.AUTH_EXTERNAL_ASSERTION_TTL_SECONDS = "300";
+
+    try {
+      const payload = {
+        providerId: "corp-oidc",
+        externalUserId: `ext-user-${nonce}`,
+        email: `external-${nonce}@example.com`,
+        displayName: `外部用户-${nonce}`,
+        timestamp: new Date().toISOString(),
+        nonce: `nonce-${nonce}-001`,
+        signature: "",
+      };
+      const canonical = [
+        payload.providerId,
+        payload.externalUserId,
+        payload.email,
+        "",
+        payload.timestamp,
+        payload.nonce,
+      ].join("\n");
+      payload.signature = createHmac("sha256", secret)
+        .update(canonical)
+        .digest("hex");
+
+      const response = await app.request("/api/v1/auth/external/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const body = (await response.json()) as {
+        user?: {
+          email?: string;
+        };
+        provider?: {
+          id?: string;
+          type?: string;
+        };
+        tokens?: {
+          accessToken?: string;
+          refreshToken?: string;
+        };
+      };
+
+      expect(response.status).toBe(200);
+      expect(body.provider?.id).toBe("corp-oidc");
+      expect(body.provider?.type).toBe("oidc");
+      expect(body.user?.email).toBe(payload.email);
+      expect(typeof body.tokens?.accessToken).toBe("string");
+      expect(typeof body.tokens?.refreshToken).toBe("string");
+    } finally {
+      if (originalProviders === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+      } else {
+        Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = originalProviders;
+      }
+      if (originalSecret === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET;
+      } else {
+        Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET = originalSecret;
+      }
+      if (originalTTL === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_ASSERTION_TTL_SECONDS;
+      } else {
+        Bun.env.AUTH_EXTERNAL_ASSERTION_TTL_SECONDS = originalTTL;
+      }
+    }
+  });
+
+  test("POST /api/v1/auth/external/login 签名错误与重放请求返回 401", async () => {
+    const nonce = createNonce("auth-external-login-fail");
+    const secret = `external-secret-${nonce}`;
+    const originalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+    const originalSecret = Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET;
+    Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = JSON.stringify([
+      {
+        id: "corp-oidc",
+        type: "oidc",
+        displayName: "企业 OIDC",
+        enabled: true,
+      },
+    ]);
+    Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET = secret;
+
+    try {
+      const basePayload = {
+        providerId: "corp-oidc",
+        externalUserId: `ext-user-${nonce}`,
+        email: `external-fail-${nonce}@example.com`,
+        displayName: `外部用户失败-${nonce}`,
+        timestamp: new Date().toISOString(),
+        nonce: `nonce-${nonce}-001`,
+      };
+      const canonical = [
+        basePayload.providerId,
+        basePayload.externalUserId,
+        basePayload.email,
+        "",
+        basePayload.timestamp,
+        basePayload.nonce,
+      ].join("\n");
+      const signature = createHmac("sha256", secret).update(canonical).digest("hex");
+      const tamperedSignature = `${signature.slice(0, 63)}${
+        signature.endsWith("0") ? "1" : "0"
+      }`;
+
+      const badSignatureResponse = await app.request("/api/v1/auth/external/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          ...basePayload,
+          signature: tamperedSignature,
+        }),
+      });
+      expect(badSignatureResponse.status).toBe(401);
+
+      const firstResponse = await app.request("/api/v1/auth/external/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          ...basePayload,
+          signature,
+        }),
+      });
+      expect(firstResponse.status).toBe(200);
+
+      const replayResponse = await app.request("/api/v1/auth/external/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          ...basePayload,
+          signature,
+        }),
+      });
+      expect(replayResponse.status).toBe(401);
+    } finally {
+      if (originalProviders === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+      } else {
+        Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = originalProviders;
+      }
+      if (originalSecret === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET;
+      } else {
+        Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET = originalSecret;
+      }
+    }
+  });
+
   test("Identity 正常流：tenant/org/member 创建与查询", async () => {
     const nonce = createNonce("identity-normal");
     const owner = await registerAndLoginUser(`${nonce}-owner`);

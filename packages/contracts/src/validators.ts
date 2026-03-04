@@ -7,6 +7,7 @@ import type {
   AlertMutableStatus,
   AlertListInput,
   AlertStatusUpdateInput,
+  AuthExternalLoginInput,
   AuthLoginInput,
   AuthLogoutInput,
   AuthProviderItem,
@@ -1458,6 +1459,68 @@ export function validateAuthLogoutInput(input: unknown): ValidationResult<AuthLo
     success: true,
     data: {
       refreshToken,
+    },
+  };
+}
+
+export function validateAuthExternalLoginInput(
+  input: unknown
+): ValidationResult<AuthExternalLoginInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const providerId = normalizeString(input.providerId)?.toLowerCase();
+  const externalUserId = normalizeString(input.externalUserId);
+  const email = normalizeString(input.email)?.toLowerCase();
+  const displayName = normalizeString(input.displayName);
+  const tenantId = normalizeString(input.tenantId);
+  const timestamp = normalizeString(input.timestamp);
+  const nonce = normalizeString(input.nonce);
+  const signature = normalizeString(input.signature)?.toLowerCase();
+
+  if (!providerId || !/^[a-z0-9][a-z0-9_-]{1,63}$/.test(providerId)) {
+    return {
+      success: false,
+      error: "providerId 必填且仅支持小写字母、数字、下划线、连字符（2-64 长度）。",
+    };
+  }
+  if (!externalUserId) {
+    return { success: false, error: "externalUserId 必填且必须为非空字符串。" };
+  }
+  if (!email || !isEmail(email)) {
+    return { success: false, error: "email 必填且必须为合法邮箱。" };
+  }
+  if (input.displayName !== undefined && !displayName) {
+    return { success: false, error: "displayName 必须为非空字符串。" };
+  }
+  if (input.tenantId !== undefined && !tenantId) {
+    return { success: false, error: "tenantId 必须为非空字符串。" };
+  }
+  if (!timestamp || !isISODate(timestamp)) {
+    return { success: false, error: "timestamp 必填且必须为 ISO 日期字符串。" };
+  }
+  if (!nonce || !/^[A-Za-z0-9._:-]{8,128}$/.test(nonce)) {
+    return {
+      success: false,
+      error: "nonce 必填且仅支持字母数字及 . _ : - 字符（8-128 长度）。",
+    };
+  }
+  if (!signature || !/^[a-f0-9]{64}$/.test(signature)) {
+    return { success: false, error: "signature 必填且必须为 64 位十六进制字符串。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      providerId,
+      externalUserId,
+      email,
+      displayName,
+      tenantId,
+      timestamp,
+      nonce,
+      signature,
     },
   };
 }

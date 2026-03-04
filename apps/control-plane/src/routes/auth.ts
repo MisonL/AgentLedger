@@ -1,5 +1,7 @@
 import { Hono, type Context } from "hono";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import {
+  validateAuthExternalLoginInput,
   validateAuthLoginInput,
   validateAuthLogoutInput,
   validateAuthRefreshInput,
@@ -28,6 +30,12 @@ const repository = getControlPlaneRepository();
 const DEFAULT_TENANT_ID = "default";
 const AUTH_DISABLE_LOCAL_LOGIN_ENV = "AUTH_DISABLE_LOCAL_LOGIN";
 const AUTH_EXTERNAL_PROVIDERS_JSON_ENV = "AUTH_EXTERNAL_PROVIDERS_JSON";
+const AUTH_EXTERNAL_ASSERTION_SECRET_ENV = "AUTH_EXTERNAL_ASSERTION_SECRET";
+const AUTH_EXTERNAL_ASSERTION_TTL_SECONDS_ENV = "AUTH_EXTERNAL_ASSERTION_TTL_SECONDS";
+const DEFAULT_AUTH_EXTERNAL_ASSERTION_TTL_SECONDS = 300;
+const MAX_AUTH_EXTERNAL_ASSERTION_TTL_SECONDS = 3600;
+const MAX_EXTERNAL_ASSERTION_NONCE_CACHE_SIZE = 20_000;
+const externalAssertionNonceCache = new Map<string, number>();
 
 interface PrimaryTenantAccess {
   tenantId: string;
@@ -208,6 +216,95 @@ function resolveAuthProviders(): AuthProviderItem[] {
   return providers;
 }
 
+function resolveExternalAssertionTTLSeconds(): number {
+  const raw = normalizeOptionalString(Bun.env[AUTH_EXTERNAL_ASSERTION_TTL_SECONDS_ENV]);
+  if (!raw || !/^\d+$/.test(raw)) {
+    return DEFAULT_AUTH_EXTERNAL_ASSERTION_TTL_SECONDS;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return DEFAULT_AUTH_EXTERNAL_ASSERTION_TTL_SECONDS;
+  }
+  return Math.min(MAX_AUTH_EXTERNAL_ASSERTION_TTL_SECONDS, parsed);
+}
+
+function resolveExternalAssertionSecret(): string | undefined {
+  return normalizeOptionalString(Bun.env[AUTH_EXTERNAL_ASSERTION_SECRET_ENV]);
+}
+
+function findEnabledExternalProvider(providerId: string): AuthProviderItem | undefined {
+  const providers = resolveAuthProviders();
+  return providers.find(
+    (item) => item.id === providerId && item.enabled && item.type !== "local"
+  );
+}
+
+function buildExternalAssertionCanonicalPayload(input: {
+  providerId: string;
+  externalUserId: string;
+  email: string;
+  tenantId?: string;
+  timestamp: string;
+  nonce: string;
+}): string {
+  return [
+    input.providerId,
+    input.externalUserId,
+    input.email,
+    input.tenantId ?? "",
+    input.timestamp,
+    input.nonce,
+  ].join("\n");
+}
+
+function verifyExternalAssertionSignature(canonicalPayload: string, signature: string, secret: string): boolean {
+  const expectedHex = createHmac("sha256", secret).update(canonicalPayload).digest("hex");
+  if (expectedHex.length !== signature.length) {
+    return false;
+  }
+  const expectedBuffer = Buffer.from(expectedHex, "hex");
+  const providedBuffer = Buffer.from(signature, "hex");
+  if (expectedBuffer.length !== providedBuffer.length) {
+    return false;
+  }
+  return timingSafeEqual(expectedBuffer, providedBuffer);
+}
+
+function cleanupExpiredExternalAssertionNonces(nowMs: number): void {
+  for (const [key, expiresAtMs] of externalAssertionNonceCache.entries()) {
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs) {
+      externalAssertionNonceCache.delete(key);
+    }
+  }
+}
+
+function enforceExternalAssertionNonceCacheLimit(): void {
+  if (externalAssertionNonceCache.size <= MAX_EXTERNAL_ASSERTION_NONCE_CACHE_SIZE) {
+    return;
+  }
+  const overSize = externalAssertionNonceCache.size - MAX_EXTERNAL_ASSERTION_NONCE_CACHE_SIZE;
+  let removed = 0;
+  for (const key of externalAssertionNonceCache.keys()) {
+    externalAssertionNonceCache.delete(key);
+    removed += 1;
+    if (removed >= overSize) {
+      return;
+    }
+  }
+}
+
+function claimExternalAssertionNonce(providerId: string, nonce: string, nowMs: number, ttlMs: number): boolean {
+  cleanupExpiredExternalAssertionNonces(nowMs);
+  const cacheKey = `${providerId}:${nonce}`;
+  const existing = externalAssertionNonceCache.get(cacheKey);
+  if (typeof existing === "number" && existing > nowMs) {
+    return false;
+  }
+  externalAssertionNonceCache.set(cacheKey, nowMs + ttlMs);
+  enforceExternalAssertionNonceCacheLimit();
+  return true;
+}
+
 async function appendAuditLogSafely(input: AppendAuditLogInput): Promise<void> {
   try {
     await repository.appendAuditLog(input);
@@ -317,6 +414,23 @@ async function resolvePrimaryTenantAccess(userId: string): Promise<PrimaryTenant
       tenantRole: "member",
     };
   }
+}
+
+async function resolveTenantAccessForLogin(userId: string, tenantId?: string): Promise<PrimaryTenantAccess | null> {
+  const normalizedTenantId = normalizeOptionalString(tenantId);
+  if (!normalizedTenantId) {
+    return resolvePrimaryTenantAccess(userId);
+  }
+
+  const membership = await repository.getTenantMemberByUser(normalizedTenantId, userId);
+  if (!membership) {
+    return null;
+  }
+
+  return {
+    tenantId: membership.tenantId,
+    tenantRole: membership.tenantRole,
+  };
 }
 
 async function createSessionForUser(userId: string, tenantId: string): Promise<AuthSession> {
@@ -485,6 +599,127 @@ authRoutes.post("/login", async (c) => {
       displayName: user.displayName,
       tenantId: tenantAccess.tenantId,
       tenantRole: tenantAccess.tenantRole,
+    },
+    tokens,
+  });
+});
+
+authRoutes.post("/external/login", async (c) => {
+  const body = await c.req.json().catch(() => undefined);
+  const result = validateAuthExternalLoginInput(body);
+  if (!result.success) {
+    return badRequest(c, result.error);
+  }
+
+  const provider = findEnabledExternalProvider(result.data.providerId);
+  if (!provider) {
+    return unauthorized(c, "外部登录提供方未启用或不存在。");
+  }
+
+  const assertionSecret = resolveExternalAssertionSecret();
+  if (!assertionSecret) {
+    console.warn(
+      `[control-plane] ${AUTH_EXTERNAL_ASSERTION_SECRET_ENV} 未配置，拒绝外部登录请求。`
+    );
+    return c.json(
+      {
+        message: "外部登录暂不可用，请联系管理员配置签名密钥。",
+        requestId: c.get("requestId"),
+      },
+      503
+    );
+  }
+
+  const timestampMs = Date.parse(result.data.timestamp);
+  if (!Number.isFinite(timestampMs)) {
+    return unauthorized(c, "外部登录断言时间戳非法。");
+  }
+
+  const ttlSeconds = resolveExternalAssertionTTLSeconds();
+  const ttlMs = ttlSeconds * 1000;
+  const nowMs = Date.now();
+  if (Math.abs(nowMs - timestampMs) > ttlMs) {
+    return unauthorized(c, "外部登录断言已过期。");
+  }
+
+  const canonicalPayload = buildExternalAssertionCanonicalPayload({
+    providerId: result.data.providerId,
+    externalUserId: result.data.externalUserId,
+    email: result.data.email,
+    tenantId: result.data.tenantId,
+    timestamp: result.data.timestamp,
+    nonce: result.data.nonce,
+  });
+  if (
+    !verifyExternalAssertionSignature(
+      canonicalPayload,
+      result.data.signature,
+      assertionSecret
+    )
+  ) {
+    return unauthorized(c, "外部登录签名校验失败。");
+  }
+
+  if (!claimExternalAssertionNonce(result.data.providerId, result.data.nonce, nowMs, ttlMs)) {
+    return unauthorized(c, "外部登录请求疑似重放，已拒绝。");
+  }
+
+  let user = await repository.getLocalUserByEmail(result.data.email);
+  if (!user) {
+    const passwordHash = await Bun.password.hash(
+      `external:${result.data.providerId}:${result.data.externalUserId}:${crypto.randomUUID()}`
+    );
+    user = await repository.createLocalUser({
+      email: result.data.email,
+      passwordHash,
+      displayName:
+        result.data.displayName ?? `${result.data.providerId}:${result.data.externalUserId}`,
+    });
+  }
+
+  const tenantAccess = await resolveTenantAccessForLogin(user.id, result.data.tenantId);
+  if (!tenantAccess) {
+    return c.json(
+      {
+        message: "外部账号未绑定到指定租户，无法登录。",
+        requestId: c.get("requestId"),
+      },
+      403
+    );
+  }
+
+  const session = await createSessionForUser(user.id, tenantAccess.tenantId);
+  const tokens = issueAuthTokens(user.id, tenantAccess.tenantId, session);
+  const requestId = c.get("requestId");
+
+  await appendAuditLogSafely({
+    tenantId: tenantAccess.tenantId,
+    eventId: `cp:${requestId}:auth-external-login`,
+    action: "auth.external_login",
+    level: "info",
+    detail: `外部登录成功(provider=${provider.id}, user=${user.id})`,
+    metadata: {
+      requestId,
+      providerId: provider.id,
+      providerType: provider.type,
+      externalUserId: result.data.externalUserId,
+      userId: user.id,
+      tenantId: tenantAccess.tenantId,
+    },
+  });
+
+  return c.json({
+    user: {
+      userId: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      tenantId: tenantAccess.tenantId,
+      tenantRole: tenantAccess.tenantRole,
+    },
+    provider: {
+      id: provider.id,
+      type: provider.type,
+      displayName: provider.displayName,
     },
     tokens,
   });

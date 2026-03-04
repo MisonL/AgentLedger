@@ -626,6 +626,17 @@ export interface AuthLogoutInput {
   refreshToken: string;
 }
 
+export interface AuthExternalLoginInput {
+  providerId: string;
+  externalUserId: string;
+  email: string;
+  displayName?: string;
+  tenantId?: string;
+  timestamp: string;
+  nonce: string;
+  signature: string;
+}
+
 export type AuthProviderType = "local" | "oauth2" | "oidc" | "sso";
 
 export interface AuthProviderItem {
