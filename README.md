@@ -19,7 +19,7 @@ AgentLedger 面向企业研发与平台团队，目标是把分散在 AI CLI 与
 | --- | --- |
 | 会话与使用量 | 使用热力图（usage heatmap）、daily/monthly/models/sessions 聚合、会话详情与事件列表 |
 | Source 管理 | source 新增/查询/删除、连通性测试、同步任务管理 |
-| Agent 自动采集（新增） | `agent collect` 自动采集本机会话并上报；默认目录：`~/.codex/sessions`、`~/.claude/projects`、`~/.gemini/tmp` |
+| Agent 自动采集（新增） | `agent collect` 按 docs/09 的 P0/P1 客户端矩阵自动采集本机会话并上报；支持 `--tool=auto` 和显式 `--tool=<client-key>`。 |
 | 预算治理 | budgets 读写、阈值分级、告警与状态流转 |
 | 集成分发 | 支持 `alert/weekly` 双事件；`webhook` 原样转发，`wecom/dingtalk/feishu` 使用 `text` 模板消息 |
 | 回调链路 | governance -> integration -> control-plane callback 闭环 |
@@ -111,6 +111,20 @@ bun --cwd apps/web-console run dev
 - `~/.codex/sessions`
 - `~/.claude/projects`
 - `~/.gemini/tmp`
+- `~/.aider/sessions`
+- `~/.opencode/sessions`
+- `~/.qwen-code/sessions`
+- `~/.kimi-cli/sessions`
+- `~/.trae-cli/sessions`
+- `~/.codebuddy-cli/sessions`
+- `~/.cursor/sessions`
+- `~/.vscode/sessions`
+- `~/.vscode-insiders/sessions`
+- `~/.trae-ide/sessions`
+- `~/.windsurf/sessions`
+- `~/.lingma/sessions`
+- `~/.codebuddy-ide/sessions`
+- `~/.zed/sessions`
 
 典型命令：
 
