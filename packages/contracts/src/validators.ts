@@ -5,9 +5,11 @@ import type {
   AddTenantMemberInput,
   Alert,
   AlertOrchestrationChannel,
+  AlertOrchestrationExecutionListInput,
   AlertOrchestrationEventType,
   AlertOrchestrationRuleListInput,
   AlertOrchestrationRuleUpsertInput,
+  AlertOrchestrationSimulateInput,
   AlertMutableStatus,
   AlertListInput,
   AlertStatusUpdateInput,
@@ -276,6 +278,7 @@ const USAGE_EXPORT_LIMIT_MAX = 2000;
 const SOURCE_PARSE_FAILURE_LIMIT_DEFAULT = 50;
 const SOURCE_PARSE_FAILURE_LIMIT_MAX = 500;
 const ALERT_LIMIT_MAX = 200;
+const ALERT_ORCHESTRATION_EXECUTION_LIMIT_MAX = 200;
 const AUDIT_LIMIT_MAX = 200;
 const IDENTITY_BINDING_LIST_LIMIT_MAX = 200;
 const API_KEY_LIST_LIMIT_MAX = 200;
@@ -3498,6 +3501,173 @@ export function validateAlertOrchestrationRuleListInput(
       enabled: typeof enabled === "boolean" ? enabled : undefined,
       severity: severity as AlertSeverity | undefined,
       sourceId,
+    },
+  };
+}
+
+export function validateAlertOrchestrationExecutionListInput(
+  input: unknown
+): ValidationResult<AlertOrchestrationExecutionListInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "查询参数必须是对象。" };
+  }
+
+  const ruleId = normalizeString(input.ruleId);
+  const eventType = normalizeString(input.eventType);
+  const alertId = normalizeString(input.alertId);
+  const severity = normalizeString(input.severity);
+  const sourceId = normalizeString(input.sourceId);
+  const dedupeHit = toOptionalBoolean(input.dedupeHit);
+  const suppressed = toOptionalBoolean(input.suppressed);
+  const simulated = toOptionalBoolean(input.simulated);
+  const from = normalizeString(input.from);
+  const to = normalizeString(input.to);
+  const limit = toOptionalInteger(input.limit);
+
+  if (input.ruleId !== undefined && !ruleId) {
+    return { success: false, error: "ruleId 必须为非空字符串。" };
+  }
+  if (
+    input.eventType !== undefined &&
+    (!eventType || !isAlertOrchestrationEventType(eventType))
+  ) {
+    return { success: false, error: "eventType 必须是 alert/weekly 之一。" };
+  }
+  if (input.alertId !== undefined && !alertId) {
+    return { success: false, error: "alertId 必须为非空字符串。" };
+  }
+  if (input.severity !== undefined && (!severity || !isAlertSeverity(severity))) {
+    return { success: false, error: "severity 必须是 warning/critical 之一。" };
+  }
+  if (input.sourceId !== undefined && !sourceId) {
+    return { success: false, error: "sourceId 必须为非空字符串。" };
+  }
+  if (dedupeHit === "invalid") {
+    return { success: false, error: "dedupeHit 必须是 true/false 或 1/0。" };
+  }
+  if (suppressed === "invalid") {
+    return { success: false, error: "suppressed 必须是 true/false 或 1/0。" };
+  }
+  if (simulated === "invalid") {
+    return { success: false, error: "simulated 必须是 true/false 或 1/0。" };
+  }
+  if (from !== undefined && !isISODate(from)) {
+    return { success: false, error: "from 必须为 ISO 日期字符串。" };
+  }
+  if (to !== undefined && !isISODate(to)) {
+    return { success: false, error: "to 必须为 ISO 日期字符串。" };
+  }
+  if (
+    limit !== undefined &&
+    (!Number.isInteger(limit) ||
+      limit <= 0 ||
+      limit > ALERT_ORCHESTRATION_EXECUTION_LIMIT_MAX)
+  ) {
+    return {
+      success: false,
+      error: `limit 必须是 1 到 ${ALERT_ORCHESTRATION_EXECUTION_LIMIT_MAX} 的整数。`,
+    };
+  }
+  if (from && to && Date.parse(from) > Date.parse(to)) {
+    return { success: false, error: "from 不能晚于 to。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      ruleId,
+      eventType: eventType as AlertOrchestrationEventType | undefined,
+      alertId,
+      severity: severity as AlertSeverity | undefined,
+      sourceId,
+      dedupeHit: typeof dedupeHit === "boolean" ? dedupeHit : undefined,
+      suppressed: typeof suppressed === "boolean" ? suppressed : undefined,
+      simulated: typeof simulated === "boolean" ? simulated : undefined,
+      from,
+      to,
+      limit,
+    },
+  };
+}
+
+export function validateAlertOrchestrationSimulateInput(
+  input: unknown
+): ValidationResult<AlertOrchestrationSimulateInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const ruleId = normalizeString(input.ruleId);
+  const eventType = normalizeString(input.eventType);
+  const alertId = normalizeString(input.alertId);
+  const severity = normalizeString(input.severity);
+  const sourceId = normalizeString(input.sourceId);
+  const channels = normalizeStringArray(input.channels);
+  const conflictRuleIds = normalizeStringArray(input.conflictRuleIds);
+  const dedupeHit = toOptionalBoolean(input.dedupeHit);
+  const suppressed = toOptionalBoolean(input.suppressed);
+  const metadata = input.metadata;
+
+  if (input.ruleId !== undefined && !ruleId) {
+    return { success: false, error: "ruleId 必须为非空字符串。" };
+  }
+  if (!eventType || !isAlertOrchestrationEventType(eventType)) {
+    return { success: false, error: "eventType 必填且必须是 alert/weekly 之一。" };
+  }
+  if (input.alertId !== undefined && !alertId) {
+    return { success: false, error: "alertId 必须为非空字符串。" };
+  }
+  if (input.severity !== undefined && (!severity || !isAlertSeverity(severity))) {
+    return { success: false, error: "severity 必须是 warning/critical 之一。" };
+  }
+  if (input.sourceId !== undefined && !sourceId) {
+    return { success: false, error: "sourceId 必须为非空字符串。" };
+  }
+  if (channels === "invalid") {
+    return { success: false, error: "channels 必须是字符串数组。" };
+  }
+  const normalizedChannels = channels?.map((channel) => channel.toLowerCase()) ?? undefined;
+  if (
+    normalizedChannels &&
+    !normalizedChannels.every((channel) => isAlertOrchestrationChannel(channel))
+  ) {
+    return {
+      success: false,
+      error: "channels 仅支持 webhook/wecom/dingtalk/feishu/email/email_webhook。",
+    };
+  }
+  if (normalizedChannels && new Set(normalizedChannels).size !== normalizedChannels.length) {
+    return { success: false, error: "channels 不能包含重复值（不区分大小写）。" };
+  }
+  if (conflictRuleIds === "invalid") {
+    return { success: false, error: "conflictRuleIds 必须是字符串数组。" };
+  }
+  if (conflictRuleIds && new Set(conflictRuleIds).size !== conflictRuleIds.length) {
+    return { success: false, error: "conflictRuleIds 不能包含重复值。" };
+  }
+  if (dedupeHit === "invalid") {
+    return { success: false, error: "dedupeHit 必须是 true/false 或 1/0。" };
+  }
+  if (suppressed === "invalid") {
+    return { success: false, error: "suppressed 必须是 true/false 或 1/0。" };
+  }
+  if (metadata !== undefined && !isRecord(metadata)) {
+    return { success: false, error: "metadata 必须是对象。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      ruleId,
+      eventType,
+      alertId,
+      severity: severity as AlertSeverity | undefined,
+      sourceId,
+      channels: normalizedChannels as AlertOrchestrationChannel[] | undefined,
+      conflictRuleIds,
+      dedupeHit: typeof dedupeHit === "boolean" ? dedupeHit : undefined,
+      suppressed: typeof suppressed === "boolean" ? suppressed : undefined,
+      metadata: (metadata as Record<string, unknown> | undefined) ?? undefined,
     },
   };
 }

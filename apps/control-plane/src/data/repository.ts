@@ -1,6 +1,9 @@
 import type {
   Alert,
   AlertOrchestrationChannel,
+  AlertOrchestrationExecutionCreateInput,
+  AlertOrchestrationExecutionListInput,
+  AlertOrchestrationExecutionLog,
   AlertOrchestrationEventType,
   AlertOrchestrationRule,
   AlertOrchestrationRuleListInput,
@@ -84,6 +87,7 @@ export type ReplayJobStatus = "pending" | "running" | "succeeded" | "failed" | "
 
 const DEFAULT_SESSION_LIMIT = 50;
 const DEFAULT_ALERT_LIMIT = 50;
+const DEFAULT_ALERT_ORCHESTRATION_EXECUTION_LIMIT = 50;
 const DEFAULT_AUDIT_LIMIT = 50;
 const DEFAULT_SYNC_JOB_LIMIT = 50;
 const DEFAULT_PARSE_FAILURE_LIMIT = 50;
@@ -93,6 +97,7 @@ const DEFAULT_QUALITY_DAILY_METRIC_LIMIT = 60;
 const DEFAULT_QUALITY_SCORECARD_LIMIT = 100;
 const DEFAULT_REPLAY_BASELINE_LIMIT = 100;
 const DEFAULT_REPLAY_JOB_LIMIT = 100;
+const MAX_ALERT_ORCHESTRATION_EXECUTION_LIMIT = 200;
 const SOURCE_TYPES: ReadonlyArray<SourceType> = ["local", "ssh", "sync-cache"];
 const SOURCE_ACCESS_MODES: ReadonlyArray<SourceAccessMode> = ["realtime", "sync", "hybrid"];
 const ALERT_STATUS_SET: ReadonlyArray<AlertStatus> = ["open", "acknowledged", "resolved"];
@@ -280,6 +285,11 @@ export interface AlertOrchestrationRuleListResult {
   total: number;
 }
 
+export interface AlertOrchestrationExecutionListResult {
+  items: AlertOrchestrationExecutionLog[];
+  total: number;
+}
+
 export interface ReplicationJobListResult {
   items: ReplicationJob[];
   total: number;
@@ -448,6 +458,20 @@ interface NormalizedAlertOrchestrationRuleListInput {
   enabled?: boolean;
   severity?: AlertSeverity;
   sourceId?: string;
+}
+
+interface NormalizedAlertOrchestrationExecutionListInput {
+  ruleId?: string;
+  eventType?: AlertOrchestrationEventType;
+  alertId?: string;
+  severity?: AlertSeverity;
+  sourceId?: string;
+  dedupeHit?: boolean;
+  suppressed?: boolean;
+  simulated?: boolean;
+  from?: string;
+  to?: string;
+  limit: number;
 }
 
 interface NormalizedReplicationJobListInput {
@@ -2017,6 +2041,61 @@ function mapAlertOrchestrationRuleRow(row: DbRow): AlertOrchestrationRule {
   };
 }
 
+function mapAlertOrchestrationExecutionRow(row: DbRow): AlertOrchestrationExecutionLog {
+  const channels: AlertOrchestrationChannel[] = [];
+  const channelSet = new Set<AlertOrchestrationChannel>();
+  for (const channel of toJsonArray(row.channels)) {
+    const normalized = firstNonEmptyString(channel);
+    if (!normalized) {
+      continue;
+    }
+    const mapped = toAlertOrchestrationChannel(normalized.toLowerCase());
+    if (!mapped) {
+      continue;
+    }
+    if (channelSet.has(mapped)) {
+      continue;
+    }
+    channelSet.add(mapped);
+    channels.push(mapped);
+  }
+
+  const conflictRuleIds: string[] = [];
+  const conflictRuleIdSet = new Set<string>();
+  for (const conflictRuleId of toJsonArray(row.conflict_rule_ids)) {
+    const normalizedConflictRuleId = firstNonEmptyString(conflictRuleId);
+    if (!normalizedConflictRuleId) {
+      continue;
+    }
+    if (conflictRuleIdSet.has(normalizedConflictRuleId)) {
+      continue;
+    }
+    conflictRuleIdSet.add(normalizedConflictRuleId);
+    conflictRuleIds.push(normalizedConflictRuleId);
+  }
+
+  const alertId = firstNonEmptyString(row.alert_id);
+  const severityRaw = firstNonEmptyString(row.severity);
+  const sourceId = firstNonEmptyString(row.source_id);
+
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    ruleId: firstNonEmptyString(row.rule_id) ?? "",
+    eventType: toAlertOrchestrationEventType(row.event_type),
+    alertId: alertId ?? undefined,
+    severity: severityRaw ? toAlertSeverity(severityRaw) : undefined,
+    sourceId: sourceId ?? undefined,
+    channels,
+    conflictRuleIds,
+    dedupeHit: toBoolean(row.dedupe_hit, false),
+    suppressed: toBoolean(row.suppressed, false),
+    simulated: toBoolean(row.simulated, false),
+    metadata: toDbRow(row.metadata) ?? {},
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
 function mapRuleScopeBinding(value: unknown): RuleScopeBinding {
   const row = toDbRow(value) ?? {};
   const readList = (field: string): string[] | undefined => {
@@ -2496,6 +2575,32 @@ function normalizeAlertOrchestrationRuleListInput(
   };
 }
 
+function normalizeAlertOrchestrationExecutionListInput(
+  input: AlertOrchestrationExecutionListInput = {}
+): NormalizedAlertOrchestrationExecutionListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(
+    MAX_ALERT_ORCHESTRATION_EXECUTION_LIMIT,
+    Math.max(1, rawLimit ?? DEFAULT_ALERT_ORCHESTRATION_EXECUTION_LIMIT)
+  );
+  const from = toIsoString(input.from);
+  const to = toIsoString(input.to);
+
+  return {
+    ruleId: firstNonEmptyString(input.ruleId) ?? undefined,
+    eventType: input.eventType,
+    alertId: firstNonEmptyString(input.alertId) ?? undefined,
+    severity: input.severity,
+    sourceId: firstNonEmptyString(input.sourceId) ?? undefined,
+    dedupeHit: typeof input.dedupeHit === "boolean" ? input.dedupeHit : undefined,
+    suppressed: typeof input.suppressed === "boolean" ? input.suppressed : undefined,
+    simulated: typeof input.simulated === "boolean" ? input.simulated : undefined,
+    from: from ?? undefined,
+    to: to ?? undefined,
+    limit,
+  };
+}
+
 function normalizeReplicationJobListInput(
   input: ReplicationJobListInput = {}
 ): NormalizedReplicationJobListInput {
@@ -2936,6 +3041,7 @@ class ControlPlaneRepository {
   private readonly memoryBudgets: TenantBudgetRecord[] = [];
   private readonly memoryAlerts: Alert[] = [];
   private readonly memoryAlertOrchestrationRules: AlertOrchestrationRule[] = [];
+  private readonly memoryAlertOrchestrationExecutions: AlertOrchestrationExecutionLog[] = [];
   private readonly memoryResidencyPolicies: TenantResidencyPolicy[] = [];
   private readonly memoryReplicationJobs: ReplicationJob[] = [];
   private readonly memoryRuleAssets: RuleAsset[] = [];
@@ -6660,6 +6766,248 @@ class ControlPlaneRepository {
     } catch (error) {
       this.disableDb(error, "写入 alert orchestration rule 失败");
       return this.upsertAlertOrchestrationRuleToMemory(normalizedTenantId, normalizedInput);
+    }
+  }
+
+  async listAlertOrchestrationExecutionLogs(
+    tenantId: string,
+    input: AlertOrchestrationExecutionListInput = {}
+  ): Promise<AlertOrchestrationExecutionListResult> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalized = normalizeAlertOrchestrationExecutionListInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listAlertOrchestrationExecutionLogsFromMemory(normalizedTenantId, normalized);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+
+      if (normalized.ruleId) {
+        params.push(normalized.ruleId);
+        whereClauses.push(`rule_id = $${params.length}`);
+      }
+      if (normalized.eventType) {
+        params.push(normalized.eventType);
+        whereClauses.push(`event_type = $${params.length}`);
+      }
+      if (normalized.alertId) {
+        params.push(normalized.alertId);
+        whereClauses.push(`alert_id = $${params.length}`);
+      }
+      if (normalized.severity) {
+        params.push(normalized.severity);
+        whereClauses.push(`severity = $${params.length}`);
+      }
+      if (normalized.sourceId) {
+        params.push(normalized.sourceId);
+        whereClauses.push(`source_id = $${params.length}`);
+      }
+      if (normalized.dedupeHit !== undefined) {
+        params.push(normalized.dedupeHit);
+        whereClauses.push(`dedupe_hit = $${params.length}`);
+      }
+      if (normalized.suppressed !== undefined) {
+        params.push(normalized.suppressed);
+        whereClauses.push(`suppressed = $${params.length}`);
+      }
+      if (normalized.simulated !== undefined) {
+        params.push(normalized.simulated);
+        whereClauses.push(`simulated = $${params.length}`);
+      }
+      if (normalized.from) {
+        params.push(normalized.from);
+        whereClauses.push(`created_at >= $${params.length}::timestamptz`);
+      }
+      if (normalized.to) {
+        params.push(normalized.to);
+        whereClauses.push(`created_at <= $${params.length}::timestamptz`);
+      }
+
+      const whereSql = `WHERE ${whereClauses.join(" AND ")}`;
+      const countResult = await pool.query(
+        `SELECT COUNT(*)::int AS total
+         FROM alert_orchestration_executions
+         ${whereSql}`,
+        params
+      );
+
+      const listParams = [...params, normalized.limit];
+      const listResult = await pool.query(
+        `SELECT id,
+                tenant_id,
+                rule_id,
+                event_type,
+                alert_id,
+                severity,
+                source_id,
+                channels,
+                conflict_rule_ids,
+                dedupe_hit,
+                suppressed,
+                simulated,
+                metadata,
+                created_at
+         FROM alert_orchestration_executions
+         ${whereSql}
+         ORDER BY created_at DESC, id DESC
+         LIMIT $${listParams.length}`,
+        listParams
+      );
+
+      return {
+        items: listResult.rows.map(mapAlertOrchestrationExecutionRow),
+        total: Math.max(0, Math.trunc(toNumber(countResult.rows[0]?.total, 0))),
+      };
+    } catch (error) {
+      this.disableDb(error, "查询 alert orchestration execution logs 失败");
+      return this.listAlertOrchestrationExecutionLogsFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
+  async createAlertOrchestrationExecutionLog(
+    tenantId: string,
+    input: AlertOrchestrationExecutionCreateInput
+  ): Promise<AlertOrchestrationExecutionLog> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedRuleId = firstNonEmptyString(input.ruleId);
+    if (!normalizedRuleId) {
+      throw new Error("alert_orchestration_execution_rule_id_required");
+    }
+
+    const rule = await this.getAlertOrchestrationRuleById(normalizedTenantId, normalizedRuleId);
+    const rawChannels = Array.isArray(input.channels) ? input.channels : rule?.channels ?? [];
+    const channels: AlertOrchestrationChannel[] = [];
+    const channelSet = new Set<AlertOrchestrationChannel>();
+    for (const channel of rawChannels) {
+      const normalizedChannel = firstNonEmptyString(channel);
+      if (!normalizedChannel) {
+        continue;
+      }
+      const mappedChannel = toAlertOrchestrationChannel(normalizedChannel.toLowerCase());
+      if (!mappedChannel) {
+        continue;
+      }
+      if (channelSet.has(mappedChannel)) {
+        continue;
+      }
+      channelSet.add(mappedChannel);
+      channels.push(mappedChannel);
+    }
+
+    const conflictRuleIds = normalizeDistinctStringArray(input.conflictRuleIds);
+    const severityRaw = firstNonEmptyString(input.severity);
+    const createdAt = toIsoString(input.createdAt) ?? new Date().toISOString();
+    const execution: AlertOrchestrationExecutionLog = {
+      id: firstNonEmptyString(input.id) ?? crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      ruleId: normalizedRuleId,
+      eventType: toAlertOrchestrationEventType(input.eventType),
+      alertId: firstNonEmptyString(input.alertId) ?? undefined,
+      severity: severityRaw ? toAlertSeverity(severityRaw) : undefined,
+      sourceId: firstNonEmptyString(input.sourceId) ?? undefined,
+      channels,
+      conflictRuleIds,
+      dedupeHit: input.dedupeHit === true,
+      suppressed: input.suppressed === true,
+      simulated: input.simulated === true,
+      metadata: toDbRow(input.metadata) ?? {},
+      createdAt,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.createAlertOrchestrationExecutionLogToMemory(execution);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO alert_orchestration_executions (
+           id,
+           tenant_id,
+           rule_id,
+           event_type,
+           alert_id,
+           severity,
+           source_id,
+           channels,
+           conflict_rule_ids,
+           dedupe_hit,
+           suppressed,
+           simulated,
+           metadata,
+           created_at
+         )
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6,
+           $7,
+           $8::jsonb,
+           $9::jsonb,
+           $10,
+           $11,
+           $12,
+           $13::jsonb,
+           $14::timestamptz
+         )
+         ON CONFLICT (tenant_id, id)
+         DO UPDATE
+           SET rule_id = EXCLUDED.rule_id,
+               event_type = EXCLUDED.event_type,
+               alert_id = EXCLUDED.alert_id,
+               severity = EXCLUDED.severity,
+               source_id = EXCLUDED.source_id,
+               channels = EXCLUDED.channels,
+               conflict_rule_ids = EXCLUDED.conflict_rule_ids,
+               dedupe_hit = EXCLUDED.dedupe_hit,
+               suppressed = EXCLUDED.suppressed,
+               simulated = EXCLUDED.simulated,
+               metadata = EXCLUDED.metadata,
+               created_at = EXCLUDED.created_at
+         RETURNING id,
+                   tenant_id,
+                   rule_id,
+                   event_type,
+                   alert_id,
+                   severity,
+                   source_id,
+                   channels,
+                   conflict_rule_ids,
+                   dedupe_hit,
+                   suppressed,
+                   simulated,
+                   metadata,
+                   created_at`,
+        [
+          execution.id,
+          execution.tenantId,
+          execution.ruleId,
+          execution.eventType,
+          execution.alertId ?? null,
+          execution.severity ?? null,
+          execution.sourceId ?? null,
+          safeStringifyJson(execution.channels),
+          safeStringifyJson(execution.conflictRuleIds),
+          execution.dedupeHit,
+          execution.suppressed,
+          execution.simulated,
+          safeStringifyJson(execution.metadata),
+          execution.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        return this.createAlertOrchestrationExecutionLogToMemory(execution);
+      }
+      return mapAlertOrchestrationExecutionRow(row);
+    } catch (error) {
+      this.disableDb(error, "写入 alert orchestration execution log 失败");
+      return this.createAlertOrchestrationExecutionLogToMemory(execution);
     }
   }
 
@@ -11931,6 +12279,164 @@ class ControlPlaneRepository {
     );
 
     await pool.query(
+      `CREATE TABLE IF NOT EXISTS alert_orchestration_executions (
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         id TEXT NOT NULL,
+         rule_id TEXT NOT NULL,
+         event_type TEXT NOT NULL DEFAULT 'alert',
+         alert_id TEXT,
+         severity TEXT,
+         source_id TEXT,
+         channels JSONB NOT NULL DEFAULT '[]'::jsonb,
+         conflict_rule_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+         dedupe_hit BOOLEAN NOT NULL DEFAULT FALSE,
+         suppressed BOOLEAN NOT NULL DEFAULT FALSE,
+         simulated BOOLEAN NOT NULL DEFAULT FALSE,
+         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         PRIMARY KEY (tenant_id, id)
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE alert_orchestration_executions
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS id TEXT,
+         ADD COLUMN IF NOT EXISTS rule_id TEXT,
+         ADD COLUMN IF NOT EXISTS event_type TEXT,
+         ADD COLUMN IF NOT EXISTS alert_id TEXT,
+         ADD COLUMN IF NOT EXISTS severity TEXT,
+         ADD COLUMN IF NOT EXISTS source_id TEXT,
+         ADD COLUMN IF NOT EXISTS channels JSONB,
+         ADD COLUMN IF NOT EXISTS conflict_rule_ids JSONB,
+         ADD COLUMN IF NOT EXISTS dedupe_hit BOOLEAN,
+         ADD COLUMN IF NOT EXISTS suppressed BOOLEAN,
+         ADD COLUMN IF NOT EXISTS simulated BOOLEAN,
+         ADD COLUMN IF NOT EXISTS metadata JSONB,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ`
+    );
+
+    await pool.query(
+      `UPDATE alert_orchestration_executions
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           id = COALESCE(
+             NULLIF(id, ''),
+             md5(random()::text || clock_timestamp()::text)
+           ),
+           rule_id = COALESCE(NULLIF(rule_id, ''), 'unknown-rule'),
+           event_type = CASE
+             WHEN event_type IN ('alert', 'weekly') THEN event_type
+             ELSE 'alert'
+           END,
+           alert_id = NULLIF(alert_id, ''),
+           severity = CASE
+             WHEN severity IN ('warning', 'critical') THEN severity
+             WHEN NULLIF(severity, '') IS NULL THEN NULL
+             ELSE NULL
+           END,
+           source_id = NULLIF(source_id, ''),
+           channels = CASE
+             WHEN jsonb_typeof(channels) = 'array' THEN channels
+             ELSE '[]'::jsonb
+           END,
+           conflict_rule_ids = CASE
+             WHEN jsonb_typeof(conflict_rule_ids) = 'array' THEN conflict_rule_ids
+             ELSE '[]'::jsonb
+           END,
+           dedupe_hit = COALESCE(dedupe_hit, FALSE),
+           suppressed = COALESCE(suppressed, FALSE),
+           simulated = COALESCE(simulated, FALSE),
+           metadata = CASE
+             WHEN jsonb_typeof(metadata) = 'object' THEN metadata
+             ELSE '{}'::jsonb
+           END,
+           created_at = COALESCE(created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR id IS NULL
+          OR id = ''
+          OR rule_id IS NULL
+          OR rule_id = ''
+          OR event_type IS NULL
+          OR event_type NOT IN ('alert', 'weekly')
+          OR severity = ''
+          OR source_id = ''
+          OR alert_id = ''
+          OR channels IS NULL
+          OR jsonb_typeof(channels) <> 'array'
+          OR conflict_rule_ids IS NULL
+          OR jsonb_typeof(conflict_rule_ids) <> 'array'
+          OR dedupe_hit IS NULL
+          OR suppressed IS NULL
+          OR simulated IS NULL
+          OR metadata IS NULL
+          OR jsonb_typeof(metadata) <> 'object'
+          OR created_at IS NULL`
+    );
+
+    await pool.query(
+      `WITH ranked AS (
+         SELECT ctid,
+                ROW_NUMBER() OVER (
+                  PARTITION BY tenant_id, id
+                  ORDER BY created_at DESC, ctid DESC
+                ) AS row_index
+         FROM alert_orchestration_executions
+       )
+       DELETE FROM alert_orchestration_executions AS executions
+       USING ranked
+       WHERE executions.ctid = ranked.ctid
+         AND ranked.row_index > 1`
+    );
+
+    await pool.query(
+      `ALTER TABLE alert_orchestration_executions
+         ALTER COLUMN tenant_id SET DEFAULT '${DEFAULT_TENANT_ID}',
+         ALTER COLUMN tenant_id SET NOT NULL,
+         ALTER COLUMN id SET NOT NULL,
+         ALTER COLUMN rule_id SET NOT NULL,
+         ALTER COLUMN event_type SET DEFAULT 'alert',
+         ALTER COLUMN event_type SET NOT NULL,
+         ALTER COLUMN channels SET DEFAULT '[]'::jsonb,
+         ALTER COLUMN channels SET NOT NULL,
+         ALTER COLUMN conflict_rule_ids SET DEFAULT '[]'::jsonb,
+         ALTER COLUMN conflict_rule_ids SET NOT NULL,
+         ALTER COLUMN dedupe_hit SET DEFAULT FALSE,
+         ALTER COLUMN dedupe_hit SET NOT NULL,
+         ALTER COLUMN suppressed SET DEFAULT FALSE,
+         ALTER COLUMN suppressed SET NOT NULL,
+         ALTER COLUMN simulated SET DEFAULT FALSE,
+         ALTER COLUMN simulated SET NOT NULL,
+         ALTER COLUMN metadata SET DEFAULT '{}'::jsonb,
+         ALTER COLUMN metadata SET NOT NULL,
+         ALTER COLUMN created_at SET DEFAULT NOW(),
+         ALTER COLUMN created_at SET NOT NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_orchestration_executions_tenant_id
+       ON alert_orchestration_executions (tenant_id, id)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_alert_orchestration_executions_tenant_created_at
+       ON alert_orchestration_executions (tenant_id, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_alert_orchestration_executions_filters
+       ON alert_orchestration_executions (
+         tenant_id,
+         rule_id,
+         event_type,
+         alert_id,
+         severity,
+         source_id,
+         created_at DESC
+       )`
+    );
+
+    await pool.query(
       `CREATE TABLE IF NOT EXISTS tenant_residency_policies (
          tenant_id TEXT PRIMARY KEY,
          mode TEXT NOT NULL DEFAULT 'single_region',
@@ -15719,6 +16225,89 @@ class ControlPlaneRepository {
     }
     this.memoryAlertOrchestrationRules.unshift(stored);
     return this.cloneAlertOrchestrationRule(stored);
+  }
+
+  private cloneAlertOrchestrationExecutionLog(
+    execution: AlertOrchestrationExecutionLog
+  ): AlertOrchestrationExecutionLog {
+    return {
+      ...execution,
+      channels: [...execution.channels],
+      conflictRuleIds: [...execution.conflictRuleIds],
+      metadata: { ...execution.metadata },
+    };
+  }
+
+  private listAlertOrchestrationExecutionLogsFromMemory(
+    tenantId: string,
+    input: NormalizedAlertOrchestrationExecutionListInput
+  ): AlertOrchestrationExecutionListResult {
+    const fromTimestamp = input.from ? Date.parse(input.from) : Number.NaN;
+    const toTimestamp = input.to ? Date.parse(input.to) : Number.NaN;
+
+    const filtered = this.memoryAlertOrchestrationExecutions
+      .filter((execution) => {
+        if (execution.tenantId !== tenantId) {
+          return false;
+        }
+        if (input.ruleId && execution.ruleId !== input.ruleId) {
+          return false;
+        }
+        if (input.eventType && execution.eventType !== input.eventType) {
+          return false;
+        }
+        if (input.alertId && execution.alertId !== input.alertId) {
+          return false;
+        }
+        if (input.severity && execution.severity !== input.severity) {
+          return false;
+        }
+        if (input.sourceId && execution.sourceId !== input.sourceId) {
+          return false;
+        }
+        if (input.dedupeHit !== undefined && execution.dedupeHit !== input.dedupeHit) {
+          return false;
+        }
+        if (input.suppressed !== undefined && execution.suppressed !== input.suppressed) {
+          return false;
+        }
+        if (input.simulated !== undefined && execution.simulated !== input.simulated) {
+          return false;
+        }
+        if (Number.isFinite(fromTimestamp) || Number.isFinite(toTimestamp)) {
+          const createdAtTs = Date.parse(execution.createdAt);
+          if (!Number.isFinite(createdAtTs)) {
+            return false;
+          }
+          if (Number.isFinite(fromTimestamp) && createdAtTs < fromTimestamp) {
+            return false;
+          }
+          if (Number.isFinite(toTimestamp) && createdAtTs > toTimestamp) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+
+    return {
+      items: filtered.slice(0, input.limit).map((item) => this.cloneAlertOrchestrationExecutionLog(item)),
+      total: filtered.length,
+    };
+  }
+
+  private createAlertOrchestrationExecutionLogToMemory(
+    execution: AlertOrchestrationExecutionLog
+  ): AlertOrchestrationExecutionLog {
+    const stored = this.cloneAlertOrchestrationExecutionLog(execution);
+    const existingIndex = this.memoryAlertOrchestrationExecutions.findIndex(
+      (item) => item.tenantId === stored.tenantId && item.id === stored.id
+    );
+    if (existingIndex >= 0) {
+      this.memoryAlertOrchestrationExecutions.splice(existingIndex, 1);
+    }
+    this.memoryAlertOrchestrationExecutions.unshift(stored);
+    return this.cloneAlertOrchestrationExecutionLog(stored);
   }
 
   private cloneRuleScopeBinding(scopeBinding: RuleScopeBinding): RuleScopeBinding {

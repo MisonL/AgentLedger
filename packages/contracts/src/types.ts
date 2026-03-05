@@ -251,6 +251,72 @@ export interface AlertOrchestrationRuleUpsertInput {
   updatedAt: string;
 }
 
+export interface AlertOrchestrationExecutionLog {
+  id: string;
+  tenantId: string;
+  ruleId: string;
+  eventType: AlertOrchestrationEventType;
+  alertId?: string;
+  severity?: AlertSeverity;
+  sourceId?: string;
+  channels: AlertOrchestrationChannel[];
+  conflictRuleIds: string[];
+  dedupeHit: boolean;
+  suppressed: boolean;
+  simulated: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AlertOrchestrationExecutionListInput {
+  ruleId?: string;
+  eventType?: AlertOrchestrationEventType;
+  alertId?: string;
+  severity?: AlertSeverity;
+  sourceId?: string;
+  dedupeHit?: boolean;
+  suppressed?: boolean;
+  simulated?: boolean;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
+export interface AlertOrchestrationExecutionCreateInput {
+  id?: string;
+  ruleId: string;
+  eventType: AlertOrchestrationEventType;
+  alertId?: string;
+  severity?: AlertSeverity;
+  sourceId?: string;
+  channels?: AlertOrchestrationChannel[];
+  conflictRuleIds?: string[];
+  dedupeHit?: boolean;
+  suppressed?: boolean;
+  simulated?: boolean;
+  metadata?: Record<string, unknown>;
+  createdAt?: string;
+}
+
+export interface AlertOrchestrationSimulateInput {
+  ruleId?: string;
+  eventType: AlertOrchestrationEventType;
+  alertId?: string;
+  severity?: AlertSeverity;
+  sourceId?: string;
+  channels?: AlertOrchestrationChannel[];
+  conflictRuleIds?: string[];
+  dedupeHit?: boolean;
+  suppressed?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AlertOrchestrationSimulationResult {
+  execution: AlertOrchestrationExecutionLog;
+  matched: boolean;
+  reason?: string;
+}
+
 export interface RegionDescriptor {
   id: string;
   name: string;

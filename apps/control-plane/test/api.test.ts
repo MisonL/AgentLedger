@@ -10673,6 +10673,383 @@ describe("Control Plane API", () => {
     expect(listBBody.items.some((item) => item.id === ruleId)).toBe(false);
   });
 
+  test("alerts/orchestration POST /api/v1/alerts/orchestration/simulate 未认证返回 401", async () => {
+    const response = await app.request("/api/v1/alerts/orchestration/simulate", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        eventType: "alert",
+      }),
+    });
+    const body = (await response.json()) as { message: string };
+
+    expect(response.status).toBe(401);
+    expect(body.message).toContain("认证");
+  });
+
+  test("alerts/orchestration POST /api/v1/alerts/orchestration/simulate 参数非法返回 400", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const response = await app.request("/api/v1/alerts/orchestration/simulate", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        eventType: "unknown",
+      }),
+    });
+    const body = (await response.json()) as { message: string };
+
+    expect(response.status).toBe(400);
+    expect(body.message).toContain("eventType");
+  });
+
+  test("alerts/orchestration simulate 两条规则冲突时返回冲突信息且写入 execution logs", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const nonce = createNonce("alerts-orchestration-simulate-conflict");
+    const sourceId = `source-${nonce}`;
+    const ruleAId = `rule-a-${nonce}`;
+    const ruleBId = `rule-b-${nonce}`;
+
+    const upsertRuleAResponse = await app.request(
+      `/api/v1/alerts/orchestration/rules/${encodeURIComponent(ruleAId)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          name: `冲突规则-A-${nonce}`,
+          enabled: true,
+          eventType: "alert",
+          severity: "critical",
+          sourceId,
+          dedupeWindowSeconds: 30,
+          suppressionWindowSeconds: 60,
+          mergeWindowSeconds: 120,
+          channels: ["wecom", "email"],
+        }),
+      },
+    );
+    expect(upsertRuleAResponse.status).toBe(200);
+
+    const upsertRuleBResponse = await app.request(
+      `/api/v1/alerts/orchestration/rules/${encodeURIComponent(ruleBId)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          name: `冲突规则-B-${nonce}`,
+          enabled: true,
+          eventType: "alert",
+          dedupeWindowSeconds: 45,
+          suppressionWindowSeconds: 90,
+          mergeWindowSeconds: 180,
+          channels: ["email", "webhook"],
+        }),
+      },
+    );
+    expect(upsertRuleBResponse.status).toBe(200);
+
+    const simulateResponse = await app.request(
+      "/api/v1/alerts/orchestration/simulate",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          eventType: "alert",
+          severity: "critical",
+          sourceId,
+        }),
+      },
+    );
+    const simulateBody = (await simulateResponse.json()) as {
+      matchedRules: AlertOrchestrationRule[];
+      conflictRuleIds: string[];
+      executions: Array<{
+        id: string;
+        ruleId: string;
+        simulated: boolean;
+        conflictRuleIds: string[];
+      }>;
+    };
+    expect(simulateResponse.status).toBe(200);
+    expect(
+      simulateBody.matchedRules.some((item) => item.id === ruleAId),
+    ).toBe(true);
+    expect(
+      simulateBody.matchedRules.some((item) => item.id === ruleBId),
+    ).toBe(true);
+    expect(new Set(simulateBody.conflictRuleIds)).toEqual(
+      new Set([ruleAId, ruleBId]),
+    );
+    expect(simulateBody.executions).toHaveLength(2);
+    expect(simulateBody.executions.every((item) => item.simulated)).toBe(true);
+    const executionForRuleA = simulateBody.executions.find(
+      (item) => item.ruleId === ruleAId,
+    );
+    const executionForRuleB = simulateBody.executions.find(
+      (item) => item.ruleId === ruleBId,
+    );
+    expect(executionForRuleA?.conflictRuleIds).toContain(ruleBId);
+    expect(executionForRuleB?.conflictRuleIds).toContain(ruleAId);
+
+    const executionListResponse = await app.request(
+      `/api/v1/alerts/orchestration/executions?eventType=alert&sourceId=${encodeURIComponent(
+        sourceId,
+      )}&simulated=true&limit=20`,
+      {
+        headers: authHeaders,
+      },
+    );
+    const executionListBody = (await executionListResponse.json()) as {
+      items: Array<{
+        id: string;
+        ruleId: string;
+        sourceId?: string;
+        simulated: boolean;
+      }>;
+      total: number;
+      filters: {
+        eventType?: string;
+        sourceId?: string;
+        simulated?: boolean;
+        limit?: number;
+      };
+    };
+    expect(executionListResponse.status).toBe(200);
+    expect(executionListBody.filters.eventType).toBe("alert");
+    expect(executionListBody.filters.sourceId).toBe(sourceId);
+    expect(executionListBody.filters.simulated).toBe(true);
+    expect(executionListBody.filters.limit).toBe(20);
+    const matchedExecutionLogs = executionListBody.items.filter((item) =>
+      [ruleAId, ruleBId].includes(item.ruleId),
+    );
+    expect(matchedExecutionLogs.length).toBe(2);
+    expect(matchedExecutionLogs.every((item) => item.simulated)).toBe(true);
+    expect(matchedExecutionLogs.every((item) => item.sourceId === sourceId)).toBe(
+      true,
+    );
+    expect(executionListBody.total).toBeGreaterThanOrEqual(
+      matchedExecutionLogs.length,
+    );
+  });
+
+  test("alerts/orchestration executions 列表支持过滤并保证租户隔离", async () => {
+    const nonce = createNonce("alerts-orchestration-executions-tenant");
+    const auth = await getDefaultAuthContext();
+
+    const tenantAResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Alerts Orchestration Execution Tenant A ${nonce}`,
+        slug: `alerts-orch-exec-a-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantAResult, [201]);
+    const tenantAId = extractEntityId(tenantAResult.payload);
+    if (!tenantAId) {
+      throw new Error("租户 A 创建响应缺少 tenantId。");
+    }
+
+    const tenantBResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Alerts Orchestration Execution Tenant B ${nonce}`,
+        slug: `alerts-orch-exec-b-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantBResult, [201]);
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error("租户 B 创建响应缺少 tenantId。");
+    }
+
+    const tenantAHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      auth.accessToken,
+      auth.userId,
+    );
+    const tenantBHeaders = await issueTenantScopedAuthHeaders(
+      tenantBId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const tenantARuleId = `tenant-a-rule-${nonce}`;
+    const tenantBRuleId = `tenant-b-rule-${nonce}`;
+    const tenantASourceId = `tenant-a-source-${nonce}`;
+    const tenantBSourceId = `tenant-b-source-${nonce}`;
+
+    const upsertTenantARuleResponse = await app.request(
+      `/api/v1/alerts/orchestration/rules/${encodeURIComponent(tenantARuleId)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          name: `执行日志过滤规则-A-${nonce}`,
+          enabled: true,
+          eventType: "alert",
+          sourceId: tenantASourceId,
+          dedupeWindowSeconds: 10,
+          suppressionWindowSeconds: 20,
+          mergeWindowSeconds: 30,
+          channels: ["wecom"],
+        }),
+      },
+    );
+    expect(upsertTenantARuleResponse.status).toBe(200);
+
+    const upsertTenantBRuleResponse = await app.request(
+      `/api/v1/alerts/orchestration/rules/${encodeURIComponent(tenantBRuleId)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...tenantBHeaders,
+        },
+        body: JSON.stringify({
+          name: `执行日志过滤规则-B-${nonce}`,
+          enabled: true,
+          eventType: "alert",
+          sourceId: tenantBSourceId,
+          dedupeWindowSeconds: 10,
+          suppressionWindowSeconds: 20,
+          mergeWindowSeconds: 30,
+          channels: ["email"],
+        }),
+      },
+    );
+    expect(upsertTenantBRuleResponse.status).toBe(200);
+
+    const simulateTenantAResponse = await app.request(
+      "/api/v1/alerts/orchestration/simulate",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          eventType: "alert",
+          sourceId: tenantASourceId,
+          ruleId: tenantARuleId,
+        }),
+      },
+    );
+    expect(simulateTenantAResponse.status).toBe(200);
+
+    const simulateTenantBResponse = await app.request(
+      "/api/v1/alerts/orchestration/simulate",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantBHeaders,
+        },
+        body: JSON.stringify({
+          eventType: "alert",
+          sourceId: tenantBSourceId,
+          ruleId: tenantBRuleId,
+        }),
+      },
+    );
+    expect(simulateTenantBResponse.status).toBe(200);
+
+    const listTenantAResponse = await app.request(
+      `/api/v1/alerts/orchestration/executions?ruleId=${encodeURIComponent(
+        tenantARuleId,
+      )}&eventType=alert&sourceId=${encodeURIComponent(
+        tenantASourceId,
+      )}&simulated=true&limit=10`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    const listTenantABody = (await listTenantAResponse.json()) as {
+      items: Array<{
+        tenantId: string;
+        ruleId: string;
+        sourceId?: string;
+        simulated: boolean;
+      }>;
+      total: number;
+      filters: {
+        ruleId?: string;
+        eventType?: string;
+        sourceId?: string;
+        simulated?: boolean;
+        limit?: number;
+      };
+    };
+    expect(listTenantAResponse.status).toBe(200);
+    expect(listTenantABody.filters.ruleId).toBe(tenantARuleId);
+    expect(listTenantABody.filters.eventType).toBe("alert");
+    expect(listTenantABody.filters.sourceId).toBe(tenantASourceId);
+    expect(listTenantABody.filters.simulated).toBe(true);
+    expect(listTenantABody.filters.limit).toBe(10);
+    expect(listTenantABody.total).toBeGreaterThanOrEqual(1);
+    expect(listTenantABody.items.length).toBeGreaterThanOrEqual(1);
+    expect(listTenantABody.items.every((item) => item.tenantId === tenantAId)).toBe(
+      true,
+    );
+    expect(listTenantABody.items.every((item) => item.ruleId === tenantARuleId)).toBe(
+      true,
+    );
+    expect(
+      listTenantABody.items.every((item) => item.sourceId === tenantASourceId),
+    ).toBe(true);
+    expect(listTenantABody.items.every((item) => item.simulated)).toBe(true);
+    expect(
+      listTenantABody.items.some((item) => item.ruleId === tenantBRuleId),
+    ).toBe(false);
+
+    const listTenantBResponse = await app.request(
+      `/api/v1/alerts/orchestration/executions?ruleId=${encodeURIComponent(
+        tenantBRuleId,
+      )}&eventType=alert&sourceId=${encodeURIComponent(
+        tenantBSourceId,
+      )}&simulated=true&limit=10`,
+      {
+        headers: tenantBHeaders,
+      },
+    );
+    const listTenantBBody = (await listTenantBResponse.json()) as {
+      items: Array<{
+        tenantId: string;
+        ruleId: string;
+      }>;
+      total: number;
+    };
+    expect(listTenantBResponse.status).toBe(200);
+    expect(listTenantBBody.total).toBeGreaterThanOrEqual(1);
+    expect(listTenantBBody.items.length).toBeGreaterThanOrEqual(1);
+    expect(listTenantBBody.items.every((item) => item.tenantId === tenantBId)).toBe(
+      true,
+    );
+    expect(listTenantBBody.items.every((item) => item.ruleId === tenantBRuleId)).toBe(
+      true,
+    );
+    expect(
+      listTenantBBody.items.some((item) => item.ruleId === tenantARuleId),
+    ).toBe(false);
+  });
+
   test("GET /api/v1/audits 返回结构包含 items/total/filters", async () => {
     const authHeaders = await resolveAuthHeaders();
     const response = await app.request("/api/v1/audits", {
