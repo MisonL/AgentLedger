@@ -52,6 +52,7 @@ jobs:
           bun run test
           bun run build
           bun run check:support-matrix
+          bun run sdk:verify
           bun run check:callback-stream-binding
 
   build-and-publish:

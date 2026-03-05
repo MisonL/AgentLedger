@@ -18,6 +18,8 @@
     "check:ts": "bash ./scripts/ts-check.sh",
     "check:text-normalization": "bash ./scripts/check-text-normalization.sh",
     "check:support-matrix": "bun run ./scripts/check-support-matrix.ts",
+    "sdk:generate": "bun run ./scripts/sdk-generate.ts",
+    "sdk:verify": "bun run ./scripts/sdk-verify.ts",
     "test:scripts": "bun test ./scripts/check-support-matrix.test.ts ./scripts/verify-evidence-bundle.test.ts",
     "check:callback-stream-binding": "bash ./scripts/check-callback-stream-binding.sh",
     "test:go": "bash ./scripts/go-test-all.sh",

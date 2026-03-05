@@ -67,6 +67,9 @@ jobs:
       - name: 支持矩阵一致性检查
         run: bun run check:support-matrix
 
+      - name: SDK 生成与校验门禁
+        run: bun run sdk:verify
+
       - name: 支持矩阵脚本测试
         run: bun run test:scripts
 

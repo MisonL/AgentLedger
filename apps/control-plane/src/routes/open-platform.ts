@@ -255,61 +255,1017 @@ async function requireTenantAccess(c: Context<AppEnv>, mode: "read" | "write") {
   return auth;
 }
 
-function buildOpenApiDocument() {
+export function buildOpenApiDocument() {
+  const standardErrorSchema = {
+    $ref: "#/components/schemas/ErrorResponse",
+  };
+
   return {
     openapi: "3.0.3",
     info: {
       title: "AgentLedger Control Plane API",
-      version: "1.0.0",
-      description: "最小可用 OpenAPI 文档（含 open-platform / quality / replay 摘要路径）。",
+      version: "1.1.0",
+      description: "Open Platform / Quality / Replay 核心路径文档。",
     },
+    tags: [
+      { name: "open-platform", description: "开放平台与 Webhook 能力" },
+      { name: "quality", description: "质量治理能力" },
+      { name: "replay", description: "回放评测能力" },
+    ],
+    security: [{ bearerAuth: [] }],
     paths: {
       "/api/v1/openapi.json": {
-        get: { summary: "获取最小 OpenAPI 文档" },
+        get: {
+          summary: "获取 OpenAPI 文档",
+          operationId: "getOpenApiDocument",
+          tags: ["open-platform"],
+          responses: {
+            "200": {
+              description: "OpenAPI 文档",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/OpenApiDocument",
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+          },
+        },
       },
       "/api/v1/api-keys": {
-        get: { summary: "列出 API Keys" },
-        post: { summary: "创建 API Key" },
+        get: {
+          summary: "列出 API Keys",
+          operationId: "listApiKeys",
+          tags: ["open-platform"],
+          parameters: [
+            { $ref: "#/components/parameters/PageLimit" },
+            { $ref: "#/components/parameters/PageCursor" },
+            {
+              name: "scope",
+              in: "query",
+              description: "按 scope 过滤",
+              schema: { type: "string", enum: ["read", "write", "admin"] },
+            },
+            {
+              name: "status",
+              in: "query",
+              description: "按状态过滤",
+              schema: { type: "string", enum: ["active", "revoked", "expired"] },
+            },
+            {
+              name: "keyword",
+              in: "query",
+              description: "名称/前缀关键字",
+              schema: { type: "string" },
+            },
+            {
+              name: "from",
+              in: "query",
+              description: "创建时间起点（ISO 日期）",
+              schema: { type: "string", format: "date-time" },
+            },
+            {
+              name: "to",
+              in: "query",
+              description: "创建时间终点（ISO 日期）",
+              schema: { type: "string", format: "date-time" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "API Key 列表",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ApiKeyListResponse" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+        post: {
+          summary: "创建 API Key",
+          operationId: "createApiKey",
+          tags: ["open-platform"],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ApiKeyCreateRequest" },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "创建成功",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ApiKeyCreateResponse" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
       },
       "/api/v1/api-keys/{id}/revoke": {
-        post: { summary: "吊销 API Key" },
+        post: {
+          summary: "吊销 API Key",
+          operationId: "revokeApiKey",
+          tags: ["open-platform"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          requestBody: {
+            required: false,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ApiKeyRevokeRequest" },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "吊销成功",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ApiKey" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
       },
       "/api/v1/webhooks": {
-        get: { summary: "列出 Webhook" },
-        post: { summary: "创建 Webhook" },
+        get: {
+          summary: "列出 Webhook",
+          operationId: "listWebhookEndpoints",
+          tags: ["open-platform"],
+          parameters: [
+            { $ref: "#/components/parameters/PageLimit" },
+            {
+              name: "status",
+              in: "query",
+              description: "按状态过滤",
+              schema: { type: "string", enum: ["active", "paused", "disabled"] },
+            },
+            {
+              name: "keyword",
+              in: "query",
+              description: "Webhook 名称关键字",
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Webhook 列表",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/WebhookListResponse" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+        post: {
+          summary: "创建 Webhook",
+          operationId: "createWebhookEndpoint",
+          tags: ["open-platform"],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/WebhookCreateRequest" },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "创建成功",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/WebhookCreateResponse" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "409": { $ref: "#/components/responses/ConflictError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
       },
       "/api/v1/webhooks/{id}": {
-        put: { summary: "更新 Webhook" },
-        delete: { summary: "删除 Webhook" },
+        put: {
+          summary: "更新 Webhook",
+          operationId: "updateWebhookEndpoint",
+          tags: ["open-platform"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/WebhookUpdateRequest" },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "更新成功",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/WebhookCreateResponse" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+        delete: {
+          summary: "删除 Webhook",
+          operationId: "deleteWebhookEndpoint",
+          tags: ["open-platform"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "删除结果",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["success"],
+                    properties: {
+                      success: { type: "boolean" },
+                    },
+                  },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
       },
       "/api/v1/webhooks/{id}/replay": {
-        post: { summary: "重放 Webhook" },
+        post: {
+          summary: "重放 Webhook",
+          operationId: "replayWebhookEndpoint",
+          tags: ["open-platform"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          requestBody: {
+            required: false,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/WebhookReplayRequest" },
+              },
+            },
+          },
+          responses: {
+            "202": {
+              description: "已接收重放请求",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/WebhookReplayResponse" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
       },
       "/api/v1/quality/events": {
-        post: { summary: "上报质量事件" },
+        post: {
+          summary: "上报质量事件",
+          operationId: "createQualityEvent",
+          tags: ["quality"],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/QualityEventInput" },
+              },
+            },
+          },
+          responses: {
+            "202": {
+              description: "事件已接收",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["accepted"],
+                    properties: {
+                      accepted: { type: "boolean" },
+                    },
+                  },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
       },
       "/api/v1/quality/metrics/daily": {
-        get: { summary: "查询质量日报" },
+        get: {
+          summary: "查询质量日报",
+          operationId: "listQualityDailyMetrics",
+          tags: ["quality"],
+          parameters: [{ $ref: "#/components/parameters/PageLimit" }],
+          responses: {
+            "200": {
+              description: "质量日报",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["items"],
+                    properties: {
+                      items: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/QualityDailyMetric" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
       },
       "/api/v1/quality/scorecards": {
-        get: { summary: "列出质量评分卡" },
+        get: {
+          summary: "列出质量评分卡",
+          operationId: "listQualityScorecards",
+          tags: ["quality"],
+          parameters: [{ $ref: "#/components/parameters/PageLimit" }],
+          responses: {
+            "200": {
+              description: "评分卡列表",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["items"],
+                    properties: {
+                      items: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/QualityScorecard" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
       },
       "/api/v1/quality/scorecards/{id}": {
-        put: { summary: "更新质量评分卡" },
+        put: {
+          summary: "更新质量评分卡",
+          operationId: "updateQualityScorecard",
+          tags: ["quality"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/QualityScorecard" },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "更新后的评分卡",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/QualityScorecard" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
       },
       "/api/v1/replay/baselines": {
-        post: { summary: "创建回放基线" },
-        get: { summary: "列出回放基线" },
+        post: {
+          summary: "创建回放基线",
+          operationId: "createReplayBaseline",
+          tags: ["replay"],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ReplayBaselineInput" },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "创建成功",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayBaseline" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+        get: {
+          summary: "列出回放基线",
+          operationId: "listReplayBaselines",
+          tags: ["replay"],
+          parameters: [{ $ref: "#/components/parameters/PageLimit" }],
+          responses: {
+            "200": {
+              description: "回放基线列表",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["items"],
+                    properties: {
+                      items: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/ReplayBaseline" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
       },
       "/api/v1/replay/jobs": {
-        post: { summary: "创建回放任务" },
-        get: { summary: "列出回放任务" },
+        post: {
+          summary: "创建回放任务",
+          operationId: "createReplayJob",
+          tags: ["replay"],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ReplayJobInput" },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "创建成功",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayJob" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+        get: {
+          summary: "列出回放任务",
+          operationId: "listReplayJobs",
+          tags: ["replay"],
+          parameters: [{ $ref: "#/components/parameters/PageLimit" }],
+          responses: {
+            "200": {
+              description: "回放任务列表",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["items"],
+                    properties: {
+                      items: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/ReplayJob" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
       },
       "/api/v1/replay/jobs/{id}": {
-        get: { summary: "查询回放任务" },
+        get: {
+          summary: "查询回放任务",
+          operationId: "getReplayJob",
+          tags: ["replay"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "回放任务详情",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayJob" },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
       },
       "/api/v1/replay/jobs/{id}/diff": {
-        get: { summary: "查询回放差异" },
+        get: {
+          summary: "查询回放差异",
+          operationId: "getReplayJobDiff",
+          tags: ["replay"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "回放差异详情",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayDiff" },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+      },
+    },
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+          description: "使用 Authorization: Bearer <access_token> 访问。",
+        },
+      },
+      parameters: {
+        PageLimit: {
+          name: "limit",
+          in: "query",
+          description: "分页大小，默认 100，最大 500。",
+          schema: {
+            type: "integer",
+            minimum: 1,
+            maximum: 500,
+            default: 100,
+          },
+        },
+        PageCursor: {
+          name: "cursor",
+          in: "query",
+          description: "分页游标（预留参数，当前可忽略）。",
+          schema: {
+            type: "string",
+          },
+        },
+      },
+      responses: {
+        BadRequestError: {
+          description: "请求参数不合法。",
+          content: {
+            "application/json": {
+              schema: standardErrorSchema,
+            },
+          },
+        },
+        UnauthorizedError: {
+          description: "未认证或 token 无效。",
+          content: {
+            "application/json": {
+              schema: standardErrorSchema,
+            },
+          },
+        },
+        ForbiddenError: {
+          description: "无权访问当前租户资源。",
+          content: {
+            "application/json": {
+              schema: standardErrorSchema,
+            },
+          },
+        },
+        NotFoundError: {
+          description: "资源不存在。",
+          content: {
+            "application/json": {
+              schema: standardErrorSchema,
+            },
+          },
+        },
+        ConflictError: {
+          description: "请求与当前资源状态冲突。",
+          content: {
+            "application/json": {
+              schema: standardErrorSchema,
+            },
+          },
+        },
+        InternalServerError: {
+          description: "服务端错误。",
+          content: {
+            "application/json": {
+              schema: standardErrorSchema,
+            },
+          },
+        },
+      },
+      schemas: {
+        OpenApiDocument: {
+          type: "object",
+          required: ["openapi", "info", "paths", "components"],
+          properties: {
+            openapi: { type: "string" },
+            info: { type: "object", additionalProperties: true },
+            paths: { type: "object", additionalProperties: true },
+            components: { type: "object", additionalProperties: true },
+          },
+        },
+        ErrorResponse: {
+          type: "object",
+          required: ["message"],
+          properties: {
+            message: { type: "string" },
+            requestId: { type: "string" },
+            code: { type: "string" },
+            details: {
+              type: "object",
+              additionalProperties: true,
+            },
+          },
+        },
+        PaginationMeta: {
+          type: "object",
+          required: ["total"],
+          properties: {
+            total: { type: "integer", minimum: 0 },
+            nextCursor: { type: "string", nullable: true },
+            limit: { type: "integer", minimum: 1 },
+          },
+        },
+        ApiKey: {
+          type: "object",
+          required: ["id", "tenantId", "name", "scope", "status", "keyPrefix", "createdAt", "updatedAt"],
+          properties: {
+            id: { type: "string" },
+            tenantId: { type: "string" },
+            name: { type: "string" },
+            scope: { type: "string", enum: ["read", "write", "admin"] },
+            status: { type: "string", enum: ["active", "revoked", "expired"] },
+            keyPrefix: { type: "string" },
+            createdByUserId: { type: "string", nullable: true },
+            lastUsedAt: { type: "string", format: "date-time", nullable: true },
+            expiresAt: { type: "string", format: "date-time", nullable: true },
+            revokedAt: { type: "string", format: "date-time", nullable: true },
+            metadata: { type: "object", additionalProperties: true },
+            createdAt: { type: "string", format: "date-time" },
+            updatedAt: { type: "string", format: "date-time" },
+          },
+        },
+        ApiKeyCreateRequest: {
+          type: "object",
+          required: ["name"],
+          properties: {
+            name: { type: "string", minLength: 1, maxLength: 100 },
+            scope: { type: "string", enum: ["read", "write", "admin"] },
+          },
+        },
+        ApiKeyCreateResponse: {
+          type: "object",
+          required: ["id", "tenantId", "keyId", "keyPrefix", "secret", "createdAt"],
+          properties: {
+            id: { type: "string" },
+            tenantId: { type: "string" },
+            keyId: { type: "string" },
+            keyPrefix: { type: "string" },
+            secret: { type: "string" },
+            createdAt: { type: "string", format: "date-time" },
+          },
+        },
+        ApiKeyRevokeRequest: {
+          type: "object",
+          properties: {
+            reason: { type: "string", maxLength: 500 },
+          },
+        },
+        ApiKeyListResponse: {
+          type: "object",
+          required: ["items", "total"],
+          properties: {
+            items: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ApiKey" },
+            },
+            total: { type: "integer", minimum: 0 },
+            filters: {
+              type: "object",
+              additionalProperties: true,
+            },
+            pagination: { $ref: "#/components/schemas/PaginationMeta" },
+          },
+        },
+        WebhookEndpoint: {
+          type: "object",
+          required: ["id", "tenantId", "name", "url", "events", "status", "createdAt", "updatedAt"],
+          properties: {
+            id: { type: "string" },
+            tenantId: { type: "string" },
+            name: { type: "string" },
+            url: { type: "string", format: "uri" },
+            events: { type: "array", items: { type: "string" } },
+            status: { type: "string", enum: ["active", "paused", "disabled"] },
+            secretHint: { type: "string", nullable: true },
+            failureCount: { type: "integer", minimum: 0 },
+            lastSuccessAt: { type: "string", format: "date-time", nullable: true },
+            lastFailureAt: { type: "string", format: "date-time", nullable: true },
+            createdAt: { type: "string", format: "date-time" },
+            updatedAt: { type: "string", format: "date-time" },
+          },
+        },
+        WebhookCreateRequest: {
+          type: "object",
+          required: ["name", "url", "events"],
+          properties: {
+            name: { type: "string", minLength: 1, maxLength: 120 },
+            url: { type: "string", format: "uri" },
+            events: {
+              type: "array",
+              minItems: 1,
+              items: { type: "string" },
+            },
+            status: { type: "string", enum: ["active", "paused", "disabled"] },
+            secret: { type: "string" },
+          },
+        },
+        WebhookUpdateRequest: {
+          type: "object",
+          minProperties: 1,
+          properties: {
+            name: { type: "string", minLength: 1, maxLength: 120 },
+            url: { type: "string", format: "uri" },
+            events: {
+              type: "array",
+              minItems: 1,
+              items: { type: "string" },
+            },
+            status: { type: "string", enum: ["active", "paused", "disabled"] },
+            secret: { type: "string" },
+          },
+        },
+        WebhookCreateResponse: {
+          allOf: [
+            { $ref: "#/components/schemas/WebhookEndpoint" },
+            {
+              type: "object",
+              properties: {
+                secret: { type: "string", nullable: true },
+              },
+            },
+          ],
+        },
+        WebhookListResponse: {
+          type: "object",
+          required: ["items", "total"],
+          properties: {
+            items: {
+              type: "array",
+              items: { $ref: "#/components/schemas/WebhookEndpoint" },
+            },
+            total: { type: "integer", minimum: 0 },
+            pagination: { $ref: "#/components/schemas/PaginationMeta" },
+          },
+        },
+        WebhookReplayFilter: {
+          type: "object",
+          required: ["limit"],
+          properties: {
+            eventType: { type: "string" },
+            from: { type: "string", format: "date-time", nullable: true },
+            to: { type: "string", format: "date-time", nullable: true },
+            limit: { type: "integer", minimum: 1, maximum: 500 },
+          },
+        },
+        WebhookReplayRequest: {
+          type: "object",
+          properties: {
+            eventType: { type: "string" },
+            from: { type: "string", format: "date-time" },
+            to: { type: "string", format: "date-time" },
+            limit: { type: "integer", minimum: 1, maximum: 500 },
+            dryRun: { type: "boolean" },
+          },
+        },
+        WebhookReplayResponse: {
+          type: "object",
+          required: ["id", "webhookId", "status", "dryRun", "filters", "requestedAt"],
+          properties: {
+            id: { type: "string" },
+            webhookId: { type: "string" },
+            status: { type: "string", enum: ["queued", "running", "completed", "failed"] },
+            dryRun: { type: "boolean" },
+            filters: { $ref: "#/components/schemas/WebhookReplayFilter" },
+            requestedAt: { type: "string", format: "date-time" },
+          },
+        },
+        QualityEventInput: {
+          type: "object",
+          required: ["sessionId", "eventType", "occurredAt"],
+          properties: {
+            sessionId: { type: "string" },
+            eventType: { type: "string" },
+            score: { type: "number" },
+            occurredAt: { type: "string", format: "date-time" },
+            metadata: { type: "object", additionalProperties: true },
+          },
+        },
+        QualityDailyMetric: {
+          type: "object",
+          required: ["date", "eventCount"],
+          properties: {
+            date: { type: "string", format: "date" },
+            eventCount: { type: "integer", minimum: 0 },
+            issueCount: { type: "integer", minimum: 0 },
+            scoreAvg: { type: "number" },
+          },
+        },
+        QualityScorecard: {
+          type: "object",
+          required: ["id", "name", "updatedAt"],
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+            description: { type: "string" },
+            weight: { type: "number" },
+            updatedAt: { type: "string", format: "date-time" },
+          },
+        },
+        ReplayBaselineInput: {
+          type: "object",
+          required: ["name"],
+          properties: {
+            name: { type: "string", minLength: 1, maxLength: 120 },
+            description: { type: "string" },
+            metadata: { type: "object", additionalProperties: true },
+          },
+        },
+        ReplayBaseline: {
+          type: "object",
+          required: ["id", "name", "createdAt"],
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+            description: { type: "string" },
+            metadata: { type: "object", additionalProperties: true },
+            createdAt: { type: "string", format: "date-time" },
+          },
+        },
+        ReplayJobInput: {
+          type: "object",
+          required: ["baselineId"],
+          properties: {
+            baselineId: { type: "string" },
+            sourceSessionId: { type: "string" },
+            targetSessionId: { type: "string" },
+            options: { type: "object", additionalProperties: true },
+          },
+        },
+        ReplayJob: {
+          type: "object",
+          required: ["id", "baselineId", "status", "createdAt"],
+          properties: {
+            id: { type: "string" },
+            baselineId: { type: "string" },
+            status: {
+              type: "string",
+              enum: ["pending", "running", "succeeded", "failed", "cancelled"],
+            },
+            score: { type: "number", nullable: true },
+            createdAt: { type: "string", format: "date-time" },
+            updatedAt: { type: "string", format: "date-time", nullable: true },
+          },
+        },
+        ReplayDiff: {
+          type: "object",
+          required: ["jobId"],
+          properties: {
+            jobId: { type: "string" },
+            summary: { type: "string" },
+            regressions: { type: "integer", minimum: 0 },
+            improvements: { type: "integer", minimum: 0 },
+            details: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: true,
+              },
+            },
+          },
+        },
       },
     },
   };
@@ -321,10 +1277,7 @@ openPlatformRoutes.get("/openapi.json", async (c) => {
     return auth;
   }
 
-  return c.json({
-    ...buildOpenApiDocument(),
-    tenantId: auth.tenantId,
-  });
+  return c.json(buildOpenApiDocument());
 });
 
 openPlatformRoutes.get("/api-keys", async (c) => {
