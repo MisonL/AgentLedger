@@ -70,6 +70,9 @@ jobs:
       - name: SDK 生成与校验门禁
         run: bun run sdk:verify
 
+      - name: SDK 覆盖测试门禁
+        run: bun run sdk:test
+
       - name: 支持矩阵脚本测试
         run: bun run test:scripts
 

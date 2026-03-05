@@ -173,6 +173,22 @@ curl -H "Authorization: Bearer <token>" \
 bun run evidence:verify -- --file ./evidence-bundle.v1.json --signing-key <your-secret>
 ```
 
+### 7. SDK 一键构建（新增）
+
+```bash
+# 生成 8 语言 SDK（全 operation 覆盖）并完成校验
+bun run sdk:verify
+bun run sdk:test
+
+# 一键执行：生成 -> 校验 -> 测试 -> 打包
+bun run sdk:build
+```
+
+构建结果默认输出到：
+
+- 源码：`clients/sdk`
+- 产物：`dist/sdk`（包含 `SHA256SUMS.txt`）
+
 ## 质量门禁
 
 | 门禁目标 | 命令入口 | 对应脚本 |

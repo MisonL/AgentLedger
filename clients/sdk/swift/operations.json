@@ -1,0 +1,253 @@
+[
+  {
+    "id": "list_api_keys",
+    "operationId": "listApiKeys",
+    "method": "GET",
+    "path": "/api/v1/api-keys",
+    "methodNameCamel": "listApiKeys",
+    "methodNameSnake": "list_api_keys",
+    "methodNamePascal": "ListApiKeys",
+    "hasRequestBody": false,
+    "pathParams": [],
+    "queryParams": [
+      "scope",
+      "status",
+      "keyword",
+      "from",
+      "to"
+    ]
+  },
+  {
+    "id": "create_api_key",
+    "operationId": "createApiKey",
+    "method": "POST",
+    "path": "/api/v1/api-keys",
+    "methodNameCamel": "createApiKey",
+    "methodNameSnake": "create_api_key",
+    "methodNamePascal": "CreateApiKey",
+    "hasRequestBody": true,
+    "pathParams": [],
+    "queryParams": []
+  },
+  {
+    "id": "revoke_api_key",
+    "operationId": "revokeApiKey",
+    "method": "POST",
+    "path": "/api/v1/api-keys/{id}/revoke",
+    "methodNameCamel": "revokeApiKey",
+    "methodNameSnake": "revoke_api_key",
+    "methodNamePascal": "RevokeApiKey",
+    "hasRequestBody": true,
+    "pathParams": [
+      "id"
+    ],
+    "queryParams": []
+  },
+  {
+    "id": "get_open_api_document",
+    "operationId": "getOpenApiDocument",
+    "method": "GET",
+    "path": "/api/v1/openapi.json",
+    "methodNameCamel": "getOpenApiDocument",
+    "methodNameSnake": "get_open_api_document",
+    "methodNamePascal": "GetOpenApiDocument",
+    "hasRequestBody": false,
+    "pathParams": [],
+    "queryParams": []
+  },
+  {
+    "id": "create_quality_event",
+    "operationId": "createQualityEvent",
+    "method": "POST",
+    "path": "/api/v1/quality/events",
+    "methodNameCamel": "createQualityEvent",
+    "methodNameSnake": "create_quality_event",
+    "methodNamePascal": "CreateQualityEvent",
+    "hasRequestBody": true,
+    "pathParams": [],
+    "queryParams": []
+  },
+  {
+    "id": "list_quality_daily_metrics",
+    "operationId": "listQualityDailyMetrics",
+    "method": "GET",
+    "path": "/api/v1/quality/metrics/daily",
+    "methodNameCamel": "listQualityDailyMetrics",
+    "methodNameSnake": "list_quality_daily_metrics",
+    "methodNamePascal": "ListQualityDailyMetrics",
+    "hasRequestBody": false,
+    "pathParams": [],
+    "queryParams": []
+  },
+  {
+    "id": "list_quality_scorecards",
+    "operationId": "listQualityScorecards",
+    "method": "GET",
+    "path": "/api/v1/quality/scorecards",
+    "methodNameCamel": "listQualityScorecards",
+    "methodNameSnake": "list_quality_scorecards",
+    "methodNamePascal": "ListQualityScorecards",
+    "hasRequestBody": false,
+    "pathParams": [],
+    "queryParams": []
+  },
+  {
+    "id": "update_quality_scorecard",
+    "operationId": "updateQualityScorecard",
+    "method": "PUT",
+    "path": "/api/v1/quality/scorecards/{id}",
+    "methodNameCamel": "updateQualityScorecard",
+    "methodNameSnake": "update_quality_scorecard",
+    "methodNamePascal": "UpdateQualityScorecard",
+    "hasRequestBody": true,
+    "pathParams": [
+      "id"
+    ],
+    "queryParams": []
+  },
+  {
+    "id": "list_replay_baselines",
+    "operationId": "listReplayBaselines",
+    "method": "GET",
+    "path": "/api/v1/replay/baselines",
+    "methodNameCamel": "listReplayBaselines",
+    "methodNameSnake": "list_replay_baselines",
+    "methodNamePascal": "ListReplayBaselines",
+    "hasRequestBody": false,
+    "pathParams": [],
+    "queryParams": []
+  },
+  {
+    "id": "create_replay_baseline",
+    "operationId": "createReplayBaseline",
+    "method": "POST",
+    "path": "/api/v1/replay/baselines",
+    "methodNameCamel": "createReplayBaseline",
+    "methodNameSnake": "create_replay_baseline",
+    "methodNamePascal": "CreateReplayBaseline",
+    "hasRequestBody": true,
+    "pathParams": [],
+    "queryParams": []
+  },
+  {
+    "id": "list_replay_jobs",
+    "operationId": "listReplayJobs",
+    "method": "GET",
+    "path": "/api/v1/replay/jobs",
+    "methodNameCamel": "listReplayJobs",
+    "methodNameSnake": "list_replay_jobs",
+    "methodNamePascal": "ListReplayJobs",
+    "hasRequestBody": false,
+    "pathParams": [],
+    "queryParams": []
+  },
+  {
+    "id": "create_replay_job",
+    "operationId": "createReplayJob",
+    "method": "POST",
+    "path": "/api/v1/replay/jobs",
+    "methodNameCamel": "createReplayJob",
+    "methodNameSnake": "create_replay_job",
+    "methodNamePascal": "CreateReplayJob",
+    "hasRequestBody": true,
+    "pathParams": [],
+    "queryParams": []
+  },
+  {
+    "id": "get_replay_job",
+    "operationId": "getReplayJob",
+    "method": "GET",
+    "path": "/api/v1/replay/jobs/{id}",
+    "methodNameCamel": "getReplayJob",
+    "methodNameSnake": "get_replay_job",
+    "methodNamePascal": "GetReplayJob",
+    "hasRequestBody": false,
+    "pathParams": [
+      "id"
+    ],
+    "queryParams": []
+  },
+  {
+    "id": "get_replay_job_diff",
+    "operationId": "getReplayJobDiff",
+    "method": "GET",
+    "path": "/api/v1/replay/jobs/{id}/diff",
+    "methodNameCamel": "getReplayJobDiff",
+    "methodNameSnake": "get_replay_job_diff",
+    "methodNamePascal": "GetReplayJobDiff",
+    "hasRequestBody": false,
+    "pathParams": [
+      "id"
+    ],
+    "queryParams": []
+  },
+  {
+    "id": "list_webhook_endpoints",
+    "operationId": "listWebhookEndpoints",
+    "method": "GET",
+    "path": "/api/v1/webhooks",
+    "methodNameCamel": "listWebhookEndpoints",
+    "methodNameSnake": "list_webhook_endpoints",
+    "methodNamePascal": "ListWebhookEndpoints",
+    "hasRequestBody": false,
+    "pathParams": [],
+    "queryParams": [
+      "status",
+      "keyword"
+    ]
+  },
+  {
+    "id": "create_webhook_endpoint",
+    "operationId": "createWebhookEndpoint",
+    "method": "POST",
+    "path": "/api/v1/webhooks",
+    "methodNameCamel": "createWebhookEndpoint",
+    "methodNameSnake": "create_webhook_endpoint",
+    "methodNamePascal": "CreateWebhookEndpoint",
+    "hasRequestBody": true,
+    "pathParams": [],
+    "queryParams": []
+  },
+  {
+    "id": "update_webhook_endpoint",
+    "operationId": "updateWebhookEndpoint",
+    "method": "PUT",
+    "path": "/api/v1/webhooks/{id}",
+    "methodNameCamel": "updateWebhookEndpoint",
+    "methodNameSnake": "update_webhook_endpoint",
+    "methodNamePascal": "UpdateWebhookEndpoint",
+    "hasRequestBody": true,
+    "pathParams": [
+      "id"
+    ],
+    "queryParams": []
+  },
+  {
+    "id": "delete_webhook_endpoint",
+    "operationId": "deleteWebhookEndpoint",
+    "method": "DELETE",
+    "path": "/api/v1/webhooks/{id}",
+    "methodNameCamel": "deleteWebhookEndpoint",
+    "methodNameSnake": "delete_webhook_endpoint",
+    "methodNamePascal": "DeleteWebhookEndpoint",
+    "hasRequestBody": false,
+    "pathParams": [
+      "id"
+    ],
+    "queryParams": []
+  },
+  {
+    "id": "replay_webhook_endpoint",
+    "operationId": "replayWebhookEndpoint",
+    "method": "POST",
+    "path": "/api/v1/webhooks/{id}/replay",
+    "methodNameCamel": "replayWebhookEndpoint",
+    "methodNameSnake": "replay_webhook_endpoint",
+    "methodNamePascal": "ReplayWebhookEndpoint",
+    "hasRequestBody": true,
+    "pathParams": [
+      "id"
+    ],
+    "queryParams": []
+  }
+]
