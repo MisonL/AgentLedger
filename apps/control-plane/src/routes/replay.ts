@@ -376,14 +376,67 @@ replayRoutes.get("/replay/baselines", async (c) => {
   if (limit <= 0 || limit > 500) {
     return c.json({ message: "limit 必须是 1 到 500 的整数。" }, 400);
   }
+
   const keyword = firstNonEmptyString(c.req.query("keyword"));
-  const items = await repository.listReplayBaselines(auth.tenantId, {
+  const model = firstNonEmptyString(c.req.query("model"))?.toLowerCase();
+  const datasetId = firstNonEmptyString(c.req.query("datasetId"));
+  const fromRaw = firstNonEmptyString(c.req.query("from"));
+  const toRaw = firstNonEmptyString(c.req.query("to"));
+  const fromTs = fromRaw ? Date.parse(fromRaw) : Number.NaN;
+  const toTs = toRaw ? Date.parse(toRaw) : Number.NaN;
+  if (fromRaw && !Number.isFinite(fromTs)) {
+    return c.json({ message: "from 必须是 ISO 日期字符串。" }, 400);
+  }
+  if (toRaw && !Number.isFinite(toTs)) {
+    return c.json({ message: "to 必须是 ISO 日期字符串。" }, 400);
+  }
+  if (Number.isFinite(fromTs) && Number.isFinite(toTs) && fromTs > toTs) {
+    return c.json({ message: "from 不能晚于 to。" }, 400);
+  }
+
+  const baselines = await repository.listReplayBaselines(auth.tenantId, {
     keyword,
-    limit,
+    limit: 500,
   });
+  const filtered = baselines
+    .map(mapReplayBaseline)
+    .filter((item) => {
+      if (model) {
+        const itemModel = firstNonEmptyString(item.model)?.toLowerCase() ?? "";
+        if (itemModel !== model) {
+          return false;
+        }
+      }
+      if (datasetId && item.datasetId !== datasetId) {
+        return false;
+      }
+      if (Number.isFinite(fromTs) || Number.isFinite(toTs)) {
+        const createdAtTs = Date.parse(item.createdAt);
+        if (!Number.isFinite(createdAtTs)) {
+          return false;
+        }
+        if (Number.isFinite(fromTs) && createdAtTs < fromTs) {
+          return false;
+        }
+        if (Number.isFinite(toTs) && createdAtTs > toTs) {
+          return false;
+        }
+      }
+      return true;
+    });
+  const items = filtered.slice(0, limit);
+
   return c.json({
-    items: items.map(mapReplayBaseline),
-    total: items.length,
+    items,
+    total: filtered.length,
+    filters: {
+      keyword,
+      model,
+      datasetId,
+      from: fromRaw,
+      to: toRaw,
+      limit,
+    },
   });
 });
 
@@ -472,17 +525,81 @@ replayRoutes.get("/replay/jobs", async (c) => {
   if (limit <= 0 || limit > 500) {
     return c.json({ message: "limit 必须是 1 到 500 的整数。" }, 400);
   }
+  const candidateLabel = firstNonEmptyString(c.req.query("candidateLabel"))?.toLowerCase();
+  const metric = firstNonEmptyString(c.req.query("metric"))?.toLowerCase();
+  if (metric && !QUALITY_METRIC_SET.has(metric)) {
+    return c.json(
+      { message: "metric 必须是 accuracy/consistency/groundedness/safety/latency 之一。" },
+      400
+    );
+  }
+  const fromRaw = firstNonEmptyString(c.req.query("from"));
+  const toRaw = firstNonEmptyString(c.req.query("to"));
+  const fromTs = fromRaw ? Date.parse(fromRaw) : Number.NaN;
+  const toTs = toRaw ? Date.parse(toRaw) : Number.NaN;
+  if (fromRaw && !Number.isFinite(fromTs)) {
+    return c.json({ message: "from 必须是 ISO 日期字符串。" }, 400);
+  }
+  if (toRaw && !Number.isFinite(toTs)) {
+    return c.json({ message: "to 必须是 ISO 日期字符串。" }, 400);
+  }
+  if (Number.isFinite(fromTs) && Number.isFinite(toTs) && fromTs > toTs) {
+    return c.json({ message: "from 不能晚于 to。" }, 400);
+  }
+  const needExtendedFiltering =
+    Boolean(candidateLabel) || Boolean(metric) || Number.isFinite(fromTs) || Number.isFinite(toTs);
+  const fetchLimit = needExtendedFiltering ? 500 : limit;
 
   const jobs = await repository.listReplayJobs(auth.tenantId, {
     baselineId: firstNonEmptyString(c.req.query("baselineId")),
     status: toRepositoryReplayStatus(statusQuery),
-    limit,
+    limit: fetchLimit,
   });
 
-  const items = jobs.map(mapReplayJob);
+  const filtered = jobs
+    .map(mapReplayJob)
+    .filter((item) => {
+      if (candidateLabel) {
+        const normalized = firstNonEmptyString(item.candidateLabel)?.toLowerCase() ?? "";
+        if (!normalized.includes(candidateLabel)) {
+          return false;
+        }
+      }
+      if (metric) {
+        const summaryMetric =
+          firstNonEmptyString(item.summary?.metric)?.toLowerCase() ??
+          firstNonEmptyString(item.diffs[0]?.metric)?.toLowerCase();
+        if (summaryMetric !== metric) {
+          return false;
+        }
+      }
+      if (Number.isFinite(fromTs) || Number.isFinite(toTs)) {
+        const createdAtTs = Date.parse(item.createdAt);
+        if (!Number.isFinite(createdAtTs)) {
+          return false;
+        }
+        if (Number.isFinite(fromTs) && createdAtTs < fromTs) {
+          return false;
+        }
+        if (Number.isFinite(toTs) && createdAtTs > toTs) {
+          return false;
+        }
+      }
+      return true;
+    });
+  const items = filtered.slice(0, limit);
   return c.json({
     items,
-    total: items.length,
+    total: filtered.length,
+    filters: {
+      baselineId: firstNonEmptyString(c.req.query("baselineId")),
+      status: statusQuery,
+      candidateLabel,
+      metric,
+      from: fromRaw,
+      to: toRaw,
+      limit,
+    },
   });
 });
 

@@ -12743,6 +12743,38 @@ describe("Control Plane API", () => {
     };
     expect(baseline.tenantId).toBe(tenantAId);
 
+    const listBaselinesFilteredResponse = await app.request(
+      "/api/v1/replay/baselines?model=gpt-4.1&datasetId=golden-set-v1&limit=10",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(listBaselinesFilteredResponse.status).toBe(200);
+    const listBaselinesFilteredBody = (await listBaselinesFilteredResponse.json()) as {
+      items: Array<{ id: string }>;
+      total: number;
+      filters: {
+        model?: string;
+        datasetId?: string;
+        limit?: number;
+      };
+    };
+    expect(listBaselinesFilteredBody.filters.model).toBe("gpt-4.1");
+    expect(listBaselinesFilteredBody.filters.datasetId).toBe("golden-set-v1");
+    expect(listBaselinesFilteredBody.filters.limit).toBe(10);
+    expect(listBaselinesFilteredBody.total).toBeGreaterThanOrEqual(1);
+    expect(
+      listBaselinesFilteredBody.items.some((item) => item.id === baseline.id),
+    ).toBe(true);
+
+    const badBaselineFilterResponse = await app.request(
+      "/api/v1/replay/baselines?from=invalid-date",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(badBaselineFilterResponse.status).toBe(400);
+
     const badCreateJobResponse = await app.request("/api/v1/replay/jobs", {
       method: "POST",
       headers: {
@@ -12778,6 +12810,30 @@ describe("Control Plane API", () => {
     expect(replayJob.baselineId).toBe(baseline.id);
     expect(replayJob.totalCases).toBe(12);
 
+    const createSafetyJobResponse = await app.request("/api/v1/replay/jobs", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        baselineId: baseline.id,
+        candidateLabel: "candidate-safety",
+        sampleLimit: 8,
+        metadata: {
+          metric: "safety",
+        },
+      }),
+    });
+    expect(createSafetyJobResponse.status).toBe(201);
+    const safetyReplayJob = (await createSafetyJobResponse.json()) as {
+      id: string;
+      totalCases: number;
+      baselineId: string;
+    };
+    expect(safetyReplayJob.baselineId).toBe(baseline.id);
+    expect(safetyReplayJob.totalCases).toBe(8);
+
     const listJobsAResponse = await app.request("/api/v1/replay/jobs", {
       headers: tenantAHeaders,
     });
@@ -12786,6 +12842,49 @@ describe("Control Plane API", () => {
       items: Array<{ id: string }>;
     };
     expect(listJobsABody.items.some((item) => item.id === replayJob.id)).toBe(true);
+
+    const listJobsCandidateFilterResponse = await app.request(
+      "/api/v1/replay/jobs?candidateLabel=safety&metric=safety&limit=10",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(listJobsCandidateFilterResponse.status).toBe(200);
+    const listJobsCandidateFilterBody = (await listJobsCandidateFilterResponse.json()) as {
+      items: Array<{ id: string }>;
+      total: number;
+      filters: {
+        candidateLabel?: string;
+        metric?: string;
+        limit?: number;
+      };
+    };
+    expect(listJobsCandidateFilterBody.filters.candidateLabel).toBe("safety");
+    expect(listJobsCandidateFilterBody.filters.metric).toBe("safety");
+    expect(listJobsCandidateFilterBody.filters.limit).toBe(10);
+    expect(listJobsCandidateFilterBody.total).toBeGreaterThanOrEqual(1);
+    expect(
+      listJobsCandidateFilterBody.items.some((item) => item.id === safetyReplayJob.id),
+    ).toBe(true);
+    expect(
+      listJobsCandidateFilterBody.items.some((item) => item.id === replayJob.id),
+    ).toBe(false);
+
+    const badMetricFilterResponse = await app.request(
+      "/api/v1/replay/jobs?metric=unknown",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(badMetricFilterResponse.status).toBe(400);
+
+    const badTimeRangeFilterResponse = await app.request(
+      "/api/v1/replay/jobs?from=2026-03-10T00:00:00.000Z&to=2026-03-01T00:00:00.000Z",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(badTimeRangeFilterResponse.status).toBe(400);
 
     const getJobAResponse = await app.request(
       `/api/v1/replay/jobs/${encodeURIComponent(replayJob.id)}`,
@@ -12817,6 +12916,7 @@ describe("Control Plane API", () => {
       items: Array<{ id: string }>;
     };
     expect(listJobsBBody.items.some((item) => item.id === replayJob.id)).toBe(false);
+    expect(listJobsBBody.items.some((item) => item.id === safetyReplayJob.id)).toBe(false);
 
     const getJobBResponse = await app.request(
       `/api/v1/replay/jobs/${encodeURIComponent(replayJob.id)}`,
