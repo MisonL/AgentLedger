@@ -31,6 +31,8 @@ import type {
   McpApprovalListResponse,
   McpApprovalRequest,
   McpApprovalReviewInput,
+  McpEvaluateInput,
+  McpEvaluateResult,
   McpInvocationCreateInput,
   McpInvocationListInput,
   McpInvocationListResponse,
@@ -819,6 +821,10 @@ function isMcpInvocationAudit(value: unknown): value is McpInvocationAudit {
     typeof value.approvalRequestId === "string";
   const resultOk =
     value.result === "allowed" || value.result === "blocked" || value.result === "approved";
+  const evaluatedDecisionOk =
+    value.evaluatedDecision === undefined ||
+    value.evaluatedDecision === null ||
+    isMcpToolDecision(value.evaluatedDecision);
   return (
     typeof value.id === "string" &&
     typeof value.tenantId === "string" &&
@@ -826,8 +832,33 @@ function isMcpInvocationAudit(value: unknown): value is McpInvocationAudit {
     isMcpToolDecision(value.decision) &&
     resultOk &&
     approvalRequestIdOk &&
+    typeof value.enforced === "boolean" &&
+    evaluatedDecisionOk &&
     isRecord(value.metadata) &&
     isISODateString(value.createdAt)
+  );
+}
+
+function isMcpEvaluateResult(value: unknown): value is McpEvaluateResult {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const approvalRequestIdOk =
+    value.approvalRequestId === undefined ||
+    value.approvalRequestId === null ||
+    typeof value.approvalRequestId === "string";
+  const resultOk =
+    value.result === "allowed" || value.result === "blocked" || value.result === "approved";
+  return (
+    typeof value.toolId === "string" &&
+    isMcpToolDecision(value.decision) &&
+    resultOk &&
+    approvalRequestIdOk &&
+    value.enforced === true &&
+    isMcpToolDecision(value.evaluatedDecision) &&
+    isMcpToolPolicy(value.policy) &&
+    isMcpInvocationAudit(value.invocation) &&
+    isISODateString(value.evaluatedAt)
   );
 }
 
@@ -3729,6 +3760,24 @@ export async function rejectMcpApproval(
   signal?: AbortSignal
 ): Promise<McpApprovalRequest> {
   return reviewMcpApproval(approvalId, "reject", input, signal);
+}
+
+export async function evaluateMcpTool(
+  input: McpEvaluateInput,
+  signal?: AbortSignal
+): Promise<McpEvaluateResult> {
+  const result = await requestJson<unknown>(
+    "/api/v1/mcp/evaluate",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+  if (!isMcpEvaluateResult(result)) {
+    throw new Error("mcp.evaluate 返回结构不合法");
+  }
+  return result;
 }
 
 export async function fetchMcpInvocations(

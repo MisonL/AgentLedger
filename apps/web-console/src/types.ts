@@ -556,6 +556,8 @@ export interface McpInvocationAudit {
   decision: McpToolDecision;
   result: "allowed" | "blocked" | "approved";
   approvalRequestId?: string;
+  enforced: boolean;
+  evaluatedDecision?: McpToolDecision;
   metadata: Record<string, unknown>;
   createdAt: string;
 }
@@ -579,7 +581,28 @@ export interface McpInvocationCreateInput {
   decision?: McpToolDecision;
   result?: "allowed" | "blocked" | "approved";
   approvalRequestId?: string;
+  enforced?: boolean;
+  evaluatedDecision?: McpToolDecision;
   metadata?: Record<string, unknown>;
+}
+
+export interface McpEvaluateInput {
+  toolId: string;
+  reason?: string;
+  approvalRequestId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface McpEvaluateResult {
+  toolId: string;
+  decision: McpToolDecision;
+  result: "allowed" | "blocked" | "approved";
+  approvalRequestId?: string;
+  enforced: true;
+  evaluatedDecision: McpToolDecision;
+  policy: McpToolPolicy;
+  invocation: McpInvocationAudit;
+  evaluatedAt: string;
 }
 
 export type OpenPlatformApiKeyStatus = "active" | "disabled";

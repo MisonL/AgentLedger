@@ -1,6 +1,8 @@
 import { Hono, type Context } from "hono";
 import {
   validateMcpApprovalCreateInput,
+  validateMcpEvaluateInput,
+  validateMcpInvocationCreateInput,
   validateMcpApprovalReviewInput,
   validateMcpInvocationListInput,
   validateMcpToolPolicyListInput,
@@ -95,64 +97,17 @@ function parseApprovalRequestListInput(query: Record<string, string>): {
   };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function parseInvocationCreateBody(body: unknown): {
-  success: true;
-  data: {
-    toolId: string;
-    decision: "allow" | "deny" | "require_approval";
-    result: "allowed" | "blocked" | "approved";
-    approvalRequestId?: string;
-    metadata?: Record<string, unknown>;
-  };
-} | {
-  success: false;
-  error: string;
-} {
-  if (!isRecord(body)) {
-    return { success: false, error: "请求体必须是对象。" };
+async function resolveToolPolicy(tenantId: string, toolId: string) {
+  const policy = await repository.getMcpToolPolicyByToolId(tenantId, toolId);
+  if (policy) {
+    return policy;
   }
-  const toolId =
-    typeof body.toolId === "string" && body.toolId.trim().length > 0
-      ? body.toolId.trim()
-      : undefined;
-  if (!toolId) {
-    return { success: false, error: "toolId 必须为非空字符串。" };
-  }
-  const decisionRaw =
-    typeof body.decision === "string" ? body.decision.trim() : "require_approval";
-  const decision =
-    decisionRaw === "allow" || decisionRaw === "deny" || decisionRaw === "require_approval"
-      ? decisionRaw
-      : undefined;
-  if (!decision) {
-    return { success: false, error: "decision 必须是 allow/deny/require_approval 之一。" };
-  }
-  const resultRaw = typeof body.result === "string" ? body.result.trim() : "allowed";
-  const result =
-    resultRaw === "allowed" || resultRaw === "blocked" || resultRaw === "approved"
-      ? resultRaw
-      : undefined;
-  if (!result) {
-    return { success: false, error: "result 必须是 allowed/blocked/approved 之一。" };
-  }
-  const approvalRequestId =
-    typeof body.approvalRequestId === "string" && body.approvalRequestId.trim().length > 0
-      ? body.approvalRequestId.trim()
-      : undefined;
-  const metadata = isRecord(body.metadata) ? body.metadata : undefined;
   return {
-    success: true,
-    data: {
-      toolId,
-      decision,
-      result,
-      approvalRequestId,
-      metadata,
-    },
+    tenantId,
+    toolId,
+    riskLevel: "medium" as const,
+    decision: "require_approval" as const,
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -324,6 +279,111 @@ mcpRoutes.post("/mcp/approvals/:id/reject", async (c) => {
   return c.json(approval);
 });
 
+mcpRoutes.post("/mcp/evaluate", async (c) => {
+  const auth = await requireTenantAccess(c, "write");
+  if (auth instanceof Response) {
+    return auth;
+  }
+  const body = await c.req.json().catch(() => undefined);
+  const validation = validateMcpEvaluateInput(body);
+  if (!validation.success) {
+    return c.json({ message: validation.error }, 400);
+  }
+
+  const evaluatedAt = new Date().toISOString();
+  const { toolId, reason, approvalRequestId: inputApprovalRequestId } = validation.data;
+  const policy = await resolveToolPolicy(auth.tenantId, toolId);
+  const decision = policy.decision;
+
+  let approvalRequestId: string | undefined;
+  let result: "allowed" | "blocked" | "approved";
+
+  switch (decision) {
+    case "allow":
+      result = "allowed";
+      break;
+    case "deny":
+      result = "blocked";
+      break;
+    default: {
+      if (inputApprovalRequestId) {
+        const current = await repository.getMcpApprovalRequestById(auth.tenantId, inputApprovalRequestId);
+        if (!current) {
+          return c.json({ message: `未找到审批请求 ${inputApprovalRequestId}。` }, 404);
+        }
+        if (current.toolId !== toolId) {
+          return c.json(
+            {
+              message: `审批请求 ${inputApprovalRequestId} 与工具 ${toolId} 不匹配。`,
+            },
+            409
+          );
+        }
+        approvalRequestId = current.id;
+        result = current.status === "approved" ? "approved" : "blocked";
+        break;
+      }
+      const created = await repository.createMcpApprovalRequest(
+        auth.tenantId,
+        { toolId, reason },
+        {
+          requestedByUserId: auth.userId,
+          requestedByEmail: auth.email,
+        }
+      );
+      approvalRequestId = created.id;
+      result = "blocked";
+      break;
+    }
+  }
+
+  const invocation = await repository.appendMcpInvocationAudit(auth.tenantId, {
+    toolId,
+    decision,
+    result,
+    approvalRequestId,
+    enforced: true,
+    evaluatedDecision: decision,
+    metadata: {
+      ...(validation.data.metadata ?? {}),
+      source: "mcp.evaluate",
+      ...(reason ? { evaluateReason: reason } : {}),
+    },
+    createdAt: evaluatedAt,
+  });
+
+  const requestId = c.get("requestId");
+  await appendAuditLogSafely({
+    tenantId: auth.tenantId,
+    eventId: `cp:${requestId}`,
+    action: "control_plane.mcp.evaluate",
+    level: result === "blocked" ? "warning" : "info",
+    detail: `Evaluated MCP tool ${toolId} with decision ${decision} and result ${result}.`,
+    metadata: {
+      requestId,
+      tenantId: auth.tenantId,
+      toolId,
+      decision,
+      result,
+      approvalRequestId: approvalRequestId ?? null,
+      enforced: true,
+      evaluatedAt,
+    },
+  });
+
+  return c.json({
+    toolId,
+    decision,
+    result,
+    approvalRequestId,
+    enforced: true,
+    evaluatedDecision: decision,
+    policy,
+    invocation,
+    evaluatedAt,
+  });
+});
+
 mcpRoutes.get("/mcp/invocations", async (c) => {
   const auth = await requireTenantAccess(c, "read");
   if (auth instanceof Response) {
@@ -347,10 +407,77 @@ mcpRoutes.post("/mcp/invocations", async (c) => {
     return auth;
   }
   const body = await c.req.json().catch(() => undefined);
-  const parsed = parseInvocationCreateBody(body);
-  if (!parsed.success) {
-    return c.json({ message: parsed.error }, 400);
+  const validation = validateMcpInvocationCreateInput(body);
+  if (!validation.success) {
+    return c.json({ message: validation.error }, 400);
   }
-  const invocation = await repository.appendMcpInvocationAudit(auth.tenantId, parsed.data);
+
+  const {
+    toolId,
+    approvalRequestId,
+    result: rawResult,
+    enforced,
+    decision: rawDecision,
+    evaluatedDecision,
+    metadata,
+  } = validation.data;
+  const decision = rawDecision ?? "require_approval";
+  const result = rawResult ?? "allowed";
+
+  if (approvalRequestId) {
+    const approval = await repository.getMcpApprovalRequestById(auth.tenantId, approvalRequestId);
+    if (!approval) {
+      return c.json({ message: `未找到审批请求 ${approvalRequestId}。` }, 404);
+    }
+    if (approval.toolId !== toolId) {
+      return c.json(
+        {
+          message: `审批请求 ${approvalRequestId} 与工具 ${toolId} 不匹配。`,
+        },
+        409
+      );
+    }
+    if (result === "approved" && approval.status !== "approved") {
+      return c.json(
+        {
+          message: `审批请求 ${approvalRequestId} 当前状态为 ${approval.status}，无法记录 approved 调用。`,
+        },
+        409
+      );
+    }
+  } else if (result === "approved") {
+    return c.json({ message: "result=approved 时必须提供 approvalRequestId。" }, 400);
+  }
+
+  const invocation = await repository.appendMcpInvocationAudit(auth.tenantId, {
+    toolId,
+    decision,
+    result,
+    approvalRequestId,
+    enforced,
+    evaluatedDecision,
+    metadata,
+  });
+
+  const requestId = c.get("requestId");
+  await appendAuditLogSafely({
+    tenantId: auth.tenantId,
+    eventId: `cp:${requestId}`,
+    action: "control_plane.mcp.invocation_append",
+    level: invocation.result === "blocked" ? "warning" : "info",
+    detail: `Recorded MCP invocation ${invocation.id} for ${invocation.toolId}.`,
+    metadata: {
+      requestId,
+      tenantId: auth.tenantId,
+      invocationId: invocation.id,
+      toolId: invocation.toolId,
+      decision: invocation.decision,
+      result: invocation.result,
+      approvalRequestId: invocation.approvalRequestId ?? null,
+      enforced: invocation.enforced,
+      evaluatedDecision: invocation.evaluatedDecision ?? null,
+    },
+  });
+
   return c.json(invocation, 201);
 });

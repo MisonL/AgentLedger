@@ -58,7 +58,10 @@ import type {
   IntegrationAlertCallbackAction,
   IntegrationAlertCallbackInput,
   McpApprovalCreateInput,
+  McpEvaluateInput,
   McpApprovalReviewInput,
+  McpInvocationCreateInput,
+  McpInvocationResult,
   McpRiskLevel,
   McpToolDecision,
   McpToolPolicyListInput,
@@ -199,6 +202,11 @@ const MCP_TOOL_DECISION_SET = new Set<McpToolDecision>([
   "allow",
   "deny",
   "require_approval",
+]);
+const MCP_INVOCATION_RESULT_SET = new Set<McpInvocationResult>([
+  "allowed",
+  "blocked",
+  "approved",
 ]);
 const AUDIT_LEVEL_SET = new Set<AuditLevel>(["info", "warning", "error", "critical"]);
 const EXPORT_FORMAT_SET = new Set<ExportFormat>(["json", "csv"]);
@@ -559,6 +567,13 @@ export function isMcpToolDecision(value: unknown): value is McpToolDecision {
   return (
     typeof value === "string" &&
     MCP_TOOL_DECISION_SET.has(value as McpToolDecision)
+  );
+}
+
+export function isMcpInvocationResult(value: unknown): value is McpInvocationResult {
+  return (
+    typeof value === "string" &&
+    MCP_INVOCATION_RESULT_SET.has(value as McpInvocationResult)
   );
 }
 
@@ -4252,6 +4267,116 @@ export function validateMcpApprovalReviewInput(
     success: true,
     data: {
       reason,
+    },
+  };
+}
+
+export function validateMcpEvaluateInput(
+  input: unknown
+): ValidationResult<McpEvaluateInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+  const toolId = normalizeString(input.toolId);
+  const reason = normalizeString(input.reason);
+  const approvalRequestId = normalizeString(input.approvalRequestId);
+  const metadata = input.metadata;
+
+  if (!toolId) {
+    return { success: false, error: "toolId 必填且必须为非空字符串。" };
+  }
+  if (input.reason !== undefined && !reason) {
+    return { success: false, error: "reason 必须为非空字符串。" };
+  }
+  if (input.approvalRequestId !== undefined && !approvalRequestId) {
+    return { success: false, error: "approvalRequestId 必须为非空字符串。" };
+  }
+  if (metadata !== undefined && !isRecord(metadata)) {
+    return { success: false, error: "metadata 必须是对象。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      toolId,
+      reason,
+      approvalRequestId,
+      metadata: metadata as Record<string, unknown> | undefined,
+    },
+  };
+}
+
+export function validateMcpInvocationCreateInput(
+  input: unknown
+): ValidationResult<McpInvocationCreateInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const toolId = normalizeString(input.toolId);
+  const decisionRaw = normalizeString(input.decision) ?? "require_approval";
+  const resultRaw = normalizeString(input.result) ?? "allowed";
+  const approvalRequestId = normalizeString(input.approvalRequestId);
+  const evaluatedDecisionRaw = normalizeString(input.evaluatedDecision);
+  const metadata = input.metadata;
+  const enforced =
+    input.enforced === undefined ? false : typeof input.enforced === "boolean" ? input.enforced : null;
+
+  if (!toolId) {
+    return { success: false, error: "toolId 必填且必须为非空字符串。" };
+  }
+  if (!isMcpToolDecision(decisionRaw)) {
+    return {
+      success: false,
+      error: "decision 必须是 allow/deny/require_approval 之一。",
+    };
+  }
+  if (!isMcpInvocationResult(resultRaw)) {
+    return {
+      success: false,
+      error: "result 必须是 allowed/blocked/approved 之一。",
+    };
+  }
+  if (input.approvalRequestId !== undefined && !approvalRequestId) {
+    return { success: false, error: "approvalRequestId 必须为非空字符串。" };
+  }
+  if (enforced === null) {
+    return { success: false, error: "enforced 必须是布尔值。" };
+  }
+  if (evaluatedDecisionRaw !== undefined && !isMcpToolDecision(evaluatedDecisionRaw)) {
+    return {
+      success: false,
+      error: "evaluatedDecision 必须是 allow/deny/require_approval 之一。",
+    };
+  }
+  if (enforced && !evaluatedDecisionRaw) {
+    return { success: false, error: "enforced=true 时必须提供 evaluatedDecision。" };
+  }
+  if (
+    enforced &&
+    evaluatedDecisionRaw &&
+    isMcpToolDecision(evaluatedDecisionRaw) &&
+    evaluatedDecisionRaw !== decisionRaw
+  ) {
+    return { success: false, error: "enforced=true 时 evaluatedDecision 必须与 decision 一致。" };
+  }
+  if (resultRaw === "approved" && !approvalRequestId) {
+    return { success: false, error: "result=approved 时必须提供 approvalRequestId。" };
+  }
+  if (metadata !== undefined && !isRecord(metadata)) {
+    return { success: false, error: "metadata 必须是对象。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      toolId,
+      decision: decisionRaw,
+      result: resultRaw,
+      approvalRequestId,
+      enforced,
+      evaluatedDecision: evaluatedDecisionRaw as McpToolDecision | undefined,
+      metadata: metadata as Record<string, unknown> | undefined,
     },
   };
 }

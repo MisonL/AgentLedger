@@ -12250,6 +12250,78 @@ describe("Control Plane API", () => {
     );
     expect(policyResponse.status).toBe(200);
 
+    const evaluateBlockedResponse = await app.request("/api/v1/mcp/evaluate", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        toolId: `tool-${nonce}`,
+        reason: "首次评估，预期触发审批",
+        metadata: {
+          scenario: "evaluate-blocked",
+        },
+      }),
+    });
+    expect(evaluateBlockedResponse.status).toBe(200);
+    const evaluateBlocked = (await evaluateBlockedResponse.json()) as {
+      decision: string;
+      result: string;
+      approvalRequestId?: string;
+      enforced: boolean;
+      evaluatedDecision: string;
+      invocation: {
+        id: string;
+        enforced: boolean;
+        evaluatedDecision?: string;
+      };
+    };
+    expect(evaluateBlocked.decision).toBe("require_approval");
+    expect(evaluateBlocked.result).toBe("blocked");
+    expect(typeof evaluateBlocked.approvalRequestId).toBe("string");
+    expect(evaluateBlocked.enforced).toBe(true);
+    expect(evaluateBlocked.evaluatedDecision).toBe("require_approval");
+    expect(evaluateBlocked.invocation.enforced).toBe(true);
+    expect(evaluateBlocked.invocation.evaluatedDecision).toBe("require_approval");
+
+    const approveEvaluateRequestResponse = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(evaluateBlocked.approvalRequestId as string)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          reason: "评估流审批通过",
+        }),
+      }
+    );
+    expect(approveEvaluateRequestResponse.status).toBe(200);
+
+    const evaluateApprovedResponse = await app.request("/api/v1/mcp/evaluate", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        toolId: `tool-${nonce}`,
+        approvalRequestId: evaluateBlocked.approvalRequestId,
+        reason: "复评通过",
+      }),
+    });
+    expect(evaluateApprovedResponse.status).toBe(200);
+    const evaluateApproved = (await evaluateApprovedResponse.json()) as {
+      result: string;
+      approvalRequestId?: string;
+      invocation: { result: string };
+    };
+    expect(evaluateApproved.result).toBe("approved");
+    expect(evaluateApproved.approvalRequestId).toBe(evaluateBlocked.approvalRequestId);
+    expect(evaluateApproved.invocation.result).toBe("approved");
+
     const createApprovalResponse = await app.request("/api/v1/mcp/approvals", {
       method: "POST",
       headers: {
@@ -12300,6 +12372,21 @@ describe("Control Plane API", () => {
     );
     expect(approveAgainResponse.status).toBe(409);
 
+    const badEnforcedInvocationResponse = await app.request("/api/v1/mcp/invocations", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        toolId: `tool-${nonce}`,
+        decision: "require_approval",
+        result: "blocked",
+        enforced: true,
+      }),
+    });
+    expect(badEnforcedInvocationResponse.status).toBe(400);
+
     const invocationResponse = await app.request("/api/v1/mcp/invocations", {
       method: "POST",
       headers: {
@@ -12311,13 +12398,21 @@ describe("Control Plane API", () => {
         decision: "require_approval",
         result: "approved",
         approvalRequestId: approval.id,
+        enforced: true,
+        evaluatedDecision: "require_approval",
         metadata: {
           scenario: "unit-test",
         },
       }),
     });
     expect(invocationResponse.status).toBe(201);
-    const invocation = (await invocationResponse.json()) as { id: string };
+    const invocation = (await invocationResponse.json()) as {
+      id: string;
+      enforced: boolean;
+      evaluatedDecision?: string;
+    };
+    expect(invocation.enforced).toBe(true);
+    expect(invocation.evaluatedDecision).toBe("require_approval");
 
     const listAResponse = await app.request("/api/v1/mcp/invocations", {
       headers: tenantAHeaders,

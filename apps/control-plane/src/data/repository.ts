@@ -624,6 +624,8 @@ export interface AppendMcpInvocationInput {
   decision: McpToolDecision;
   result: "allowed" | "blocked" | "approved";
   approvalRequestId?: string;
+  enforced?: boolean;
+  evaluatedDecision?: McpToolDecision;
   metadata?: Record<string, unknown>;
   createdAt?: string;
 }
@@ -2226,6 +2228,7 @@ function mapMcpApprovalRequestRow(row: DbRow): McpApprovalRequest {
 }
 
 function mapMcpInvocationAuditRow(row: DbRow): McpInvocationAudit {
+  const evaluatedDecisionRaw = firstNonEmptyString(row.evaluated_decision);
   return {
     id: firstNonEmptyString(row.id) ?? "",
     tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
@@ -2238,6 +2241,8 @@ function mapMcpInvocationAuditRow(row: DbRow): McpInvocationAudit {
           ? "approved"
           : "allowed",
     approvalRequestId: firstNonEmptyString(row.approval_request_id) ?? undefined,
+    enforced: toBoolean(row.enforced, false),
+    evaluatedDecision: evaluatedDecisionRaw ? toMcpToolDecision(evaluatedDecisionRaw) : undefined,
     metadata: toDbRow(row.metadata) ?? {},
     createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
   };
@@ -8045,6 +8050,43 @@ class ControlPlaneRepository {
     }
   }
 
+  async getMcpToolPolicyByToolId(
+    tenantId: string,
+    toolId: string
+  ): Promise<McpToolPolicy | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedToolId = firstNonEmptyString(toolId);
+    if (!normalizedToolId) {
+      return null;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getMcpToolPolicyByToolIdFromMemory(normalizedTenantId, normalizedToolId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT tenant_id,
+                tool_id,
+                risk_level,
+                decision,
+                reason,
+                updated_at
+         FROM mcp_tool_policies
+         WHERE tenant_id = $1
+           AND tool_id = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedToolId]
+      );
+      const row = result.rows[0];
+      return row ? mapMcpToolPolicyRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询 MCP 工具策略失败");
+      return this.getMcpToolPolicyByToolIdFromMemory(normalizedTenantId, normalizedToolId);
+    }
+  }
+
   async upsertMcpToolPolicy(
     tenantId: string,
     input: McpToolPolicyUpsertInput
@@ -8395,6 +8437,9 @@ class ControlPlaneRepository {
     input: AppendMcpInvocationInput
   ): Promise<McpInvocationAudit> {
     const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const enforced = input.enforced === true;
+    const evaluatedDecision =
+      firstNonEmptyString(input.evaluatedDecision) ?? (enforced ? input.decision : undefined);
     const invocation: McpInvocationAudit = {
       id: crypto.randomUUID(),
       tenantId: normalizedTenantId,
@@ -8403,6 +8448,8 @@ class ControlPlaneRepository {
       result:
         input.result === "blocked" || input.result === "approved" ? input.result : "allowed",
       approvalRequestId: firstNonEmptyString(input.approvalRequestId) ?? undefined,
+      enforced,
+      evaluatedDecision: evaluatedDecision ? toMcpToolDecision(evaluatedDecision) : undefined,
       metadata: toDbRow(input.metadata) ?? {},
       createdAt: toIsoString(input.createdAt) ?? new Date().toISOString(),
     };
@@ -8421,16 +8468,20 @@ class ControlPlaneRepository {
            decision,
            result,
            approval_request_id,
+           enforced,
+           evaluated_decision,
            metadata,
            created_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::timestamptz)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::timestamptz)
          RETURNING id,
                    tenant_id,
                    tool_id,
                    decision,
                    result,
                    approval_request_id,
+                   enforced,
+                   evaluated_decision,
                    metadata,
                    created_at`,
         [
@@ -8440,6 +8491,8 @@ class ControlPlaneRepository {
           invocation.decision,
           invocation.result,
           invocation.approvalRequestId ?? null,
+          invocation.enforced,
+          invocation.evaluatedDecision ?? null,
           safeStringifyJson(invocation.metadata),
           invocation.createdAt,
         ]
@@ -8494,6 +8547,8 @@ class ControlPlaneRepository {
                 decision,
                 result,
                 approval_request_id,
+                enforced,
+                evaluated_decision,
                 metadata,
                 created_at
          FROM mcp_invocation_audits
@@ -12958,6 +13013,8 @@ class ControlPlaneRepository {
          decision TEXT NOT NULL DEFAULT 'require_approval',
          result TEXT NOT NULL DEFAULT 'allowed',
          approval_request_id TEXT,
+         enforced BOOLEAN NOT NULL DEFAULT FALSE,
+         evaluated_decision TEXT,
          metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
        )`
@@ -12970,6 +13027,8 @@ class ControlPlaneRepository {
          ADD COLUMN IF NOT EXISTS decision TEXT,
          ADD COLUMN IF NOT EXISTS result TEXT,
          ADD COLUMN IF NOT EXISTS approval_request_id TEXT,
+         ADD COLUMN IF NOT EXISTS enforced BOOLEAN,
+         ADD COLUMN IF NOT EXISTS evaluated_decision TEXT,
          ADD COLUMN IF NOT EXISTS metadata JSONB,
          ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ`
     );
@@ -12987,6 +13046,12 @@ class ControlPlaneRepository {
              ELSE 'allowed'
            END,
            approval_request_id = NULLIF(approval_request_id, ''),
+           enforced = COALESCE(enforced, FALSE),
+           evaluated_decision = CASE
+             WHEN evaluated_decision IN ('allow', 'deny', 'require_approval')
+               THEN evaluated_decision
+             ELSE NULL
+           END,
            metadata = COALESCE(metadata, '{}'::jsonb),
            created_at = COALESCE(created_at, NOW())
        WHERE tenant_id IS NULL
@@ -12997,6 +13062,8 @@ class ControlPlaneRepository {
           OR decision NOT IN ('allow', 'deny', 'require_approval')
           OR result IS NULL
           OR result NOT IN ('allowed', 'blocked', 'approved')
+          OR enforced IS NULL
+          OR (evaluated_decision IS NOT NULL AND evaluated_decision NOT IN ('allow', 'deny', 'require_approval'))
           OR metadata IS NULL
           OR created_at IS NULL`
     );
@@ -16758,6 +16825,16 @@ class ControlPlaneRepository {
       items,
       total: items.length,
     };
+  }
+
+  private getMcpToolPolicyByToolIdFromMemory(
+    tenantId: string,
+    toolId: string
+  ): McpToolPolicy | null {
+    const matched = this.memoryMcpToolPolicies.find(
+      (policy) => policy.tenantId === tenantId && policy.toolId === toolId
+    );
+    return matched ? this.cloneMcpToolPolicy(matched) : null;
   }
 
   private upsertMcpToolPolicyToMemory(policy: McpToolPolicy): McpToolPolicy {

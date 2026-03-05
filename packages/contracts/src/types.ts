@@ -507,13 +507,17 @@ export interface McpApprovalReviewInput {
   reason?: string;
 }
 
+export type McpInvocationResult = "allowed" | "blocked" | "approved";
+
 export interface McpInvocationAudit {
   id: string;
   tenantId: string;
   toolId: string;
   decision: McpToolDecision;
-  result: "allowed" | "blocked" | "approved";
+  result: McpInvocationResult;
   approvalRequestId?: string;
+  enforced: boolean;
+  evaluatedDecision?: McpToolDecision;
   metadata: Record<string, unknown>;
   createdAt: string;
 }
@@ -524,6 +528,35 @@ export interface McpInvocationListInput {
   from?: string;
   to?: string;
   limit?: number;
+}
+
+export interface McpInvocationCreateInput {
+  toolId: string;
+  decision?: McpToolDecision;
+  result?: McpInvocationResult;
+  approvalRequestId?: string;
+  enforced?: boolean;
+  evaluatedDecision?: McpToolDecision;
+  metadata?: Record<string, unknown>;
+}
+
+export interface McpEvaluateInput {
+  toolId: string;
+  reason?: string;
+  approvalRequestId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface McpEvaluateResult {
+  toolId: string;
+  decision: McpToolDecision;
+  result: McpInvocationResult;
+  approvalRequestId?: string;
+  enforced: true;
+  evaluatedDecision: McpToolDecision;
+  policy: McpToolPolicy;
+  invocation: McpInvocationAudit;
+  evaluatedAt: string;
 }
 
 export interface AuditItem {
