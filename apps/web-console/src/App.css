@@ -763,6 +763,23 @@
   font-size: 15px;
 }
 
+.governance-inline-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.governance-wide-field {
+  flex: 1 1 280px;
+  min-width: 220px;
+}
+
+.governance-wide-field input,
+.governance-wide-field select {
+  width: 100%;
+}
+
 .secondary-button {
   background: #fff;
   color: #184567;

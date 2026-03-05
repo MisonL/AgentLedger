@@ -13,6 +13,8 @@ func TestIntegrationMetricsObserveAndRender(t *testing.T) {
 
 	metrics := newIntegrationMetrics()
 	metrics.observe(outcomeSuccess, string(channelWebhook), eventTypeAlert, 120*time.Millisecond)
+	metrics.observe(outcomeSuccess, string(channelEmail), eventTypeAlert, 140*time.Millisecond)
+	metrics.observe(outcomeSuccess, string(channelEmailWebhook), eventTypeAlert, 160*time.Millisecond)
 	metrics.observe(outcomeRetry, string(channelWeCom), eventTypeWeeklyReport, 220*time.Millisecond)
 	metrics.observe(outcomeSuccess, labelChannelControl, eventTypeCallback, 80*time.Millisecond)
 	metrics.observe("unexpected", "random", "custom", 10*time.Millisecond)
@@ -21,6 +23,8 @@ func TestIntegrationMetricsObserveAndRender(t *testing.T) {
 
 	assertContains(t, rendered, "# HELP integration_dispatch_events_total")
 	assertContains(t, rendered, "integration_dispatch_events_total{outcome=\"success\",channel=\"webhook\",event_type=\"alert\"} 1")
+	assertContains(t, rendered, "integration_dispatch_events_total{outcome=\"success\",channel=\"email\",event_type=\"alert\"} 1")
+	assertContains(t, rendered, "integration_dispatch_events_total{outcome=\"success\",channel=\"email_webhook\",event_type=\"alert\"} 1")
 	assertContains(t, rendered, "integration_dispatch_events_total{outcome=\"success\",channel=\"control_plane\",event_type=\"callback_alert\"} 1")
 	assertContains(t, rendered, "integration_dispatch_events_total{outcome=\"retry\",channel=\"wecom\",event_type=\"weekly_report\"} 1")
 	assertContains(t, rendered, "integration_dispatch_events_total{outcome=\"dlq\",channel=\"unknown\",event_type=\"unknown\"} 1")

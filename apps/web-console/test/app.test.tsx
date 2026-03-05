@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { clearAuthTokens, setAuthTokens } from "../src/api";
 import App from "../src/App";
@@ -43,6 +43,191 @@ function mockAuthProvidersResponse() {
       },
     ],
     total: 2,
+  });
+}
+
+type GovernanceRuleAssetFixture = {
+  id: string;
+  name: string;
+  status: "draft" | "published" | "deprecated";
+  latestVersion: number;
+  publishedVersion: number | null;
+};
+
+function mockGovernancePageFetch({
+  residencyPolicy = {
+    tenantId: "default",
+    mode: "single_region" as const,
+    primaryRegion: "cn-shanghai",
+    replicaRegions: [] as string[],
+    allowCrossRegionTransfer: false,
+    requireTransferApproval: false,
+    updatedAt: "2026-03-01T00:00:00.000Z",
+  },
+  ruleAssets = [] as GovernanceRuleAssetFixture[],
+}: {
+  residencyPolicy?: {
+    tenantId: string;
+    mode: "single_region" | "active_active";
+    primaryRegion: string;
+    replicaRegions: string[];
+    allowCrossRegionTransfer: boolean;
+    requireTransferApproval: boolean;
+    updatedAt: string;
+  };
+  ruleAssets?: GovernanceRuleAssetFixture[];
+} = {}) {
+  const ruleAssetItems = ruleAssets.map((asset, index) => ({
+    id: asset.id,
+    tenantId: "default",
+    name: asset.name,
+    description: `fixture-${index + 1}`,
+    status: asset.status,
+    latestVersion: asset.latestVersion,
+    publishedVersion: asset.publishedVersion,
+    scopeBinding: {},
+    createdAt: `2026-03-${String(index + 1).padStart(2, "0")}T08:00:00.000Z`,
+    updatedAt: `2026-03-${String(index + 1).padStart(2, "0")}T09:00:00.000Z`,
+  }));
+
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = toUrl(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+    const pathname = new URL(url, "http://localhost").pathname;
+
+    if (pathname === "/api/v1/alerts" && method === "GET") {
+      return mockJsonResponse({
+        items: [],
+        total: 0,
+        filters: {
+          limit: 50,
+        },
+        nextCursor: null,
+      });
+    }
+
+    if (pathname === "/api/v1/usage/weekly-summary" && method === "GET") {
+      return mockJsonResponse({
+        metric: "tokens",
+        timezone: "UTC",
+        weeks: [],
+        summary: {
+          tokens: 0,
+          cost: 0,
+          sessions: 0,
+        },
+      });
+    }
+
+    if (pathname === "/api/v1/residency/regions" && method === "GET") {
+      return mockJsonResponse({
+        items: [
+          {
+            id: "cn-shanghai",
+            name: "华东 1",
+            active: true,
+          },
+          {
+            id: "ap-southeast-1",
+            name: "新加坡",
+            active: true,
+          },
+        ],
+        total: 2,
+      });
+    }
+
+    if (pathname === "/api/v1/residency/policy" && method === "GET") {
+      return mockJsonResponse(residencyPolicy);
+    }
+
+    if (pathname === "/api/v1/residency/policy" && method === "PUT") {
+      const payload = JSON.parse(String(init?.body ?? "{}")) as {
+        mode?: "single_region" | "active_active";
+        primaryRegion?: string;
+        replicaRegions?: string[];
+        allowCrossRegionTransfer?: boolean;
+        requireTransferApproval?: boolean;
+      };
+      return mockJsonResponse({
+        tenantId: "default",
+        mode: payload.mode ?? "single_region",
+        primaryRegion: payload.primaryRegion ?? "cn-shanghai",
+        replicaRegions: payload.replicaRegions ?? [],
+        allowCrossRegionTransfer: payload.allowCrossRegionTransfer ?? false,
+        requireTransferApproval: payload.requireTransferApproval ?? false,
+        updatedAt: "2026-03-02T00:00:00.000Z",
+      });
+    }
+
+    if (pathname === "/api/v1/residency/replication-jobs" && method === "GET") {
+      return mockJsonResponse({
+        items: [],
+        total: 0,
+        filters: {
+          limit: 50,
+        },
+      });
+    }
+
+    if (pathname.match(/^\/api\/v1\/rules\/assets\/[^/]+\/versions$/) && method === "GET") {
+      return mockJsonResponse({
+        items: [],
+        total: 0,
+      });
+    }
+
+    if (pathname.match(/^\/api\/v1\/rules\/assets\/[^/]+\/approvals$/) && method === "GET") {
+      return mockJsonResponse({
+        items: [],
+        total: 0,
+        filters: {
+          limit: 50,
+        },
+      });
+    }
+
+    if (pathname === "/api/v1/rules/assets" && method === "GET") {
+      return mockJsonResponse({
+        items: ruleAssetItems,
+        total: ruleAssetItems.length,
+        filters: {
+          limit: 50,
+        },
+      });
+    }
+
+    if (pathname === "/api/v1/mcp/policies" && method === "GET") {
+      return mockJsonResponse({
+        items: [],
+        total: 0,
+        filters: {
+          limit: 50,
+        },
+      });
+    }
+
+    if (pathname === "/api/v1/mcp/approvals" && method === "GET") {
+      return mockJsonResponse({
+        items: [],
+        total: 0,
+        filters: {
+          limit: 50,
+        },
+      });
+    }
+
+    if (pathname === "/api/v1/mcp/invocations" && method === "GET") {
+      return mockJsonResponse({
+        items: [],
+        total: 0,
+        filters: {
+          limit: 50,
+        },
+      });
+    }
+
+    throw new Error(`unexpected call: ${method} ${url}`);
   });
 }
 
@@ -1672,6 +1857,112 @@ describe("Web Console", () => {
         (init as RequestInit | undefined)?.method === "PATCH"
     );
     expect(patchCall).toBeTruthy();
+  });
+
+  test("治理页在 single_region 模式配置副本地域时会阻止保存且不发起 PUT", async () => {
+    window.location.hash = "#/governance";
+    setAuthTokens({
+      accessToken: "access-token-governance-residency-single-region",
+      refreshToken: "refresh-token-governance-residency-single-region",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const fetchSpy = mockGovernancePageFetch({
+      residencyPolicy: {
+        tenantId: "default",
+        mode: "single_region",
+        primaryRegion: "cn-shanghai",
+        replicaRegions: [],
+        allowCrossRegionTransfer: false,
+        requireTransferApproval: false,
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "治理中心" })).toBeInTheDocument();
+
+    const replicaRegionsInput = await screen.findByLabelText("副本地域（逗号分隔）");
+    const residencySection = replicaRegionsInput.closest("section");
+    expect(residencySection).not.toBeNull();
+
+    fireEvent.change(replicaRegionsInput, {
+      target: { value: "ap-southeast-1" },
+    });
+    fireEvent.click(
+      within(residencySection as HTMLElement).getByRole("button", { name: "保存策略" })
+    );
+
+    expect(await screen.findByText("single_region 模式不允许配置副本地域。")).toBeInTheDocument();
+    expect(
+      fetchSpy.mock.calls.some(([url, init]) => {
+        const requestInit = init as RequestInit | undefined;
+        return (
+          new URL(toUrl(url), "http://localhost").pathname === "/api/v1/residency/policy" &&
+          (requestInit?.method ?? "GET").toUpperCase() === "PUT"
+        );
+      })
+    ).toBe(false);
+  });
+
+  test("治理页 Rule Hub 切换资产后会刷新发布/回滚/审批版本输入框", async () => {
+    window.location.hash = "#/governance";
+    setAuthTokens({
+      accessToken: "access-token-governance-rule-hub-switch",
+      refreshToken: "refresh-token-governance-rule-hub-switch",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    mockGovernancePageFetch({
+      ruleAssets: [
+        {
+          id: "asset-alpha",
+          name: "asset-alpha",
+          status: "draft",
+          latestVersion: 3,
+          publishedVersion: 2,
+        },
+        {
+          id: "asset-beta",
+          name: "asset-beta",
+          status: "published",
+          latestVersion: 9,
+          publishedVersion: 8,
+        },
+      ],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Rule Hub 规则资产", level: 2 })).toBeInTheDocument();
+
+    const publishVersionInput = (await screen.findByLabelText("发布版本")) as HTMLInputElement;
+    const rollbackVersionInput = (await screen.findByLabelText("回滚版本")) as HTMLInputElement;
+    const approvalVersionInput = (await screen.findByLabelText("审批版本")) as HTMLInputElement;
+
+    await waitFor(() => {
+      expect(publishVersionInput.value).toBe("3");
+      expect(rollbackVersionInput.value).toBe("3");
+      expect(approvalVersionInput.value).toBe("3");
+    });
+
+    fireEvent.change(publishVersionInput, { target: { value: "1" } });
+    fireEvent.change(rollbackVersionInput, { target: { value: "1" } });
+    fireEvent.change(approvalVersionInput, { target: { value: "1" } });
+    expect(publishVersionInput.value).toBe("1");
+    expect(rollbackVersionInput.value).toBe("1");
+    expect(approvalVersionInput.value).toBe("1");
+
+    fireEvent.click(screen.getByRole("button", { name: "选中" }));
+
+    await waitFor(() => {
+      expect(publishVersionInput.value).toBe("9");
+      expect(rollbackVersionInput.value).toBe("9");
+      expect(approvalVersionInput.value).toBe("9");
+    });
   });
 
   test("治理页支持 Sessions/Usage 导出", async () => {
