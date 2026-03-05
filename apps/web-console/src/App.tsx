@@ -8,13 +8,29 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import {
+  approveMcpApproval,
   ApiError,
+  cancelReplicationJob,
+  createMcpApproval,
+  createReplicationJob,
+  createRuleApproval,
+  createRuleAsset,
+  createRuleAssetVersion,
   createSource,
   exportSessions,
   exportUsage,
   exchangeExternalAuthCode,
   fetchAlerts,
   fetchAuthProviders,
+  fetchMcpApprovals,
+  fetchMcpInvocations,
+  fetchMcpPolicies,
+  fetchReplicationJobs,
+  fetchResidencyPolicy,
+  fetchResidencyRegions,
+  fetchRuleApprovals,
+  fetchRuleAssetVersions,
+  fetchRuleAssets,
   fetchUsageWeeklySummary,
   fetchSourceHealth,
   fetchSourceParseFailures,
@@ -29,9 +45,14 @@ import {
   fetchUsageSessions,
   hasAccessToken,
   login,
+  publishRuleAsset,
+  rejectMcpApproval,
+  rollbackRuleAsset,
   searchSessions,
   setUnauthorizedHandler,
   testSourceConnection,
+  upsertMcpPolicy,
+  upsertResidencyPolicy,
   updateAlertStatus,
   upsertPricingCatalog,
 } from "./api";
@@ -43,17 +64,32 @@ import type {
   AuthProviderItem,
   AuthLoginInput,
   CreateSourceInput,
+  DataResidencyMode,
   ExportFormat,
   HeatmapCell,
+  McpApprovalRequest,
+  McpInvocationAudit,
+  McpRiskLevel,
+  McpToolDecision,
+  McpToolPolicy,
   MetricKey,
   PricingCatalogEntry,
   PricingCatalogUpsertInput,
+  RegionDescriptor,
+  ReplicationJob,
+  ReplicationJobStatus,
+  RuleApproval,
+  RuleApprovalDecision,
+  RuleAsset,
+  RuleAssetVersion,
+  RuleLifecycleStatus,
   Session,
   SessionDetailResponse,
   SessionSearchInput,
   SessionSourceFreshness,
   SourceConnectionTestResponse,
   SourceHealth,
+  TenantResidencyPolicy,
   SourceType,
   UsageAggregateFilters,
   UsageCostMode,
@@ -226,6 +262,60 @@ const WEEKLY_SUMMARY_TIMEZONE_OPTIONS: Array<{ value: string; label: string }> =
   { value: "UTC", label: "UTC" },
   { value: "Asia/Shanghai", label: "Asia/Shanghai" },
   { value: "America/Los_Angeles", label: "America/Los_Angeles" },
+];
+
+const DATA_RESIDENCY_MODE_OPTIONS: Array<{ value: DataResidencyMode; label: string }> = [
+  { value: "single_region", label: "single_region" },
+  { value: "active_active", label: "active_active" },
+];
+
+const REPLICATION_STATUS_FILTER_OPTIONS: Array<
+  { value: ""; label: string } | { value: ReplicationJobStatus; label: string }
+> = [
+  { value: "", label: "全部状态" },
+  { value: "pending", label: "pending" },
+  { value: "running", label: "running" },
+  { value: "succeeded", label: "succeeded" },
+  { value: "failed", label: "failed" },
+  { value: "cancelled", label: "cancelled" },
+];
+
+const RULE_STATUS_FILTER_OPTIONS: Array<
+  { value: ""; label: string } | { value: RuleLifecycleStatus; label: string }
+> = [
+  { value: "", label: "全部状态" },
+  { value: "draft", label: "draft" },
+  { value: "published", label: "published" },
+  { value: "deprecated", label: "deprecated" },
+];
+
+const RULE_APPROVAL_DECISION_OPTIONS: Array<{
+  value: RuleApprovalDecision;
+  label: string;
+}> = [
+  { value: "approved", label: "approved" },
+  { value: "rejected", label: "rejected" },
+];
+
+const MCP_RISK_LEVEL_OPTIONS: Array<{ value: McpRiskLevel; label: string }> = [
+  { value: "low", label: "low" },
+  { value: "medium", label: "medium" },
+  { value: "high", label: "high" },
+];
+
+const MCP_DECISION_OPTIONS: Array<{ value: McpToolDecision; label: string }> = [
+  { value: "allow", label: "allow" },
+  { value: "deny", label: "deny" },
+  { value: "require_approval", label: "require_approval" },
+];
+
+const MCP_APPROVAL_STATUS_FILTER_OPTIONS: Array<
+  { value: ""; label: string } | { value: McpApprovalRequest["status"]; label: string }
+> = [
+  { value: "", label: "全部状态" },
+  { value: "pending", label: "pending" },
+  { value: "approved", label: "approved" },
+  { value: "rejected", label: "rejected" },
 ];
 
 function createEmptyPricingEntry(): PricingEntryFormState {
@@ -2187,12 +2277,59 @@ function GovernancePage() {
   const [statusFilter, setStatusFilter] = useState<AlertStatus | "">("");
   const [severityFilter, setSeverityFilter] = useState<AlertSeverity | "">("");
   const [alertFeedback, setAlertFeedback] = useState<string | null>(null);
+
+  const [residencyMode, setResidencyMode] = useState<DataResidencyMode>("single_region");
+  const [primaryRegion, setPrimaryRegion] = useState("");
+  const [replicaRegionsInput, setReplicaRegionsInput] = useState("");
+  const [allowCrossRegionTransfer, setAllowCrossRegionTransfer] = useState(false);
+  const [requireTransferApproval, setRequireTransferApproval] = useState(false);
+  const [replicationStatusFilter, setReplicationStatusFilter] =
+    useState<ReplicationJobStatus | "">("");
+  const [replicationSourceRegion, setReplicationSourceRegion] = useState("");
+  const [replicationTargetRegion, setReplicationTargetRegion] = useState("");
+  const [replicationReason, setReplicationReason] = useState("");
+  const [residencyFeedback, setResidencyFeedback] = useState<string | null>(null);
+  const [residencyError, setResidencyError] = useState<string | null>(null);
+
+  const [ruleStatusFilter, setRuleStatusFilter] = useState<RuleLifecycleStatus | "">("");
+  const [ruleKeyword, setRuleKeyword] = useState("");
+  const [ruleName, setRuleName] = useState("");
+  const [ruleDescription, setRuleDescription] = useState("");
+  const [selectedRuleAssetId, setSelectedRuleAssetId] = useState<string | null>(null);
+  const [ruleVersionContent, setRuleVersionContent] = useState("");
+  const [ruleVersionChangelog, setRuleVersionChangelog] = useState("");
+  const [rulePublishVersion, setRulePublishVersion] = useState("");
+  const [ruleRollbackVersion, setRuleRollbackVersion] = useState("");
+  const [ruleRollbackReason, setRuleRollbackReason] = useState("");
+  const [ruleApprovalVersion, setRuleApprovalVersion] = useState("");
+  const [ruleApprovalDecision, setRuleApprovalDecision] =
+    useState<RuleApprovalDecision>("approved");
+  const [ruleApprovalReason, setRuleApprovalReason] = useState("");
+  const [ruleFeedback, setRuleFeedback] = useState<string | null>(null);
+  const [ruleError, setRuleError] = useState<string | null>(null);
+
+  const [mcpPolicyKeyword, setMcpPolicyKeyword] = useState("");
+  const [mcpPolicyToolId, setMcpPolicyToolId] = useState("");
+  const [mcpPolicyRiskLevel, setMcpPolicyRiskLevel] = useState<McpRiskLevel>("medium");
+  const [mcpPolicyDecision, setMcpPolicyDecision] = useState<McpToolDecision>("require_approval");
+  const [mcpPolicyReason, setMcpPolicyReason] = useState("");
+  const [mcpApprovalStatusFilter, setMcpApprovalStatusFilter] =
+    useState<McpApprovalRequest["status"] | "">("");
+  const [mcpApprovalToolId, setMcpApprovalToolId] = useState("");
+  const [mcpApprovalReason, setMcpApprovalReason] = useState("");
+  const [mcpReviewReason, setMcpReviewReason] = useState("");
+  const [mcpInvocationToolId, setMcpInvocationToolId] = useState("");
+  const [mcpFeedback, setMcpFeedback] = useState<string | null>(null);
+  const [mcpError, setMcpError] = useState<string | null>(null);
+
   const [sessionExportFormat, setSessionExportFormat] = useState<ExportFormat>("csv");
   const [usageExportFormat, setUsageExportFormat] = useState<ExportFormat>("csv");
   const [usageExportDimension, setUsageExportDimension] =
     useState<UsageExportDimension>("daily");
   const [exportFeedback, setExportFeedback] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const hasInitializedResidencyForm = useRef(false);
+  const previousRuleAssetIdRef = useRef<string | null>(null);
 
   const alertQueryInput = useMemo(
     () => ({
@@ -2201,6 +2338,47 @@ function GovernancePage() {
       ...(severityFilter ? { severity: severityFilter } : {}),
     }),
     [severityFilter, statusFilter]
+  );
+
+  const replicationJobQueryInput = useMemo(
+    () => ({
+      limit: 50,
+      ...(replicationStatusFilter ? { status: replicationStatusFilter } : {}),
+    }),
+    [replicationStatusFilter]
+  );
+
+  const ruleAssetQueryInput = useMemo(
+    () => ({
+      limit: 50,
+      ...(ruleStatusFilter ? { status: ruleStatusFilter } : {}),
+      ...(ruleKeyword.trim().length > 0 ? { keyword: ruleKeyword.trim() } : {}),
+    }),
+    [ruleKeyword, ruleStatusFilter]
+  );
+
+  const mcpPolicyQueryInput = useMemo(
+    () => ({
+      limit: 50,
+      ...(mcpPolicyKeyword.trim().length > 0 ? { keyword: mcpPolicyKeyword.trim() } : {}),
+    }),
+    [mcpPolicyKeyword]
+  );
+
+  const mcpApprovalQueryInput = useMemo(
+    () => ({
+      limit: 50,
+      ...(mcpApprovalStatusFilter ? { status: mcpApprovalStatusFilter } : {}),
+    }),
+    [mcpApprovalStatusFilter]
+  );
+
+  const mcpInvocationQueryInput = useMemo(
+    () => ({
+      limit: 50,
+      ...(mcpInvocationToolId.trim().length > 0 ? { toolId: mcpInvocationToolId.trim() } : {}),
+    }),
+    [mcpInvocationToolId]
   );
 
   const alertsQuery = useQuery({
@@ -2222,12 +2400,384 @@ function GovernancePage() {
     staleTime: 60_000,
   });
 
+  const residencyRegionsQuery = useQuery({
+    queryKey: ["residency", "regions"],
+    queryFn: ({ signal }) => fetchResidencyRegions(signal),
+    staleTime: 60_000,
+  });
+
+  const residencyPolicyQuery = useQuery({
+    queryKey: ["residency", "policy"],
+    queryFn: ({ signal }) => fetchResidencyPolicy(signal),
+    staleTime: 20_000,
+  });
+
+  const replicationJobsQuery = useQuery({
+    queryKey: ["residency", "jobs", replicationJobQueryInput],
+    queryFn: ({ signal }) => fetchReplicationJobs(replicationJobQueryInput, signal),
+    staleTime: 20_000,
+  });
+
+  const ruleAssetsQuery = useQuery({
+    queryKey: ["rules", "assets", ruleAssetQueryInput],
+    queryFn: ({ signal }) => fetchRuleAssets(ruleAssetQueryInput, signal),
+    staleTime: 20_000,
+  });
+
+  const ruleVersionsQuery = useQuery({
+    queryKey: ["rules", "assets", selectedRuleAssetId, "versions"],
+    enabled: Boolean(selectedRuleAssetId),
+    queryFn: ({ signal }) => fetchRuleAssetVersions(selectedRuleAssetId!, 50, signal),
+    staleTime: 20_000,
+  });
+
+  const ruleApprovalsQuery = useQuery({
+    queryKey: ["rules", "assets", selectedRuleAssetId, "approvals"],
+    enabled: Boolean(selectedRuleAssetId),
+    queryFn: ({ signal }) => fetchRuleApprovals(selectedRuleAssetId!, { limit: 50 }, signal),
+    staleTime: 20_000,
+  });
+
+  const mcpPoliciesQuery = useQuery({
+    queryKey: ["mcp", "policies", mcpPolicyQueryInput],
+    queryFn: ({ signal }) => fetchMcpPolicies(mcpPolicyQueryInput, signal),
+    staleTime: 20_000,
+  });
+
+  const mcpApprovalsQuery = useQuery({
+    queryKey: ["mcp", "approvals", mcpApprovalQueryInput],
+    queryFn: ({ signal }) => fetchMcpApprovals(mcpApprovalQueryInput, signal),
+    staleTime: 20_000,
+  });
+
+  const mcpInvocationsQuery = useQuery({
+    queryKey: ["mcp", "invocations", mcpInvocationQueryInput],
+    queryFn: ({ signal }) => fetchMcpInvocations(mcpInvocationQueryInput, signal),
+    staleTime: 20_000,
+  });
+
+  useEffect(() => {
+    if (hasInitializedResidencyForm.current) {
+      return;
+    }
+    if (residencyRegionsQuery.isLoading || residencyPolicyQuery.isLoading) {
+      return;
+    }
+    if (residencyRegionsQuery.isError || residencyPolicyQuery.isError) {
+      return;
+    }
+    const regions = residencyRegionsQuery.data?.items ?? [];
+    const policy = residencyPolicyQuery.data;
+
+    if (policy) {
+      setResidencyMode(policy.mode);
+      setPrimaryRegion(policy.primaryRegion);
+      setReplicaRegionsInput(policy.replicaRegions.join(", "));
+      setAllowCrossRegionTransfer(policy.allowCrossRegionTransfer);
+      setRequireTransferApproval(policy.requireTransferApproval);
+      setReplicationSourceRegion(policy.primaryRegion);
+      setReplicationTargetRegion(policy.replicaRegions[0] ?? "");
+      hasInitializedResidencyForm.current = true;
+      return;
+    }
+
+    if (regions.length > 0) {
+      setPrimaryRegion(regions[0].id);
+      setReplicationSourceRegion(regions[0].id);
+      setReplicationTargetRegion(regions[1]?.id ?? regions[0].id);
+    }
+    hasInitializedResidencyForm.current = true;
+  }, [
+    residencyPolicyQuery.data,
+    residencyPolicyQuery.isLoading,
+    residencyRegionsQuery.data,
+    residencyRegionsQuery.isLoading,
+  ]);
+
+  useEffect(() => {
+    const assets = ruleAssetsQuery.data?.items ?? [];
+    if (assets.length === 0) {
+      previousRuleAssetIdRef.current = null;
+      setSelectedRuleAssetId(null);
+      setRulePublishVersion("");
+      setRuleRollbackVersion("");
+      setRuleApprovalVersion("");
+      return;
+    }
+    if (!selectedRuleAssetId || !assets.some((asset) => asset.id === selectedRuleAssetId)) {
+      setSelectedRuleAssetId(assets[0].id);
+    }
+  }, [ruleAssetsQuery.data, selectedRuleAssetId]);
+
+  useEffect(() => {
+    if (!selectedRuleAssetId) {
+      previousRuleAssetIdRef.current = null;
+      return;
+    }
+    const assets = ruleAssetsQuery.data?.items ?? [];
+    const selected = assets.find((asset) => asset.id === selectedRuleAssetId);
+    if (!selected || selected.latestVersion < 1) {
+      return;
+    }
+    const latestVersionText = String(selected.latestVersion);
+    const switchedAsset = previousRuleAssetIdRef.current !== selectedRuleAssetId;
+    previousRuleAssetIdRef.current = selectedRuleAssetId;
+    if (switchedAsset) {
+      setRulePublishVersion(latestVersionText);
+      setRuleRollbackVersion(latestVersionText);
+      setRuleApprovalVersion(latestVersionText);
+      return;
+    }
+    setRulePublishVersion((prev) => (prev.trim().length > 0 ? prev : latestVersionText));
+    setRuleRollbackVersion((prev) => (prev.trim().length > 0 ? prev : latestVersionText));
+    setRuleApprovalVersion((prev) => (prev.trim().length > 0 ? prev : latestVersionText));
+  }, [ruleAssetsQuery.data, selectedRuleAssetId]);
+
   const updateAlertStatusMutation = useMutation({
     mutationFn: ({ alertId, status }: { alertId: string; status: AlertMutableStatus }) =>
       updateAlertStatus(alertId, status),
     onSuccess: async (alert) => {
       setAlertFeedback(`告警 ${alert.id} 已更新为 ${alert.status}。`);
       await queryClient.invalidateQueries({ queryKey: ["alerts"] });
+    },
+  });
+
+  const saveResidencyPolicyMutation = useMutation({
+    mutationFn: (
+      input: Omit<TenantResidencyPolicy, "tenantId" | "updatedAt"> & {
+        updatedAt?: string;
+      }
+    ) => upsertResidencyPolicy(input),
+    onSuccess: async (policy) => {
+      setResidencyError(null);
+      setResidencyFeedback(`数据主权策略已保存，主地域：${policy.primaryRegion}`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["residency", "policy"] }),
+        queryClient.invalidateQueries({ queryKey: ["residency", "jobs"] }),
+      ]);
+    },
+    onError: (error) => {
+      setResidencyFeedback(null);
+      setResidencyError(`保存策略失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const createReplicationJobMutation = useMutation({
+    mutationFn: ({
+      sourceRegion,
+      targetRegion,
+      reason,
+    }: {
+      sourceRegion: string;
+      targetRegion: string;
+      reason?: string;
+    }) => createReplicationJob({ sourceRegion, targetRegion, reason }),
+    onSuccess: async (job) => {
+      setResidencyError(null);
+      setResidencyFeedback(`复制任务 ${job.id} 已创建（${job.sourceRegion} -> ${job.targetRegion}）。`);
+      setReplicationReason("");
+      await queryClient.invalidateQueries({ queryKey: ["residency", "jobs"] });
+    },
+    onError: (error) => {
+      setResidencyFeedback(null);
+      setResidencyError(`创建复制任务失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const cancelReplicationJobMutation = useMutation({
+    mutationFn: ({ jobId, reason }: { jobId: string; reason?: string }) =>
+      cancelReplicationJob(jobId, reason ? { reason } : undefined),
+    onSuccess: async (job) => {
+      setResidencyError(null);
+      setResidencyFeedback(`复制任务 ${job.id} 已取消。`);
+      await queryClient.invalidateQueries({ queryKey: ["residency", "jobs"] });
+    },
+    onError: (error) => {
+      setResidencyFeedback(null);
+      setResidencyError(`取消复制任务失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const createRuleAssetMutation = useMutation({
+    mutationFn: ({ name, description }: { name: string; description?: string }) =>
+      createRuleAsset({ name, description }),
+    onSuccess: async (asset) => {
+      setRuleError(null);
+      setRuleFeedback(`规则资产 ${asset.name} 已创建。`);
+      setRuleName("");
+      setRuleDescription("");
+      setSelectedRuleAssetId(asset.id);
+      const latestVersionText =
+        asset.latestVersion > 0 ? String(asset.latestVersion) : "";
+      setRulePublishVersion(latestVersionText);
+      setRuleRollbackVersion(latestVersionText);
+      setRuleApprovalVersion(latestVersionText);
+      await queryClient.invalidateQueries({ queryKey: ["rules", "assets"] });
+    },
+    onError: (error) => {
+      setRuleFeedback(null);
+      setRuleError(`创建规则资产失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const createRuleAssetVersionMutation = useMutation({
+    mutationFn: ({
+      assetId,
+      content,
+      changelog,
+    }: {
+      assetId: string;
+      content: string;
+      changelog?: string;
+    }) => createRuleAssetVersion(assetId, { content, changelog }),
+    onSuccess: async (version) => {
+      setRuleError(null);
+      setRuleFeedback(`规则版本 v${version.version} 已创建。`);
+      setRuleVersionContent("");
+      setRuleVersionChangelog("");
+      setRulePublishVersion(String(version.version));
+      setRuleRollbackVersion(String(version.version));
+      setRuleApprovalVersion(String(version.version));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["rules", "assets"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["rules", "assets", version.assetId, "versions"],
+        }),
+      ]);
+    },
+    onError: (error) => {
+      setRuleFeedback(null);
+      setRuleError(`创建规则版本失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const publishRuleAssetMutation = useMutation({
+    mutationFn: ({ assetId, version }: { assetId: string; version: number }) =>
+      publishRuleAsset(assetId, { version }),
+    onSuccess: async (asset) => {
+      setRuleError(null);
+      setRuleFeedback(`规则资产 ${asset.name} 已发布 v${asset.publishedVersion ?? "-"}.`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["rules", "assets"] }),
+        queryClient.invalidateQueries({ queryKey: ["rules", "assets", asset.id, "versions"] }),
+      ]);
+    },
+    onError: (error) => {
+      setRuleFeedback(null);
+      setRuleError(`发布规则版本失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const rollbackRuleAssetMutation = useMutation({
+    mutationFn: ({
+      assetId,
+      version,
+      reason,
+    }: {
+      assetId: string;
+      version: number;
+      reason?: string;
+    }) => rollbackRuleAsset(assetId, { version, reason }),
+    onSuccess: async (asset) => {
+      setRuleError(null);
+      setRuleFeedback(`规则资产 ${asset.name} 已回滚到 v${asset.publishedVersion ?? "-"}.`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["rules", "assets"] }),
+        queryClient.invalidateQueries({ queryKey: ["rules", "assets", asset.id, "versions"] }),
+      ]);
+    },
+    onError: (error) => {
+      setRuleFeedback(null);
+      setRuleError(`回滚规则版本失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const createRuleApprovalMutation = useMutation({
+    mutationFn: ({
+      assetId,
+      version,
+      decision,
+      reason,
+    }: {
+      assetId: string;
+      version: number;
+      decision: RuleApprovalDecision;
+      reason?: string;
+    }) => createRuleApproval(assetId, { version, decision, reason }),
+    onSuccess: async (approval) => {
+      setRuleError(null);
+      setRuleFeedback(`已提交审批：v${approval.version} -> ${approval.decision}。`);
+      setRuleApprovalReason("");
+      await queryClient.invalidateQueries({
+        queryKey: ["rules", "assets", approval.assetId, "approvals"],
+      });
+    },
+    onError: (error) => {
+      setRuleFeedback(null);
+      setRuleError(`提交审批失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const upsertMcpPolicyMutation = useMutation({
+    mutationFn: ({
+      toolId,
+      riskLevel,
+      decision,
+      reason,
+    }: {
+      toolId: string;
+      riskLevel: McpRiskLevel;
+      decision: McpToolDecision;
+      reason?: string;
+    }) => upsertMcpPolicy(toolId, { riskLevel, decision, reason }),
+    onSuccess: async (policy) => {
+      setMcpError(null);
+      setMcpFeedback(`策略 ${policy.toolId} 已更新为 ${policy.decision}。`);
+      await queryClient.invalidateQueries({ queryKey: ["mcp", "policies"] });
+    },
+    onError: (error) => {
+      setMcpFeedback(null);
+      setMcpError(`更新策略失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const createMcpApprovalMutation = useMutation({
+    mutationFn: ({ toolId, reason }: { toolId: string; reason?: string }) =>
+      createMcpApproval({ toolId, reason }),
+    onSuccess: async (approval) => {
+      setMcpError(null);
+      setMcpFeedback(`审批请求 ${approval.id} 已创建。`);
+      setMcpApprovalToolId("");
+      setMcpApprovalReason("");
+      await queryClient.invalidateQueries({ queryKey: ["mcp", "approvals"] });
+    },
+    onError: (error) => {
+      setMcpFeedback(null);
+      setMcpError(`创建审批请求失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const reviewMcpApprovalMutation = useMutation({
+    mutationFn: ({
+      approvalId,
+      status,
+      reason,
+    }: {
+      approvalId: string;
+      status: "approved" | "rejected";
+      reason?: string;
+    }) =>
+      status === "approved"
+        ? approveMcpApproval(approvalId, reason ? { reason } : undefined)
+        : rejectMcpApproval(approvalId, reason ? { reason } : undefined),
+    onSuccess: async (approval) => {
+      setMcpError(null);
+      setMcpFeedback(`审批请求 ${approval.id} 已更新为 ${approval.status}。`);
+      await queryClient.invalidateQueries({ queryKey: ["mcp", "approvals"] });
+    },
+    onError: (error) => {
+      setMcpFeedback(null);
+      setMcpError(`审批操作失败：${toErrorMessage(error)}`);
     },
   });
 
@@ -2264,6 +2814,16 @@ function GovernancePage() {
   const alertItems = alertsQuery.data?.items ?? [];
   const weeklyItems = weeklySummaryQuery.data?.weeks ?? [];
   const weeklyPeak = weeklySummaryQuery.data?.peakWeek;
+  const regionItems: RegionDescriptor[] = residencyRegionsQuery.data?.items ?? [];
+  const replicationItems: ReplicationJob[] = replicationJobsQuery.data?.items ?? [];
+  const ruleItems: RuleAsset[] = ruleAssetsQuery.data?.items ?? [];
+  const selectedRuleAsset =
+    ruleItems.find((asset) => asset.id === selectedRuleAssetId) ?? null;
+  const ruleVersionItems: RuleAssetVersion[] = ruleVersionsQuery.data?.items ?? [];
+  const ruleApprovalItems: RuleApproval[] = ruleApprovalsQuery.data?.items ?? [];
+  const mcpPolicyItems: McpToolPolicy[] = mcpPoliciesQuery.data?.items ?? [];
+  const mcpApprovalItems: McpApprovalRequest[] = mcpApprovalsQuery.data?.items ?? [];
+  const mcpInvocationItems: McpInvocationAudit[] = mcpInvocationsQuery.data?.items ?? [];
 
   return (
     <>
@@ -2501,6 +3061,1063 @@ function GovernancePage() {
                     </tr>
                   );
                 })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel">
+        <header>
+          <h2>数据主权与复制</h2>
+          <p>主权策略 + 跨地域复制任务。</p>
+        </header>
+
+        <div className="filters-row">
+          <label className="inline-field" htmlFor="residency-mode">
+            模式
+            <select
+              id="residency-mode"
+              value={residencyMode}
+              onChange={(event) => setResidencyMode(event.target.value as DataResidencyMode)}
+            >
+              {DATA_RESIDENCY_MODE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="residency-primary-region">
+            主地域
+            <select
+              id="residency-primary-region"
+              value={primaryRegion}
+              onChange={(event) => setPrimaryRegion(event.target.value)}
+            >
+              <option value="">请选择</option>
+              {regionItems.map((region) => (
+                <option key={region.id} value={region.id}>
+                  {region.id}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="filters-row">
+          <label className="inline-field governance-wide-field" htmlFor="residency-replica-regions">
+            副本地域（逗号分隔）
+            <input
+              id="residency-replica-regions"
+              type="text"
+              value={replicaRegionsInput}
+              onChange={(event) => setReplicaRegionsInput(event.target.value)}
+              placeholder="例如：cn-shanghai, ap-southeast-1"
+            />
+          </label>
+        </div>
+
+        <div className="filters-row">
+          <label className="checkbox-field" htmlFor="residency-cross-transfer">
+            <input
+              id="residency-cross-transfer"
+              type="checkbox"
+              checked={allowCrossRegionTransfer}
+              onChange={(event) => setAllowCrossRegionTransfer(event.target.checked)}
+            />
+            允许跨地域传输
+          </label>
+
+          <label className="checkbox-field" htmlFor="residency-transfer-approval">
+            <input
+              id="residency-transfer-approval"
+              type="checkbox"
+              checked={requireTransferApproval}
+              onChange={(event) => setRequireTransferApproval(event.target.checked)}
+            />
+            传输必须审批
+          </label>
+
+          <button
+            type="button"
+            className="submit-button"
+            disabled={saveResidencyPolicyMutation.isPending}
+            onClick={() => {
+              const normalizedPrimaryRegion = primaryRegion.trim();
+              if (!normalizedPrimaryRegion) {
+                setResidencyFeedback(null);
+                setResidencyError("主地域不能为空。");
+                return;
+              }
+              const replicaRegions = replicaRegionsInput
+                .split(",")
+                .map((region) => region.trim())
+                .filter((region, index, list) => region.length > 0 && list.indexOf(region) === index)
+                .filter((region) => region !== normalizedPrimaryRegion);
+              if (residencyMode === "active_active" && replicaRegions.length === 0) {
+                setResidencyFeedback(null);
+                setResidencyError("active_active 模式至少需要一个副本地域。");
+                return;
+              }
+              if (residencyMode === "single_region" && replicaRegions.length > 0) {
+                setResidencyFeedback(null);
+                setResidencyError("single_region 模式不允许配置副本地域。");
+                return;
+              }
+              setResidencyFeedback(null);
+              setResidencyError(null);
+              saveResidencyPolicyMutation.mutate({
+                mode: residencyMode,
+                primaryRegion: normalizedPrimaryRegion,
+                replicaRegions,
+                allowCrossRegionTransfer,
+                requireTransferApproval,
+              });
+            }}
+          >
+            {saveResidencyPolicyMutation.isPending ? "保存中..." : "保存策略"}
+          </button>
+        </div>
+
+        {residencyRegionsQuery.isLoading || residencyPolicyQuery.isLoading ? (
+          <p className="feedback info">数据主权配置加载中...</p>
+        ) : null}
+        {residencyRegionsQuery.isError ? (
+          <p className="feedback error">地域列表加载失败：{toErrorMessage(residencyRegionsQuery.error)}</p>
+        ) : null}
+        {residencyPolicyQuery.isError ? (
+          <p className="feedback error">主权策略加载失败：{toErrorMessage(residencyPolicyQuery.error)}</p>
+        ) : null}
+        {residencyFeedback ? <p className="feedback success">{residencyFeedback}</p> : null}
+        {residencyError ? <p className="feedback error">{residencyError}</p> : null}
+
+        <div className="filters-row governance-inline-grid">
+          <label className="inline-field" htmlFor="replication-source-region">
+            复制源地域
+            <select
+              id="replication-source-region"
+              value={replicationSourceRegion}
+              onChange={(event) => setReplicationSourceRegion(event.target.value)}
+            >
+              <option value="">请选择</option>
+              {regionItems.map((region) => (
+                <option key={`src-${region.id}`} value={region.id}>
+                  {region.id}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="replication-target-region">
+            复制目标地域
+            <select
+              id="replication-target-region"
+              value={replicationTargetRegion}
+              onChange={(event) => setReplicationTargetRegion(event.target.value)}
+            >
+              <option value="">请选择</option>
+              {regionItems.map((region) => (
+                <option key={`target-${region.id}`} value={region.id}>
+                  {region.id}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="replication-reason">
+            原因
+            <input
+              id="replication-reason"
+              type="text"
+              value={replicationReason}
+              onChange={(event) => setReplicationReason(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+
+          <button
+            type="button"
+            className="submit-button"
+            disabled={createReplicationJobMutation.isPending}
+            onClick={() => {
+              const sourceRegion = replicationSourceRegion.trim();
+              const targetRegion = replicationTargetRegion.trim();
+              if (!sourceRegion || !targetRegion) {
+                setResidencyFeedback(null);
+                setResidencyError("复制任务的源地域与目标地域不能为空。");
+                return;
+              }
+              if (sourceRegion === targetRegion) {
+                setResidencyFeedback(null);
+                setResidencyError("源地域和目标地域不能相同。");
+                return;
+              }
+              setResidencyFeedback(null);
+              setResidencyError(null);
+              createReplicationJobMutation.mutate({
+                sourceRegion,
+                targetRegion,
+                reason: replicationReason.trim() || undefined,
+              });
+            }}
+          >
+            {createReplicationJobMutation.isPending ? "创建中..." : "创建复制任务"}
+          </button>
+        </div>
+
+        <div className="filters-row">
+          <label className="inline-field" htmlFor="replication-status-filter">
+            任务状态
+            <select
+              id="replication-status-filter"
+              value={replicationStatusFilter}
+              onChange={(event) =>
+                setReplicationStatusFilter(event.target.value as ReplicationJobStatus | "")
+              }
+            >
+              {REPLICATION_STATUS_FILTER_OPTIONS.map((option) => (
+                <option key={option.value || "all"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {replicationJobsQuery.isLoading ? <p className="feedback info">复制任务加载中...</p> : null}
+        {replicationJobsQuery.isError ? (
+          <p className="feedback error">
+            复制任务加载失败：{toErrorMessage(replicationJobsQuery.error)}
+          </p>
+        ) : null}
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>源地域</th>
+                <th>目标地域</th>
+                <th>状态</th>
+                <th>创建时间</th>
+                <th>原因</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {replicationItems.length === 0 ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={7}>
+                    暂无复制任务
+                  </td>
+                </tr>
+              ) : (
+                replicationItems.map((job) => {
+                  const canCancel = job.status === "pending" || job.status === "running";
+                  const isCancelling =
+                    cancelReplicationJobMutation.isPending &&
+                    cancelReplicationJobMutation.variables?.jobId === job.id;
+                  return (
+                    <tr key={job.id}>
+                      <td>{job.id}</td>
+                      <td>{job.sourceRegion}</td>
+                      <td>{job.targetRegion}</td>
+                      <td>{job.status}</td>
+                      <td>{formatDateTime(job.createdAt)}</td>
+                      <td>{job.reason ?? "--"}</td>
+                      <td>
+                        {canCancel ? (
+                          <button
+                            type="button"
+                            className="table-action"
+                            disabled={isCancelling}
+                            onClick={() => {
+                              const reason =
+                                typeof window !== "undefined"
+                                  ? window.prompt("取消原因（可选）", "") ?? ""
+                                  : "";
+                              cancelReplicationJobMutation.mutate({
+                                jobId: job.id,
+                                reason: reason.trim() || undefined,
+                              });
+                            }}
+                          >
+                            {isCancelling ? "取消中..." : "取消"}
+                          </button>
+                        ) : (
+                          <span className="tiny-feedback tiny-feedback-success">不可取消</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel">
+        <header>
+          <h2>Rule Hub 规则资产</h2>
+          <p>规则资产、版本发布与审批闭环。</p>
+        </header>
+
+        <div className="filters-row">
+          <label className="inline-field" htmlFor="rule-status-filter">
+            规则状态
+            <select
+              id="rule-status-filter"
+              value={ruleStatusFilter}
+              onChange={(event) => setRuleStatusFilter(event.target.value as RuleLifecycleStatus | "")}
+            >
+              {RULE_STATUS_FILTER_OPTIONS.map((option) => (
+                <option key={option.value || "all"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field governance-wide-field" htmlFor="rule-keyword">
+            关键字
+            <input
+              id="rule-keyword"
+              type="text"
+              value={ruleKeyword}
+              onChange={(event) => setRuleKeyword(event.target.value)}
+              placeholder="按名称或描述检索"
+            />
+          </label>
+        </div>
+
+        <div className="filters-row governance-inline-grid">
+          <label className="inline-field" htmlFor="rule-name">
+            资产名称
+            <input
+              id="rule-name"
+              type="text"
+              value={ruleName}
+              onChange={(event) => setRuleName(event.target.value)}
+              placeholder="例如：Prompt 审计规则"
+            />
+          </label>
+
+          <label className="inline-field governance-wide-field" htmlFor="rule-description">
+            说明
+            <input
+              id="rule-description"
+              type="text"
+              value={ruleDescription}
+              onChange={(event) => setRuleDescription(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+
+          <button
+            type="button"
+            className="submit-button"
+            disabled={createRuleAssetMutation.isPending}
+            onClick={() => {
+              const name = ruleName.trim();
+              if (!name) {
+                setRuleFeedback(null);
+                setRuleError("资产名称不能为空。");
+                return;
+              }
+              setRuleFeedback(null);
+              setRuleError(null);
+              createRuleAssetMutation.mutate({
+                name,
+                description: ruleDescription.trim() || undefined,
+              });
+            }}
+          >
+            {createRuleAssetMutation.isPending ? "创建中..." : "创建规则资产"}
+          </button>
+        </div>
+
+        {ruleAssetsQuery.isLoading ? <p className="feedback info">规则资产加载中...</p> : null}
+        {ruleAssetsQuery.isError ? (
+          <p className="feedback error">规则资产加载失败：{toErrorMessage(ruleAssetsQuery.error)}</p>
+        ) : null}
+        {ruleFeedback ? <p className="feedback success">{ruleFeedback}</p> : null}
+        {ruleError ? <p className="feedback error">{ruleError}</p> : null}
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>名称</th>
+                <th>状态</th>
+                <th>最新版本</th>
+                <th>发布版本</th>
+                <th>更新时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ruleItems.length === 0 ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={7}>
+                    暂无规则资产
+                  </td>
+                </tr>
+              ) : (
+                ruleItems.map((asset) => {
+                  const isSelected = selectedRuleAssetId === asset.id;
+                  return (
+                    <tr key={asset.id} className={isSelected ? "is-selected-row" : ""}>
+                      <td>{asset.id}</td>
+                      <td>{asset.name}</td>
+                      <td>{asset.status}</td>
+                      <td>{asset.latestVersion}</td>
+                      <td>{asset.publishedVersion ?? "--"}</td>
+                      <td>{formatDateTime(asset.updatedAt)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="table-action"
+                          onClick={() => {
+                            setSelectedRuleAssetId(asset.id);
+                            if (asset.latestVersion > 0) {
+                              const latestVersionText = String(asset.latestVersion);
+                              setRulePublishVersion(latestVersionText);
+                              setRuleRollbackVersion(latestVersionText);
+                              setRuleApprovalVersion(latestVersionText);
+                            }
+                          }}
+                        >
+                          {isSelected ? "已选中" : "选中"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {selectedRuleAsset ? (
+          <>
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field governance-wide-field" htmlFor="rule-version-content">
+                新版本内容
+                <input
+                  id="rule-version-content"
+                  type="text"
+                  value={ruleVersionContent}
+                  onChange={(event) => setRuleVersionContent(event.target.value)}
+                  placeholder="例如：deny tool=github.delete_repo when risk=high"
+                />
+              </label>
+
+              <label className="inline-field governance-wide-field" htmlFor="rule-version-changelog">
+                变更说明
+                <input
+                  id="rule-version-changelog"
+                  type="text"
+                  value={ruleVersionChangelog}
+                  onChange={(event) => setRuleVersionChangelog(event.target.value)}
+                  placeholder="可选"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={createRuleAssetVersionMutation.isPending}
+                onClick={() => {
+                  const content = ruleVersionContent.trim();
+                  if (!content) {
+                    setRuleFeedback(null);
+                    setRuleError("版本内容不能为空。");
+                    return;
+                  }
+                  setRuleFeedback(null);
+                  setRuleError(null);
+                  createRuleAssetVersionMutation.mutate({
+                    assetId: selectedRuleAsset.id,
+                    content,
+                    changelog: ruleVersionChangelog.trim() || undefined,
+                  });
+                }}
+              >
+                {createRuleAssetVersionMutation.isPending ? "创建中..." : "创建版本"}
+              </button>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="rule-publish-version">
+                发布版本
+                <input
+                  id="rule-publish-version"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={rulePublishVersion}
+                  onChange={(event) => setRulePublishVersion(event.target.value)}
+                  placeholder="例如：1"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={publishRuleAssetMutation.isPending}
+                onClick={() => {
+                  const version = Number(rulePublishVersion);
+                  if (!Number.isInteger(version) || version < 1) {
+                    setRuleFeedback(null);
+                    setRuleError("发布版本必须是正整数。");
+                    return;
+                  }
+                  setRuleFeedback(null);
+                  setRuleError(null);
+                  publishRuleAssetMutation.mutate({ assetId: selectedRuleAsset.id, version });
+                }}
+              >
+                {publishRuleAssetMutation.isPending ? "发布中..." : "发布版本"}
+              </button>
+
+              <label className="inline-field" htmlFor="rule-rollback-version">
+                回滚版本
+                <input
+                  id="rule-rollback-version"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={ruleRollbackVersion}
+                  onChange={(event) => setRuleRollbackVersion(event.target.value)}
+                  placeholder="例如：1"
+                />
+              </label>
+
+              <label className="inline-field governance-wide-field" htmlFor="rule-rollback-reason">
+                回滚原因
+                <input
+                  id="rule-rollback-reason"
+                  type="text"
+                  value={ruleRollbackReason}
+                  onChange={(event) => setRuleRollbackReason(event.target.value)}
+                  placeholder="可选"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={rollbackRuleAssetMutation.isPending}
+                onClick={() => {
+                  const version = Number(ruleRollbackVersion);
+                  if (!Number.isInteger(version) || version < 1) {
+                    setRuleFeedback(null);
+                    setRuleError("回滚版本必须是正整数。");
+                    return;
+                  }
+                  setRuleFeedback(null);
+                  setRuleError(null);
+                  rollbackRuleAssetMutation.mutate({
+                    assetId: selectedRuleAsset.id,
+                    version,
+                    reason: ruleRollbackReason.trim() || undefined,
+                  });
+                }}
+              >
+                {rollbackRuleAssetMutation.isPending ? "回滚中..." : "执行回滚"}
+              </button>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="rule-approval-version">
+                审批版本
+                <input
+                  id="rule-approval-version"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={ruleApprovalVersion}
+                  onChange={(event) => setRuleApprovalVersion(event.target.value)}
+                  placeholder="例如：1"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="rule-approval-decision">
+                审批决策
+                <select
+                  id="rule-approval-decision"
+                  value={ruleApprovalDecision}
+                  onChange={(event) =>
+                    setRuleApprovalDecision(event.target.value as RuleApprovalDecision)
+                  }
+                >
+                  {RULE_APPROVAL_DECISION_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="inline-field governance-wide-field" htmlFor="rule-approval-reason">
+                审批意见
+                <input
+                  id="rule-approval-reason"
+                  type="text"
+                  value={ruleApprovalReason}
+                  onChange={(event) => setRuleApprovalReason(event.target.value)}
+                  placeholder="可选"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={createRuleApprovalMutation.isPending}
+                onClick={() => {
+                  const version = Number(ruleApprovalVersion);
+                  if (!Number.isInteger(version) || version < 1) {
+                    setRuleFeedback(null);
+                    setRuleError("审批版本必须是正整数。");
+                    return;
+                  }
+                  setRuleFeedback(null);
+                  setRuleError(null);
+                  createRuleApprovalMutation.mutate({
+                    assetId: selectedRuleAsset.id,
+                    version,
+                    decision: ruleApprovalDecision,
+                    reason: ruleApprovalReason.trim() || undefined,
+                  });
+                }}
+              >
+                {createRuleApprovalMutation.isPending ? "提交中..." : "提交审批"}
+              </button>
+            </div>
+
+            {ruleVersionsQuery.isLoading ? <p className="feedback info">版本列表加载中...</p> : null}
+            {ruleVersionsQuery.isError ? (
+              <p className="feedback error">版本列表加载失败：{toErrorMessage(ruleVersionsQuery.error)}</p>
+            ) : null}
+            {ruleApprovalsQuery.isLoading ? <p className="feedback info">审批记录加载中...</p> : null}
+            {ruleApprovalsQuery.isError ? (
+              <p className="feedback error">审批记录加载失败：{toErrorMessage(ruleApprovalsQuery.error)}</p>
+            ) : null}
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>Version</th>
+                    <th>Content</th>
+                    <th>Changelog</th>
+                    <th>Created At</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ruleVersionItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={4}>
+                        暂无版本记录
+                      </td>
+                    </tr>
+                  ) : (
+                    ruleVersionItems.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.version}</td>
+                        <td>{item.content}</td>
+                        <td>{item.changelog ?? "--"}</td>
+                        <td>{formatDateTime(item.createdAt)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Version</th>
+                    <th>Decision</th>
+                    <th>Approver</th>
+                    <th>Reason</th>
+                    <th>Created At</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ruleApprovalItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={6}>
+                        暂无审批记录
+                      </td>
+                    </tr>
+                  ) : (
+                    ruleApprovalItems.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.id}</td>
+                        <td>{item.version}</td>
+                        <td>{item.decision}</td>
+                        <td>{item.approverEmail ?? item.approverUserId}</td>
+                        <td>{item.reason ?? "--"}</td>
+                        <td>{formatDateTime(item.createdAt)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <p className="feedback empty">请选择一个规则资产查看版本与审批详情。</p>
+        )}
+      </section>
+
+      <section className="panel">
+        <header>
+          <h2>MCP 治理</h2>
+          <p>工具策略、审批请求和调用审计。</p>
+        </header>
+
+        <div className="filters-row">
+          <label className="inline-field governance-wide-field" htmlFor="mcp-policy-keyword">
+            策略检索
+            <input
+              id="mcp-policy-keyword"
+              type="text"
+              value={mcpPolicyKeyword}
+              onChange={(event) => setMcpPolicyKeyword(event.target.value)}
+              placeholder="按 toolId 过滤"
+            />
+          </label>
+        </div>
+
+        <div className="filters-row governance-inline-grid">
+          <label className="inline-field" htmlFor="mcp-policy-tool-id">
+            Tool ID
+            <input
+              id="mcp-policy-tool-id"
+              type="text"
+              value={mcpPolicyToolId}
+              onChange={(event) => setMcpPolicyToolId(event.target.value)}
+              placeholder="例如：github.delete_repo"
+            />
+          </label>
+
+          <label className="inline-field" htmlFor="mcp-policy-risk-level">
+            风险等级
+            <select
+              id="mcp-policy-risk-level"
+              value={mcpPolicyRiskLevel}
+              onChange={(event) => setMcpPolicyRiskLevel(event.target.value as McpRiskLevel)}
+            >
+              {MCP_RISK_LEVEL_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="mcp-policy-decision">
+            策略决策
+            <select
+              id="mcp-policy-decision"
+              value={mcpPolicyDecision}
+              onChange={(event) => setMcpPolicyDecision(event.target.value as McpToolDecision)}
+            >
+              {MCP_DECISION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field governance-wide-field" htmlFor="mcp-policy-reason">
+            策略说明
+            <input
+              id="mcp-policy-reason"
+              type="text"
+              value={mcpPolicyReason}
+              onChange={(event) => setMcpPolicyReason(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+
+          <button
+            type="button"
+            className="submit-button"
+            disabled={upsertMcpPolicyMutation.isPending}
+            onClick={() => {
+              const toolId = mcpPolicyToolId.trim();
+              if (!toolId) {
+                setMcpFeedback(null);
+                setMcpError("Tool ID 不能为空。");
+                return;
+              }
+              setMcpFeedback(null);
+              setMcpError(null);
+              upsertMcpPolicyMutation.mutate({
+                toolId,
+                riskLevel: mcpPolicyRiskLevel,
+                decision: mcpPolicyDecision,
+                reason: mcpPolicyReason.trim() || undefined,
+              });
+            }}
+          >
+            {upsertMcpPolicyMutation.isPending ? "保存中..." : "保存策略"}
+          </button>
+        </div>
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>Tool ID</th>
+                <th>Risk</th>
+                <th>Decision</th>
+                <th>Reason</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mcpPolicyItems.length === 0 ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={5}>
+                    暂无 MCP 策略
+                  </td>
+                </tr>
+              ) : (
+                mcpPolicyItems.map((policy) => (
+                  <tr key={policy.toolId}>
+                    <td>{policy.toolId}</td>
+                    <td>{policy.riskLevel}</td>
+                    <td>{policy.decision}</td>
+                    <td>{policy.reason ?? "--"}</td>
+                    <td>{formatDateTime(policy.updatedAt)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="filters-row governance-inline-grid">
+          <label className="inline-field" htmlFor="mcp-approval-status-filter">
+            审批状态
+            <select
+              id="mcp-approval-status-filter"
+              value={mcpApprovalStatusFilter}
+              onChange={(event) =>
+                setMcpApprovalStatusFilter(event.target.value as McpApprovalRequest["status"] | "")
+              }
+            >
+              {MCP_APPROVAL_STATUS_FILTER_OPTIONS.map((option) => (
+                <option key={option.value || "all"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="mcp-approval-tool-id">
+            新建审批 Tool ID
+            <input
+              id="mcp-approval-tool-id"
+              type="text"
+              value={mcpApprovalToolId}
+              onChange={(event) => setMcpApprovalToolId(event.target.value)}
+              placeholder="例如：github.delete_repo"
+            />
+          </label>
+
+          <label className="inline-field governance-wide-field" htmlFor="mcp-approval-reason">
+            申请原因
+            <input
+              id="mcp-approval-reason"
+              type="text"
+              value={mcpApprovalReason}
+              onChange={(event) => setMcpApprovalReason(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+
+          <button
+            type="button"
+            className="submit-button"
+            disabled={createMcpApprovalMutation.isPending}
+            onClick={() => {
+              const toolId = mcpApprovalToolId.trim();
+              if (!toolId) {
+                setMcpFeedback(null);
+                setMcpError("审批请求的 Tool ID 不能为空。");
+                return;
+              }
+              setMcpFeedback(null);
+              setMcpError(null);
+              createMcpApprovalMutation.mutate({
+                toolId,
+                reason: mcpApprovalReason.trim() || undefined,
+              });
+            }}
+          >
+            {createMcpApprovalMutation.isPending ? "提交中..." : "提交审批请求"}
+          </button>
+        </div>
+
+        <div className="filters-row">
+          <label className="inline-field governance-wide-field" htmlFor="mcp-review-reason">
+            审批操作说明（通过/拒绝时可选）
+            <input
+              id="mcp-review-reason"
+              type="text"
+              value={mcpReviewReason}
+              onChange={(event) => setMcpReviewReason(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+        </div>
+
+        {mcpPoliciesQuery.isLoading || mcpApprovalsQuery.isLoading || mcpInvocationsQuery.isLoading ? (
+          <p className="feedback info">MCP 数据加载中...</p>
+        ) : null}
+        {mcpPoliciesQuery.isError ? (
+          <p className="feedback error">MCP 策略加载失败：{toErrorMessage(mcpPoliciesQuery.error)}</p>
+        ) : null}
+        {mcpApprovalsQuery.isError ? (
+          <p className="feedback error">审批列表加载失败：{toErrorMessage(mcpApprovalsQuery.error)}</p>
+        ) : null}
+        {mcpInvocationsQuery.isError ? (
+          <p className="feedback error">调用审计加载失败：{toErrorMessage(mcpInvocationsQuery.error)}</p>
+        ) : null}
+        {mcpFeedback ? <p className="feedback success">{mcpFeedback}</p> : null}
+        {mcpError ? <p className="feedback error">{mcpError}</p> : null}
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>审批 ID</th>
+                <th>Tool ID</th>
+                <th>状态</th>
+                <th>申请人</th>
+                <th>创建时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mcpApprovalItems.length === 0 ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={6}>
+                    暂无审批请求
+                  </td>
+                </tr>
+              ) : (
+                mcpApprovalItems.map((approval) => {
+                  const isMutating =
+                    reviewMcpApprovalMutation.isPending &&
+                    reviewMcpApprovalMutation.variables?.approvalId === approval.id;
+                  return (
+                    <tr key={approval.id}>
+                      <td>{approval.id}</td>
+                      <td>{approval.toolId}</td>
+                      <td>{approval.status}</td>
+                      <td>{approval.requestedByEmail ?? approval.requestedByUserId}</td>
+                      <td>{formatDateTime(approval.createdAt)}</td>
+                      <td>
+                        {approval.status === "pending" ? (
+                          <div className="governance-action-row">
+                            <button
+                              type="button"
+                              className="table-action"
+                              disabled={isMutating}
+                              onClick={() =>
+                                reviewMcpApprovalMutation.mutate({
+                                  approvalId: approval.id,
+                                  status: "approved",
+                                  reason: mcpReviewReason.trim() || undefined,
+                                })
+                              }
+                            >
+                              通过
+                            </button>
+                            <button
+                              type="button"
+                              className="table-action"
+                              disabled={isMutating}
+                              onClick={() =>
+                                reviewMcpApprovalMutation.mutate({
+                                  approvalId: approval.id,
+                                  status: "rejected",
+                                  reason: mcpReviewReason.trim() || undefined,
+                                })
+                              }
+                            >
+                              拒绝
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="tiny-feedback tiny-feedback-success">已处理</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="filters-row">
+          <label className="inline-field governance-wide-field" htmlFor="mcp-invocation-tool-id">
+            调用审计 Tool ID
+            <input
+              id="mcp-invocation-tool-id"
+              type="text"
+              value={mcpInvocationToolId}
+              onChange={(event) => setMcpInvocationToolId(event.target.value)}
+              placeholder="留空查看全部"
+            />
+          </label>
+        </div>
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Tool ID</th>
+                <th>Decision</th>
+                <th>Result</th>
+                <th>审批请求</th>
+                <th>时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mcpInvocationItems.length === 0 ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={6}>
+                    暂无调用审计
+                  </td>
+                </tr>
+              ) : (
+                mcpInvocationItems.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.id}</td>
+                    <td>{item.toolId}</td>
+                    <td>{item.decision}</td>
+                    <td>{item.result}</td>
+                    <td>{item.approvalRequestId ?? "--"}</td>
+                    <td>{formatDateTime(item.createdAt)}</td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>

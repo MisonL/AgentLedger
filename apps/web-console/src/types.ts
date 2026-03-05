@@ -216,6 +216,264 @@ export interface AlertListResponse {
   nextCursor: string | null;
 }
 
+export type DataResidencyMode = "single_region" | "active_active";
+export type ReplicationJobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+export type RuleLifecycleStatus = "draft" | "published" | "deprecated";
+export type RuleApprovalDecision = "approved" | "rejected";
+export type McpRiskLevel = "low" | "medium" | "high";
+export type McpToolDecision = "allow" | "deny" | "require_approval";
+export type McpApprovalStatus = "pending" | "approved" | "rejected";
+
+export interface RegionDescriptor {
+  id: string;
+  name: string;
+  active: boolean;
+  description?: string;
+}
+
+export interface ResidencyRegionListResponse {
+  items: RegionDescriptor[];
+  total: number;
+}
+
+export interface TenantResidencyPolicy {
+  tenantId: string;
+  mode: DataResidencyMode;
+  primaryRegion: string;
+  replicaRegions: string[];
+  allowCrossRegionTransfer: boolean;
+  requireTransferApproval: boolean;
+  updatedAt: string;
+}
+
+export interface ReplicationJob {
+  id: string;
+  tenantId: string;
+  sourceRegion: string;
+  targetRegion: string;
+  status: ReplicationJobStatus;
+  reason?: string;
+  createdByUserId?: string;
+  approvedByUserId?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+export interface ReplicationJobListInput {
+  status?: ReplicationJobStatus;
+  sourceRegion?: string;
+  targetRegion?: string;
+  limit?: number;
+}
+
+export interface ReplicationJobListResponse {
+  items: ReplicationJob[];
+  total: number;
+  filters: ReplicationJobListInput;
+}
+
+export interface ReplicationJobCreateInput {
+  sourceRegion: string;
+  targetRegion: string;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ReplicationJobCancelInput {
+  reason?: string;
+}
+
+export interface RuleScopeBinding {
+  organizations?: string[];
+  projects?: string[];
+  clients?: string[];
+}
+
+export interface RuleAsset {
+  id: string;
+  tenantId: string;
+  name: string;
+  description?: string;
+  status: RuleLifecycleStatus;
+  latestVersion: number;
+  publishedVersion?: number;
+  scopeBinding: RuleScopeBinding;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RuleAssetListInput {
+  status?: RuleLifecycleStatus;
+  keyword?: string;
+  limit?: number;
+}
+
+export interface RuleAssetListResponse {
+  items: RuleAsset[];
+  total: number;
+  filters: RuleAssetListInput;
+}
+
+export interface RuleAssetCreateInput {
+  name: string;
+  description?: string;
+  scopeBinding?: RuleScopeBinding;
+}
+
+export interface RuleAssetVersion {
+  id: string;
+  tenantId: string;
+  assetId: string;
+  version: number;
+  content: string;
+  changelog?: string;
+  createdByUserId?: string;
+  createdAt: string;
+}
+
+export interface RuleAssetVersionCreateInput {
+  content: string;
+  changelog?: string;
+}
+
+export interface RuleApproval {
+  id: string;
+  tenantId: string;
+  assetId: string;
+  version: number;
+  approverUserId: string;
+  approverEmail?: string;
+  decision: RuleApprovalDecision;
+  reason?: string;
+  createdAt: string;
+}
+
+export interface RuleApprovalListInput {
+  version?: number;
+  decision?: RuleApprovalDecision;
+  limit?: number;
+}
+
+export interface RuleApprovalListResponse {
+  items: RuleApproval[];
+  total: number;
+  filters: RuleApprovalListInput;
+}
+
+export interface RuleApprovalCreateInput {
+  version: number;
+  decision: RuleApprovalDecision;
+  reason?: string;
+}
+
+export interface RulePublishInput {
+  version: number;
+}
+
+export interface RuleRollbackInput {
+  version: number;
+  reason?: string;
+}
+
+export interface McpToolPolicy {
+  tenantId: string;
+  toolId: string;
+  riskLevel: McpRiskLevel;
+  decision: McpToolDecision;
+  reason?: string;
+  updatedAt: string;
+}
+
+export interface McpToolPolicyListInput {
+  riskLevel?: McpRiskLevel;
+  decision?: McpToolDecision;
+  keyword?: string;
+  limit?: number;
+}
+
+export interface McpToolPolicyListResponse {
+  items: McpToolPolicy[];
+  total: number;
+  filters: McpToolPolicyListInput;
+}
+
+export interface McpToolPolicyUpsertInput {
+  riskLevel: McpRiskLevel;
+  decision: McpToolDecision;
+  reason?: string;
+}
+
+export interface McpApprovalRequest {
+  id: string;
+  tenantId: string;
+  toolId: string;
+  status: McpApprovalStatus;
+  requestedByUserId: string;
+  requestedByEmail?: string;
+  reason?: string;
+  reviewedByUserId?: string;
+  reviewedByEmail?: string;
+  reviewReason?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface McpApprovalListInput {
+  status?: McpApprovalStatus;
+  limit?: number;
+}
+
+export interface McpApprovalListResponse {
+  items: McpApprovalRequest[];
+  total: number;
+  filters: McpApprovalListInput;
+}
+
+export interface McpApprovalCreateInput {
+  toolId: string;
+  reason?: string;
+}
+
+export interface McpApprovalReviewInput {
+  reason?: string;
+}
+
+export interface McpInvocationAudit {
+  id: string;
+  tenantId: string;
+  toolId: string;
+  decision: McpToolDecision;
+  result: "allowed" | "blocked" | "approved";
+  approvalRequestId?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface McpInvocationListInput {
+  toolId?: string;
+  decision?: McpToolDecision;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
+export interface McpInvocationListResponse {
+  items: McpInvocationAudit[];
+  total: number;
+  filters: McpInvocationListInput;
+}
+
+export interface McpInvocationCreateInput {
+  toolId: string;
+  decision?: McpToolDecision;
+  result?: "allowed" | "blocked" | "approved";
+  approvalRequestId?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface SessionEvent {
   id: string;
   sessionId: string;

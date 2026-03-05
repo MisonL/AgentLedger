@@ -12,13 +12,50 @@ import type {
   AuthRefreshResponse,
   AuthTokens,
   CreateSourceInput,
+  DataResidencyMode,
   DownloadFile,
   ExportFormat,
   HeatmapCell,
+  McpApprovalListInput,
+  McpApprovalListResponse,
+  McpApprovalRequest,
+  McpApprovalReviewInput,
+  McpInvocationCreateInput,
+  McpInvocationListInput,
+  McpInvocationListResponse,
+  McpInvocationAudit,
+  McpRiskLevel,
+  McpToolDecision,
+  McpToolPolicyListInput,
+  McpToolPolicyListResponse,
+  McpToolPolicyUpsertInput,
+  McpToolPolicy,
   AuthUserProfile,
   PricingCatalog,
   PricingCatalogEntry,
   PricingCatalogUpsertInput,
+  RegionDescriptor,
+  ReplicationJobCancelInput,
+  ReplicationJobCreateInput,
+  ReplicationJobListInput,
+  ReplicationJobListResponse,
+  ReplicationJobStatus,
+  ReplicationJob,
+  ResidencyRegionListResponse,
+  RuleAssetCreateInput,
+  RuleAssetListInput,
+  RuleAssetListResponse,
+  RuleApprovalCreateInput,
+  RuleApprovalDecision,
+  RuleApprovalListInput,
+  RuleApprovalListResponse,
+  RuleApproval,
+  RuleAsset,
+  RuleAssetVersionCreateInput,
+  RuleAssetVersion,
+  RuleLifecycleStatus,
+  RulePublishInput,
+  RuleRollbackInput,
   SourceAccessMode,
   SourceConnectionTestResponse,
   SourceHealth,
@@ -46,6 +83,7 @@ import type {
   UsageSessionBreakdownItem,
   UsageWeeklySummaryQueryInput,
   UsageWeeklySummaryResponse,
+  TenantResidencyPolicy,
 } from "./types";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(
@@ -76,6 +114,23 @@ const USAGE_EXPORT_DIMENSIONS = [
   "heatmap",
 ] as const;
 const USAGE_METRICS = ["tokens", "cost", "sessions"] as const;
+const DATA_RESIDENCY_MODES: DataResidencyMode[] = ["single_region", "active_active"];
+const REPLICATION_JOB_STATUSES: ReplicationJobStatus[] = [
+  "pending",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+];
+const RULE_LIFECYCLE_STATUSES: RuleLifecycleStatus[] = [
+  "draft",
+  "published",
+  "deprecated",
+];
+const RULE_APPROVAL_DECISIONS: RuleApprovalDecision[] = ["approved", "rejected"];
+const MCP_RISK_LEVELS: McpRiskLevel[] = ["low", "medium", "high"];
+const MCP_TOOL_DECISIONS: McpToolDecision[] = ["allow", "deny", "require_approval"];
+const MCP_APPROVAL_STATUSES = ["pending", "approved", "rejected"] as const;
 
 function daysAgo(days: number): Date {
   const date = new Date();
@@ -241,6 +296,465 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isISODateString(value: unknown): value is string {
   return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
+function isDataResidencyMode(value: unknown): value is DataResidencyMode {
+  return typeof value === "string" && DATA_RESIDENCY_MODES.includes(value as DataResidencyMode);
+}
+
+function isReplicationJobStatus(value: unknown): value is ReplicationJobStatus {
+  return (
+    typeof value === "string" &&
+    REPLICATION_JOB_STATUSES.includes(value as ReplicationJobStatus)
+  );
+}
+
+function isRuleLifecycleStatus(value: unknown): value is RuleLifecycleStatus {
+  return (
+    typeof value === "string" &&
+    RULE_LIFECYCLE_STATUSES.includes(value as RuleLifecycleStatus)
+  );
+}
+
+function isRuleApprovalDecision(value: unknown): value is RuleApprovalDecision {
+  return (
+    typeof value === "string" &&
+    RULE_APPROVAL_DECISIONS.includes(value as RuleApprovalDecision)
+  );
+}
+
+function isMcpRiskLevel(value: unknown): value is McpRiskLevel {
+  return typeof value === "string" && MCP_RISK_LEVELS.includes(value as McpRiskLevel);
+}
+
+function isMcpToolDecision(value: unknown): value is McpToolDecision {
+  return typeof value === "string" && MCP_TOOL_DECISIONS.includes(value as McpToolDecision);
+}
+
+function isMcpApprovalStatus(value: unknown): value is McpApprovalRequest["status"] {
+  return (
+    typeof value === "string" &&
+    MCP_APPROVAL_STATUSES.includes(value as McpApprovalRequest["status"])
+  );
+}
+
+function isRegionDescriptor(value: unknown): value is RegionDescriptor {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const descriptionOk =
+    value.description === undefined ||
+    value.description === null ||
+    typeof value.description === "string";
+  return (
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.active === "boolean" &&
+    descriptionOk
+  );
+}
+
+function isResidencyRegionListResponse(value: unknown): value is ResidencyRegionListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isRegionDescriptor(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0
+  );
+}
+
+function isTenantResidencyPolicy(value: unknown): value is TenantResidencyPolicy {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.tenantId === "string" &&
+    isDataResidencyMode(value.mode) &&
+    typeof value.primaryRegion === "string" &&
+    Array.isArray(value.replicaRegions) &&
+    value.replicaRegions.every((region) => typeof region === "string") &&
+    typeof value.allowCrossRegionTransfer === "boolean" &&
+    typeof value.requireTransferApproval === "boolean" &&
+    isISODateString(value.updatedAt)
+  );
+}
+
+function isReplicationJob(value: unknown): value is ReplicationJob {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const reasonOk = value.reason === undefined || value.reason === null || typeof value.reason === "string";
+  const createdByOk =
+    value.createdByUserId === undefined ||
+    value.createdByUserId === null ||
+    typeof value.createdByUserId === "string";
+  const approvedByOk =
+    value.approvedByUserId === undefined ||
+    value.approvedByUserId === null ||
+    typeof value.approvedByUserId === "string";
+  const startedAtOk =
+    value.startedAt === undefined || value.startedAt === null || isISODateString(value.startedAt);
+  const finishedAtOk =
+    value.finishedAt === undefined || value.finishedAt === null || isISODateString(value.finishedAt);
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.tenantId === "string" &&
+    typeof value.sourceRegion === "string" &&
+    typeof value.targetRegion === "string" &&
+    isReplicationJobStatus(value.status) &&
+    reasonOk &&
+    createdByOk &&
+    approvedByOk &&
+    isRecord(value.metadata) &&
+    isISODateString(value.createdAt) &&
+    isISODateString(value.updatedAt) &&
+    startedAtOk &&
+    finishedAtOk
+  );
+}
+
+function isReplicationJobListInput(value: unknown): value is ReplicationJobListInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const statusOk = value.status === undefined || isReplicationJobStatus(value.status);
+  const sourceRegionOk = value.sourceRegion === undefined || typeof value.sourceRegion === "string";
+  const targetRegionOk = value.targetRegion === undefined || typeof value.targetRegion === "string";
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
+  return statusOk && sourceRegionOk && targetRegionOk && limitOk;
+}
+
+function isReplicationJobListResponse(value: unknown): value is ReplicationJobListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const filtersOk = isReplicationJobListInput(value.filters);
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isReplicationJob(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    filtersOk
+  );
+}
+
+function isRuleAsset(value: unknown): value is RuleAsset {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const descriptionOk =
+    value.description === undefined ||
+    value.description === null ||
+    typeof value.description === "string";
+  const publishedVersionOk =
+    value.publishedVersion === undefined ||
+    value.publishedVersion === null ||
+    (typeof value.publishedVersion === "number" &&
+      Number.isInteger(value.publishedVersion) &&
+      value.publishedVersion >= 0);
+  const scopeBindingOk = isRecord(value.scopeBinding);
+  return (
+    typeof value.id === "string" &&
+    typeof value.tenantId === "string" &&
+    typeof value.name === "string" &&
+    descriptionOk &&
+    isRuleLifecycleStatus(value.status) &&
+    typeof value.latestVersion === "number" &&
+    Number.isInteger(value.latestVersion) &&
+    value.latestVersion >= 0 &&
+    publishedVersionOk &&
+    scopeBindingOk &&
+    isISODateString(value.createdAt) &&
+    isISODateString(value.updatedAt)
+  );
+}
+
+function isRuleAssetListInput(value: unknown): value is RuleAssetListInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const statusOk = value.status === undefined || isRuleLifecycleStatus(value.status);
+  const keywordOk = value.keyword === undefined || typeof value.keyword === "string";
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
+  return statusOk && keywordOk && limitOk;
+}
+
+function isRuleAssetListResponse(value: unknown): value is RuleAssetListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const filtersOk = isRuleAssetListInput(value.filters);
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isRuleAsset(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    filtersOk
+  );
+}
+
+function isRuleAssetVersion(value: unknown): value is RuleAssetVersion {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const changelogOk =
+    value.changelog === undefined || value.changelog === null || typeof value.changelog === "string";
+  const createdByOk =
+    value.createdByUserId === undefined ||
+    value.createdByUserId === null ||
+    typeof value.createdByUserId === "string";
+  return (
+    typeof value.id === "string" &&
+    typeof value.tenantId === "string" &&
+    typeof value.assetId === "string" &&
+    typeof value.version === "number" &&
+    Number.isInteger(value.version) &&
+    value.version > 0 &&
+    typeof value.content === "string" &&
+    changelogOk &&
+    createdByOk &&
+    isISODateString(value.createdAt)
+  );
+}
+
+function isRuleAssetVersionListResponse(value: unknown): value is {
+  items: RuleAssetVersion[];
+  total: number;
+} {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isRuleAssetVersion(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0
+  );
+}
+
+function isRuleApproval(value: unknown): value is RuleApproval {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const approverEmailOk =
+    value.approverEmail === undefined ||
+    value.approverEmail === null ||
+    typeof value.approverEmail === "string";
+  const reasonOk =
+    value.reason === undefined || value.reason === null || typeof value.reason === "string";
+  return (
+    typeof value.id === "string" &&
+    typeof value.tenantId === "string" &&
+    typeof value.assetId === "string" &&
+    typeof value.version === "number" &&
+    Number.isInteger(value.version) &&
+    value.version > 0 &&
+    typeof value.approverUserId === "string" &&
+    approverEmailOk &&
+    isRuleApprovalDecision(value.decision) &&
+    reasonOk &&
+    isISODateString(value.createdAt)
+  );
+}
+
+function isRuleApprovalListInput(value: unknown): value is RuleApprovalListInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const versionOk =
+    value.version === undefined ||
+    (typeof value.version === "number" && Number.isInteger(value.version) && value.version > 0);
+  const decisionOk = value.decision === undefined || isRuleApprovalDecision(value.decision);
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
+  return versionOk && decisionOk && limitOk;
+}
+
+function isRuleApprovalListResponse(value: unknown): value is RuleApprovalListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const filtersOk = isRuleApprovalListInput(value.filters);
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isRuleApproval(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    filtersOk
+  );
+}
+
+function isMcpToolPolicy(value: unknown): value is McpToolPolicy {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const reasonOk = value.reason === undefined || value.reason === null || typeof value.reason === "string";
+  return (
+    typeof value.tenantId === "string" &&
+    typeof value.toolId === "string" &&
+    isMcpRiskLevel(value.riskLevel) &&
+    isMcpToolDecision(value.decision) &&
+    reasonOk &&
+    isISODateString(value.updatedAt)
+  );
+}
+
+function isMcpToolPolicyListInput(value: unknown): value is McpToolPolicyListInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const riskLevelOk = value.riskLevel === undefined || isMcpRiskLevel(value.riskLevel);
+  const decisionOk = value.decision === undefined || isMcpToolDecision(value.decision);
+  const keywordOk = value.keyword === undefined || typeof value.keyword === "string";
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
+  return riskLevelOk && decisionOk && keywordOk && limitOk;
+}
+
+function isMcpToolPolicyListResponse(value: unknown): value is McpToolPolicyListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const filtersOk = isMcpToolPolicyListInput(value.filters);
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isMcpToolPolicy(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    filtersOk
+  );
+}
+
+function isMcpApprovalRequest(value: unknown): value is McpApprovalRequest {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const requestedByEmailOk =
+    value.requestedByEmail === undefined ||
+    value.requestedByEmail === null ||
+    typeof value.requestedByEmail === "string";
+  const reasonOk = value.reason === undefined || value.reason === null || typeof value.reason === "string";
+  const reviewedByUserIdOk =
+    value.reviewedByUserId === undefined ||
+    value.reviewedByUserId === null ||
+    typeof value.reviewedByUserId === "string";
+  const reviewedByEmailOk =
+    value.reviewedByEmail === undefined ||
+    value.reviewedByEmail === null ||
+    typeof value.reviewedByEmail === "string";
+  const reviewReasonOk =
+    value.reviewReason === undefined ||
+    value.reviewReason === null ||
+    typeof value.reviewReason === "string";
+  return (
+    typeof value.id === "string" &&
+    typeof value.tenantId === "string" &&
+    typeof value.toolId === "string" &&
+    isMcpApprovalStatus(value.status) &&
+    typeof value.requestedByUserId === "string" &&
+    requestedByEmailOk &&
+    reasonOk &&
+    reviewedByUserIdOk &&
+    reviewedByEmailOk &&
+    reviewReasonOk &&
+    isISODateString(value.createdAt) &&
+    isISODateString(value.updatedAt)
+  );
+}
+
+function isMcpApprovalListInput(value: unknown): value is McpApprovalListInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const statusOk = value.status === undefined || isMcpApprovalStatus(value.status);
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
+  return statusOk && limitOk;
+}
+
+function isMcpApprovalListResponse(value: unknown): value is McpApprovalListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const filtersOk = isMcpApprovalListInput(value.filters);
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isMcpApprovalRequest(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    filtersOk
+  );
+}
+
+function isMcpInvocationAudit(value: unknown): value is McpInvocationAudit {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const approvalRequestIdOk =
+    value.approvalRequestId === undefined ||
+    value.approvalRequestId === null ||
+    typeof value.approvalRequestId === "string";
+  const resultOk =
+    value.result === "allowed" || value.result === "blocked" || value.result === "approved";
+  return (
+    typeof value.id === "string" &&
+    typeof value.tenantId === "string" &&
+    typeof value.toolId === "string" &&
+    isMcpToolDecision(value.decision) &&
+    resultOk &&
+    approvalRequestIdOk &&
+    isRecord(value.metadata) &&
+    isISODateString(value.createdAt)
+  );
+}
+
+function isMcpInvocationListInput(value: unknown): value is McpInvocationListInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const toolIdOk = value.toolId === undefined || typeof value.toolId === "string";
+  const decisionOk = value.decision === undefined || isMcpToolDecision(value.decision);
+  const fromOk = value.from === undefined || isISODateString(value.from);
+  const toOk = value.to === undefined || isISODateString(value.to);
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
+  return toolIdOk && decisionOk && fromOk && toOk && limitOk;
+}
+
+function isMcpInvocationListResponse(value: unknown): value is McpInvocationListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const filtersOk = isMcpInvocationListInput(value.filters);
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isMcpInvocationAudit(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    filtersOk
+  );
 }
 
 function isSession(value: unknown): value is Session {
@@ -633,6 +1147,134 @@ function buildAlertListQuery(input?: AlertListInput): string {
   }
   if (typeof input.cursor === "string" && input.cursor.trim().length > 0) {
     params.set("cursor", input.cursor.trim());
+  }
+
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildReplicationJobListQuery(input?: ReplicationJobListInput): string {
+  if (!input) {
+    return "";
+  }
+
+  const params = new URLSearchParams();
+  if (input.status) {
+    params.set("status", input.status);
+  }
+  if (typeof input.sourceRegion === "string" && input.sourceRegion.trim().length > 0) {
+    params.set("sourceRegion", input.sourceRegion.trim());
+  }
+  if (typeof input.targetRegion === "string" && input.targetRegion.trim().length > 0) {
+    params.set("targetRegion", input.targetRegion.trim());
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit > 0) {
+    params.set("limit", String(input.limit));
+  }
+
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildRuleAssetListQuery(input?: RuleAssetListInput): string {
+  if (!input) {
+    return "";
+  }
+
+  const params = new URLSearchParams();
+  if (input.status) {
+    params.set("status", input.status);
+  }
+  if (typeof input.keyword === "string" && input.keyword.trim().length > 0) {
+    params.set("keyword", input.keyword.trim());
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit > 0) {
+    params.set("limit", String(input.limit));
+  }
+
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildRuleApprovalListQuery(input?: RuleApprovalListInput): string {
+  if (!input) {
+    return "";
+  }
+
+  const params = new URLSearchParams();
+  if (typeof input.version === "number" && Number.isInteger(input.version) && input.version > 0) {
+    params.set("version", String(input.version));
+  }
+  if (input.decision) {
+    params.set("decision", input.decision);
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit > 0) {
+    params.set("limit", String(input.limit));
+  }
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildMcpToolPolicyListQuery(input?: McpToolPolicyListInput): string {
+  if (!input) {
+    return "";
+  }
+
+  const params = new URLSearchParams();
+  if (input.riskLevel) {
+    params.set("riskLevel", input.riskLevel);
+  }
+  if (input.decision) {
+    params.set("decision", input.decision);
+  }
+  if (typeof input.keyword === "string" && input.keyword.trim().length > 0) {
+    params.set("keyword", input.keyword.trim());
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit > 0) {
+    params.set("limit", String(input.limit));
+  }
+
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildMcpApprovalListQuery(input?: McpApprovalListInput): string {
+  if (!input) {
+    return "";
+  }
+
+  const params = new URLSearchParams();
+  if (input.status) {
+    params.set("status", input.status);
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit > 0) {
+    params.set("limit", String(input.limit));
+  }
+
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildMcpInvocationListQuery(input?: McpInvocationListInput): string {
+  if (!input) {
+    return "";
+  }
+
+  const params = new URLSearchParams();
+  if (typeof input.toolId === "string" && input.toolId.trim().length > 0) {
+    params.set("toolId", input.toolId.trim());
+  }
+  if (input.decision) {
+    params.set("decision", input.decision);
+  }
+  if (typeof input.from === "string" && input.from.trim().length > 0) {
+    params.set("from", input.from.trim());
+  }
+  if (typeof input.to === "string" && input.to.trim().length > 0) {
+    params.set("to", input.to.trim());
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit > 0) {
+    params.set("limit", String(input.limit));
   }
 
   const query = params.toString();
@@ -1756,6 +2398,420 @@ export async function testSourceConnection(
   );
   if (!isSourceConnectionTestResponse(result)) {
     throw new Error("sources.test-connection 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchResidencyRegions(
+  signal?: AbortSignal
+): Promise<ResidencyRegionListResponse> {
+  const result = await requestJson<unknown>("/api/v1/residency/regions", undefined, signal);
+  if (!isResidencyRegionListResponse(result)) {
+    throw new Error("residency.regions 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchResidencyPolicy(
+  signal?: AbortSignal
+): Promise<TenantResidencyPolicy | null> {
+  try {
+    const result = await requestJson<unknown>("/api/v1/residency/policy", undefined, signal);
+    if (!isTenantResidencyPolicy(result)) {
+      throw new Error("residency.policy 返回结构不合法");
+    }
+    return result;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function upsertResidencyPolicy(
+  input: Omit<TenantResidencyPolicy, "tenantId" | "updatedAt"> & {
+    updatedAt?: string;
+  },
+  signal?: AbortSignal
+): Promise<TenantResidencyPolicy> {
+  const result = await requestJson<unknown>(
+    "/api/v1/residency/policy",
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+  if (!isTenantResidencyPolicy(result)) {
+    throw new Error("residency.policy.upsert 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchReplicationJobs(
+  input?: ReplicationJobListInput,
+  signal?: AbortSignal
+): Promise<ReplicationJobListResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v1/residency/replication-jobs${buildReplicationJobListQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isReplicationJobListResponse(result)) {
+    throw new Error("residency.replication-jobs 返回结构不合法");
+  }
+  return result;
+}
+
+export async function createReplicationJob(
+  input: ReplicationJobCreateInput,
+  signal?: AbortSignal
+): Promise<ReplicationJob> {
+  const result = await requestJson<unknown>(
+    "/api/v1/residency/replication-jobs",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+  if (!isReplicationJob(result)) {
+    throw new Error("residency.replication-jobs.create 返回结构不合法");
+  }
+  return result;
+}
+
+export async function cancelReplicationJob(
+  jobId: string,
+  input?: ReplicationJobCancelInput,
+  signal?: AbortSignal
+): Promise<ReplicationJob> {
+  const normalizedJobId = jobId.trim();
+  if (!normalizedJobId) {
+    throw new Error("jobId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/residency/replication-jobs/${encodeURIComponent(normalizedJobId)}/cancel`,
+    {
+      method: "POST",
+      body: JSON.stringify(input ?? {}),
+    },
+    signal
+  );
+  if (!isReplicationJob(result)) {
+    throw new Error("residency.replication-jobs.cancel 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchRuleAssets(
+  input?: RuleAssetListInput,
+  signal?: AbortSignal
+): Promise<RuleAssetListResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v1/rules/assets${buildRuleAssetListQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isRuleAssetListResponse(result)) {
+    throw new Error("rules.assets 返回结构不合法");
+  }
+  return result;
+}
+
+export async function createRuleAsset(
+  input: RuleAssetCreateInput,
+  signal?: AbortSignal
+): Promise<RuleAsset> {
+  const result = await requestJson<unknown>(
+    "/api/v1/rules/assets",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+  if (!isRuleAsset(result)) {
+    throw new Error("rules.assets.create 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchRuleAssetVersions(
+  assetId: string,
+  limit?: number,
+  signal?: AbortSignal
+): Promise<{ items: RuleAssetVersion[]; total: number }> {
+  const normalizedAssetId = assetId.trim();
+  if (!normalizedAssetId) {
+    throw new Error("assetId 不能为空。");
+  }
+  const query =
+    typeof limit === "number" && Number.isInteger(limit) && limit > 0 ? `?limit=${limit}` : "";
+  const result = await requestJson<unknown>(
+    `/api/v1/rules/assets/${encodeURIComponent(normalizedAssetId)}/versions${query}`,
+    undefined,
+    signal
+  );
+  if (!isRuleAssetVersionListResponse(result)) {
+    throw new Error("rules.assets.versions 返回结构不合法");
+  }
+  return result;
+}
+
+export async function createRuleAssetVersion(
+  assetId: string,
+  input: RuleAssetVersionCreateInput,
+  signal?: AbortSignal
+): Promise<RuleAssetVersion> {
+  const normalizedAssetId = assetId.trim();
+  if (!normalizedAssetId) {
+    throw new Error("assetId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/rules/assets/${encodeURIComponent(normalizedAssetId)}/versions`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+  if (!isRuleAssetVersion(result)) {
+    throw new Error("rules.assets.versions.create 返回结构不合法");
+  }
+  return result;
+}
+
+export async function publishRuleAsset(
+  assetId: string,
+  input: RulePublishInput,
+  signal?: AbortSignal
+): Promise<RuleAsset> {
+  const normalizedAssetId = assetId.trim();
+  if (!normalizedAssetId) {
+    throw new Error("assetId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/rules/assets/${encodeURIComponent(normalizedAssetId)}/publish`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+  if (!isRuleAsset(result)) {
+    throw new Error("rules.assets.publish 返回结构不合法");
+  }
+  return result;
+}
+
+export async function rollbackRuleAsset(
+  assetId: string,
+  input: RuleRollbackInput,
+  signal?: AbortSignal
+): Promise<RuleAsset> {
+  const normalizedAssetId = assetId.trim();
+  if (!normalizedAssetId) {
+    throw new Error("assetId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/rules/assets/${encodeURIComponent(normalizedAssetId)}/rollback`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+  if (!isRuleAsset(result)) {
+    throw new Error("rules.assets.rollback 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchRuleApprovals(
+  assetId: string,
+  input?: RuleApprovalListInput,
+  signal?: AbortSignal
+): Promise<RuleApprovalListResponse> {
+  const normalizedAssetId = assetId.trim();
+  if (!normalizedAssetId) {
+    throw new Error("assetId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/rules/assets/${encodeURIComponent(normalizedAssetId)}/approvals${buildRuleApprovalListQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isRuleApprovalListResponse(result)) {
+    throw new Error("rules.assets.approvals 返回结构不合法");
+  }
+  return result;
+}
+
+export async function createRuleApproval(
+  assetId: string,
+  input: RuleApprovalCreateInput,
+  signal?: AbortSignal
+): Promise<RuleApproval> {
+  const normalizedAssetId = assetId.trim();
+  if (!normalizedAssetId) {
+    throw new Error("assetId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/rules/assets/${encodeURIComponent(normalizedAssetId)}/approvals`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+  if (!isRuleApproval(result)) {
+    throw new Error("rules.assets.approvals.create 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchMcpPolicies(
+  input?: McpToolPolicyListInput,
+  signal?: AbortSignal
+): Promise<McpToolPolicyListResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v1/mcp/policies${buildMcpToolPolicyListQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isMcpToolPolicyListResponse(result)) {
+    throw new Error("mcp.policies 返回结构不合法");
+  }
+  return result;
+}
+
+export async function upsertMcpPolicy(
+  toolId: string,
+  input: McpToolPolicyUpsertInput,
+  signal?: AbortSignal
+): Promise<McpToolPolicy> {
+  const normalizedToolId = toolId.trim();
+  if (!normalizedToolId) {
+    throw new Error("toolId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/mcp/policies/${encodeURIComponent(normalizedToolId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+  if (!isMcpToolPolicy(result)) {
+    throw new Error("mcp.policies.upsert 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchMcpApprovals(
+  input?: McpApprovalListInput,
+  signal?: AbortSignal
+): Promise<McpApprovalListResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v1/mcp/approvals${buildMcpApprovalListQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isMcpApprovalListResponse(result)) {
+    throw new Error("mcp.approvals 返回结构不合法");
+  }
+  return result;
+}
+
+export async function createMcpApproval(
+  input: { toolId: string; reason?: string },
+  signal?: AbortSignal
+): Promise<McpApprovalRequest> {
+  const result = await requestJson<unknown>(
+    "/api/v1/mcp/approvals",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+  if (!isMcpApprovalRequest(result)) {
+    throw new Error("mcp.approvals.create 返回结构不合法");
+  }
+  return result;
+}
+
+async function reviewMcpApproval(
+  approvalId: string,
+  action: "approve" | "reject",
+  input?: McpApprovalReviewInput,
+  signal?: AbortSignal
+): Promise<McpApprovalRequest> {
+  const normalizedApprovalId = approvalId.trim();
+  if (!normalizedApprovalId) {
+    throw new Error("approvalId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/mcp/approvals/${encodeURIComponent(normalizedApprovalId)}/${action}`,
+    {
+      method: "POST",
+      body: JSON.stringify(input ?? {}),
+    },
+    signal
+  );
+  if (!isMcpApprovalRequest(result)) {
+    throw new Error(`mcp.approvals.${action} 返回结构不合法`);
+  }
+  return result;
+}
+
+export async function approveMcpApproval(
+  approvalId: string,
+  input?: McpApprovalReviewInput,
+  signal?: AbortSignal
+): Promise<McpApprovalRequest> {
+  return reviewMcpApproval(approvalId, "approve", input, signal);
+}
+
+export async function rejectMcpApproval(
+  approvalId: string,
+  input?: McpApprovalReviewInput,
+  signal?: AbortSignal
+): Promise<McpApprovalRequest> {
+  return reviewMcpApproval(approvalId, "reject", input, signal);
+}
+
+export async function fetchMcpInvocations(
+  input?: McpInvocationListInput,
+  signal?: AbortSignal
+): Promise<McpInvocationListResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v1/mcp/invocations${buildMcpInvocationListQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isMcpInvocationListResponse(result)) {
+    throw new Error("mcp.invocations 返回结构不合法");
+  }
+  return result;
+}
+
+export async function createMcpInvocation(
+  input: McpInvocationCreateInput,
+  signal?: AbortSignal
+): Promise<McpInvocationAudit> {
+  const result = await requestJson<unknown>(
+    "/api/v1/mcp/invocations",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+  if (!isMcpInvocationAudit(result)) {
+    throw new Error("mcp.invocations.create 返回结构不合法");
   }
   return result;
 }
