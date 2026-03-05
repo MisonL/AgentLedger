@@ -3,6 +3,17 @@ import type {
   AlertListInput,
   AlertListResponse,
   AlertMutableStatus,
+  AlertOrchestrationChannel,
+  AlertOrchestrationEventType,
+  AlertOrchestrationExecutionListInput,
+  AlertOrchestrationExecutionListResponse,
+  AlertOrchestrationExecutionLog,
+  AlertOrchestrationRule,
+  AlertOrchestrationRuleListInput,
+  AlertOrchestrationRuleListResponse,
+  AlertOrchestrationRuleUpsertInput,
+  AlertOrchestrationSimulateInput,
+  AlertOrchestrationSimulationResponse,
   AuthExternalExchangeInput,
   AuthLoginInput,
   AuthLoginResponse,
@@ -104,6 +115,15 @@ const SOURCE_TYPES: SourceType[] = ["local", "ssh", "sync-cache"];
 const ALERT_SEVERITIES = ["warning", "critical"] as const;
 const ALERT_STATUSES = ["open", "acknowledged", "resolved"] as const;
 const ALERT_MUTABLE_STATUSES = ["acknowledged", "resolved"] as const;
+const ALERT_ORCHESTRATION_EVENT_TYPES = ["alert", "weekly"] as const;
+const ALERT_ORCHESTRATION_CHANNELS = [
+  "webhook",
+  "wecom",
+  "dingtalk",
+  "feishu",
+  "email",
+  "email_webhook",
+] as const;
 const EXPORT_FORMATS = ["json", "csv"] as const;
 const USAGE_EXPORT_DIMENSIONS = [
   "daily",
@@ -935,6 +955,20 @@ function isAlertMutableStatus(value: unknown): value is AlertMutableStatus {
   return typeof value === "string" && ALERT_MUTABLE_STATUSES.includes(value as AlertMutableStatus);
 }
 
+function isAlertOrchestrationEventType(value: unknown): value is AlertOrchestrationEventType {
+  return (
+    typeof value === "string" &&
+    ALERT_ORCHESTRATION_EVENT_TYPES.includes(value as AlertOrchestrationEventType)
+  );
+}
+
+function isAlertOrchestrationChannel(value: unknown): value is AlertOrchestrationChannel {
+  return (
+    typeof value === "string" &&
+    ALERT_ORCHESTRATION_CHANNELS.includes(value as AlertOrchestrationChannel)
+  );
+}
+
 function isExportFormat(value: unknown): value is ExportFormat {
   return typeof value === "string" && EXPORT_FORMATS.includes(value as ExportFormat);
 }
@@ -1019,6 +1053,167 @@ function isAlertListResponse(value: unknown): value is AlertListResponse {
     value.total >= 0 &&
     filtersOk &&
     nextCursorOk
+  );
+}
+
+function isAlertOrchestrationRule(value: unknown): value is AlertOrchestrationRule {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const severityOk = value.severity === undefined || value.severity === null || isAlertSeverity(value.severity);
+  const sourceIdOk = value.sourceId === undefined || value.sourceId === null || typeof value.sourceId === "string";
+  const slaOk =
+    value.slaMinutes === undefined ||
+    value.slaMinutes === null ||
+    (typeof value.slaMinutes === "number" && Number.isInteger(value.slaMinutes) && value.slaMinutes >= 0);
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.tenantId === "string" &&
+    typeof value.name === "string" &&
+    typeof value.enabled === "boolean" &&
+    isAlertOrchestrationEventType(value.eventType) &&
+    severityOk &&
+    sourceIdOk &&
+    typeof value.dedupeWindowSeconds === "number" &&
+    Number.isInteger(value.dedupeWindowSeconds) &&
+    value.dedupeWindowSeconds >= 0 &&
+    typeof value.suppressionWindowSeconds === "number" &&
+    Number.isInteger(value.suppressionWindowSeconds) &&
+    value.suppressionWindowSeconds >= 0 &&
+    typeof value.mergeWindowSeconds === "number" &&
+    Number.isInteger(value.mergeWindowSeconds) &&
+    value.mergeWindowSeconds >= 0 &&
+    slaOk &&
+    Array.isArray(value.channels) &&
+    value.channels.every((channel) => isAlertOrchestrationChannel(channel)) &&
+    isISODateString(value.updatedAt)
+  );
+}
+
+function isAlertOrchestrationRuleListInput(
+  value: unknown
+): value is AlertOrchestrationRuleListInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const eventTypeOk = value.eventType === undefined || isAlertOrchestrationEventType(value.eventType);
+  const enabledOk = value.enabled === undefined || typeof value.enabled === "boolean";
+  const severityOk = value.severity === undefined || isAlertSeverity(value.severity);
+  const sourceIdOk = value.sourceId === undefined || typeof value.sourceId === "string";
+  return eventTypeOk && enabledOk && severityOk && sourceIdOk;
+}
+
+function isAlertOrchestrationRuleListResponse(
+  value: unknown
+): value is AlertOrchestrationRuleListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isAlertOrchestrationRule(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isAlertOrchestrationRuleListInput(value.filters)
+  );
+}
+
+function isAlertOrchestrationExecutionLog(
+  value: unknown
+): value is AlertOrchestrationExecutionLog {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const alertIdOk = value.alertId === undefined || value.alertId === null || typeof value.alertId === "string";
+  const severityOk = value.severity === undefined || value.severity === null || isAlertSeverity(value.severity);
+  const sourceIdOk = value.sourceId === undefined || value.sourceId === null || typeof value.sourceId === "string";
+  return (
+    typeof value.id === "string" &&
+    typeof value.tenantId === "string" &&
+    typeof value.ruleId === "string" &&
+    isAlertOrchestrationEventType(value.eventType) &&
+    alertIdOk &&
+    severityOk &&
+    sourceIdOk &&
+    Array.isArray(value.channels) &&
+    value.channels.every((channel) => isAlertOrchestrationChannel(channel)) &&
+    Array.isArray(value.conflictRuleIds) &&
+    value.conflictRuleIds.every((ruleId) => typeof ruleId === "string") &&
+    typeof value.dedupeHit === "boolean" &&
+    typeof value.suppressed === "boolean" &&
+    typeof value.simulated === "boolean" &&
+    isRecord(value.metadata) &&
+    isISODateString(value.createdAt)
+  );
+}
+
+function isAlertOrchestrationExecutionListInput(
+  value: unknown
+): value is AlertOrchestrationExecutionListInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const ruleIdOk = value.ruleId === undefined || typeof value.ruleId === "string";
+  const eventTypeOk = value.eventType === undefined || isAlertOrchestrationEventType(value.eventType);
+  const alertIdOk = value.alertId === undefined || typeof value.alertId === "string";
+  const severityOk = value.severity === undefined || isAlertSeverity(value.severity);
+  const sourceIdOk = value.sourceId === undefined || typeof value.sourceId === "string";
+  const dedupeHitOk = value.dedupeHit === undefined || typeof value.dedupeHit === "boolean";
+  const suppressedOk = value.suppressed === undefined || typeof value.suppressed === "boolean";
+  const simulatedOk = value.simulated === undefined || typeof value.simulated === "boolean";
+  const fromOk = value.from === undefined || isISODateString(value.from);
+  const toOk = value.to === undefined || isISODateString(value.to);
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit > 0);
+  return (
+    ruleIdOk &&
+    eventTypeOk &&
+    alertIdOk &&
+    severityOk &&
+    sourceIdOk &&
+    dedupeHitOk &&
+    suppressedOk &&
+    simulatedOk &&
+    fromOk &&
+    toOk &&
+    limitOk
+  );
+}
+
+function isAlertOrchestrationExecutionListResponse(
+  value: unknown
+): value is AlertOrchestrationExecutionListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isAlertOrchestrationExecutionLog(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isAlertOrchestrationExecutionListInput(value.filters)
+  );
+}
+
+function isAlertOrchestrationSimulationResponse(
+  value: unknown
+): value is AlertOrchestrationSimulationResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.matchedRules) &&
+    value.matchedRules.every((rule) => isAlertOrchestrationRule(rule)) &&
+    Array.isArray(value.conflictRuleIds) &&
+    value.conflictRuleIds.every((ruleId) => typeof ruleId === "string") &&
+    Array.isArray(value.executions) &&
+    value.executions.every((execution) => isAlertOrchestrationExecutionLog(execution))
   );
 }
 
@@ -1147,6 +1342,77 @@ function buildAlertListQuery(input?: AlertListInput): string {
   }
   if (typeof input.cursor === "string" && input.cursor.trim().length > 0) {
     params.set("cursor", input.cursor.trim());
+  }
+
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildAlertOrchestrationRuleListQuery(
+  input?: AlertOrchestrationRuleListInput
+): string {
+  if (!input) {
+    return "";
+  }
+
+  const params = new URLSearchParams();
+  if (input.eventType) {
+    params.set("eventType", input.eventType);
+  }
+  if (typeof input.enabled === "boolean") {
+    params.set("enabled", String(input.enabled));
+  }
+  if (input.severity) {
+    params.set("severity", input.severity);
+  }
+  if (typeof input.sourceId === "string" && input.sourceId.trim().length > 0) {
+    params.set("sourceId", input.sourceId.trim());
+  }
+
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildAlertOrchestrationExecutionListQuery(
+  input?: AlertOrchestrationExecutionListInput
+): string {
+  if (!input) {
+    return "";
+  }
+
+  const params = new URLSearchParams();
+  if (typeof input.ruleId === "string" && input.ruleId.trim().length > 0) {
+    params.set("ruleId", input.ruleId.trim());
+  }
+  if (input.eventType) {
+    params.set("eventType", input.eventType);
+  }
+  if (typeof input.alertId === "string" && input.alertId.trim().length > 0) {
+    params.set("alertId", input.alertId.trim());
+  }
+  if (input.severity) {
+    params.set("severity", input.severity);
+  }
+  if (typeof input.sourceId === "string" && input.sourceId.trim().length > 0) {
+    params.set("sourceId", input.sourceId.trim());
+  }
+  if (typeof input.dedupeHit === "boolean") {
+    params.set("dedupeHit", String(input.dedupeHit));
+  }
+  if (typeof input.suppressed === "boolean") {
+    params.set("suppressed", String(input.suppressed));
+  }
+  if (typeof input.simulated === "boolean") {
+    params.set("simulated", String(input.simulated));
+  }
+  if (typeof input.from === "string" && input.from.trim().length > 0) {
+    params.set("from", input.from.trim());
+  }
+  if (typeof input.to === "string" && input.to.trim().length > 0) {
+    params.set("to", input.to.trim());
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit > 0) {
+    params.set("limit", String(input.limit));
   }
 
   const query = params.toString();
@@ -2158,6 +2424,77 @@ export async function updateAlertStatus(
 
   if (!isAlertItem(result)) {
     throw new Error("alerts.status 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchAlertOrchestrationRules(
+  input?: AlertOrchestrationRuleListInput,
+  signal?: AbortSignal
+): Promise<AlertOrchestrationRuleListResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v1/alerts/orchestration/rules${buildAlertOrchestrationRuleListQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isAlertOrchestrationRuleListResponse(result)) {
+    throw new Error("alerts.orchestration.rules 返回结构不合法");
+  }
+  return result;
+}
+
+export async function upsertAlertOrchestrationRule(
+  ruleId: string,
+  input: AlertOrchestrationRuleUpsertInput,
+  signal?: AbortSignal
+): Promise<AlertOrchestrationRule> {
+  const normalizedRuleId = ruleId.trim();
+  if (!normalizedRuleId) {
+    throw new Error("ruleId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/alerts/orchestration/rules/${encodeURIComponent(normalizedRuleId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+  if (!isAlertOrchestrationRule(result)) {
+    throw new Error("alerts.orchestration.rules.upsert 返回结构不合法");
+  }
+  return result;
+}
+
+export async function simulateAlertOrchestration(
+  input: AlertOrchestrationSimulateInput,
+  signal?: AbortSignal
+): Promise<AlertOrchestrationSimulationResponse> {
+  const result = await requestJson<unknown>(
+    "/api/v1/alerts/orchestration/simulate",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+  if (!isAlertOrchestrationSimulationResponse(result)) {
+    throw new Error("alerts.orchestration.simulate 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchAlertOrchestrationExecutions(
+  input?: AlertOrchestrationExecutionListInput,
+  signal?: AbortSignal
+): Promise<AlertOrchestrationExecutionListResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v1/alerts/orchestration/executions${buildAlertOrchestrationExecutionListQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isAlertOrchestrationExecutionListResponse(result)) {
+    throw new Error("alerts.orchestration.executions 返回结构不合法");
   }
   return result;
 }

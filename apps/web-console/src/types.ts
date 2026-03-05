@@ -180,6 +180,14 @@ export interface SessionDetailResponse extends SessionDetail {
 export type AlertSeverity = "warning" | "critical";
 export type AlertStatus = "open" | "acknowledged" | "resolved";
 export type AlertMutableStatus = "acknowledged" | "resolved";
+export type AlertOrchestrationEventType = "alert" | "weekly";
+export type AlertOrchestrationChannel =
+  | "webhook"
+  | "wecom"
+  | "dingtalk"
+  | "feishu"
+  | "email"
+  | "email_webhook";
 
 export interface AlertListInput {
   status?: AlertStatus;
@@ -214,6 +222,105 @@ export interface AlertListResponse {
   total: number;
   filters: AlertListInput;
   nextCursor: string | null;
+}
+
+export interface AlertOrchestrationRule {
+  id: string;
+  tenantId: string;
+  name: string;
+  enabled: boolean;
+  eventType: AlertOrchestrationEventType;
+  severity?: AlertSeverity;
+  sourceId?: string;
+  dedupeWindowSeconds: number;
+  suppressionWindowSeconds: number;
+  mergeWindowSeconds: number;
+  slaMinutes?: number;
+  channels: AlertOrchestrationChannel[];
+  updatedAt: string;
+}
+
+export interface AlertOrchestrationRuleListInput {
+  eventType?: AlertOrchestrationEventType;
+  enabled?: boolean;
+  severity?: AlertSeverity;
+  sourceId?: string;
+}
+
+export interface AlertOrchestrationRuleListResponse {
+  items: AlertOrchestrationRule[];
+  total: number;
+  filters: AlertOrchestrationRuleListInput;
+}
+
+export interface AlertOrchestrationRuleUpsertInput {
+  name: string;
+  enabled: boolean;
+  eventType: AlertOrchestrationEventType;
+  severity?: AlertSeverity;
+  sourceId?: string;
+  dedupeWindowSeconds: number;
+  suppressionWindowSeconds: number;
+  mergeWindowSeconds: number;
+  slaMinutes?: number;
+  channels: AlertOrchestrationChannel[];
+  updatedAt?: string;
+}
+
+export interface AlertOrchestrationExecutionLog {
+  id: string;
+  tenantId: string;
+  ruleId: string;
+  eventType: AlertOrchestrationEventType;
+  alertId?: string;
+  severity?: AlertSeverity;
+  sourceId?: string;
+  channels: AlertOrchestrationChannel[];
+  conflictRuleIds: string[];
+  dedupeHit: boolean;
+  suppressed: boolean;
+  simulated: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AlertOrchestrationExecutionListInput {
+  ruleId?: string;
+  eventType?: AlertOrchestrationEventType;
+  alertId?: string;
+  severity?: AlertSeverity;
+  sourceId?: string;
+  dedupeHit?: boolean;
+  suppressed?: boolean;
+  simulated?: boolean;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
+export interface AlertOrchestrationExecutionListResponse {
+  items: AlertOrchestrationExecutionLog[];
+  total: number;
+  filters: AlertOrchestrationExecutionListInput;
+}
+
+export interface AlertOrchestrationSimulateInput {
+  ruleId?: string;
+  eventType: AlertOrchestrationEventType;
+  alertId?: string;
+  severity?: AlertSeverity;
+  sourceId?: string;
+  channels?: AlertOrchestrationChannel[];
+  conflictRuleIds?: string[];
+  dedupeHit?: boolean;
+  suppressed?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AlertOrchestrationSimulationResponse {
+  matchedRules: AlertOrchestrationRule[];
+  conflictRuleIds: string[];
+  executions: AlertOrchestrationExecutionLog[];
 }
 
 export type DataResidencyMode = "single_region" | "active_active";

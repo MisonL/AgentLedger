@@ -11,6 +11,8 @@ import {
   approveMcpApproval,
   ApiError,
   cancelReplicationJob,
+  fetchAlertOrchestrationExecutions,
+  fetchAlertOrchestrationRules,
   createMcpApproval,
   createReplicationJob,
   createRuleApproval,
@@ -51,12 +53,22 @@ import {
   searchSessions,
   setUnauthorizedHandler,
   testSourceConnection,
+  simulateAlertOrchestration,
   upsertMcpPolicy,
+  upsertAlertOrchestrationRule,
   upsertResidencyPolicy,
   updateAlertStatus,
   upsertPricingCatalog,
 } from "./api";
 import type {
+  AlertOrchestrationChannel,
+  AlertOrchestrationEventType,
+  AlertOrchestrationExecutionListInput,
+  AlertOrchestrationExecutionLog,
+  AlertOrchestrationRule,
+  AlertOrchestrationRuleListInput,
+  AlertOrchestrationSimulateInput,
+  AlertOrchestrationSimulationResponse,
   AlertItem,
   AlertMutableStatus,
   AlertSeverity,
@@ -236,6 +248,50 @@ const ALERT_SEVERITY_FILTER_OPTIONS: Array<
   { value: "", label: "全部级别" },
   { value: "warning", label: "warning" },
   { value: "critical", label: "critical" },
+];
+
+const ALERT_ORCHESTRATION_EVENT_TYPE_OPTIONS: Array<{
+  value: AlertOrchestrationEventType;
+  label: string;
+}> = [
+  { value: "alert", label: "alert" },
+  { value: "weekly", label: "weekly" },
+];
+
+const ALERT_ORCHESTRATION_CHANNEL_OPTIONS: Array<{
+  value: AlertOrchestrationChannel;
+  label: string;
+}> = [
+  { value: "webhook", label: "webhook" },
+  { value: "wecom", label: "wecom" },
+  { value: "dingtalk", label: "dingtalk" },
+  { value: "feishu", label: "feishu" },
+  { value: "email", label: "email" },
+  { value: "email_webhook", label: "email_webhook" },
+];
+
+const ALERT_ORCHESTRATION_ENABLED_FILTER_OPTIONS: Array<{
+  value: "";
+  label: string;
+} | {
+  value: "true" | "false";
+  label: string;
+}> = [
+  { value: "", label: "全部启用状态" },
+  { value: "true", label: "enabled=true" },
+  { value: "false", label: "enabled=false" },
+];
+
+const BOOLEAN_FILTER_OPTIONS: Array<{
+  value: "";
+  label: string;
+} | {
+  value: "true" | "false";
+  label: string;
+}> = [
+  { value: "", label: "全部" },
+  { value: "true", label: "true" },
+  { value: "false", label: "false" },
 ];
 
 const EXPORT_FORMAT_OPTIONS: Array<{ value: ExportFormat; label: string }> = [
@@ -582,6 +638,27 @@ function formatSourceFreshness(item: SessionSourceFreshness): string {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "未知错误";
+}
+
+function parseBooleanSelect(value: "" | "true" | "false"): boolean | undefined {
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+  return undefined;
+}
+
+function parseOptionalNonNegativeInteger(value: string): number | undefined {
+  if (value.trim().length === 0) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return undefined;
+  }
+  return parsed;
 }
 
 function triggerBrowserDownload(file: { blob: Blob; filename: string }) {
@@ -2277,6 +2354,65 @@ function GovernancePage() {
   const [statusFilter, setStatusFilter] = useState<AlertStatus | "">("");
   const [severityFilter, setSeverityFilter] = useState<AlertSeverity | "">("");
   const [alertFeedback, setAlertFeedback] = useState<string | null>(null);
+  const [orchestrationRuleEventTypeFilter, setOrchestrationRuleEventTypeFilter] = useState<
+    AlertOrchestrationEventType | ""
+  >("");
+  const [orchestrationRuleEnabledFilter, setOrchestrationRuleEnabledFilter] = useState<
+    "" | "true" | "false"
+  >("");
+  const [orchestrationRuleSeverityFilter, setOrchestrationRuleSeverityFilter] = useState<
+    AlertSeverity | ""
+  >("");
+  const [orchestrationRuleSourceIdFilter, setOrchestrationRuleSourceIdFilter] = useState("");
+  const [orchestrationRuleId, setOrchestrationRuleId] = useState("");
+  const [orchestrationRuleName, setOrchestrationRuleName] = useState("");
+  const [orchestrationRuleEnabled, setOrchestrationRuleEnabled] = useState(true);
+  const [orchestrationRuleEventType, setOrchestrationRuleEventType] =
+    useState<AlertOrchestrationEventType>("alert");
+  const [orchestrationRuleSeverity, setOrchestrationRuleSeverity] = useState<AlertSeverity | "">("");
+  const [orchestrationRuleSourceId, setOrchestrationRuleSourceId] = useState("");
+  const [orchestrationRuleDedupeWindowSeconds, setOrchestrationRuleDedupeWindowSeconds] = useState("0");
+  const [orchestrationRuleSuppressionWindowSeconds, setOrchestrationRuleSuppressionWindowSeconds] =
+    useState("0");
+  const [orchestrationRuleMergeWindowSeconds, setOrchestrationRuleMergeWindowSeconds] = useState("0");
+  const [orchestrationRuleSlaMinutes, setOrchestrationRuleSlaMinutes] = useState("");
+  const [orchestrationRuleChannelsInput, setOrchestrationRuleChannelsInput] = useState(
+    "webhook,wecom"
+  );
+  const [orchestrationSimulateRuleId, setOrchestrationSimulateRuleId] = useState("");
+  const [orchestrationSimulateEventType, setOrchestrationSimulateEventType] =
+    useState<AlertOrchestrationEventType>("alert");
+  const [orchestrationSimulateAlertId, setOrchestrationSimulateAlertId] = useState("");
+  const [orchestrationSimulateSeverity, setOrchestrationSimulateSeverity] = useState<
+    AlertSeverity | ""
+  >("");
+  const [orchestrationSimulateSourceId, setOrchestrationSimulateSourceId] = useState("");
+  const [orchestrationSimulateDedupeHit, setOrchestrationSimulateDedupeHit] = useState(false);
+  const [orchestrationSimulateSuppressed, setOrchestrationSimulateSuppressed] = useState(false);
+  const [orchestrationExecutionRuleIdFilter, setOrchestrationExecutionRuleIdFilter] = useState("");
+  const [orchestrationExecutionEventTypeFilter, setOrchestrationExecutionEventTypeFilter] =
+    useState<AlertOrchestrationEventType | "">("");
+  const [orchestrationExecutionSeverityFilter, setOrchestrationExecutionSeverityFilter] = useState<
+    AlertSeverity | ""
+  >("");
+  const [orchestrationExecutionSourceIdFilter, setOrchestrationExecutionSourceIdFilter] = useState("");
+  const [orchestrationExecutionDedupeHitFilter, setOrchestrationExecutionDedupeHitFilter] =
+    useState<"" | "true" | "false">("");
+  const [orchestrationExecutionSuppressedFilter, setOrchestrationExecutionSuppressedFilter] =
+    useState<"" | "true" | "false">("");
+  const [orchestrationExecutionSimulatedFilter, setOrchestrationExecutionSimulatedFilter] =
+    useState<"" | "true" | "false">("");
+  const [orchestrationExecutionFrom, setOrchestrationExecutionFrom] = useState("");
+  const [orchestrationExecutionTo, setOrchestrationExecutionTo] = useState("");
+  const [orchestrationExecutionLimit, setOrchestrationExecutionLimit] = useState("50");
+  const [orchestrationRulesPayload, setOrchestrationRulesPayload] =
+    useState<{ items: AlertOrchestrationRule[]; total: number } | null>(null);
+  const [orchestrationExecutionsPayload, setOrchestrationExecutionsPayload] =
+    useState<{ items: AlertOrchestrationExecutionLog[]; total: number } | null>(null);
+  const [orchestrationSimulationResult, setOrchestrationSimulationResult] =
+    useState<AlertOrchestrationSimulationResponse | null>(null);
+  const [orchestrationFeedback, setOrchestrationFeedback] = useState<string | null>(null);
+  const [orchestrationError, setOrchestrationError] = useState<string | null>(null);
 
   const [residencyMode, setResidencyMode] = useState<DataResidencyMode>("single_region");
   const [primaryRegion, setPrimaryRegion] = useState("");
@@ -2338,6 +2474,74 @@ function GovernancePage() {
       ...(severityFilter ? { severity: severityFilter } : {}),
     }),
     [severityFilter, statusFilter]
+  );
+
+  const orchestrationRuleQueryInput = useMemo<AlertOrchestrationRuleListInput>(
+    () => ({
+      ...(orchestrationRuleEventTypeFilter
+        ? { eventType: orchestrationRuleEventTypeFilter }
+        : {}),
+      ...(typeof parseBooleanSelect(orchestrationRuleEnabledFilter) === "boolean"
+        ? { enabled: parseBooleanSelect(orchestrationRuleEnabledFilter) }
+        : {}),
+      ...(orchestrationRuleSeverityFilter ? { severity: orchestrationRuleSeverityFilter } : {}),
+      ...(orchestrationRuleSourceIdFilter.trim().length > 0
+        ? { sourceId: orchestrationRuleSourceIdFilter.trim() }
+        : {}),
+    }),
+    [
+      orchestrationRuleEnabledFilter,
+      orchestrationRuleEventTypeFilter,
+      orchestrationRuleSeverityFilter,
+      orchestrationRuleSourceIdFilter,
+    ]
+  );
+
+  const orchestrationExecutionQueryInput = useMemo<AlertOrchestrationExecutionListInput>(
+    () => ({
+      ...(orchestrationExecutionRuleIdFilter.trim().length > 0
+        ? { ruleId: orchestrationExecutionRuleIdFilter.trim() }
+        : {}),
+      ...(orchestrationExecutionEventTypeFilter
+        ? { eventType: orchestrationExecutionEventTypeFilter }
+        : {}),
+      ...(orchestrationExecutionSeverityFilter
+        ? { severity: orchestrationExecutionSeverityFilter }
+        : {}),
+      ...(orchestrationExecutionSourceIdFilter.trim().length > 0
+        ? { sourceId: orchestrationExecutionSourceIdFilter.trim() }
+        : {}),
+      ...(typeof parseBooleanSelect(orchestrationExecutionDedupeHitFilter) === "boolean"
+        ? { dedupeHit: parseBooleanSelect(orchestrationExecutionDedupeHitFilter) }
+        : {}),
+      ...(typeof parseBooleanSelect(orchestrationExecutionSuppressedFilter) === "boolean"
+        ? { suppressed: parseBooleanSelect(orchestrationExecutionSuppressedFilter) }
+        : {}),
+      ...(typeof parseBooleanSelect(orchestrationExecutionSimulatedFilter) === "boolean"
+        ? { simulated: parseBooleanSelect(orchestrationExecutionSimulatedFilter) }
+        : {}),
+      ...(orchestrationExecutionFrom.trim().length > 0
+        ? { from: orchestrationExecutionFrom.trim() }
+        : {}),
+      ...(orchestrationExecutionTo.trim().length > 0
+        ? { to: orchestrationExecutionTo.trim() }
+        : {}),
+      ...(typeof parseOptionalNonNegativeInteger(orchestrationExecutionLimit) === "number"
+        ? { limit: parseOptionalNonNegativeInteger(orchestrationExecutionLimit) }
+        : {}),
+    }),
+    [
+      orchestrationExecutionDedupeHitFilter,
+      orchestrationExecutionEventTypeFilter,
+      orchestrationExecutionFrom,
+      orchestrationExecutionLimit,
+      orchestrationExecutionRuleIdFilter,
+      orchestrationExecutionSeverityFilter,
+      orchestrationExecutionSimulatedFilter,
+      orchestrationExecutionSourceIdFilter,
+      orchestrationExecutionSuppressedFilter,
+      orchestrationExecutionTo,
+    ]
   );
 
   const replicationJobQueryInput = useMemo(
@@ -2539,6 +2743,103 @@ function GovernancePage() {
     onSuccess: async (alert) => {
       setAlertFeedback(`告警 ${alert.id} 已更新为 ${alert.status}。`);
       await queryClient.invalidateQueries({ queryKey: ["alerts"] });
+    },
+  });
+
+  const loadOrchestrationRulesMutation = useMutation({
+    mutationFn: (input: AlertOrchestrationRuleListInput) =>
+      fetchAlertOrchestrationRules(input),
+    onSuccess: (payload) => {
+      setOrchestrationError(null);
+      setOrchestrationRulesPayload({
+        items: payload.items,
+        total: payload.total,
+      });
+      setOrchestrationFeedback(`编排规则已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setOrchestrationFeedback(null);
+      setOrchestrationError(`加载编排规则失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const upsertOrchestrationRuleMutation = useMutation({
+    mutationFn: ({
+      ruleId,
+      input,
+    }: {
+      ruleId: string;
+      input: {
+        name: string;
+        enabled: boolean;
+        eventType: AlertOrchestrationEventType;
+        severity?: AlertSeverity;
+        sourceId?: string;
+        dedupeWindowSeconds: number;
+        suppressionWindowSeconds: number;
+        mergeWindowSeconds: number;
+        slaMinutes?: number;
+        channels: AlertOrchestrationChannel[];
+      };
+    }) => upsertAlertOrchestrationRule(ruleId, input),
+    onSuccess: async (rule) => {
+      setOrchestrationError(null);
+      setOrchestrationFeedback(`编排规则 ${rule.id} 已保存。`);
+      setOrchestrationRuleId(rule.id);
+      setOrchestrationRuleName(rule.name);
+      setOrchestrationRuleEnabled(rule.enabled);
+      setOrchestrationRuleEventType(rule.eventType);
+      setOrchestrationRuleSeverity(rule.severity ?? "");
+      setOrchestrationRuleSourceId(rule.sourceId ?? "");
+      setOrchestrationRuleDedupeWindowSeconds(String(rule.dedupeWindowSeconds));
+      setOrchestrationRuleSuppressionWindowSeconds(String(rule.suppressionWindowSeconds));
+      setOrchestrationRuleMergeWindowSeconds(String(rule.mergeWindowSeconds));
+      setOrchestrationRuleSlaMinutes(
+        typeof rule.slaMinutes === "number" ? String(rule.slaMinutes) : ""
+      );
+      setOrchestrationRuleChannelsInput(rule.channels.join(","));
+      const payload = await fetchAlertOrchestrationRules(orchestrationRuleQueryInput);
+      setOrchestrationRulesPayload({
+        items: payload.items,
+        total: payload.total,
+      });
+    },
+    onError: (error) => {
+      setOrchestrationFeedback(null);
+      setOrchestrationError(`保存编排规则失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const simulateOrchestrationMutation = useMutation({
+    mutationFn: (input: AlertOrchestrationSimulateInput) =>
+      simulateAlertOrchestration(input),
+    onSuccess: (payload) => {
+      setOrchestrationError(null);
+      setOrchestrationSimulationResult(payload);
+      setOrchestrationFeedback(
+        `模拟完成：命中 ${payload.matchedRules.length} 条规则，冲突 ${payload.conflictRuleIds.length} 条。`
+      );
+    },
+    onError: (error) => {
+      setOrchestrationFeedback(null);
+      setOrchestrationError(`模拟失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadOrchestrationExecutionsMutation = useMutation({
+    mutationFn: (input: AlertOrchestrationExecutionListInput) =>
+      fetchAlertOrchestrationExecutions(input),
+    onSuccess: (payload) => {
+      setOrchestrationError(null);
+      setOrchestrationExecutionsPayload({
+        items: payload.items,
+        total: payload.total,
+      });
+      setOrchestrationFeedback(`执行日志已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setOrchestrationFeedback(null);
+      setOrchestrationError(`加载执行日志失败：${toErrorMessage(error)}`);
     },
   });
 
@@ -2814,6 +3115,9 @@ function GovernancePage() {
   const alertItems = alertsQuery.data?.items ?? [];
   const weeklyItems = weeklySummaryQuery.data?.weeks ?? [];
   const weeklyPeak = weeklySummaryQuery.data?.peakWeek;
+  const orchestrationRuleItems = orchestrationRulesPayload?.items ?? [];
+  const orchestrationExecutionItems = orchestrationExecutionsPayload?.items ?? [];
+  const orchestrationSimulationExecutions = orchestrationSimulationResult?.executions ?? [];
   const regionItems: RegionDescriptor[] = residencyRegionsQuery.data?.items ?? [];
   const replicationItems: ReplicationJob[] = replicationJobsQuery.data?.items ?? [];
   const ruleItems: RuleAsset[] = ruleAssetsQuery.data?.items ?? [];
@@ -3061,6 +3365,743 @@ function GovernancePage() {
                     </tr>
                   );
                 })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel">
+        <header>
+          <h2>告警编排中心</h2>
+          <p>规则编排、模拟与执行日志。</p>
+        </header>
+
+        <div className="filters-row governance-inline-grid">
+          <label className="inline-field" htmlFor="orchestration-rule-event-type-filter">
+            事件类型
+            <select
+              id="orchestration-rule-event-type-filter"
+              value={orchestrationRuleEventTypeFilter}
+              onChange={(event) =>
+                setOrchestrationRuleEventTypeFilter(
+                  event.target.value as AlertOrchestrationEventType | ""
+                )
+              }
+            >
+              <option value="">全部</option>
+              {ALERT_ORCHESTRATION_EVENT_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-rule-enabled-filter">
+            enabled
+            <select
+              id="orchestration-rule-enabled-filter"
+              value={orchestrationRuleEnabledFilter}
+              onChange={(event) =>
+                setOrchestrationRuleEnabledFilter(event.target.value as "" | "true" | "false")
+              }
+            >
+              {ALERT_ORCHESTRATION_ENABLED_FILTER_OPTIONS.map((option) => (
+                <option key={option.label} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-rule-severity-filter">
+            级别（规则筛选）
+            <select
+              id="orchestration-rule-severity-filter"
+              value={orchestrationRuleSeverityFilter}
+              onChange={(event) => setOrchestrationRuleSeverityFilter(event.target.value as AlertSeverity | "")}
+            >
+              <option value="">全部</option>
+              {ALERT_SEVERITY_FILTER_OPTIONS.filter((option) => option.value !== "").map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field governance-wide-field" htmlFor="orchestration-rule-source-filter">
+            Source ID
+            <input
+              id="orchestration-rule-source-filter"
+              type="text"
+              value={orchestrationRuleSourceIdFilter}
+              onChange={(event) => setOrchestrationRuleSourceIdFilter(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+
+          <button
+            type="button"
+            className="submit-button"
+            disabled={loadOrchestrationRulesMutation.isPending}
+            onClick={() => {
+              setOrchestrationFeedback(null);
+              setOrchestrationError(null);
+              loadOrchestrationRulesMutation.mutate(orchestrationRuleQueryInput);
+            }}
+          >
+            {loadOrchestrationRulesMutation.isPending ? "加载中..." : "加载编排规则"}
+          </button>
+        </div>
+
+        <div className="filters-row governance-inline-grid">
+          <label className="inline-field" htmlFor="orchestration-rule-id">
+            Rule ID（规则）
+            <input
+              id="orchestration-rule-id"
+              type="text"
+              value={orchestrationRuleId}
+              onChange={(event) => setOrchestrationRuleId(event.target.value)}
+              placeholder="例如：rule-alert-critical"
+            />
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-rule-name">
+            名称
+            <input
+              id="orchestration-rule-name"
+              type="text"
+              value={orchestrationRuleName}
+              onChange={(event) => setOrchestrationRuleName(event.target.value)}
+              placeholder="例如：critical 高频抑制"
+            />
+          </label>
+
+          <label className="checkbox-field" htmlFor="orchestration-rule-enabled">
+            <input
+              id="orchestration-rule-enabled"
+              type="checkbox"
+              checked={orchestrationRuleEnabled}
+              onChange={(event) => setOrchestrationRuleEnabled(event.target.checked)}
+            />
+            enabled
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-rule-event-type">
+            事件类型
+            <select
+              id="orchestration-rule-event-type"
+              value={orchestrationRuleEventType}
+              onChange={(event) =>
+                setOrchestrationRuleEventType(event.target.value as AlertOrchestrationEventType)
+              }
+            >
+              {ALERT_ORCHESTRATION_EVENT_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-rule-severity">
+            级别（规则）
+            <select
+              id="orchestration-rule-severity"
+              value={orchestrationRuleSeverity}
+              onChange={(event) => setOrchestrationRuleSeverity(event.target.value as AlertSeverity | "")}
+            >
+              <option value="">全部</option>
+              {ALERT_SEVERITY_FILTER_OPTIONS.filter((option) => option.value !== "").map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-rule-source-id">
+            Source ID
+            <input
+              id="orchestration-rule-source-id"
+              type="text"
+              value={orchestrationRuleSourceId}
+              onChange={(event) => setOrchestrationRuleSourceId(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+        </div>
+
+        <div className="filters-row governance-inline-grid">
+          <label className="inline-field" htmlFor="orchestration-rule-dedupe-window">
+            去重窗口(s)
+            <input
+              id="orchestration-rule-dedupe-window"
+              type="number"
+              min={0}
+              step={1}
+              value={orchestrationRuleDedupeWindowSeconds}
+              onChange={(event) => setOrchestrationRuleDedupeWindowSeconds(event.target.value)}
+            />
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-rule-suppression-window">
+            抑制窗口(s)
+            <input
+              id="orchestration-rule-suppression-window"
+              type="number"
+              min={0}
+              step={1}
+              value={orchestrationRuleSuppressionWindowSeconds}
+              onChange={(event) => setOrchestrationRuleSuppressionWindowSeconds(event.target.value)}
+            />
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-rule-merge-window">
+            合并窗口(s)
+            <input
+              id="orchestration-rule-merge-window"
+              type="number"
+              min={0}
+              step={1}
+              value={orchestrationRuleMergeWindowSeconds}
+              onChange={(event) => setOrchestrationRuleMergeWindowSeconds(event.target.value)}
+            />
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-rule-sla">
+            SLA(分钟)
+            <input
+              id="orchestration-rule-sla"
+              type="number"
+              min={0}
+              step={1}
+              value={orchestrationRuleSlaMinutes}
+              onChange={(event) => setOrchestrationRuleSlaMinutes(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+
+          <label className="inline-field governance-wide-field" htmlFor="orchestration-rule-channels">
+            Channels（逗号分隔）
+            <input
+              id="orchestration-rule-channels"
+              type="text"
+              value={orchestrationRuleChannelsInput}
+              onChange={(event) => setOrchestrationRuleChannelsInput(event.target.value)}
+              placeholder={ALERT_ORCHESTRATION_CHANNEL_OPTIONS.map((option) => option.value).join(",")}
+            />
+          </label>
+
+          <button
+            type="button"
+            className="submit-button"
+            disabled={upsertOrchestrationRuleMutation.isPending}
+            onClick={() => {
+              const normalizedRuleId = orchestrationRuleId.trim();
+              const normalizedName = orchestrationRuleName.trim();
+              const dedupeWindowSeconds = parseOptionalNonNegativeInteger(
+                orchestrationRuleDedupeWindowSeconds
+              );
+              const suppressionWindowSeconds = parseOptionalNonNegativeInteger(
+                orchestrationRuleSuppressionWindowSeconds
+              );
+              const mergeWindowSeconds = parseOptionalNonNegativeInteger(
+                orchestrationRuleMergeWindowSeconds
+              );
+              const slaMinutes = parseOptionalNonNegativeInteger(orchestrationRuleSlaMinutes);
+              if (!normalizedRuleId) {
+                setOrchestrationFeedback(null);
+                setOrchestrationError("Rule ID 不能为空。");
+                return;
+              }
+              if (!normalizedName) {
+                setOrchestrationFeedback(null);
+                setOrchestrationError("规则名称不能为空。");
+                return;
+              }
+              if (
+                typeof dedupeWindowSeconds !== "number" ||
+                typeof suppressionWindowSeconds !== "number" ||
+                typeof mergeWindowSeconds !== "number"
+              ) {
+                setOrchestrationFeedback(null);
+                setOrchestrationError("去重/抑制/合并窗口必须是非负整数。");
+                return;
+              }
+              const channels = orchestrationRuleChannelsInput
+                .split(",")
+                .map((item) => item.trim().toLowerCase())
+                .filter((item, index, array) => item.length > 0 && array.indexOf(item) === index)
+                .filter((item): item is AlertOrchestrationChannel =>
+                  ALERT_ORCHESTRATION_CHANNEL_OPTIONS.some((option) => option.value === item)
+                );
+              if (channels.length === 0) {
+                setOrchestrationFeedback(null);
+                setOrchestrationError("至少选择一个合法 channel。");
+                return;
+              }
+              setOrchestrationFeedback(null);
+              setOrchestrationError(null);
+              upsertOrchestrationRuleMutation.mutate({
+                ruleId: normalizedRuleId,
+                input: {
+                  name: normalizedName,
+                  enabled: orchestrationRuleEnabled,
+                  eventType: orchestrationRuleEventType,
+                  severity: orchestrationRuleSeverity || undefined,
+                  sourceId: orchestrationRuleSourceId.trim() || undefined,
+                  dedupeWindowSeconds,
+                  suppressionWindowSeconds,
+                  mergeWindowSeconds,
+                  slaMinutes,
+                  channels,
+                },
+              });
+            }}
+          >
+            {upsertOrchestrationRuleMutation.isPending ? "保存中..." : "保存编排规则"}
+          </button>
+        </div>
+
+        <div className="filters-row governance-inline-grid">
+          <label className="inline-field" htmlFor="orchestration-simulate-rule-id">
+            指定 Rule ID（可选）
+            <input
+              id="orchestration-simulate-rule-id"
+              type="text"
+              value={orchestrationSimulateRuleId}
+              onChange={(event) => setOrchestrationSimulateRuleId(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-simulate-event-type">
+            事件类型
+            <select
+              id="orchestration-simulate-event-type"
+              value={orchestrationSimulateEventType}
+              onChange={(event) =>
+                setOrchestrationSimulateEventType(event.target.value as AlertOrchestrationEventType)
+              }
+            >
+              {ALERT_ORCHESTRATION_EVENT_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-simulate-alert-id">
+            Alert ID
+            <input
+              id="orchestration-simulate-alert-id"
+              type="text"
+              value={orchestrationSimulateAlertId}
+              onChange={(event) => setOrchestrationSimulateAlertId(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-simulate-severity">
+            级别（模拟）
+            <select
+              id="orchestration-simulate-severity"
+              value={orchestrationSimulateSeverity}
+              onChange={(event) => setOrchestrationSimulateSeverity(event.target.value as AlertSeverity | "")}
+            >
+              <option value="">全部</option>
+              {ALERT_SEVERITY_FILTER_OPTIONS.filter((option) => option.value !== "").map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-simulate-source-id">
+            Source ID
+            <input
+              id="orchestration-simulate-source-id"
+              type="text"
+              value={orchestrationSimulateSourceId}
+              onChange={(event) => setOrchestrationSimulateSourceId(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+
+          <label className="checkbox-field" htmlFor="orchestration-simulate-dedupe-hit">
+            <input
+              id="orchestration-simulate-dedupe-hit"
+              type="checkbox"
+              checked={orchestrationSimulateDedupeHit}
+              onChange={(event) => setOrchestrationSimulateDedupeHit(event.target.checked)}
+            />
+            dedupeHit
+          </label>
+
+          <label className="checkbox-field" htmlFor="orchestration-simulate-suppressed">
+            <input
+              id="orchestration-simulate-suppressed"
+              type="checkbox"
+              checked={orchestrationSimulateSuppressed}
+              onChange={(event) => setOrchestrationSimulateSuppressed(event.target.checked)}
+            />
+            suppressed
+          </label>
+
+          <button
+            type="button"
+            className="submit-button"
+            disabled={simulateOrchestrationMutation.isPending}
+            onClick={() => {
+              setOrchestrationFeedback(null);
+              setOrchestrationError(null);
+              setOrchestrationSimulationResult(null);
+              simulateOrchestrationMutation.mutate({
+                ruleId: orchestrationSimulateRuleId.trim() || undefined,
+                eventType: orchestrationSimulateEventType,
+                alertId: orchestrationSimulateAlertId.trim() || undefined,
+                severity: orchestrationSimulateSeverity || undefined,
+                sourceId: orchestrationSimulateSourceId.trim() || undefined,
+                dedupeHit: orchestrationSimulateDedupeHit,
+                suppressed: orchestrationSimulateSuppressed,
+              });
+            }}
+          >
+            {simulateOrchestrationMutation.isPending ? "模拟中..." : "执行模拟"}
+          </button>
+        </div>
+
+        <div className="filters-row governance-inline-grid">
+          <label className="inline-field" htmlFor="orchestration-execution-rule-id-filter">
+            Rule ID（日志）
+            <input
+              id="orchestration-execution-rule-id-filter"
+              type="text"
+              value={orchestrationExecutionRuleIdFilter}
+              onChange={(event) => setOrchestrationExecutionRuleIdFilter(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-execution-event-type-filter">
+            事件类型
+            <select
+              id="orchestration-execution-event-type-filter"
+              value={orchestrationExecutionEventTypeFilter}
+              onChange={(event) =>
+                setOrchestrationExecutionEventTypeFilter(
+                  event.target.value as AlertOrchestrationEventType | ""
+                )
+              }
+            >
+              <option value="">全部</option>
+              {ALERT_ORCHESTRATION_EVENT_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-execution-severity-filter">
+            级别（日志）
+            <select
+              id="orchestration-execution-severity-filter"
+              value={orchestrationExecutionSeverityFilter}
+              onChange={(event) => setOrchestrationExecutionSeverityFilter(event.target.value as AlertSeverity | "")}
+            >
+              <option value="">全部</option>
+              {ALERT_SEVERITY_FILTER_OPTIONS.filter((option) => option.value !== "").map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-execution-source-id-filter">
+            Source ID
+            <input
+              id="orchestration-execution-source-id-filter"
+              type="text"
+              value={orchestrationExecutionSourceIdFilter}
+              onChange={(event) => setOrchestrationExecutionSourceIdFilter(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-execution-dedupe-hit-filter">
+            dedupeHit
+            <select
+              id="orchestration-execution-dedupe-hit-filter"
+              value={orchestrationExecutionDedupeHitFilter}
+              onChange={(event) =>
+                setOrchestrationExecutionDedupeHitFilter(event.target.value as "" | "true" | "false")
+              }
+            >
+              {BOOLEAN_FILTER_OPTIONS.map((option) => (
+                <option key={`dedupe-${option.label}`} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-execution-suppressed-filter">
+            suppressed
+            <select
+              id="orchestration-execution-suppressed-filter"
+              value={orchestrationExecutionSuppressedFilter}
+              onChange={(event) =>
+                setOrchestrationExecutionSuppressedFilter(event.target.value as "" | "true" | "false")
+              }
+            >
+              {BOOLEAN_FILTER_OPTIONS.map((option) => (
+                <option key={`suppressed-${option.label}`} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-execution-simulated-filter">
+            simulated
+            <select
+              id="orchestration-execution-simulated-filter"
+              value={orchestrationExecutionSimulatedFilter}
+              onChange={(event) =>
+                setOrchestrationExecutionSimulatedFilter(event.target.value as "" | "true" | "false")
+              }
+            >
+              {BOOLEAN_FILTER_OPTIONS.map((option) => (
+                <option key={`simulated-${option.label}`} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-execution-from">
+            from
+            <input
+              id="orchestration-execution-from"
+              type="datetime-local"
+              value={orchestrationExecutionFrom}
+              onChange={(event) => setOrchestrationExecutionFrom(event.target.value)}
+            />
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-execution-to">
+            to
+            <input
+              id="orchestration-execution-to"
+              type="datetime-local"
+              value={orchestrationExecutionTo}
+              onChange={(event) => setOrchestrationExecutionTo(event.target.value)}
+            />
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-execution-limit">
+            limit
+            <input
+              id="orchestration-execution-limit"
+              type="number"
+              min={1}
+              step={1}
+              value={orchestrationExecutionLimit}
+              onChange={(event) => setOrchestrationExecutionLimit(event.target.value)}
+            />
+          </label>
+
+          <button
+            type="button"
+            className="submit-button"
+            disabled={loadOrchestrationExecutionsMutation.isPending}
+            onClick={() => {
+              const fromTimestamp = orchestrationExecutionFrom
+                ? Date.parse(orchestrationExecutionFrom)
+                : null;
+              const toTimestamp = orchestrationExecutionTo ? Date.parse(orchestrationExecutionTo) : null;
+              if (
+                fromTimestamp !== null &&
+                toTimestamp !== null &&
+                !Number.isNaN(fromTimestamp) &&
+                !Number.isNaN(toTimestamp) &&
+                fromTimestamp > toTimestamp
+              ) {
+                setOrchestrationFeedback(null);
+                setOrchestrationError("执行日志筛选时间范围非法：from 不能晚于 to。");
+                return;
+              }
+              setOrchestrationFeedback(null);
+              setOrchestrationError(null);
+              loadOrchestrationExecutionsMutation.mutate(orchestrationExecutionQueryInput);
+            }}
+          >
+            {loadOrchestrationExecutionsMutation.isPending ? "加载中..." : "加载执行日志"}
+          </button>
+        </div>
+
+        {orchestrationFeedback ? <p className="feedback success">{orchestrationFeedback}</p> : null}
+        {orchestrationError ? <p className="feedback error">{orchestrationError}</p> : null}
+        {upsertOrchestrationRuleMutation.isError ? (
+          <p className="feedback error">
+            保存编排规则失败：{toErrorMessage(upsertOrchestrationRuleMutation.error)}
+          </p>
+        ) : null}
+        {simulateOrchestrationMutation.isError ? (
+          <p className="feedback error">
+            模拟失败：{toErrorMessage(simulateOrchestrationMutation.error)}
+          </p>
+        ) : null}
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>名称</th>
+                <th>eventType</th>
+                <th>severity</th>
+                <th>sourceId</th>
+                <th>enabled</th>
+                <th>channels</th>
+                <th>窗口配置</th>
+                <th>更新时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orchestrationRuleItems.length === 0 ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={10}>
+                    尚未加载规则或无匹配结果
+                  </td>
+                </tr>
+              ) : (
+                orchestrationRuleItems.map((rule) => (
+                  <tr key={rule.id}>
+                    <td>{rule.id}</td>
+                    <td>{rule.name}</td>
+                    <td>{rule.eventType}</td>
+                    <td>{rule.severity ?? "--"}</td>
+                    <td>{rule.sourceId ?? "--"}</td>
+                    <td>{rule.enabled ? "true" : "false"}</td>
+                    <td>{rule.channels.join(",")}</td>
+                    <td>
+                      d={rule.dedupeWindowSeconds}s / s={rule.suppressionWindowSeconds}s / m=
+                      {rule.mergeWindowSeconds}s / sla=
+                      {typeof rule.slaMinutes === "number" ? `${rule.slaMinutes}m` : "--"}
+                    </td>
+                    <td>{formatDateTime(rule.updatedAt)}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="table-action"
+                        onClick={() => {
+                          setOrchestrationRuleId(rule.id);
+                          setOrchestrationRuleName(rule.name);
+                          setOrchestrationRuleEnabled(rule.enabled);
+                          setOrchestrationRuleEventType(rule.eventType);
+                          setOrchestrationRuleSeverity(rule.severity ?? "");
+                          setOrchestrationRuleSourceId(rule.sourceId ?? "");
+                          setOrchestrationRuleDedupeWindowSeconds(String(rule.dedupeWindowSeconds));
+                          setOrchestrationRuleSuppressionWindowSeconds(
+                            String(rule.suppressionWindowSeconds)
+                          );
+                          setOrchestrationRuleMergeWindowSeconds(String(rule.mergeWindowSeconds));
+                          setOrchestrationRuleSlaMinutes(
+                            typeof rule.slaMinutes === "number" ? String(rule.slaMinutes) : ""
+                          );
+                          setOrchestrationRuleChannelsInput(rule.channels.join(","));
+                        }}
+                      >
+                        载入
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {orchestrationSimulationResult ? (
+          <div className="table-wrapper">
+            <table className="session-table">
+              <thead>
+                <tr>
+                  <th>模拟结果</th>
+                  <th>值</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>命中规则</td>
+                  <td>{orchestrationSimulationResult.matchedRules.length}</td>
+                </tr>
+                <tr>
+                  <td>冲突规则 ID</td>
+                  <td>
+                    {orchestrationSimulationResult.conflictRuleIds.length > 0
+                      ? orchestrationSimulationResult.conflictRuleIds.join(",")
+                      : "--"}
+                  </td>
+                </tr>
+                <tr>
+                  <td>执行日志条数</td>
+                  <td>{orchestrationSimulationExecutions.length}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>ruleId</th>
+                <th>eventType</th>
+                <th>severity</th>
+                <th>sourceId</th>
+                <th>dedupeHit</th>
+                <th>suppressed</th>
+                <th>simulated</th>
+                <th>conflicts</th>
+                <th>channels</th>
+                <th>创建时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orchestrationExecutionItems.length === 0 ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={11}>
+                    尚未加载执行日志或无匹配结果
+                  </td>
+                </tr>
+              ) : (
+                orchestrationExecutionItems.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.id}</td>
+                    <td>{item.ruleId}</td>
+                    <td>{item.eventType}</td>
+                    <td>{item.severity ?? "--"}</td>
+                    <td>{item.sourceId ?? "--"}</td>
+                    <td>{item.dedupeHit ? "true" : "false"}</td>
+                    <td>{item.suppressed ? "true" : "false"}</td>
+                    <td>{item.simulated ? "true" : "false"}</td>
+                    <td>{item.conflictRuleIds.length > 0 ? item.conflictRuleIds.join(",") : "--"}</td>
+                    <td>{item.channels.join(",")}</td>
+                    <td>{formatDateTime(item.createdAt)}</td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>

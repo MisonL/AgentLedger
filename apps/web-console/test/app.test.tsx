@@ -81,10 +81,16 @@ function mockGovernancePageFetch({
   },
   residencyPolicyResponses = [] as GovernanceResidencyPolicyResponseFixture[],
   ruleAssets = [] as GovernanceRuleAssetFixture[],
+  extraHandler,
 }: {
   residencyPolicy?: GovernanceResidencyPolicyFixture;
   residencyPolicyResponses?: GovernanceResidencyPolicyResponseFixture[];
   ruleAssets?: GovernanceRuleAssetFixture[];
+  extraHandler?: (
+    input: Parameters<typeof fetch>[0],
+    init: Parameters<typeof fetch>[1],
+    context: { url: string; method: string; pathname: string }
+  ) => Response | Promise<Response> | undefined;
 } = {}) {
   const ruleAssetItems = ruleAssets.map((asset, index) => ({
     id: asset.id,
@@ -243,6 +249,13 @@ function mockGovernancePageFetch({
           limit: 50,
         },
       });
+    }
+
+    if (extraHandler) {
+      const extraResponse = await extraHandler(input, init, { url, method, pathname });
+      if (extraResponse) {
+        return extraResponse;
+      }
     }
 
     throw new Error(`unexpected call: ${method} ${url}`);
@@ -1875,6 +1888,240 @@ describe("Web Console", () => {
         (init as RequestInit | undefined)?.method === "PATCH"
     );
     expect(patchCall).toBeTruthy();
+  });
+
+  test("治理页支持告警编排规则保存、模拟与执行日志加载", async () => {
+    window.location.hash = "#/governance";
+    setAuthTokens({
+      accessToken: "access-token-governance-orchestration",
+      refreshToken: "refresh-token-governance-orchestration",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const orchestrationRules = [
+      {
+        id: "rule-ui-1",
+        tenantId: "default",
+        name: "critical dedupe",
+        enabled: true,
+        eventType: "alert",
+        severity: "critical",
+        sourceId: "source-1",
+        dedupeWindowSeconds: 300,
+        suppressionWindowSeconds: 120,
+        mergeWindowSeconds: 60,
+        slaMinutes: 15,
+        channels: ["webhook", "wecom"],
+        updatedAt: "2026-03-03T10:00:00.000Z",
+      },
+    ];
+    const orchestrationExecutions: Array<{
+      id: string;
+      tenantId: string;
+      ruleId: string;
+      eventType: "alert" | "weekly";
+      alertId?: string;
+      severity?: "warning" | "critical";
+      sourceId?: string;
+      channels: string[];
+      conflictRuleIds: string[];
+      dedupeHit: boolean;
+      suppressed: boolean;
+      simulated: boolean;
+      metadata: Record<string, unknown>;
+      createdAt: string;
+    }> = [];
+
+    const fetchSpy = mockGovernancePageFetch({
+      extraHandler: async (_input, init, { method, pathname, url }) => {
+        if (pathname === "/api/v1/alerts/orchestration/rules" && method === "GET") {
+          const parsedUrl = new URL(url, "http://localhost");
+          const eventType = parsedUrl.searchParams.get("eventType");
+          const severity = parsedUrl.searchParams.get("severity");
+          const sourceId = parsedUrl.searchParams.get("sourceId");
+          const enabled = parsedUrl.searchParams.get("enabled");
+          const filtered = orchestrationRules.filter((item) => {
+            if (eventType && item.eventType !== eventType) {
+              return false;
+            }
+            if (severity && item.severity !== severity) {
+              return false;
+            }
+            if (sourceId && item.sourceId !== sourceId) {
+              return false;
+            }
+            if (enabled === "true" && item.enabled !== true) {
+              return false;
+            }
+            if (enabled === "false" && item.enabled !== false) {
+              return false;
+            }
+            return true;
+          });
+          return mockJsonResponse({
+            items: filtered,
+            total: filtered.length,
+            filters: {
+              ...(eventType ? { eventType } : {}),
+              ...(severity ? { severity } : {}),
+              ...(sourceId ? { sourceId } : {}),
+              ...(enabled ? { enabled: enabled === "true" } : {}),
+            },
+          });
+        }
+
+        if (pathname.startsWith("/api/v1/alerts/orchestration/rules/") && method === "PUT") {
+          const ruleId = decodeURIComponent(pathname.split("/").pop() ?? "");
+          const payload = JSON.parse(String(init?.body ?? "{}")) as {
+            name?: string;
+            enabled?: boolean;
+            eventType?: "alert" | "weekly";
+            severity?: "warning" | "critical";
+            sourceId?: string;
+            dedupeWindowSeconds?: number;
+            suppressionWindowSeconds?: number;
+            mergeWindowSeconds?: number;
+            slaMinutes?: number;
+            channels?: string[];
+          };
+          const nextRule = {
+            id: ruleId,
+            tenantId: "default",
+            name: payload.name ?? ruleId,
+            enabled: payload.enabled === true,
+            eventType: payload.eventType ?? "alert",
+            severity: payload.severity,
+            sourceId: payload.sourceId,
+            dedupeWindowSeconds: payload.dedupeWindowSeconds ?? 0,
+            suppressionWindowSeconds: payload.suppressionWindowSeconds ?? 0,
+            mergeWindowSeconds: payload.mergeWindowSeconds ?? 0,
+            slaMinutes: payload.slaMinutes,
+            channels: payload.channels ?? ["webhook"],
+            updatedAt: "2026-03-03T11:00:00.000Z",
+          };
+          const existingIndex = orchestrationRules.findIndex((item) => item.id === ruleId);
+          if (existingIndex >= 0) {
+            orchestrationRules[existingIndex] = nextRule;
+          } else {
+            orchestrationRules.unshift(nextRule);
+          }
+          return mockJsonResponse(nextRule);
+        }
+
+        if (pathname === "/api/v1/alerts/orchestration/simulate" && method === "POST") {
+          const payload = JSON.parse(String(init?.body ?? "{}")) as {
+            ruleId?: string;
+            eventType?: "alert" | "weekly";
+            alertId?: string;
+            severity?: "warning" | "critical";
+            sourceId?: string;
+            dedupeHit?: boolean;
+            suppressed?: boolean;
+          };
+          const matchedRules = orchestrationRules.filter((item) => {
+            if (payload.ruleId && item.id !== payload.ruleId) {
+              return false;
+            }
+            if (payload.eventType && item.eventType !== payload.eventType) {
+              return false;
+            }
+            return item.enabled;
+          });
+          const executions = matchedRules.map((item, index) => {
+            const execution = {
+              id: `exec-ui-${orchestrationExecutions.length + index + 1}`,
+              tenantId: "default",
+              ruleId: item.id,
+              eventType: payload.eventType ?? "alert",
+              alertId: payload.alertId,
+              severity: payload.severity,
+              sourceId: payload.sourceId,
+              channels: item.channels,
+              conflictRuleIds: [],
+              dedupeHit: payload.dedupeHit === true,
+              suppressed: payload.suppressed === true,
+              simulated: true,
+              metadata: {},
+              createdAt: "2026-03-03T11:30:00.000Z",
+            };
+            orchestrationExecutions.unshift(execution);
+            return execution;
+          });
+          return mockJsonResponse({
+            matchedRules,
+            conflictRuleIds: [],
+            executions,
+          });
+        }
+
+        if (pathname === "/api/v1/alerts/orchestration/executions" && method === "GET") {
+          const parsedUrl = new URL(url, "http://localhost");
+          const ruleId = parsedUrl.searchParams.get("ruleId");
+          const filtered = orchestrationExecutions.filter((item) =>
+            ruleId ? item.ruleId === ruleId : true
+          );
+          return mockJsonResponse({
+            items: filtered,
+            total: filtered.length,
+            filters: {
+              ...(ruleId ? { ruleId } : {}),
+            },
+          });
+        }
+
+        return undefined;
+      },
+    });
+
+    render(<App />);
+
+    const section = (await screen.findByRole("heading", { name: "告警编排中心", level: 2 }))
+      .closest("section");
+    expect(section).not.toBeNull();
+    const sectionScreen = within(section as HTMLElement);
+
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载编排规则" }));
+    expect(await sectionScreen.findByText("rule-ui-1")).toBeInTheDocument();
+
+    fireEvent.change(sectionScreen.getByLabelText("Rule ID（规则）"), {
+      target: { value: "rule-ui-2" },
+    });
+    fireEvent.change(sectionScreen.getByLabelText("名称"), {
+      target: { value: "weekly fanout" },
+    });
+    fireEvent.change(sectionScreen.getByLabelText("Channels（逗号分隔）"), {
+      target: { value: "webhook,email" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "保存编排规则" }));
+    expect(await sectionScreen.findByText("编排规则 rule-ui-2 已保存。")).toBeInTheDocument();
+
+    fireEvent.change(sectionScreen.getByLabelText("指定 Rule ID（可选）"), {
+      target: { value: "rule-ui-2" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "执行模拟" }));
+    expect(await sectionScreen.findByText("模拟完成：命中 1 条规则，冲突 0 条。")).toBeInTheDocument();
+
+    fireEvent.change(sectionScreen.getByLabelText("Rule ID（日志）"), {
+      target: { value: "rule-ui-2" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载执行日志" }));
+    expect(await sectionScreen.findByText("exec-ui-1")).toBeInTheDocument();
+
+    expect(
+      fetchSpy.mock.calls.some(
+        ([url, init]) =>
+          toUrl(url).includes("/api/v1/alerts/orchestration/rules/rule-ui-2") &&
+          ((init as RequestInit | undefined)?.method ?? "GET").toUpperCase() === "PUT"
+      )
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(
+        ([url, init]) =>
+          toUrl(url).includes("/api/v1/alerts/orchestration/simulate") &&
+          ((init as RequestInit | undefined)?.method ?? "GET").toUpperCase() === "POST"
+      )
+    ).toBe(true);
   });
 
   test("治理页在 single_region 模式配置副本地域时会阻止保存且不发起 PUT", async () => {
