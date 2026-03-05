@@ -780,6 +780,11 @@
   width: 100%;
 }
 
+.governance-stack {
+  display: grid;
+  gap: 12px;
+}
+
 .secondary-button {
   background: #fff;
   color: #184567;

@@ -1890,7 +1890,7 @@ describe("Web Console", () => {
     expect(patchCall).toBeTruthy();
   });
 
-  test("治理页支持告警编排规则保存、模拟与执行日志加载", async () => {
+  test("治理页支持告警编排规则筛选、保存规范化、模拟与执行日志加载", async () => {
     window.location.hash = "#/governance";
     setAuthTokens({
       accessToken: "access-token-governance-orchestration",
@@ -1932,11 +1932,38 @@ describe("Web Console", () => {
       metadata: Record<string, unknown>;
       createdAt: string;
     }> = [];
+    const orchestrationRuleQuerySnapshots: Array<Record<string, string>> = [];
+    const orchestrationExecutionQuerySnapshots: Array<Record<string, string>> = [];
+    const orchestrationRuleUpsertPayloads: Array<{
+      ruleId: string;
+      payload: {
+        name?: string;
+        enabled?: boolean;
+        eventType?: "alert" | "weekly";
+        severity?: "warning" | "critical";
+        sourceId?: string;
+        dedupeWindowSeconds?: number;
+        suppressionWindowSeconds?: number;
+        mergeWindowSeconds?: number;
+        slaMinutes?: number;
+        channels?: string[];
+      };
+    }> = [];
+    const orchestrationSimulationPayloads: Array<{
+      ruleId?: string;
+      eventType?: "alert" | "weekly";
+      alertId?: string;
+      severity?: "warning" | "critical";
+      sourceId?: string;
+      dedupeHit?: boolean;
+      suppressed?: boolean;
+    }> = [];
 
     const fetchSpy = mockGovernancePageFetch({
       extraHandler: async (_input, init, { method, pathname, url }) => {
         if (pathname === "/api/v1/alerts/orchestration/rules" && method === "GET") {
           const parsedUrl = new URL(url, "http://localhost");
+          orchestrationRuleQuerySnapshots.push(Object.fromEntries(parsedUrl.searchParams.entries()));
           const eventType = parsedUrl.searchParams.get("eventType");
           const severity = parsedUrl.searchParams.get("severity");
           const sourceId = parsedUrl.searchParams.get("sourceId");
@@ -1985,6 +2012,7 @@ describe("Web Console", () => {
             slaMinutes?: number;
             channels?: string[];
           };
+          orchestrationRuleUpsertPayloads.push({ ruleId, payload });
           const nextRule = {
             id: ruleId,
             tenantId: "default",
@@ -2019,6 +2047,7 @@ describe("Web Console", () => {
             dedupeHit?: boolean;
             suppressed?: boolean;
           };
+          orchestrationSimulationPayloads.push(payload);
           const matchedRules = orchestrationRules.filter((item) => {
             if (payload.ruleId && item.id !== payload.ruleId) {
               return false;
@@ -2057,6 +2086,9 @@ describe("Web Console", () => {
 
         if (pathname === "/api/v1/alerts/orchestration/executions" && method === "GET") {
           const parsedUrl = new URL(url, "http://localhost");
+          orchestrationExecutionQuerySnapshots.push(
+            Object.fromEntries(parsedUrl.searchParams.entries())
+          );
           const ruleId = parsedUrl.searchParams.get("ruleId");
           const filtered = orchestrationExecutions.filter((item) =>
             ruleId ? item.ruleId === ruleId : true
@@ -2080,33 +2112,194 @@ describe("Web Console", () => {
       .closest("section");
     expect(section).not.toBeNull();
     const sectionScreen = within(section as HTMLElement);
+    const byId = <T extends HTMLElement>(id: string) => {
+      const element = (section as HTMLElement).querySelector(`#${id}`);
+      expect(element).not.toBeNull();
+      return element as T;
+    };
+
+    expect(
+      sectionScreen.getByText("尚未加载规则，请点击“加载编排规则”。")
+    ).toBeInTheDocument();
+    expect(
+      sectionScreen.getByText("尚未加载执行日志，请点击“加载执行日志”。")
+    ).toBeInTheDocument();
+
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-source-filter"), {
+      target: { value: "missing-source" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载编排规则" }));
+    expect(await sectionScreen.findByText("无匹配规则。")).toBeInTheDocument();
+
+    fireEvent.change(byId<HTMLSelectElement>("orchestration-rule-event-type-filter"), {
+      target: { value: "alert" },
+    });
+    fireEvent.change(byId<HTMLSelectElement>("orchestration-rule-enabled-filter"), {
+      target: { value: "true" },
+    });
+    fireEvent.change(byId<HTMLSelectElement>("orchestration-rule-severity-filter"), {
+      target: { value: "critical" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-source-filter"), {
+      target: { value: " source-1 " },
+    });
 
     fireEvent.click(sectionScreen.getByRole("button", { name: "加载编排规则" }));
     expect(await sectionScreen.findByText("rule-ui-1")).toBeInTheDocument();
+    const latestRuleQuerySnapshot =
+      orchestrationRuleQuerySnapshots[orchestrationRuleQuerySnapshots.length - 1];
+    expect(latestRuleQuerySnapshot).toEqual(
+      expect.objectContaining({
+        eventType: "alert",
+        enabled: "true",
+        severity: "critical",
+        sourceId: "source-1",
+      })
+    );
+
+    fireEvent.click(sectionScreen.getByRole("button", { name: "载入" }));
+    expect(byId<HTMLInputElement>("orchestration-simulate-rule-id").value).toBe("rule-ui-1");
 
     fireEvent.change(sectionScreen.getByLabelText("Rule ID（规则）"), {
-      target: { value: "rule-ui-2" },
+      target: { value: " rule-ui-2 " },
     });
     fireEvent.change(sectionScreen.getByLabelText("名称"), {
-      target: { value: "weekly fanout" },
+      target: { value: " weekly fanout " },
+    });
+    fireEvent.change(byId<HTMLSelectElement>("orchestration-rule-event-type"), {
+      target: { value: "weekly" },
+    });
+    fireEvent.change(byId<HTMLSelectElement>("orchestration-rule-severity"), {
+      target: { value: "warning" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-source-id"), {
+      target: { value: " source-2 " },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-dedupe-window"), {
+      target: { value: "301" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-suppression-window"), {
+      target: { value: "121" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-merge-window"), {
+      target: { value: "61" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-sla"), {
+      target: { value: "30" },
     });
     fireEvent.change(sectionScreen.getByLabelText("Channels（逗号分隔）"), {
-      target: { value: "webhook,email" },
+      target: { value: " WEBHOOK,email,webhook " },
     });
     fireEvent.click(sectionScreen.getByRole("button", { name: "保存编排规则" }));
     expect(await sectionScreen.findByText("编排规则 rule-ui-2 已保存。")).toBeInTheDocument();
+    const latestUpsertPayload =
+      orchestrationRuleUpsertPayloads[orchestrationRuleUpsertPayloads.length - 1];
+    expect(latestUpsertPayload).toEqual(
+      expect.objectContaining({
+        ruleId: "rule-ui-2",
+      })
+    );
+    expect(latestUpsertPayload?.payload).toEqual(
+      expect.objectContaining({
+        name: "weekly fanout",
+        enabled: true,
+        eventType: "weekly",
+        severity: "warning",
+        sourceId: "source-2",
+        dedupeWindowSeconds: 301,
+        suppressionWindowSeconds: 121,
+        mergeWindowSeconds: 61,
+        slaMinutes: 30,
+        channels: ["webhook", "email"],
+      })
+    );
 
     fireEvent.change(sectionScreen.getByLabelText("指定 Rule ID（可选）"), {
-      target: { value: "rule-ui-2" },
+      target: { value: " rule-ui-2 " },
+    });
+    fireEvent.change(byId<HTMLSelectElement>("orchestration-simulate-event-type"), {
+      target: { value: "weekly" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-simulate-source-id"), {
+      target: { value: " source-2 " },
     });
     fireEvent.click(sectionScreen.getByRole("button", { name: "执行模拟" }));
     expect(await sectionScreen.findByText("模拟完成：命中 1 条规则，冲突 0 条。")).toBeInTheDocument();
+    expect(sectionScreen.getByText("命中规则 ID")).toBeInTheDocument();
+    const latestSimulationPayload =
+      orchestrationSimulationPayloads[orchestrationSimulationPayloads.length - 1];
+    expect(latestSimulationPayload).toEqual(
+      expect.objectContaining({
+        ruleId: "rule-ui-2",
+        eventType: "weekly",
+        sourceId: "source-2",
+      })
+    );
+
+    fireEvent.change(byId<HTMLInputElement>("orchestration-execution-rule-id-filter"), {
+      target: { value: "rule-not-exist" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载执行日志" }));
+    expect(await sectionScreen.findByText("无匹配执行日志。")).toBeInTheDocument();
 
     fireEvent.change(sectionScreen.getByLabelText("Rule ID（日志）"), {
-      target: { value: "rule-ui-2" },
+      target: { value: " rule-ui-2 " },
+    });
+    fireEvent.change(byId<HTMLSelectElement>("orchestration-execution-event-type-filter"), {
+      target: { value: "weekly" },
+    });
+    fireEvent.change(byId<HTMLSelectElement>("orchestration-execution-severity-filter"), {
+      target: { value: "warning" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-execution-source-id-filter"), {
+      target: { value: " source-2 " },
+    });
+    fireEvent.change(byId<HTMLSelectElement>("orchestration-execution-dedupe-hit-filter"), {
+      target: { value: "false" },
+    });
+    fireEvent.change(byId<HTMLSelectElement>("orchestration-execution-suppressed-filter"), {
+      target: { value: "false" },
+    });
+    fireEvent.change(byId<HTMLSelectElement>("orchestration-execution-simulated-filter"), {
+      target: { value: "true" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-execution-from"), {
+      target: { value: "2026-03-03T11:00" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-execution-to"), {
+      target: { value: "2026-03-03T12:00" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-execution-limit"), {
+      target: { value: "25" },
     });
     fireEvent.click(sectionScreen.getByRole("button", { name: "加载执行日志" }));
     expect(await sectionScreen.findByText("exec-ui-1")).toBeInTheDocument();
+    const latestExecutionQuerySnapshot =
+      orchestrationExecutionQuerySnapshots[orchestrationExecutionQuerySnapshots.length - 1];
+    expect(latestExecutionQuerySnapshot).toEqual(
+      expect.objectContaining({
+        ruleId: "rule-ui-2",
+        eventType: "weekly",
+        severity: "warning",
+        sourceId: "source-2",
+        dedupeHit: "false",
+        suppressed: "false",
+        simulated: "true",
+        from: "2026-03-03T11:00",
+        to: "2026-03-03T12:00",
+        limit: "25",
+      })
+    );
+    expect(
+      (section as HTMLElement).querySelector(
+        "#orchestration-rule-id-options option[value='rule-ui-1']"
+      )
+    ).not.toBeNull();
+    expect(
+      (section as HTMLElement).querySelector(
+        "#orchestration-source-id-options option[value='source-1']"
+      )
+    ).not.toBeNull();
 
     expect(
       fetchSpy.mock.calls.some(
@@ -2122,6 +2315,161 @@ describe("Web Console", () => {
           ((init as RequestInit | undefined)?.method ?? "GET").toUpperCase() === "POST"
       )
     ).toBe(true);
+  });
+
+  test("治理页告警编排非法输入时会阻止请求", async () => {
+    window.location.hash = "#/governance";
+    setAuthTokens({
+      accessToken: "access-token-governance-orchestration-invalid",
+      refreshToken: "refresh-token-governance-orchestration-invalid",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const orchestrationExecutionQuerySnapshots: Array<Record<string, string>> = [];
+
+    const fetchSpy = mockGovernancePageFetch({
+      extraHandler: async (_input, init, { method, pathname, url }) => {
+        if (pathname === "/api/v1/alerts/orchestration/rules" && method === "GET") {
+          return mockJsonResponse({
+            items: [],
+            total: 0,
+            filters: {},
+          });
+        }
+        if (pathname.startsWith("/api/v1/alerts/orchestration/rules/") && method === "PUT") {
+          const ruleId = decodeURIComponent(pathname.split("/").pop() ?? "");
+          const payload = JSON.parse(String(init?.body ?? "{}")) as {
+            name?: string;
+            channels?: string[];
+          };
+          return mockJsonResponse({
+            id: ruleId,
+            tenantId: "default",
+            name: payload.name ?? ruleId,
+            enabled: true,
+            eventType: "alert",
+            dedupeWindowSeconds: 0,
+            suppressionWindowSeconds: 0,
+            mergeWindowSeconds: 0,
+            channels: payload.channels ?? ["webhook"],
+            updatedAt: "2026-03-03T12:00:00.000Z",
+          });
+        }
+        if (pathname === "/api/v1/alerts/orchestration/simulate" && method === "POST") {
+          return mockJsonResponse({
+            matchedRules: [],
+            conflictRuleIds: [],
+            executions: [],
+          });
+        }
+        if (pathname === "/api/v1/alerts/orchestration/executions" && method === "GET") {
+          const parsedUrl = new URL(url, "http://localhost");
+          orchestrationExecutionQuerySnapshots.push(
+            Object.fromEntries(parsedUrl.searchParams.entries())
+          );
+          return mockJsonResponse({
+            items: [],
+            total: 0,
+            filters: {},
+          });
+        }
+        return undefined;
+      },
+    });
+
+    render(<App />);
+
+    const section = (await screen.findByRole("heading", { name: "告警编排中心", level: 2 }))
+      .closest("section");
+    expect(section).not.toBeNull();
+    const sectionScreen = within(section as HTMLElement);
+    const byId = <T extends HTMLElement>(id: string) => {
+      const element = (section as HTMLElement).querySelector(`#${id}`);
+      expect(element).not.toBeNull();
+      return element as T;
+    };
+    const rulePutCalls = () =>
+      fetchSpy.mock.calls.filter(([url, init]) => {
+        const requestInit = init as RequestInit | undefined;
+        return (
+          new URL(toUrl(url), "http://localhost").pathname.startsWith(
+            "/api/v1/alerts/orchestration/rules/"
+          ) && (requestInit?.method ?? "GET").toUpperCase() === "PUT"
+        );
+      });
+
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-id"), {
+      target: { value: "   " },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-name"), {
+      target: { value: "rule name" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-channels"), {
+      target: { value: "webhook" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "保存编排规则" }));
+    expect(await sectionScreen.findByText("Rule ID 不能为空。")).toBeInTheDocument();
+    expect(rulePutCalls()).toHaveLength(0);
+
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-id"), {
+      target: { value: "rule-invalid-ui" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-name"), {
+      target: { value: "   " },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "保存编排规则" }));
+    expect(await sectionScreen.findByText("规则名称不能为空。")).toBeInTheDocument();
+    expect(rulePutCalls()).toHaveLength(0);
+
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-name"), {
+      target: { value: "rule-invalid-ui" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-dedupe-window"), {
+      target: { value: "-1" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "保存编排规则" }));
+    expect(await sectionScreen.findByText("去重/抑制/合并窗口必须是非负整数。")).toBeInTheDocument();
+    expect(rulePutCalls()).toHaveLength(0);
+
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-dedupe-window"), {
+      target: { value: "0" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-channels"), {
+      target: { value: "webhook,unknown" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "保存编排规则" }));
+    expect(
+      await sectionScreen.findByText((content) => content.includes("存在不支持的 channels：unknown"))
+    ).toBeInTheDocument();
+    expect(rulePutCalls()).toHaveLength(0);
+
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-channels"), {
+      target: { value: " , " },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "保存编排规则" }));
+    expect(await sectionScreen.findByText("至少选择一个合法 channel。")).toBeInTheDocument();
+    expect(rulePutCalls()).toHaveLength(0);
+
+    fireEvent.change(byId<HTMLInputElement>("orchestration-rule-channels"), {
+      target: { value: "webhook" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "保存编排规则" }));
+    expect(await sectionScreen.findByText("编排规则 rule-invalid-ui 已保存。")).toBeInTheDocument();
+    expect(rulePutCalls()).toHaveLength(1);
+
+    const beforeInvalidTimeRange = orchestrationExecutionQuerySnapshots.length;
+    fireEvent.change(byId<HTMLInputElement>("orchestration-execution-from"), {
+      target: { value: "2026-03-04T12:00" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("orchestration-execution-to"), {
+      target: { value: "2026-03-04T11:00" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载执行日志" }));
+    expect(
+      await sectionScreen.findByText("执行日志筛选时间范围非法：from 不能晚于 to。")
+    ).toBeInTheDocument();
+    expect(orchestrationExecutionQuerySnapshots).toHaveLength(beforeInvalidTimeRange);
   });
 
   test("治理页在 single_region 模式配置副本地域时会阻止保存且不发起 PUT", async () => {

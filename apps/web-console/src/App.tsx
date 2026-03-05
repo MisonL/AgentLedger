@@ -2413,6 +2413,8 @@ function GovernancePage() {
     useState<AlertOrchestrationSimulationResponse | null>(null);
   const [orchestrationFeedback, setOrchestrationFeedback] = useState<string | null>(null);
   const [orchestrationError, setOrchestrationError] = useState<string | null>(null);
+  const [hasLoadedOrchestrationRules, setHasLoadedOrchestrationRules] = useState(false);
+  const [hasLoadedOrchestrationExecutions, setHasLoadedOrchestrationExecutions] = useState(false);
 
   const [residencyMode, setResidencyMode] = useState<DataResidencyMode>("single_region");
   const [primaryRegion, setPrimaryRegion] = useState("");
@@ -2751,6 +2753,7 @@ function GovernancePage() {
       fetchAlertOrchestrationRules(input),
     onSuccess: (payload) => {
       setOrchestrationError(null);
+      setHasLoadedOrchestrationRules(true);
       setOrchestrationRulesPayload({
         items: payload.items,
         total: payload.total,
@@ -2759,6 +2762,7 @@ function GovernancePage() {
     },
     onError: (error) => {
       setOrchestrationFeedback(null);
+      setHasLoadedOrchestrationRules(true);
       setOrchestrationError(`加载编排规则失败：${toErrorMessage(error)}`);
     },
   });
@@ -2798,11 +2802,18 @@ function GovernancePage() {
         typeof rule.slaMinutes === "number" ? String(rule.slaMinutes) : ""
       );
       setOrchestrationRuleChannelsInput(rule.channels.join(","));
-      const payload = await fetchAlertOrchestrationRules(orchestrationRuleQueryInput);
-      setOrchestrationRulesPayload({
-        items: payload.items,
-        total: payload.total,
-      });
+      try {
+        const payload = await fetchAlertOrchestrationRules(orchestrationRuleQueryInput);
+        setHasLoadedOrchestrationRules(true);
+        setOrchestrationRulesPayload({
+          items: payload.items,
+          total: payload.total,
+        });
+      } catch (error) {
+        setOrchestrationFeedback(
+          `编排规则 ${rule.id} 已保存，但规则列表刷新失败：${toErrorMessage(error)}`
+        );
+      }
     },
     onError: (error) => {
       setOrchestrationFeedback(null);
@@ -2831,6 +2842,7 @@ function GovernancePage() {
       fetchAlertOrchestrationExecutions(input),
     onSuccess: (payload) => {
       setOrchestrationError(null);
+      setHasLoadedOrchestrationExecutions(true);
       setOrchestrationExecutionsPayload({
         items: payload.items,
         total: payload.total,
@@ -2839,6 +2851,7 @@ function GovernancePage() {
     },
     onError: (error) => {
       setOrchestrationFeedback(null);
+      setHasLoadedOrchestrationExecutions(true);
       setOrchestrationError(`加载执行日志失败：${toErrorMessage(error)}`);
     },
   });
@@ -3118,6 +3131,51 @@ function GovernancePage() {
   const orchestrationRuleItems = orchestrationRulesPayload?.items ?? [];
   const orchestrationExecutionItems = orchestrationExecutionsPayload?.items ?? [];
   const orchestrationSimulationExecutions = orchestrationSimulationResult?.executions ?? [];
+  const knownOrchestrationRuleIds = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...orchestrationRuleItems.map((rule) => rule.id),
+          ...orchestrationExecutionItems.map((execution) => execution.ruleId),
+        ])
+      ).sort((left, right) => left.localeCompare(right)),
+    [orchestrationExecutionItems, orchestrationRuleItems]
+  );
+  const knownOrchestrationSourceIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            ...orchestrationRuleItems.map((rule) => rule.sourceId ?? ""),
+            ...orchestrationExecutionItems.map((execution) => execution.sourceId ?? ""),
+          ].filter((item) => item.trim().length > 0)
+        )
+      ).sort((left, right) => left.localeCompare(right)),
+    [orchestrationExecutionItems, orchestrationRuleItems]
+  );
+  const simulationConflictRuleSet = useMemo(
+    () => new Set(orchestrationSimulationResult?.conflictRuleIds ?? []),
+    [orchestrationSimulationResult]
+  );
+  const simulationConflictRules = useMemo(() => {
+    if (!orchestrationSimulationResult) {
+      return [];
+    }
+    const candidateRules = [
+      ...orchestrationSimulationResult.matchedRules,
+      ...orchestrationRuleItems,
+    ];
+    const mergedRuleById = new Map<string, AlertOrchestrationRule>();
+    for (const candidate of candidateRules) {
+      if (!mergedRuleById.has(candidate.id)) {
+        mergedRuleById.set(candidate.id, candidate);
+      }
+    }
+    return orchestrationSimulationResult.conflictRuleIds.map((ruleId) => ({
+      ruleId,
+      rule: mergedRuleById.get(ruleId) ?? null,
+    }));
+  }, [orchestrationRuleItems, orchestrationSimulationResult]);
   const regionItems: RegionDescriptor[] = residencyRegionsQuery.data?.items ?? [];
   const replicationItems: ReplicationJob[] = replicationJobsQuery.data?.items ?? [];
   const ruleItems: RuleAsset[] = ruleAssetsQuery.data?.items ?? [];
@@ -3376,6 +3434,16 @@ function GovernancePage() {
           <h2>告警编排中心</h2>
           <p>规则编排、模拟与执行日志。</p>
         </header>
+        <datalist id="orchestration-rule-id-options">
+          {knownOrchestrationRuleIds.map((ruleId) => (
+            <option key={ruleId} value={ruleId} />
+          ))}
+        </datalist>
+        <datalist id="orchestration-source-id-options">
+          {knownOrchestrationSourceIds.map((sourceId) => (
+            <option key={sourceId} value={sourceId} />
+          ))}
+        </datalist>
 
         <div className="filters-row governance-inline-grid">
           <label className="inline-field" htmlFor="orchestration-rule-event-type-filter">
@@ -3436,6 +3504,7 @@ function GovernancePage() {
             <input
               id="orchestration-rule-source-filter"
               type="text"
+              list="orchestration-source-id-options"
               value={orchestrationRuleSourceIdFilter}
               onChange={(event) => setOrchestrationRuleSourceIdFilter(event.target.value)}
               placeholder="可选"
@@ -3462,6 +3531,7 @@ function GovernancePage() {
             <input
               id="orchestration-rule-id"
               type="text"
+              list="orchestration-rule-id-options"
               value={orchestrationRuleId}
               onChange={(event) => setOrchestrationRuleId(event.target.value)}
               placeholder="例如：rule-alert-critical"
@@ -3527,6 +3597,7 @@ function GovernancePage() {
             <input
               id="orchestration-rule-source-id"
               type="text"
+              list="orchestration-source-id-options"
               value={orchestrationRuleSourceId}
               onChange={(event) => setOrchestrationRuleSourceId(event.target.value)}
               placeholder="可选"
@@ -3631,13 +3702,26 @@ function GovernancePage() {
                 setOrchestrationError("去重/抑制/合并窗口必须是非负整数。");
                 return;
               }
-              const channels = orchestrationRuleChannelsInput
+              const rawChannels = orchestrationRuleChannelsInput
                 .split(",")
                 .map((item) => item.trim().toLowerCase())
-                .filter((item, index, array) => item.length > 0 && array.indexOf(item) === index)
-                .filter((item): item is AlertOrchestrationChannel =>
-                  ALERT_ORCHESTRATION_CHANNEL_OPTIONS.some((option) => option.value === item)
+                .filter((item, index, array) => item.length > 0 && array.indexOf(item) === index);
+              const invalidChannels = rawChannels.filter(
+                (item) =>
+                  !ALERT_ORCHESTRATION_CHANNEL_OPTIONS.some((option) => option.value === item)
+              );
+              const channels = rawChannels.filter((item): item is AlertOrchestrationChannel =>
+                ALERT_ORCHESTRATION_CHANNEL_OPTIONS.some((option) => option.value === item)
+              );
+              if (invalidChannels.length > 0) {
+                setOrchestrationFeedback(null);
+                setOrchestrationError(
+                  `存在不支持的 channels：${invalidChannels.join(",")}。可选值：${ALERT_ORCHESTRATION_CHANNEL_OPTIONS.map(
+                    (option) => option.value
+                  ).join(",")}`
                 );
+                return;
+              }
               if (channels.length === 0) {
                 setOrchestrationFeedback(null);
                 setOrchestrationError("至少选择一个合法 channel。");
@@ -3672,6 +3756,7 @@ function GovernancePage() {
             <input
               id="orchestration-simulate-rule-id"
               type="text"
+              list="orchestration-rule-id-options"
               value={orchestrationSimulateRuleId}
               onChange={(event) => setOrchestrationSimulateRuleId(event.target.value)}
               placeholder="可选"
@@ -3727,6 +3812,7 @@ function GovernancePage() {
             <input
               id="orchestration-simulate-source-id"
               type="text"
+              list="orchestration-source-id-options"
               value={orchestrationSimulateSourceId}
               onChange={(event) => setOrchestrationSimulateSourceId(event.target.value)}
               placeholder="可选"
@@ -3782,6 +3868,7 @@ function GovernancePage() {
             <input
               id="orchestration-execution-rule-id-filter"
               type="text"
+              list="orchestration-rule-id-options"
               value={orchestrationExecutionRuleIdFilter}
               onChange={(event) => setOrchestrationExecutionRuleIdFilter(event.target.value)}
               placeholder="可选"
@@ -3829,6 +3916,7 @@ function GovernancePage() {
             <input
               id="orchestration-execution-source-id-filter"
               type="text"
+              list="orchestration-source-id-options"
               value={orchestrationExecutionSourceIdFilter}
               onChange={(event) => setOrchestrationExecutionSourceIdFilter(event.target.value)}
               placeholder="可选"
@@ -3949,16 +4037,6 @@ function GovernancePage() {
 
         {orchestrationFeedback ? <p className="feedback success">{orchestrationFeedback}</p> : null}
         {orchestrationError ? <p className="feedback error">{orchestrationError}</p> : null}
-        {upsertOrchestrationRuleMutation.isError ? (
-          <p className="feedback error">
-            保存编排规则失败：{toErrorMessage(upsertOrchestrationRuleMutation.error)}
-          </p>
-        ) : null}
-        {simulateOrchestrationMutation.isError ? (
-          <p className="feedback error">
-            模拟失败：{toErrorMessage(simulateOrchestrationMutation.error)}
-          </p>
-        ) : null}
 
         <div className="table-wrapper">
           <table className="session-table">
@@ -3980,7 +4058,9 @@ function GovernancePage() {
               {orchestrationRuleItems.length === 0 ? (
                 <tr>
                   <td className="table-empty-cell" colSpan={10}>
-                    尚未加载规则或无匹配结果
+                    {hasLoadedOrchestrationRules
+                      ? "无匹配规则。"
+                      : "尚未加载规则，请点击“加载编排规则”。"}
                   </td>
                 </tr>
               ) : (
@@ -4005,6 +4085,7 @@ function GovernancePage() {
                         className="table-action"
                         onClick={() => {
                           setOrchestrationRuleId(rule.id);
+                          setOrchestrationSimulateRuleId(rule.id);
                           setOrchestrationRuleName(rule.name);
                           setOrchestrationRuleEnabled(rule.enabled);
                           setOrchestrationRuleEventType(rule.eventType);
@@ -4032,33 +4113,107 @@ function GovernancePage() {
         </div>
 
         {orchestrationSimulationResult ? (
-          <div className="table-wrapper">
-            <table className="session-table">
-              <thead>
-                <tr>
-                  <th>模拟结果</th>
-                  <th>值</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>命中规则</td>
-                  <td>{orchestrationSimulationResult.matchedRules.length}</td>
-                </tr>
-                <tr>
-                  <td>冲突规则 ID</td>
-                  <td>
-                    {orchestrationSimulationResult.conflictRuleIds.length > 0
-                      ? orchestrationSimulationResult.conflictRuleIds.join(",")
-                      : "--"}
-                  </td>
-                </tr>
-                <tr>
-                  <td>执行日志条数</td>
-                  <td>{orchestrationSimulationExecutions.length}</td>
-                </tr>
-              </tbody>
-            </table>
+          <div className="governance-stack">
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>模拟结果</th>
+                    <th>值</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>命中规则</td>
+                    <td>{orchestrationSimulationResult.matchedRules.length}</td>
+                  </tr>
+                  <tr>
+                    <td>冲突规则 ID</td>
+                    <td>
+                      {orchestrationSimulationResult.conflictRuleIds.length > 0
+                        ? orchestrationSimulationResult.conflictRuleIds.join(",")
+                        : "--"}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>执行日志条数</td>
+                    <td>{orchestrationSimulationExecutions.length}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>命中规则 ID</th>
+                    <th>名称</th>
+                    <th>eventType</th>
+                    <th>severity</th>
+                    <th>sourceId</th>
+                    <th>channels</th>
+                    <th>冲突</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orchestrationSimulationResult.matchedRules.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={7}>
+                        本次模拟未命中规则
+                      </td>
+                    </tr>
+                  ) : (
+                    orchestrationSimulationResult.matchedRules.map((rule) => (
+                      <tr key={`simulation-match-${rule.id}`}>
+                        <td>{rule.id}</td>
+                        <td>{rule.name}</td>
+                        <td>{rule.eventType}</td>
+                        <td>{rule.severity ?? "--"}</td>
+                        <td>{rule.sourceId ?? "--"}</td>
+                        <td>{rule.channels.join(",")}</td>
+                        <td>{simulationConflictRuleSet.has(rule.id) ? "是" : "否"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>冲突规则 ID</th>
+                    <th>名称</th>
+                    <th>eventType</th>
+                    <th>severity</th>
+                    <th>sourceId</th>
+                    <th>channels</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {simulationConflictRules.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={6}>
+                        本次模拟无冲突
+                      </td>
+                    </tr>
+                  ) : (
+                    simulationConflictRules.map((item) => (
+                      <tr key={`simulation-conflict-${item.ruleId}`}>
+                        <td>{item.ruleId}</td>
+                        <td>{item.rule?.name ?? "--"}</td>
+                        <td>{item.rule?.eventType ?? "--"}</td>
+                        <td>{item.rule?.severity ?? "--"}</td>
+                        <td>{item.rule?.sourceId ?? "--"}</td>
+                        <td>{item.rule ? item.rule.channels.join(",") : "--"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : null}
 
@@ -4083,7 +4238,9 @@ function GovernancePage() {
               {orchestrationExecutionItems.length === 0 ? (
                 <tr>
                   <td className="table-empty-cell" colSpan={11}>
-                    尚未加载执行日志或无匹配结果
+                    {hasLoadedOrchestrationExecutions
+                      ? "无匹配执行日志。"
+                      : "尚未加载执行日志，请点击“加载执行日志”。"}
                   </td>
                 </tr>
               ) : (
