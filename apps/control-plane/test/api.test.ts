@@ -12340,6 +12340,7 @@ describe("Control Plane API", () => {
       paths?: Record<string, unknown>;
     };
     expect(Boolean(openapiBody.paths?.["/api/v1/replay/jobs"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v1/webhooks/{id}/replay"])).toBe(true);
 
     const forbiddenCreateKeyResponse = await app.request("/api/v1/api-keys", {
       method: "POST",
@@ -12427,6 +12428,99 @@ describe("Control Plane API", () => {
     });
     expect(createWebhookResponse.status).toBe(201);
     const createdWebhook = (await createWebhookResponse.json()) as { id: string };
+
+    const forbiddenReplayResponse = await app.request(
+      `/api/v1/webhooks/${encodeURIComponent(createdWebhook.id)}/replay`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAMemberHeaders,
+        },
+        body: JSON.stringify({ dryRun: true }),
+      },
+    );
+    expect(forbiddenReplayResponse.status).toBe(403);
+
+    const badReplayResponse = await app.request(
+      `/api/v1/webhooks/${encodeURIComponent(createdWebhook.id)}/replay`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          from: "2026-03-10T00:00:00.000Z",
+          to: "2026-03-01T00:00:00.000Z",
+        }),
+      },
+    );
+    expect(badReplayResponse.status).toBe(400);
+
+    const replayResponse = await app.request(
+      `/api/v1/webhooks/${encodeURIComponent(createdWebhook.id)}/replay`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          eventType: "quality.event.created",
+          limit: 50,
+          dryRun: true,
+        }),
+      },
+    );
+    expect(replayResponse.status).toBe(202);
+    const replayBody = (await replayResponse.json()) as {
+      id: string;
+      webhookId: string;
+      status: string;
+      dryRun: boolean;
+      filters: {
+        eventType?: string;
+        limit?: number;
+      };
+    };
+    expect(typeof replayBody.id).toBe("string");
+    expect(replayBody.webhookId).toBe(createdWebhook.id);
+    expect(replayBody.status).toBe("queued");
+    expect(replayBody.dryRun).toBe(true);
+    expect(replayBody.filters.eventType).toBe("quality.event.created");
+    expect(replayBody.filters.limit).toBe(50);
+
+    const crossTenantReplayResponse = await app.request(
+      `/api/v1/webhooks/${encodeURIComponent(createdWebhook.id)}/replay`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantBHeaders,
+        },
+        body: JSON.stringify({ dryRun: true }),
+      },
+    );
+    expect(crossTenantReplayResponse.status).toBe(404);
+
+    const replayAuditResponse = await app.request(
+      `/api/v1/audits?action=control_plane.open_platform.webhook_replayed&keyword=${encodeURIComponent(
+        createdWebhook.id,
+      )}&limit=200`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(replayAuditResponse.status).toBe(200);
+    const replayAudits = (await replayAuditResponse.json()) as {
+      items: Array<{ metadata: Record<string, unknown> }>;
+    };
+    expect(
+      replayAudits.items.some(
+        (item) => item.metadata["webhookId"] === createdWebhook.id,
+      ),
+    ).toBe(true);
 
     const listWebhookTenantBResponse = await app.request("/api/v1/webhooks", {
       headers: tenantBHeaders,

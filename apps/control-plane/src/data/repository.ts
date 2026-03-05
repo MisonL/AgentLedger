@@ -10161,6 +10161,47 @@ class ControlPlaneRepository {
     }
   }
 
+  async getWebhookEndpointById(
+    tenantId: string,
+    endpointId: string
+  ): Promise<WebhookEndpoint | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedEndpointId = firstNonEmptyString(endpointId);
+    if (!normalizedEndpointId) {
+      return null;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getWebhookEndpointByIdFromMemory(normalizedTenantId, normalizedEndpointId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                name,
+                url,
+                enabled,
+                event_types,
+                secret_hash,
+                headers,
+                created_at,
+                updated_at
+         FROM webhook_endpoints
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedEndpointId]
+      );
+      const row = result.rows[0];
+      return row ? mapWebhookEndpointRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "按 id 查询 webhook_endpoints 失败");
+      return this.getWebhookEndpointByIdFromMemory(normalizedTenantId, normalizedEndpointId);
+    }
+  }
+
   async createWebhookEndpoint(
     tenantId: string,
     input: CreateWebhookEndpointInput
@@ -14478,6 +14519,16 @@ class ControlPlaneRepository {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id))
       .slice(0, limit)
       .map((endpoint) => this.cloneWebhookEndpoint(endpoint));
+  }
+
+  private getWebhookEndpointByIdFromMemory(
+    tenantId: string,
+    endpointId: string
+  ): WebhookEndpoint | null {
+    const matched = this.memoryWebhookEndpoints.find(
+      (endpoint) => endpoint.tenantId === tenantId && endpoint.id === endpointId
+    );
+    return matched ? this.cloneWebhookEndpoint(matched) : null;
   }
 
   private createWebhookEndpointToMemory(endpoint: WebhookEndpoint): WebhookEndpoint {

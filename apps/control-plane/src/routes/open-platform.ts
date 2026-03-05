@@ -18,10 +18,28 @@ const repository = getControlPlaneRepository();
 const WRITABLE_ROLES = new Set(["owner", "maintainer"]);
 const API_KEY_SCOPE_SET = new Set(["read", "write", "admin"]);
 const WEBHOOK_STATUS_SET = new Set(["active", "paused", "disabled"]);
+const WEBHOOK_REPLAY_LIMIT_DEFAULT = 100;
+const WEBHOOK_REPLAY_LIMIT_MAX = 500;
+const WEBHOOK_EVENT_TYPE_SET = new Set([
+  "api_key.created",
+  "api_key.revoked",
+  "quality.event.created",
+  "quality.scorecard.updated",
+  "replay.job.started",
+  "replay.job.completed",
+  "replay.job.failed",
+]);
 
 type ApiKeyScope = "read" | "write" | "admin";
 type ApiKeyStatus = "active" | "revoked" | "expired";
 type WebhookEndpointStatus = "active" | "paused" | "disabled";
+type WebhookReplayInput = {
+  eventType?: string;
+  from?: string;
+  to?: string;
+  limit: number;
+  dryRun: boolean;
+};
 
 function firstNonEmptyString(value: unknown): string | undefined {
   if (typeof value !== "string") {
@@ -115,6 +133,82 @@ function mapWebhookEndpoint(endpoint: WebhookEndpoint) {
   };
 }
 
+function validateWebhookReplayInput(input: unknown): {
+  success: true;
+  data: WebhookReplayInput;
+} | {
+  success: false;
+  error: string;
+} {
+  if (
+    input !== undefined &&
+    (typeof input !== "object" || input === null || Array.isArray(input))
+  ) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+  const body = normalizeStringRecord(input);
+  const eventType = firstNonEmptyString(body.eventType);
+  if (body.eventType !== undefined && !eventType) {
+    return { success: false, error: "eventType 必须为非空字符串。" };
+  }
+  if (eventType && !WEBHOOK_EVENT_TYPE_SET.has(eventType)) {
+    return {
+      success: false,
+      error:
+        "eventType 仅支持 api_key.created/api_key.revoked/quality.event.created/quality.scorecard.updated/replay.job.started/replay.job.completed/replay.job.failed。",
+    };
+  }
+
+  const from = toIsoString(body.from);
+  if (body.from !== undefined && !from) {
+    return { success: false, error: "from 必须是 ISO 日期字符串。" };
+  }
+  const to = toIsoString(body.to);
+  if (body.to !== undefined && !to) {
+    return { success: false, error: "to 必须是 ISO 日期字符串。" };
+  }
+  if (from && to && Date.parse(from) > Date.parse(to)) {
+    return { success: false, error: "from 不能晚于 to。" };
+  }
+
+  let dryRun = true;
+  if (body.dryRun !== undefined) {
+    if (typeof body.dryRun !== "boolean") {
+      return { success: false, error: "dryRun 必须是布尔值。" };
+    }
+    dryRun = body.dryRun;
+  }
+
+  let limit = WEBHOOK_REPLAY_LIMIT_DEFAULT;
+  if (body.limit !== undefined) {
+    if (typeof body.limit !== "number" || !Number.isFinite(body.limit)) {
+      return { success: false, error: "limit 必须是整数。" };
+    }
+    const normalizedLimit = Math.trunc(body.limit);
+    if (
+      normalizedLimit <= 0 ||
+      normalizedLimit > WEBHOOK_REPLAY_LIMIT_MAX
+    ) {
+      return {
+        success: false,
+        error: `limit 必须是 1 到 ${WEBHOOK_REPLAY_LIMIT_MAX} 的整数。`,
+      };
+    }
+    limit = normalizedLimit;
+  }
+
+  return {
+    success: true,
+    data: {
+      eventType,
+      from: from ?? undefined,
+      to: to ?? undefined,
+      limit,
+      dryRun,
+    },
+  };
+}
+
 async function appendAuditLogSafely(input: AppendAuditLogInput): Promise<void> {
   try {
     await repository.appendAuditLog(input);
@@ -187,6 +281,9 @@ function buildOpenApiDocument() {
       "/api/v1/webhooks/{id}": {
         put: { summary: "更新 Webhook" },
         delete: { summary: "删除 Webhook" },
+      },
+      "/api/v1/webhooks/{id}/replay": {
+        post: { summary: "重放 Webhook" },
       },
       "/api/v1/quality/events": {
         post: { summary: "上报质量事件" },
@@ -558,4 +655,62 @@ openPlatformRoutes.delete("/webhooks/:id", async (c) => {
   });
 
   return c.json({ success: true });
+});
+
+openPlatformRoutes.post("/webhooks/:id/replay", async (c) => {
+  const auth = await requireTenantAccess(c, "write");
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const endpointId = c.req.param("id")?.trim();
+  if (!endpointId) {
+    return c.json({ message: "id 必须为非空字符串。" }, 400);
+  }
+
+  const body = await c.req.json().catch(() => undefined);
+  const validation = validateWebhookReplayInput(body);
+  if (!validation.success) {
+    return c.json({ message: validation.error }, 400);
+  }
+
+  const endpoint = await repository.getWebhookEndpointById(auth.tenantId, endpointId);
+  if (!endpoint) {
+    return c.json({ message: `未找到 Webhook：${endpointId}` }, 404);
+  }
+
+  const replayId = crypto.randomUUID();
+  const requestedAt = new Date().toISOString();
+  const requestId = c.get("requestId");
+  await appendAuditLogSafely({
+    tenantId: auth.tenantId,
+    eventId: `cp:${requestId}`,
+    action: "control_plane.open_platform.webhook_replayed",
+    level: "info",
+    detail: `Replay requested for webhook ${endpoint.id}.`,
+    metadata: {
+      requestId,
+      tenantId: auth.tenantId,
+      webhookId: endpoint.id,
+      replayId,
+      replay: validation.data,
+    },
+  });
+
+  return c.json(
+    {
+      id: replayId,
+      webhookId: endpoint.id,
+      status: "queued",
+      dryRun: validation.data.dryRun,
+      filters: {
+        eventType: validation.data.eventType,
+        from: validation.data.from,
+        to: validation.data.to,
+        limit: validation.data.limit,
+      },
+      requestedAt,
+    },
+    202
+  );
 });
