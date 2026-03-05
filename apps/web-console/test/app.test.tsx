@@ -54,6 +54,21 @@ type GovernanceRuleAssetFixture = {
   publishedVersion: number | null;
 };
 
+type GovernanceResidencyPolicyFixture = {
+  tenantId: string;
+  mode: "single_region" | "active_active";
+  primaryRegion: string;
+  replicaRegions: string[];
+  allowCrossRegionTransfer: boolean;
+  requireTransferApproval: boolean;
+  updatedAt: string;
+};
+
+type GovernanceResidencyPolicyResponseFixture = {
+  status?: number;
+  body: GovernanceResidencyPolicyFixture | { message: string };
+};
+
 function mockGovernancePageFetch({
   residencyPolicy = {
     tenantId: "default",
@@ -64,17 +79,11 @@ function mockGovernancePageFetch({
     requireTransferApproval: false,
     updatedAt: "2026-03-01T00:00:00.000Z",
   },
+  residencyPolicyResponses = [] as GovernanceResidencyPolicyResponseFixture[],
   ruleAssets = [] as GovernanceRuleAssetFixture[],
 }: {
-  residencyPolicy?: {
-    tenantId: string;
-    mode: "single_region" | "active_active";
-    primaryRegion: string;
-    replicaRegions: string[];
-    allowCrossRegionTransfer: boolean;
-    requireTransferApproval: boolean;
-    updatedAt: string;
-  };
+  residencyPolicy?: GovernanceResidencyPolicyFixture;
+  residencyPolicyResponses?: GovernanceResidencyPolicyResponseFixture[];
   ruleAssets?: GovernanceRuleAssetFixture[];
 } = {}) {
   const ruleAssetItems = ruleAssets.map((asset, index) => ({
@@ -89,6 +98,7 @@ function mockGovernancePageFetch({
     createdAt: `2026-03-${String(index + 1).padStart(2, "0")}T08:00:00.000Z`,
     updatedAt: `2026-03-${String(index + 1).padStart(2, "0")}T09:00:00.000Z`,
   }));
+  let residencyPolicyResponseCursor = 0;
 
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = toUrl(input);
@@ -138,6 +148,14 @@ function mockGovernancePageFetch({
     }
 
     if (pathname === "/api/v1/residency/policy" && method === "GET") {
+      if (residencyPolicyResponses.length > 0) {
+        const response =
+          residencyPolicyResponses[
+            Math.min(residencyPolicyResponseCursor, residencyPolicyResponses.length - 1)
+          ];
+        residencyPolicyResponseCursor += 1;
+        return mockJsonResponse(response.body, response.status ?? 200);
+      }
       return mockJsonResponse(residencyPolicy);
     }
 
@@ -1905,6 +1923,61 @@ describe("Web Console", () => {
         );
       })
     ).toBe(false);
+  });
+
+  test("治理页主权策略首次失败后恢复成功时会回填表单", async () => {
+    window.location.hash = "#/governance";
+    setAuthTokens({
+      accessToken: "access-token-governance-residency-retry",
+      refreshToken: "refresh-token-governance-residency-retry",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const fetchSpy = mockGovernancePageFetch({
+      residencyPolicyResponses: [
+        {
+          status: 503,
+          body: {
+            message: "temporary outage",
+          },
+        },
+        {
+          status: 200,
+          body: {
+            tenantId: "default",
+            mode: "active_active",
+            primaryRegion: "cn-shanghai",
+            replicaRegions: ["ap-southeast-1"],
+            allowCrossRegionTransfer: true,
+            requireTransferApproval: true,
+            updatedAt: "2026-03-02T00:00:00.000Z",
+          },
+        },
+      ],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "治理中心" })).toBeInTheDocument();
+    await waitFor(
+      () => {
+        expect((screen.getByLabelText("模式") as HTMLSelectElement).value).toBe("active_active");
+        expect((screen.getByLabelText("主地域") as HTMLSelectElement).value).toBe("cn-shanghai");
+        expect((screen.getByLabelText("副本地域（逗号分隔）") as HTMLInputElement).value).toBe(
+          "ap-southeast-1"
+        );
+      },
+      { timeout: 8_000 }
+    );
+
+    expect(
+      fetchSpy.mock.calls.filter(
+        ([url, init]) =>
+          new URL(toUrl(url), "http://localhost").pathname === "/api/v1/residency/policy" &&
+          ((init as RequestInit | undefined)?.method ?? "GET").toUpperCase() === "GET"
+      ).length
+    ).toBeGreaterThanOrEqual(2);
   });
 
   test("治理页 Rule Hub 切换资产后会刷新发布/回滚/审批版本输入框", async () => {
