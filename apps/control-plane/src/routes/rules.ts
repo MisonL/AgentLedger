@@ -1,0 +1,299 @@
+import { Hono, type Context } from "hono";
+import {
+  validateRuleApprovalCreateInput,
+  validateRuleApprovalListInput,
+  validateRuleAssetCreateInput,
+  validateRuleAssetListInput,
+  validateRuleAssetVersionCreateInput,
+  validateRulePublishInput,
+  validateRuleRollbackInput,
+} from "../contracts";
+import type { AppendAuditLogInput } from "../data/repository";
+import { getControlPlaneRepository } from "../data/repository";
+import { authMiddleware } from "../middleware/auth";
+import type { AppEnv } from "../types";
+
+export const ruleRoutes = new Hono<AppEnv>();
+const repository = getControlPlaneRepository();
+const WRITABLE_ROLES = new Set(["owner", "maintainer"]);
+
+async function appendAuditLogSafely(input: AppendAuditLogInput): Promise<void> {
+  try {
+    await repository.appendAuditLog(input);
+  } catch (error) {
+    console.warn("[control-plane] 写入 rules 审计日志失败。", error);
+  }
+}
+
+function unauthorized(c: Context<AppEnv>) {
+  return c.json({ message: "未认证：请先登录。" }, 401);
+}
+
+function forbidden(c: Context<AppEnv>, mode: "read" | "write") {
+  if (mode === "write") {
+    return c.json({ message: "无写入权限：仅 owner/maintainer 可执行写操作。" }, 403);
+  }
+  return c.json({ message: "无权访问该租户资源。" }, 403);
+}
+
+async function requireAuthContext(c: Context<AppEnv>) {
+  const authResult = await authMiddleware(c, async () => {});
+  if (authResult instanceof Response) {
+    return authResult;
+  }
+  const auth = c.get("auth");
+  if (!auth) {
+    return unauthorized(c);
+  }
+  return auth;
+}
+
+async function requireTenantAccess(c: Context<AppEnv>, mode: "read" | "write") {
+  const auth = await requireAuthContext(c);
+  if (auth instanceof Response) {
+    return auth;
+  }
+  const membership = await repository.getTenantMemberByUser(auth.tenantId, auth.userId);
+  if (!membership) {
+    return forbidden(c, mode);
+  }
+  if (mode === "write" && !WRITABLE_ROLES.has(membership.tenantRole)) {
+    return forbidden(c, mode);
+  }
+  return auth;
+}
+
+function parseVersionLimit(value: string | undefined): number | null {
+  if (value === undefined) {
+    return 50;
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return 50;
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 200) {
+    return null;
+  }
+  return parsed;
+}
+
+ruleRoutes.get("/rules/assets", async (c) => {
+  const auth = await requireTenantAccess(c, "read");
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const result = validateRuleAssetListInput(c.req.query());
+  if (!result.success) {
+    return c.json({ message: result.error }, 400);
+  }
+  const payload = await repository.listRuleAssets(auth.tenantId, result.data);
+  return c.json({
+    items: payload.items,
+    total: payload.total,
+    filters: result.data,
+  });
+});
+
+ruleRoutes.post("/rules/assets", async (c) => {
+  const auth = await requireTenantAccess(c, "write");
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const body = await c.req.json().catch(() => undefined);
+  const result = validateRuleAssetCreateInput(body);
+  if (!result.success) {
+    return c.json({ message: result.error }, 400);
+  }
+  const asset = await repository.createRuleAsset(auth.tenantId, result.data);
+  const requestId = c.get("requestId");
+  await appendAuditLogSafely({
+    tenantId: auth.tenantId,
+    eventId: `cp:${requestId}`,
+    action: "control_plane.rule_asset_created",
+    level: "info",
+    detail: `Created rule asset ${asset.id}.`,
+    metadata: {
+      requestId,
+      tenantId: auth.tenantId,
+      resourceId: asset.id,
+      status: asset.status,
+      latestVersion: asset.latestVersion,
+    },
+  });
+  return c.json(asset, 201);
+});
+
+ruleRoutes.get("/rules/assets/:id", async (c) => {
+  const auth = await requireTenantAccess(c, "read");
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const assetId = c.req.param("id")?.trim();
+  if (!assetId) {
+    return c.json({ message: "assetId 必须为非空字符串。" }, 400);
+  }
+
+  const asset = await repository.getRuleAssetById(auth.tenantId, assetId);
+  if (!asset) {
+    return c.json({ message: `未找到规则资产 ${assetId}。` }, 404);
+  }
+  return c.json(asset);
+});
+
+ruleRoutes.get("/rules/assets/:id/versions", async (c) => {
+  const auth = await requireTenantAccess(c, "read");
+  if (auth instanceof Response) {
+    return auth;
+  }
+  const assetId = c.req.param("id")?.trim();
+  if (!assetId) {
+    return c.json({ message: "assetId 必须为非空字符串。" }, 400);
+  }
+
+  const limit = parseVersionLimit(c.req.query("limit"));
+  if (limit === null) {
+    return c.json({ message: "limit 必须是 1 到 200 的整数。" }, 400);
+  }
+  const items = await repository.listRuleAssetVersions(auth.tenantId, assetId, limit);
+  return c.json({
+    items,
+    total: items.length,
+  });
+});
+
+ruleRoutes.post("/rules/assets/:id/versions", async (c) => {
+  const auth = await requireTenantAccess(c, "write");
+  if (auth instanceof Response) {
+    return auth;
+  }
+  const assetId = c.req.param("id")?.trim();
+  if (!assetId) {
+    return c.json({ message: "assetId 必须为非空字符串。" }, 400);
+  }
+  const body = await c.req.json().catch(() => undefined);
+  const result = validateRuleAssetVersionCreateInput(body);
+  if (!result.success) {
+    return c.json({ message: result.error }, 400);
+  }
+
+  const version = await repository.createRuleAssetVersion(auth.tenantId, assetId, result.data, {
+    createdByUserId: auth.userId,
+  });
+  if (!version) {
+    return c.json({ message: `未找到规则资产 ${assetId}。` }, 404);
+  }
+  const requestId = c.get("requestId");
+  await appendAuditLogSafely({
+    tenantId: auth.tenantId,
+    eventId: `cp:${requestId}`,
+    action: "control_plane.rule_asset_version_created",
+    level: "info",
+    detail: `Created rule version ${version.version} for asset ${assetId}.`,
+    metadata: {
+      requestId,
+      tenantId: auth.tenantId,
+      resourceId: assetId,
+      version: version.version,
+    },
+  });
+  return c.json(version, 201);
+});
+
+ruleRoutes.post("/rules/assets/:id/publish", async (c) => {
+  const auth = await requireTenantAccess(c, "write");
+  if (auth instanceof Response) {
+    return auth;
+  }
+  const assetId = c.req.param("id")?.trim();
+  if (!assetId) {
+    return c.json({ message: "assetId 必须为非空字符串。" }, 400);
+  }
+  const body = await c.req.json().catch(() => undefined);
+  const result = validateRulePublishInput(body);
+  if (!result.success) {
+    return c.json({ message: result.error }, 400);
+  }
+  const requestedVersion = result.data.version;
+  const asset = await repository.publishRuleAssetVersion(auth.tenantId, assetId, result.data);
+  if (!asset) {
+    return c.json({ message: `未找到规则资产 ${assetId}。` }, 404);
+  }
+  if (asset.publishedVersion !== requestedVersion) {
+    return c.json({ message: `规则版本 ${requestedVersion} 不存在，无法发布。` }, 409);
+  }
+  return c.json(asset);
+});
+
+ruleRoutes.post("/rules/assets/:id/rollback", async (c) => {
+  const auth = await requireTenantAccess(c, "write");
+  if (auth instanceof Response) {
+    return auth;
+  }
+  const assetId = c.req.param("id")?.trim();
+  if (!assetId) {
+    return c.json({ message: "assetId 必须为非空字符串。" }, 400);
+  }
+  const body = await c.req.json().catch(() => undefined);
+  const result = validateRuleRollbackInput(body);
+  if (!result.success) {
+    return c.json({ message: result.error }, 400);
+  }
+  const requestedVersion = result.data.version;
+  const asset = await repository.rollbackRuleAssetVersion(auth.tenantId, assetId, result.data);
+  if (!asset) {
+    return c.json({ message: `未找到规则资产 ${assetId}。` }, 404);
+  }
+  if (asset.publishedVersion !== requestedVersion) {
+    return c.json({ message: `规则版本 ${requestedVersion} 不存在，无法回滚。` }, 409);
+  }
+  return c.json(asset);
+});
+
+ruleRoutes.get("/rules/assets/:id/approvals", async (c) => {
+  const auth = await requireTenantAccess(c, "read");
+  if (auth instanceof Response) {
+    return auth;
+  }
+  const assetId = c.req.param("id")?.trim();
+  if (!assetId) {
+    return c.json({ message: "assetId 必须为非空字符串。" }, 400);
+  }
+  const result = validateRuleApprovalListInput(c.req.query());
+  if (!result.success) {
+    return c.json({ message: result.error }, 400);
+  }
+  const payload = await repository.listRuleApprovals(auth.tenantId, assetId, result.data);
+  return c.json({
+    items: payload.items,
+    total: payload.total,
+    filters: result.data,
+  });
+});
+
+ruleRoutes.post("/rules/assets/:id/approvals", async (c) => {
+  const auth = await requireTenantAccess(c, "write");
+  if (auth instanceof Response) {
+    return auth;
+  }
+  const assetId = c.req.param("id")?.trim();
+  if (!assetId) {
+    return c.json({ message: "assetId 必须为非空字符串。" }, 400);
+  }
+  const body = await c.req.json().catch(() => undefined);
+  const result = validateRuleApprovalCreateInput(body);
+  if (!result.success) {
+    return c.json({ message: result.error }, 400);
+  }
+  const approval = await repository.createRuleApproval(auth.tenantId, assetId, result.data, {
+    approverUserId: auth.userId,
+    approverEmail: auth.email,
+  });
+  if (!approval) {
+    return c.json({ message: "规则版本不存在，无法提交审批。" }, 404);
+  }
+  return c.json(approval, 201);
+});

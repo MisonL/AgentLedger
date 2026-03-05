@@ -8158,6 +8158,49 @@ class ControlPlaneRepository {
     }
   }
 
+  async getMcpApprovalRequestById(
+    tenantId: string,
+    approvalRequestId: string
+  ): Promise<McpApprovalRequest | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const requestId = firstNonEmptyString(approvalRequestId);
+    if (!requestId) {
+      return null;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getMcpApprovalRequestByIdFromMemory(normalizedTenantId, requestId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                tool_id,
+                status,
+                requested_by_user_id,
+                requested_by_email,
+                reason,
+                reviewed_by_user_id,
+                reviewed_by_email,
+                review_reason,
+                created_at,
+                updated_at
+         FROM mcp_approval_requests
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [normalizedTenantId, requestId]
+      );
+      const row = result.rows[0];
+      return row ? mapMcpApprovalRequestRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询 MCP 审批请求详情失败");
+      return this.getMcpApprovalRequestByIdFromMemory(normalizedTenantId, requestId);
+    }
+  }
+
   async createMcpApprovalRequest(
     tenantId: string,
     input: McpApprovalCreateInput,

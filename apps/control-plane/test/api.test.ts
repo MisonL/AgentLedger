@@ -11942,6 +11942,40 @@ describe("Control Plane API", () => {
     };
     expect(jobBody.tenantId).toBe(tenantAId);
 
+    const cancelJobResponse = await app.request(
+      `/api/v1/residency/replication-jobs/${encodeURIComponent(jobBody.id)}/cancel`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          reason: "停止测试任务",
+        }),
+      }
+    );
+    expect(cancelJobResponse.status).toBe(200);
+    const cancelledJobBody = (await cancelJobResponse.json()) as {
+      status: string;
+    };
+    expect(cancelledJobBody.status).toBe("cancelled");
+
+    const cancelAgainResponse = await app.request(
+      `/api/v1/residency/replication-jobs/${encodeURIComponent(jobBody.id)}/cancel`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          reason: "重复取消",
+        }),
+      }
+    );
+    expect(cancelAgainResponse.status).toBe(409);
+
     const listAResponse = await app.request("/api/v1/residency/replication-jobs", {
       headers: tenantAHeaders,
     });
@@ -12034,6 +12068,14 @@ describe("Control Plane API", () => {
     expect(asset.tenantId).toBe(tenantAId);
     expect(asset.status).toBe("draft");
 
+    const badVersionLimitResponse = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/versions?limit=0`,
+      {
+        headers: tenantAHeaders,
+      }
+    );
+    expect(badVersionLimitResponse.status).toBe(400);
+
     const createVersionResponse = await app.request(
       `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/versions`,
       {
@@ -12072,6 +12114,21 @@ describe("Control Plane API", () => {
     };
     expect(publishedAsset.publishedVersion).toBe(1);
     expect(publishedAsset.status).toBe("published");
+
+    const publishMissingVersionResponse = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/publish`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          version: 99,
+        }),
+      }
+    );
+    expect(publishMissingVersionResponse.status).toBe(409);
 
     const createApprovalResponse = await app.request(
       `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/approvals`,
@@ -12227,6 +12284,21 @@ describe("Control Plane API", () => {
     expect(approveResponse.status).toBe(200);
     const approved = (await approveResponse.json()) as { status: string };
     expect(approved.status).toBe("approved");
+
+    const approveAgainResponse = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(approval.id)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          reason: "重复审批应冲突",
+        }),
+      }
+    );
+    expect(approveAgainResponse.status).toBe(409);
 
     const invocationResponse = await app.request("/api/v1/mcp/invocations", {
       method: "POST",
