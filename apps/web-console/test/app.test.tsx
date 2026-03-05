@@ -1673,11 +1673,26 @@ describe("Web Console", () => {
 
     render(<App />);
 
+    expect(await screen.findByRole("heading", { name: "告警工作台", level: 2 })).toBeInTheDocument();
     expect(await screen.findByText("warning budget approaching")).toBeInTheDocument();
     expect(await screen.findByText("critical unresolved incident")).toBeInTheDocument();
     expect(await screen.findByText("critical already resolved")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("级别"), { target: { value: "critical" } });
+    await waitFor(
+      () => {
+        expect(
+          fetchSpy.mock.calls.some(([url]) => {
+            const parsedUrl = new URL(toUrl(url), "http://localhost");
+            return (
+              parsedUrl.pathname === "/api/v1/alerts" &&
+              parsedUrl.searchParams.get("severity") === "critical"
+            );
+          })
+        ).toBe(true);
+      },
+      { timeout: 15000 }
+    );
 
     expect(await screen.findByText("critical unresolved incident")).toBeInTheDocument();
     expect(await screen.findByText("critical already resolved")).toBeInTheDocument();
@@ -1686,6 +1701,22 @@ describe("Web Console", () => {
     });
 
     fireEvent.change(screen.getByLabelText("状态"), { target: { value: "resolved" } });
+
+    await waitFor(
+      () => {
+        expect(
+          fetchSpy.mock.calls.some(([url]) => {
+            const parsedUrl = new URL(toUrl(url), "http://localhost");
+            return (
+              parsedUrl.pathname === "/api/v1/alerts" &&
+              parsedUrl.searchParams.get("severity") === "critical" &&
+              parsedUrl.searchParams.get("status") === "resolved"
+            );
+          })
+        ).toBe(true);
+      },
+      { timeout: 15000 }
+    );
 
     expect(await screen.findByText("critical already resolved")).toBeInTheDocument();
     await waitFor(() => {
@@ -1875,10 +1906,16 @@ describe("Web Console", () => {
 
     render(<App />);
 
+    expect(await screen.findByText("resolve me")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Resolve" }));
 
-    expect(await screen.findByText("告警 alert-ui-resolve 已更新为 resolved。")).toBeInTheDocument();
-    expect(await screen.findByText("已完成")).toBeInTheDocument();
+    await waitFor(
+      () => {
+        expect(screen.getByText("告警 alert-ui-resolve 已更新为 resolved。")).toBeInTheDocument();
+        expect(screen.getByText("已完成")).toBeInTheDocument();
+      },
+      { timeout: 15000 }
+    );
 
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();

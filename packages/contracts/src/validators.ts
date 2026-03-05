@@ -178,6 +178,7 @@ const ALERT_ORCHESTRATION_CHANNEL_SET = new Set<AlertOrchestrationChannel>([
   "feishu",
   "email",
   "email_webhook",
+  "ticket",
 ]);
 const DATA_RESIDENCY_MODE_SET = new Set<DataResidencyMode>(["single_region", "active_active"]);
 const REPLICATION_JOB_STATUS_SET = new Set<ReplicationJobStatus>([
@@ -3633,7 +3634,7 @@ export function validateAlertOrchestrationSimulateInput(
   ) {
     return {
       success: false,
-      error: "channels 仅支持 webhook/wecom/dingtalk/feishu/email/email_webhook。",
+      error: "channels 仅支持 webhook/wecom/dingtalk/feishu/email/email_webhook/ticket。",
     };
   }
   if (normalizedChannels && new Set(normalizedChannels).size !== normalizedChannels.length) {
@@ -3750,7 +3751,7 @@ export function validateAlertOrchestrationRuleUpsertInput(
   if (!normalizedChannels.every((channel) => isAlertOrchestrationChannel(channel))) {
     return {
       success: false,
-      error: "channels 仅支持 webhook/wecom/dingtalk/feishu/email/email_webhook。",
+      error: "channels 仅支持 webhook/wecom/dingtalk/feishu/email/email_webhook/ticket。",
     };
   }
   const channelSet = new Set(normalizedChannels);

@@ -219,7 +219,7 @@ func normalizeOutcome(outcome string) string {
 
 func normalizeChannel(channel string) string {
 	switch channel {
-	case string(channelWebhook), string(channelWeCom), string(channelDingTalk), string(channelFeishu), string(channelEmail), string(channelEmailWebhook), labelChannelNone, labelChannelControl:
+	case string(channelWebhook), string(channelWeCom), string(channelDingTalk), string(channelFeishu), string(channelEmail), string(channelEmailWebhook), string(channelTicket), labelChannelNone, labelChannelControl:
 		return channel
 	default:
 		return labelChannelUnknown

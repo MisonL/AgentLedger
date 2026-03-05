@@ -18,8 +18,8 @@ func TestParseChannels(t *testing.T) {
 	}{
 		{
 			name: "all channels",
-			raw:  "webhook,wecom,dingtalk,feishu,email,email_webhook",
-			want: []integrationChannel{channelWebhook, channelWeCom, channelDingTalk, channelFeishu, channelEmail, channelEmailWebhook},
+			raw:  "webhook,wecom,dingtalk,feishu,email,email_webhook,ticket",
+			want: []integrationChannel{channelWebhook, channelWeCom, channelDingTalk, channelFeishu, channelEmail, channelEmailWebhook, channelTicket},
 		},
 		{
 			name: "trim and dedupe",
@@ -242,6 +242,39 @@ func TestLoadIntegrationConfigEmailWebhookChannelValid(t *testing.T) {
 	}
 	if cfg.EmailFrom != "alerts@example.com" {
 		t.Fatalf("email from mismatch: got %q", cfg.EmailFrom)
+	}
+}
+
+func TestLoadIntegrationConfigTicketChannelValidation(t *testing.T) {
+	setBaseIntegrationEnvs(t)
+
+	t.Setenv("INTEGRATION_CHANNELS", "ticket")
+	t.Setenv("INTEGRATION_TICKET_WEBHOOK_URL", "")
+
+	_, err := loadIntegrationConfig()
+	if err == nil {
+		t.Fatal("expected missing ticket webhook url to fail")
+	}
+	if !strings.Contains(err.Error(), "INTEGRATION_TICKET_WEBHOOK_URL") {
+		t.Fatalf("error mismatch: %v", err)
+	}
+}
+
+func TestLoadIntegrationConfigTicketChannelValid(t *testing.T) {
+	setBaseIntegrationEnvs(t)
+
+	t.Setenv("INTEGRATION_CHANNELS", "ticket")
+	t.Setenv("INTEGRATION_TICKET_WEBHOOK_URL", "https://example.com/ticket")
+
+	cfg, err := loadIntegrationConfig()
+	if err != nil {
+		t.Fatalf("loadIntegrationConfig returned error: %v", err)
+	}
+	if !reflect.DeepEqual(cfg.Channels, []integrationChannel{channelTicket}) {
+		t.Fatalf("ticket channels mismatch: got %v", cfg.Channels)
+	}
+	if cfg.ChannelURLs[channelTicket] != "https://example.com/ticket" {
+		t.Fatalf("ticket webhook url mismatch: got %q", cfg.ChannelURLs[channelTicket])
 	}
 }
 
@@ -536,6 +569,7 @@ func setBaseIntegrationEnvs(t *testing.T) {
 	t.Setenv("INTEGRATION_ROUTING_MODE", "broadcast")
 	t.Setenv("CONTROL_PLANE_BASE_URL", "https://control.example.com")
 	t.Setenv("INTEGRATION_EMAIL_WEBHOOK_URL", "")
+	t.Setenv("INTEGRATION_TICKET_WEBHOOK_URL", "")
 	t.Setenv("INTEGRATION_EMAIL_SMTP_HOST", "")
 	t.Setenv("INTEGRATION_EMAIL_SMTP_PORT", "")
 	t.Setenv("INTEGRATION_EMAIL_SMTP_USER", "")

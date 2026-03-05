@@ -291,6 +291,7 @@ const ALERT_ORCHESTRATION_CHANNEL_OPTIONS: Array<{
   { value: "feishu", label: "feishu" },
   { value: "email", label: "email" },
   { value: "email_webhook", label: "email_webhook" },
+  { value: "ticket", label: "ticket" },
 ];
 
 const ALERT_ORCHESTRATION_ENABLED_FILTER_OPTIONS: Array<{

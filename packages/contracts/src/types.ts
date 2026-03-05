@@ -164,7 +164,8 @@ export type AlertOrchestrationChannel =
   | "dingtalk"
   | "feishu"
   | "email"
-  | "email_webhook";
+  | "email_webhook"
+  | "ticket";
 export type DataResidencyMode = "single_region" | "active_active";
 export type ReplicationJobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 export type RuleLifecycleStatus = "draft" | "published" | "deprecated";

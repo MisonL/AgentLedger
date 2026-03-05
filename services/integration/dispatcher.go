@@ -591,7 +591,7 @@ func (d *alertDispatcher) routeChannels(eventType string, payload []byte) []inte
 	case "critical":
 		return enabled
 	case "warning":
-		routed := filterChannels(enabled, channelWebhook, channelWeCom, channelEmail, channelEmailWebhook)
+		routed := filterChannels(enabled, channelWebhook, channelWeCom, channelEmail, channelEmailWebhook, channelTicket)
 		if len(routed) > 0 {
 			return routed
 		}
@@ -720,6 +720,43 @@ type emailWebhookChannelPayload struct {
 	OccurredAt time.Time       `json:"occurred_at"`
 }
 
+type ticketWebhookChannelPayload struct {
+	EventType  string                   `json:"event_type"`
+	Title      string                   `json:"title"`
+	Summary    string                   `json:"summary"`
+	Severity   string                   `json:"severity,omitempty"`
+	Status     string                   `json:"status,omitempty"`
+	OccurredAt time.Time                `json:"occurred_at"`
+	Event      json.RawMessage          `json:"event,omitempty"`
+	EventRaw   string                   `json:"event_raw,omitempty"`
+	Context    ticketWebhookEventFields `json:"context,omitempty"`
+}
+
+type ticketWebhookEventFields struct {
+	TenantID string `json:"tenant_id,omitempty"`
+	BudgetID string `json:"budget_id,omitempty"`
+	SourceID string `json:"source_id,omitempty"`
+	AlertID  string `json:"alert_id,omitempty"`
+	ReportID string `json:"report_id,omitempty"`
+	RuleID   string `json:"rule_id,omitempty"`
+}
+
+type ticketPayloadEnvelope struct {
+	ID         string `json:"id"`
+	AlertID    string `json:"alert_id"`
+	ReportID   string `json:"report_id"`
+	TenantID   string `json:"tenant_id"`
+	BudgetID   string `json:"budget_id"`
+	SourceID   string `json:"source_id"`
+	RuleID     string `json:"rule_id"`
+	Severity   string `json:"severity"`
+	Status     string `json:"status"`
+	Stage      string `json:"stage"`
+	OccurredAt string `json:"occurred_at"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
 type stringList []string
 
 func buildChannelPayload(channel integrationChannel, payload []byte, eventType string) ([]byte, error) {
@@ -745,6 +782,8 @@ func buildChannelPayload(channel integrationChannel, payload []byte, eventType s
 			return nil, err
 		}
 		return body, nil
+	case channelTicket:
+		return buildTicketWebhookPayload(payload, eventType)
 	default:
 		return nil, fmt.Errorf("unsupported channel %s", channel)
 	}
@@ -816,6 +855,76 @@ func compactJSONPayload(payload []byte) string {
 		return string(trimmed)
 	}
 	return buf.String()
+}
+
+func buildTicketWebhookPayload(payload []byte, eventType string) ([]byte, error) {
+	normalizedEventType := normalizeEventTypeLabel(eventType)
+	trimmedPayload := bytes.TrimSpace(payload)
+	if len(trimmedPayload) == 0 {
+		trimmedPayload = []byte("{}")
+	}
+
+	var envelope ticketPayloadEnvelope
+	if err := json.Unmarshal(trimmedPayload, &envelope); err != nil {
+		return nil, err
+	}
+
+	alertID := strings.TrimSpace(envelope.AlertID)
+	if alertID == "" {
+		alertID = strings.TrimSpace(envelope.ID)
+	}
+
+	status := strings.TrimSpace(envelope.Status)
+	if status == "" {
+		status = strings.TrimSpace(envelope.Stage)
+	}
+
+	wrapped := ticketWebhookChannelPayload{
+		EventType:  normalizedEventType,
+		Title:      buildEmailSubject(trimmedPayload, normalizedEventType),
+		Summary:    formatEventTextPayload(trimmedPayload, normalizedEventType),
+		Severity:   strings.ToLower(strings.TrimSpace(envelope.Severity)),
+		Status:     strings.ToLower(status),
+		OccurredAt: resolveTicketOccurredAt(envelope),
+		Context: ticketWebhookEventFields{
+			TenantID: strings.TrimSpace(envelope.TenantID),
+			BudgetID: strings.TrimSpace(envelope.BudgetID),
+			SourceID: strings.TrimSpace(envelope.SourceID),
+			AlertID:  alertID,
+			ReportID: strings.TrimSpace(envelope.ReportID),
+			RuleID:   strings.TrimSpace(envelope.RuleID),
+		},
+	}
+
+	if json.Valid(trimmedPayload) {
+		wrapped.Event = append([]byte(nil), trimmedPayload...)
+	} else {
+		wrapped.EventRaw = string(trimmedPayload)
+	}
+
+	return json.Marshal(wrapped)
+}
+
+func resolveTicketOccurredAt(envelope ticketPayloadEnvelope) time.Time {
+	for _, candidate := range []string{envelope.OccurredAt, envelope.CreatedAt, envelope.UpdatedAt} {
+		parsed, ok := parseRFC3339Timestamp(candidate)
+		if ok {
+			return parsed
+		}
+	}
+	return time.Now().UTC()
+}
+
+func parseRFC3339Timestamp(raw string) (time.Time, bool) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return time.Time{}, false
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return parsed.UTC(), true
 }
 
 func (d *alertDispatcher) dispatchToChannel(messageKey string, channel integrationChannel, payload []byte, eventType string) error {

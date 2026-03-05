@@ -15,7 +15,7 @@ func TestRouteChannels(t *testing.T) {
 	t.Parallel()
 
 	cfg := integrationConfig{
-		Channels: []integrationChannel{channelWebhook, channelWeCom, channelDingTalk, channelFeishu, channelEmail, channelEmailWebhook},
+		Channels: []integrationChannel{channelWebhook, channelWeCom, channelDingTalk, channelFeishu, channelEmail, channelEmailWebhook, channelTicket},
 	}
 	dispatcher := &alertDispatcher{cfg: cfg}
 
@@ -29,7 +29,7 @@ func TestRouteChannels(t *testing.T) {
 		t.Fatalf("critical route mismatch: got %v want %v", got, cfg.Channels)
 	}
 
-	wantWarning := []integrationChannel{channelWebhook, channelWeCom, channelEmail, channelEmailWebhook}
+	wantWarning := []integrationChannel{channelWebhook, channelWeCom, channelEmail, channelEmailWebhook, channelTicket}
 	if got := dispatcher.routeChannels(eventTypeAlert, []byte(`{"severity":"warning"}`)); !reflect.DeepEqual(got, wantWarning) {
 		t.Fatalf("warning route mismatch: got %v want %v", got, wantWarning)
 	}
@@ -232,6 +232,20 @@ func TestDispatchToChannelPayloadAdaptation(t *testing.T) {
 			payload:   alertPayload,
 			wantText:  alertText,
 		},
+		{
+			name:      "ticket uses wrapped payload for alert",
+			channel:   channelTicket,
+			eventType: eventTypeAlert,
+			payload:   alertPayload,
+			wantText:  alertText,
+		},
+		{
+			name:      "ticket uses wrapped payload for weekly report",
+			channel:   channelTicket,
+			eventType: eventTypeWeeklyReport,
+			payload:   weeklyPayload,
+			wantText:  weeklyText,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -328,6 +342,42 @@ func TestDispatchToChannelPayloadAdaptation(t *testing.T) {
 				}
 				if compactJSONPayload(parsed.Event) != compactJSONPayload(tc.payload) {
 					t.Fatalf("event payload mismatch: got %s want %s", parsed.Event, tc.payload)
+				}
+			case channelTicket:
+				var parsed ticketWebhookChannelPayload
+				if err := json.Unmarshal(gotBody, &parsed); err != nil {
+					t.Fatalf("unmarshal ticket webhook payload failed: %v", err)
+				}
+				if parsed.EventType != normalizeEventTypeLabel(tc.eventType) {
+					t.Fatalf("event type mismatch: got %q want %q", parsed.EventType, normalizeEventTypeLabel(tc.eventType))
+				}
+				if parsed.Title != buildEmailSubject(tc.payload, tc.eventType) {
+					t.Fatalf("title mismatch: got %q want %q", parsed.Title, buildEmailSubject(tc.payload, tc.eventType))
+				}
+				if parsed.Summary != tc.wantText {
+					t.Fatalf("summary mismatch:\ngot:  %s\nwant: %s", parsed.Summary, tc.wantText)
+				}
+				if compactJSONPayload(parsed.Event) != compactJSONPayload(tc.payload) {
+					t.Fatalf("event payload mismatch: got %s want %s", parsed.Event, tc.payload)
+				}
+				if parsed.OccurredAt.IsZero() {
+					t.Fatal("occurred_at should not be zero")
+				}
+				if tc.eventType == eventTypeAlert {
+					if parsed.Context.AlertID != "alert-1" {
+						t.Fatalf("alert context id mismatch: got %q want %q", parsed.Context.AlertID, "alert-1")
+					}
+					if parsed.Severity != "critical" {
+						t.Fatalf("severity mismatch: got %q want %q", parsed.Severity, "critical")
+					}
+				}
+				if tc.eventType == eventTypeWeeklyReport {
+					if parsed.Context.ReportID != "weekly-1" {
+						t.Fatalf("report context id mismatch: got %q want %q", parsed.Context.ReportID, "weekly-1")
+					}
+					if parsed.Context.TenantID != "tenant-a" {
+						t.Fatalf("tenant context mismatch: got %q want %q", parsed.Context.TenantID, "tenant-a")
+					}
 				}
 			default:
 				t.Fatalf("unexpected channel %s", tc.channel)

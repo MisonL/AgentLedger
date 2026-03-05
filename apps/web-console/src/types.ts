@@ -187,7 +187,8 @@ export type AlertOrchestrationChannel =
   | "dingtalk"
   | "feishu"
   | "email"
-  | "email_webhook";
+  | "email_webhook"
+  | "ticket";
 
 export interface AlertListInput {
   status?: AlertStatus;

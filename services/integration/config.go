@@ -48,6 +48,7 @@ const (
 	channelFeishu       integrationChannel = "feishu"
 	channelEmail        integrationChannel = "email"
 	channelEmailWebhook integrationChannel = "email_webhook"
+	channelTicket       integrationChannel = "ticket"
 )
 
 type smtpTLSMode string
@@ -150,6 +151,7 @@ func loadIntegrationConfig() (integrationConfig, error) {
 			channelDingTalk:     getEnv("INTEGRATION_DINGTALK_WEBHOOK_URL", ""),
 			channelFeishu:       getEnv("INTEGRATION_FEISHU_WEBHOOK_URL", ""),
 			channelEmailWebhook: getEnv("INTEGRATION_EMAIL_WEBHOOK_URL", ""),
+			channelTicket:       getEnv("INTEGRATION_TICKET_WEBHOOK_URL", ""),
 		},
 
 		EmailSMTPHost:    getEnv("INTEGRATION_EMAIL_SMTP_HOST", ""),
@@ -513,6 +515,8 @@ func channelFromString(raw string) (integrationChannel, bool) {
 		return channelEmail, true
 	case string(channelEmailWebhook):
 		return channelEmailWebhook, true
+	case string(channelTicket):
+		return channelTicket, true
 	default:
 		return "", false
 	}
@@ -566,6 +570,8 @@ func channelEnvKey(channel integrationChannel) string {
 		return "INTEGRATION_EMAIL_SMTP_HOST"
 	case channelEmailWebhook:
 		return "INTEGRATION_EMAIL_WEBHOOK_URL"
+	case channelTicket:
+		return "INTEGRATION_TICKET_WEBHOOK_URL"
 	default:
 		return "INTEGRATION_WEBHOOK_URL"
 	}

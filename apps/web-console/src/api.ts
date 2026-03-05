@@ -153,6 +153,7 @@ const ALERT_ORCHESTRATION_CHANNELS = [
   "feishu",
   "email",
   "email_webhook",
+  "ticket",
 ] as const;
 const EXPORT_FORMATS = ["json", "csv"] as const;
 const USAGE_EXPORT_DIMENSIONS = [

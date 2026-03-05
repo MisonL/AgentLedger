@@ -116,6 +116,7 @@ const ALERT_ORCHESTRATION_CHANNELS: ReadonlyArray<AlertOrchestrationChannel> = [
   "feishu",
   "email",
   "email_webhook",
+  "ticket",
 ];
 const DATA_RESIDENCY_MODES: ReadonlyArray<DataResidencyMode> = ["single_region", "active_active"];
 const REPLICATION_JOB_STATUSES: ReadonlyArray<ReplicationJobStatus> = [
