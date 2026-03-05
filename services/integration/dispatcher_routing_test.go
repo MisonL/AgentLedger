@@ -15,7 +15,7 @@ func TestRouteChannels(t *testing.T) {
 	t.Parallel()
 
 	cfg := integrationConfig{
-		Channels: []integrationChannel{channelWebhook, channelWeCom, channelDingTalk, channelFeishu},
+		Channels: []integrationChannel{channelWebhook, channelWeCom, channelDingTalk, channelFeishu, channelEmail, channelEmailWebhook},
 	}
 	dispatcher := &alertDispatcher{cfg: cfg}
 
@@ -29,7 +29,7 @@ func TestRouteChannels(t *testing.T) {
 		t.Fatalf("critical route mismatch: got %v want %v", got, cfg.Channels)
 	}
 
-	wantWarning := []integrationChannel{channelWebhook, channelWeCom}
+	wantWarning := []integrationChannel{channelWebhook, channelWeCom, channelEmail, channelEmailWebhook}
 	if got := dispatcher.routeChannels(eventTypeAlert, []byte(`{"severity":"warning"}`)); !reflect.DeepEqual(got, wantWarning) {
 		t.Fatalf("warning route mismatch: got %v want %v", got, wantWarning)
 	}
@@ -40,6 +40,21 @@ func TestRouteChannels(t *testing.T) {
 
 	if got := dispatcher.routeChannels(eventTypeWeeklyReport, []byte(`{"severity":"warning"}`)); !reflect.DeepEqual(got, cfg.Channels) {
 		t.Fatalf("weekly event route mismatch: got %v want %v", got, cfg.Channels)
+	}
+}
+
+func TestRouteChannelsWarningIncludesEmailWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	dispatcher := &alertDispatcher{cfg: integrationConfig{
+		Channels:    []integrationChannel{channelWebhook, channelEmail},
+		RoutingMode: routingModeSeverity,
+	}}
+
+	got := dispatcher.routeChannels(eventTypeAlert, []byte(`{"severity":"warning"}`))
+	want := []integrationChannel{channelWebhook, channelEmail}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("warning route should include email when enabled: got %v want %v", got, want)
 	}
 }
 
@@ -127,7 +142,7 @@ func TestDispatchToChannelRetryableByStatusCode(t *testing.T) {
 				httpClient: server.Client(),
 			}
 
-			err := dispatcher.dispatchToChannel(channelWebhook, []byte(`{"ok":true}`), eventTypeAlert)
+			err := dispatcher.dispatchToChannel("", channelWebhook, []byte(`{"ok":true}`), eventTypeAlert)
 			if err == nil {
 				t.Fatal("expected error for non-2xx status")
 			}
@@ -210,6 +225,13 @@ func TestDispatchToChannelPayloadAdaptation(t *testing.T) {
 			payload:   weeklyPayload,
 			wantText:  weeklyText,
 		},
+		{
+			name:      "email webhook uses wrapped payload for alert",
+			channel:   channelEmailWebhook,
+			eventType: eventTypeAlert,
+			payload:   alertPayload,
+			wantText:  alertText,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -232,6 +254,7 @@ func TestDispatchToChannelPayloadAdaptation(t *testing.T) {
 				log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 				cfg: integrationConfig{
 					WebhookTimeout: defaultWebhookTimeout,
+					EmailFrom:      "alerts@example.com",
 					ChannelURLs: map[integrationChannel]string{
 						tc.channel: server.URL,
 					},
@@ -239,7 +262,7 @@ func TestDispatchToChannelPayloadAdaptation(t *testing.T) {
 				httpClient: server.Client(),
 			}
 
-			if err := dispatcher.dispatchToChannel(tc.channel, tc.payload, tc.eventType); err != nil {
+			if err := dispatcher.dispatchToChannel("", tc.channel, tc.payload, tc.eventType); err != nil {
 				t.Fatalf("dispatchToChannel returned error: %v", err)
 			}
 			if gotContentType != "application/json" {
@@ -282,6 +305,29 @@ func TestDispatchToChannelPayloadAdaptation(t *testing.T) {
 				}
 				if parsed.Content.Text != tc.wantText {
 					t.Fatalf("text content mismatch:\ngot:  %s\nwant: %s", parsed.Content.Text, tc.wantText)
+				}
+			case channelEmailWebhook:
+				var parsed emailWebhookChannelPayload
+				if err := json.Unmarshal(gotBody, &parsed); err != nil {
+					t.Fatalf("unmarshal email webhook payload failed: %v", err)
+				}
+				if parsed.EventType != eventTypeAlert {
+					t.Fatalf("event type mismatch: got %q want %q", parsed.EventType, eventTypeAlert)
+				}
+				if parsed.Subject != buildEmailSubject(tc.payload, tc.eventType) {
+					t.Fatalf("subject mismatch: got %q want %q", parsed.Subject, buildEmailSubject(tc.payload, tc.eventType))
+				}
+				if parsed.From != "alerts@example.com" {
+					t.Fatalf("from mismatch: got %q want %q", parsed.From, "alerts@example.com")
+				}
+				if !reflect.DeepEqual(parsed.To, []string{"alerts@example.com"}) {
+					t.Fatalf("to mismatch: got %v want %v", parsed.To, []string{"alerts@example.com"})
+				}
+				if parsed.Body != tc.wantText {
+					t.Fatalf("body mismatch:\ngot:  %s\nwant: %s", parsed.Body, tc.wantText)
+				}
+				if compactJSONPayload(parsed.Event) != compactJSONPayload(tc.payload) {
+					t.Fatalf("event payload mismatch: got %s want %s", parsed.Event, tc.payload)
 				}
 			default:
 				t.Fatalf("unexpected channel %s", tc.channel)

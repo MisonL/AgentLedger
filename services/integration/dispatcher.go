@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -14,7 +15,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/mail"
+	"net/smtp"
+	"net/textproto"
 	"sort"
 	"strconv"
 	"strings"
@@ -110,6 +115,7 @@ type dispatchProgressStore struct {
 type dispatchProgressEntry struct {
 	successful   map[integrationChannel]struct{}
 	dlqPublished bool
+	occurredAt   time.Time
 	updatedAt    time.Time
 }
 
@@ -547,7 +553,7 @@ func (d *alertDispatcher) dispatchWithMessageKey(messageKey string, payload []by
 	failures := make([]channelDispatchFailure, 0, len(channels))
 	for _, channel := range channels {
 		channelStarted := time.Now()
-		err := d.dispatchToChannel(channel, payload, eventType)
+		err := d.dispatchToChannel(messageKey, channel, payload, eventType)
 		result := channelDispatchResult{
 			channel:  channel,
 			duration: time.Since(channelStarted),
@@ -585,7 +591,7 @@ func (d *alertDispatcher) routeChannels(eventType string, payload []byte) []inte
 	case "critical":
 		return enabled
 	case "warning":
-		routed := filterChannels(enabled, channelWebhook, channelWeCom)
+		routed := filterChannels(enabled, channelWebhook, channelWeCom, channelEmail, channelEmailWebhook)
 		if len(routed) > 0 {
 			return routed
 		}
@@ -703,6 +709,19 @@ type weeklyReportTextPayload struct {
 	PeakDayCost   float64 `json:"peak_day_cost"`
 }
 
+type emailWebhookChannelPayload struct {
+	EventType  string          `json:"event_type"`
+	Subject    string          `json:"subject"`
+	From       string          `json:"from,omitempty"`
+	To         []string        `json:"to,omitempty"`
+	Body       string          `json:"body"`
+	Event      json.RawMessage `json:"event,omitempty"`
+	EventRaw   string          `json:"event_raw,omitempty"`
+	OccurredAt time.Time       `json:"occurred_at"`
+}
+
+type stringList []string
+
 func buildChannelPayload(channel integrationChannel, payload []byte, eventType string) ([]byte, error) {
 	if channel == channelWebhook {
 		return append([]byte(nil), payload...), nil
@@ -799,21 +818,39 @@ func compactJSONPayload(payload []byte) string {
 	return buf.String()
 }
 
-func (d *alertDispatcher) dispatchToChannel(channel integrationChannel, payload []byte, eventType string) error {
+func (d *alertDispatcher) dispatchToChannel(messageKey string, channel integrationChannel, payload []byte, eventType string) error {
+	switch channel {
+	case channelEmail:
+		return d.dispatchEmail(channel, payload, eventType)
+	case channelEmailWebhook:
+		webhookPayload, err := d.buildEmailWebhookPayload(messageKey, payload, eventType)
+		if err != nil {
+			return &dispatchError{
+				retryable: false,
+				message:   fmt.Sprintf("build %s payload failed", channel),
+				err:       err,
+			}
+		}
+		return d.dispatchHTTPChannel(channel, webhookPayload)
+	default:
+		channelPayload, err := buildChannelPayload(channel, payload, eventType)
+		if err != nil {
+			return &dispatchError{
+				retryable: false,
+				message:   fmt.Sprintf("build %s payload failed", channel),
+				err:       err,
+			}
+		}
+		return d.dispatchHTTPChannel(channel, channelPayload)
+	}
+}
+
+func (d *alertDispatcher) dispatchHTTPChannel(channel integrationChannel, channelPayload []byte) error {
 	endpoint := strings.TrimSpace(d.cfg.ChannelURLs[channel])
 	if endpoint == "" {
 		return &dispatchError{
 			retryable: false,
 			message:   fmt.Sprintf("channel %s is not configured", channel),
-		}
-	}
-
-	channelPayload, err := buildChannelPayload(channel, payload, eventType)
-	if err != nil {
-		return &dispatchError{
-			retryable: false,
-			message:   fmt.Sprintf("build %s payload failed", channel),
-			err:       err,
 		}
 	}
 
@@ -872,6 +909,448 @@ func (d *alertDispatcher) dispatchToChannel(channel integrationChannel, payload 
 		statusCode: resp.StatusCode,
 		message:    message,
 	}
+}
+
+func (d *alertDispatcher) dispatchEmail(channel integrationChannel, payload []byte, eventType string) error {
+	fromAddress, err := parseEmailAddress(d.cfg.EmailFrom)
+	if err != nil {
+		return &dispatchError{
+			retryable: false,
+			message:   fmt.Sprintf("invalid email sender for channel %s", channel),
+			err:       err,
+		}
+	}
+
+	recipients, err := resolveEmailRecipients(payload, fromAddress)
+	if err != nil {
+		return &dispatchError{
+			retryable: false,
+			message:   fmt.Sprintf("resolve %s recipients failed", channel),
+			err:       err,
+		}
+	}
+
+	subject := buildEmailSubject(payload, eventType)
+	body := formatEventTextPayload(payload, eventType)
+	message := buildSMTPMessage(fromAddress, recipients, subject, body)
+	if err := d.sendSMTPMessage(fromAddress, recipients, message); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (d *alertDispatcher) buildEmailWebhookPayload(messageKey string, payload []byte, eventType string) ([]byte, error) {
+	fromAddress := ""
+	rawFrom := strings.TrimSpace(d.cfg.EmailFrom)
+	if rawFrom != "" {
+		parsedFrom, err := parseEmailAddress(rawFrom)
+		if err != nil {
+			return nil, err
+		}
+		fromAddress = parsedFrom
+	}
+
+	recipients, err := resolveEmailRecipients(payload, fromAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	body := formatEventTextPayload(payload, eventType)
+	wrapped := emailWebhookChannelPayload{
+		EventType:  normalizeEventTypeLabel(eventType),
+		Subject:    buildEmailSubject(payload, eventType),
+		From:       fromAddress,
+		To:         recipients,
+		Body:       body,
+		OccurredAt: d.resolveEmailWebhookOccurredAt(messageKey, payload),
+	}
+
+	trimmedPayload := bytes.TrimSpace(payload)
+	if len(trimmedPayload) > 0 {
+		if json.Valid(trimmedPayload) {
+			wrapped.Event = append([]byte(nil), trimmedPayload...)
+		} else {
+			wrapped.EventRaw = string(trimmedPayload)
+		}
+	}
+
+	return json.Marshal(wrapped)
+}
+
+func (d *alertDispatcher) resolveEmailWebhookOccurredAt(messageKey string, payload []byte) time.Time {
+	if parsed, ok := extractPayloadOccurredAt(payload); ok {
+		return parsed.UTC()
+	}
+
+	now := time.Now().UTC()
+	if messageKey == "" || d.progress == nil {
+		return now
+	}
+
+	d.progress.mu.Lock()
+	defer d.progress.mu.Unlock()
+
+	d.cleanupDispatchProgressLocked(now)
+
+	entry := d.progress.items[messageKey]
+	if entry != nil {
+		if !entry.occurredAt.IsZero() {
+			entry.updatedAt = now
+			return entry.occurredAt
+		}
+		entry.occurredAt = now
+		entry.updatedAt = now
+		return entry.occurredAt
+	}
+
+	d.progress.items[messageKey] = &dispatchProgressEntry{
+		successful: make(map[integrationChannel]struct{}, len(d.cfg.Channels)),
+		occurredAt: now,
+		updatedAt:  now,
+	}
+	return now
+}
+
+func extractPayloadOccurredAt(payload []byte) (time.Time, bool) {
+	trimmed := bytes.TrimSpace(payload)
+	if len(trimmed) == 0 {
+		return time.Time{}, false
+	}
+
+	var envelope struct {
+		OccurredAt string `json:"occurred_at"`
+		CreatedAt  string `json:"created_at"`
+		Timestamp  string `json:"timestamp"`
+		Event      struct {
+			OccurredAt string `json:"occurred_at"`
+			CreatedAt  string `json:"created_at"`
+			Timestamp  string `json:"timestamp"`
+		} `json:"event"`
+	}
+	if err := json.Unmarshal(trimmed, &envelope); err != nil {
+		return time.Time{}, false
+	}
+
+	for _, candidate := range []string{
+		envelope.OccurredAt,
+		envelope.CreatedAt,
+		envelope.Timestamp,
+		envelope.Event.OccurredAt,
+		envelope.Event.CreatedAt,
+		envelope.Event.Timestamp,
+	} {
+		parsed, ok := parseOccurredAtValue(candidate)
+		if ok {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func parseOccurredAtValue(value string) (time.Time, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Time{}, false
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, trimmed)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return parsed.UTC(), true
+}
+
+func (d *alertDispatcher) sendSMTPMessage(from string, recipients []string, message []byte) error {
+	smtpHost := strings.TrimSpace(d.cfg.EmailSMTPHost)
+	if smtpHost == "" {
+		return &dispatchError{
+			retryable: false,
+			message:   "INTEGRATION_EMAIL_SMTP_HOST is not configured",
+		}
+	}
+	if d.cfg.EmailSMTPPort <= 0 {
+		return &dispatchError{
+			retryable: false,
+			message:   "INTEGRATION_EMAIL_SMTP_PORT is not configured",
+		}
+	}
+
+	smtpMode := d.cfg.EmailSMTPTLSMode
+	if smtpMode == "" {
+		smtpMode = smtpTLSModeSTARTTLS
+	}
+
+	timeout := d.cfg.WebhookTimeout
+	if timeout <= 0 {
+		timeout = defaultWebhookTimeout
+	}
+
+	address := net.JoinHostPort(smtpHost, strconv.Itoa(d.cfg.EmailSMTPPort))
+	dialer := net.Dialer{Timeout: timeout}
+	tlsConfig := &tls.Config{
+		ServerName: smtpHost,
+		MinVersion: tls.VersionTLS12,
+	}
+
+	var conn net.Conn
+	var err error
+
+	switch smtpMode {
+	case smtpTLSModeTLS:
+		conn, err = tls.DialWithDialer(&dialer, "tcp", address, tlsConfig)
+	case smtpTLSModeSTARTTLS, smtpTLSModeNone:
+		conn, err = dialer.Dial("tcp", address)
+	default:
+		return &dispatchError{
+			retryable: false,
+			message:   fmt.Sprintf("unsupported smtp tls mode %q", smtpMode),
+		}
+	}
+
+	if err != nil {
+		return &dispatchError{
+			retryable: true,
+			message:   "smtp dial failed",
+			err:       err,
+		}
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(timeout))
+
+	client, err := smtp.NewClient(conn, smtpHost)
+	if err != nil {
+		return classifySMTPError("create smtp client failed", err)
+	}
+	defer client.Close()
+
+	if smtpMode == smtpTLSModeSTARTTLS {
+		if ok, _ := client.Extension("STARTTLS"); !ok {
+			return &dispatchError{
+				retryable: false,
+				message:   "smtp server does not support STARTTLS",
+			}
+		}
+		if err := client.StartTLS(tlsConfig); err != nil {
+			return classifySMTPError("smtp STARTTLS failed", err)
+		}
+	}
+
+	if err := d.smtpAuth(client, smtpHost); err != nil {
+		return err
+	}
+
+	if err := client.Mail(from); err != nil {
+		return classifySMTPError("smtp MAIL FROM failed", err)
+	}
+	for _, recipient := range recipients {
+		if err := client.Rcpt(recipient); err != nil {
+			return classifySMTPError(fmt.Sprintf("smtp RCPT TO failed for %s", recipient), err)
+		}
+	}
+
+	writer, err := client.Data()
+	if err != nil {
+		return classifySMTPError("smtp DATA command failed", err)
+	}
+	if _, err := writer.Write(message); err != nil {
+		_ = writer.Close()
+		return classifySMTPError("write smtp payload failed", err)
+	}
+	if err := writer.Close(); err != nil {
+		return classifySMTPError("finalize smtp payload failed", err)
+	}
+	if err := client.Quit(); err != nil {
+		return classifySMTPError("smtp QUIT failed", err)
+	}
+
+	return nil
+}
+
+func (d *alertDispatcher) smtpAuth(client *smtp.Client, host string) error {
+	username := strings.TrimSpace(d.cfg.EmailSMTPUser)
+	password := strings.TrimSpace(d.cfg.EmailSMTPPass)
+	if username == "" && password == "" {
+		return nil
+	}
+	if username == "" || password == "" {
+		return &dispatchError{
+			retryable: false,
+			message:   "smtp credentials must include both username and password",
+		}
+	}
+	if ok, _ := client.Extension("AUTH"); !ok {
+		return &dispatchError{
+			retryable: false,
+			message:   "smtp server does not support AUTH",
+		}
+	}
+
+	auth := smtp.PlainAuth("", username, password, host)
+	if err := client.Auth(auth); err != nil {
+		return classifySMTPError("smtp AUTH failed", err)
+	}
+	return nil
+}
+
+func classifySMTPError(message string, err error) error {
+	retryable := true
+	var protoErr *textproto.Error
+	if errors.As(err, &protoErr) {
+		if protoErr.Code >= 500 && protoErr.Code < 600 {
+			retryable = false
+		}
+		if protoErr.Code >= 400 && protoErr.Code < 500 {
+			retryable = true
+		}
+	}
+	return &dispatchError{
+		retryable: retryable,
+		message:   message,
+		err:       err,
+	}
+}
+
+func buildSMTPMessage(from string, recipients []string, subject string, body string) []byte {
+	normalizedBody := strings.ReplaceAll(body, "\r\n", "\n")
+	normalizedBody = strings.ReplaceAll(normalizedBody, "\n", "\r\n")
+	sanitizedSubject := sanitizeEmailHeader(subject)
+
+	headers := []string{
+		fmt.Sprintf("From: %s", from),
+		fmt.Sprintf("To: %s", strings.Join(recipients, ", ")),
+		fmt.Sprintf("Subject: %s", sanitizedSubject),
+		"MIME-Version: 1.0",
+		`Content-Type: text/plain; charset="UTF-8"`,
+		"Content-Transfer-Encoding: 8bit",
+		"",
+		normalizedBody,
+	}
+
+	return []byte(strings.Join(headers, "\r\n"))
+}
+
+func sanitizeEmailHeader(value string) string {
+	withoutCR := strings.ReplaceAll(value, "\r", " ")
+	return strings.ReplaceAll(withoutCR, "\n", " ")
+}
+
+func buildEmailSubject(payload []byte, eventType string) string {
+	parts := []string{fmt.Sprintf("[agentledger][%s]", normalizeEventTypeLabel(eventType))}
+	if severity := extractSeverity(payload); severity != "" {
+		parts = append(parts, fmt.Sprintf("[%s]", severity))
+	}
+	return strings.Join(parts, "")
+}
+
+func normalizeEventTypeLabel(eventType string) string {
+	normalized := strings.ToLower(strings.TrimSpace(eventType))
+	if normalized == "" {
+		return "unknown"
+	}
+	return normalized
+}
+
+func parseEmailAddress(raw string) (string, error) {
+	parsed, err := mail.ParseAddress(strings.TrimSpace(raw))
+	if err != nil {
+		return "", err
+	}
+	if parsed.Address == "" {
+		return "", errors.New("email address is empty")
+	}
+	return strings.ToLower(strings.TrimSpace(parsed.Address)), nil
+}
+
+func resolveEmailRecipients(payload []byte, fallback string) ([]string, error) {
+	trimmed := bytes.TrimSpace(payload)
+	if len(trimmed) == 0 {
+		trimmed = []byte("{}")
+	}
+
+	var envelope struct {
+		To           stringList `json:"to"`
+		EmailTo      stringList `json:"email_to"`
+		Emails       stringList `json:"emails"`
+		Recipients   stringList `json:"recipients"`
+		Notification struct {
+			To         stringList `json:"to"`
+			EmailTo    stringList `json:"email_to"`
+			Emails     stringList `json:"emails"`
+			Recipients stringList `json:"recipients"`
+		} `json:"notification"`
+	}
+	if err := json.Unmarshal(trimmed, &envelope); err != nil {
+		return nil, err
+	}
+
+	candidates := make([]string, 0, len(envelope.To)+len(envelope.EmailTo)+len(envelope.Emails)+len(envelope.Recipients))
+	candidates = append(candidates, envelope.To...)
+	candidates = append(candidates, envelope.EmailTo...)
+	candidates = append(candidates, envelope.Emails...)
+	candidates = append(candidates, envelope.Recipients...)
+	candidates = append(candidates, envelope.Notification.To...)
+	candidates = append(candidates, envelope.Notification.EmailTo...)
+	candidates = append(candidates, envelope.Notification.Emails...)
+	candidates = append(candidates, envelope.Notification.Recipients...)
+
+	if len(candidates) == 0 && strings.TrimSpace(fallback) != "" {
+		candidates = append(candidates, fallback)
+	}
+
+	recipients := make([]string, 0, len(candidates))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		addr, err := parseEmailAddress(candidate)
+		if err != nil {
+			return nil, fmt.Errorf("invalid recipient %q: %w", candidate, err)
+		}
+		if _, exists := seen[addr]; exists {
+			continue
+		}
+		seen[addr] = struct{}{}
+		recipients = append(recipients, addr)
+	}
+
+	if len(recipients) == 0 {
+		return nil, errors.New("no email recipients resolved")
+	}
+	return recipients, nil
+}
+
+func (s *stringList) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if bytes.Equal(trimmed, []byte("null")) || len(trimmed) == 0 {
+		*s = nil
+		return nil
+	}
+
+	if len(trimmed) > 0 && trimmed[0] == '"' {
+		var raw string
+		if err := json.Unmarshal(trimmed, &raw); err != nil {
+			return err
+		}
+		parts := strings.Split(raw, ",")
+		items := make([]string, 0, len(parts))
+		for _, part := range parts {
+			if value := strings.TrimSpace(part); value != "" {
+				items = append(items, value)
+			}
+		}
+		*s = items
+		return nil
+	}
+
+	var values []string
+	if err := json.Unmarshal(trimmed, &values); err != nil {
+		return err
+	}
+	items := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			items = append(items, value)
+		}
+	}
+	*s = items
+	return nil
 }
 
 func (d *alertDispatcher) callbackEndpoint() (string, error) {

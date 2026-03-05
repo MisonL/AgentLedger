@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/mail"
 	"net/url"
 	"os"
 	"strconv"
@@ -35,15 +36,26 @@ const (
 	defaultDLQPublishTimeout      = 5 * time.Second
 	defaultIntegrationServiceName = "integration"
 	defaultIntegrationChannels    = "webhook"
+	defaultEmailSMTPPort          = 587
 )
 
 type integrationChannel string
 
 const (
-	channelWebhook  integrationChannel = "webhook"
-	channelWeCom    integrationChannel = "wecom"
-	channelDingTalk integrationChannel = "dingtalk"
-	channelFeishu   integrationChannel = "feishu"
+	channelWebhook      integrationChannel = "webhook"
+	channelWeCom        integrationChannel = "wecom"
+	channelDingTalk     integrationChannel = "dingtalk"
+	channelFeishu       integrationChannel = "feishu"
+	channelEmail        integrationChannel = "email"
+	channelEmailWebhook integrationChannel = "email_webhook"
+)
+
+type smtpTLSMode string
+
+const (
+	smtpTLSModeNone     smtpTLSMode = "none"
+	smtpTLSModeSTARTTLS smtpTLSMode = "starttls"
+	smtpTLSModeTLS      smtpTLSMode = "tls"
 )
 
 type routingMode string
@@ -80,6 +92,13 @@ type integrationConfig struct {
 	ChannelURLs    map[integrationChannel]string
 	RoutingMode    routingMode
 	WebhookTimeout time.Duration
+
+	EmailSMTPHost    string
+	EmailSMTPPort    int
+	EmailSMTPUser    string
+	EmailSMTPPass    string
+	EmailFrom        string
+	EmailSMTPTLSMode smtpTLSMode
 
 	RetryMax       int
 	RetryBaseDelay time.Duration
@@ -126,11 +145,18 @@ func loadIntegrationConfig() (integrationConfig, error) {
 		CallbackSignatureTTL: defaultCallbackSignatureTTL,
 
 		ChannelURLs: map[integrationChannel]string{
-			channelWebhook:  getEnv("INTEGRATION_WEBHOOK_URL", ""),
-			channelWeCom:    getEnv("INTEGRATION_WECOM_WEBHOOK_URL", ""),
-			channelDingTalk: getEnv("INTEGRATION_DINGTALK_WEBHOOK_URL", ""),
-			channelFeishu:   getEnv("INTEGRATION_FEISHU_WEBHOOK_URL", ""),
+			channelWebhook:      getEnv("INTEGRATION_WEBHOOK_URL", ""),
+			channelWeCom:        getEnv("INTEGRATION_WECOM_WEBHOOK_URL", ""),
+			channelDingTalk:     getEnv("INTEGRATION_DINGTALK_WEBHOOK_URL", ""),
+			channelFeishu:       getEnv("INTEGRATION_FEISHU_WEBHOOK_URL", ""),
+			channelEmailWebhook: getEnv("INTEGRATION_EMAIL_WEBHOOK_URL", ""),
 		},
+
+		EmailSMTPHost:    getEnv("INTEGRATION_EMAIL_SMTP_HOST", ""),
+		EmailSMTPUser:    getEnv("INTEGRATION_EMAIL_SMTP_USER", ""),
+		EmailSMTPPass:    strings.TrimSpace(os.Getenv("INTEGRATION_EMAIL_SMTP_PASS")),
+		EmailFrom:        getEnv("INTEGRATION_EMAIL_FROM", ""),
+		EmailSMTPTLSMode: smtpTLSModeSTARTTLS,
 
 		WebhookTimeout:        defaultWebhookTimeout,
 		RetryMax:              defaultRetryMax,
@@ -153,6 +179,16 @@ func loadIntegrationConfig() (integrationConfig, error) {
 	}
 
 	cfg.WebhookTimeout, err = durationFromEnv("INTEGRATION_WEBHOOK_TIMEOUT", cfg.WebhookTimeout)
+	if err != nil {
+		return integrationConfig{}, err
+	}
+
+	cfg.EmailSMTPPort, err = intFromEnv("INTEGRATION_EMAIL_SMTP_PORT", defaultEmailSMTPPort)
+	if err != nil {
+		return integrationConfig{}, err
+	}
+
+	cfg.EmailSMTPTLSMode, err = smtpTLSModeFromEnv("INTEGRATION_EMAIL_SMTP_TLS_MODE", cfg.EmailSMTPTLSMode)
 	if err != nil {
 		return integrationConfig{}, err
 	}
@@ -250,6 +286,19 @@ func loadIntegrationConfig() (integrationConfig, error) {
 		return integrationConfig{}, fmt.Errorf("INTEGRATION_CHANNELS must contain at least one channel")
 	}
 	for _, channel := range cfg.Channels {
+		if channel == channelEmail {
+			if err := validateEmailChannelConfig(cfg); err != nil {
+				return integrationConfig{}, err
+			}
+			continue
+		}
+		if channel == channelEmailWebhook {
+			if err := validateEmailWebhookChannelConfig(cfg); err != nil {
+				return integrationConfig{}, err
+			}
+			continue
+		}
+
 		rawURL := strings.TrimSpace(cfg.ChannelURLs[channel])
 		envKey := channelEnvKey(channel)
 		if rawURL == "" {
@@ -281,6 +330,9 @@ func loadIntegrationConfig() (integrationConfig, error) {
 	}
 	if cfg.WebhookTimeout <= 0 {
 		return integrationConfig{}, fmt.Errorf("invalid INTEGRATION_WEBHOOK_TIMEOUT: must be > 0")
+	}
+	if cfg.EmailSMTPPort <= 0 {
+		return integrationConfig{}, fmt.Errorf("invalid INTEGRATION_EMAIL_SMTP_PORT: must be > 0")
 	}
 	if cfg.CallbackSignatureTTL <= 0 {
 		return integrationConfig{}, fmt.Errorf("invalid INTEGRATION_CALLBACK_SIGNATURE_TTL: must be > 0")
@@ -457,8 +509,30 @@ func channelFromString(raw string) (integrationChannel, bool) {
 		return channelDingTalk, true
 	case string(channelFeishu):
 		return channelFeishu, true
+	case string(channelEmail):
+		return channelEmail, true
+	case string(channelEmailWebhook):
+		return channelEmailWebhook, true
 	default:
 		return "", false
+	}
+}
+
+func smtpTLSModeFromEnv(key string, fallback smtpTLSMode) (smtpTLSMode, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback, nil
+	}
+
+	switch smtpTLSMode(strings.ToLower(value)) {
+	case smtpTLSModeNone:
+		return smtpTLSModeNone, nil
+	case smtpTLSModeSTARTTLS:
+		return smtpTLSModeSTARTTLS, nil
+	case smtpTLSModeTLS:
+		return smtpTLSModeTLS, nil
+	default:
+		return "", fmt.Errorf("invalid %s: %q (supported: none,starttls,tls)", key, value)
 	}
 }
 
@@ -488,9 +562,62 @@ func channelEnvKey(channel integrationChannel) string {
 		return "INTEGRATION_DINGTALK_WEBHOOK_URL"
 	case channelFeishu:
 		return "INTEGRATION_FEISHU_WEBHOOK_URL"
+	case channelEmail:
+		return "INTEGRATION_EMAIL_SMTP_HOST"
+	case channelEmailWebhook:
+		return "INTEGRATION_EMAIL_WEBHOOK_URL"
 	default:
 		return "INTEGRATION_WEBHOOK_URL"
 	}
+}
+
+func validateEmailChannelConfig(cfg integrationConfig) error {
+	if strings.TrimSpace(cfg.EmailSMTPHost) == "" {
+		return fmt.Errorf("INTEGRATION_EMAIL_SMTP_HOST is required when channel %q is enabled", channelEmail)
+	}
+	if cfg.EmailSMTPPort <= 0 {
+		return fmt.Errorf("INTEGRATION_EMAIL_SMTP_PORT is required when channel %q is enabled", channelEmail)
+	}
+	if strings.TrimSpace(cfg.EmailSMTPUser) == "" {
+		return fmt.Errorf("INTEGRATION_EMAIL_SMTP_USER is required when channel %q is enabled", channelEmail)
+	}
+	if strings.TrimSpace(cfg.EmailSMTPPass) == "" {
+		return fmt.Errorf("INTEGRATION_EMAIL_SMTP_PASS is required when channel %q is enabled", channelEmail)
+	}
+
+	address, err := mail.ParseAddress(strings.TrimSpace(cfg.EmailFrom))
+	if err != nil {
+		return fmt.Errorf("invalid INTEGRATION_EMAIL_FROM: %w", err)
+	}
+	if strings.TrimSpace(address.Address) == "" {
+		return fmt.Errorf("INTEGRATION_EMAIL_FROM is required when channel %q is enabled", channelEmail)
+	}
+
+	switch cfg.EmailSMTPTLSMode {
+	case smtpTLSModeNone, smtpTLSModeSTARTTLS, smtpTLSModeTLS:
+		return nil
+	default:
+		return fmt.Errorf("invalid INTEGRATION_EMAIL_SMTP_TLS_MODE: %q", cfg.EmailSMTPTLSMode)
+	}
+}
+
+func validateEmailWebhookChannelConfig(cfg integrationConfig) error {
+	rawURL := strings.TrimSpace(cfg.ChannelURLs[channelEmailWebhook])
+	if rawURL == "" {
+		return fmt.Errorf("INTEGRATION_EMAIL_WEBHOOK_URL is required when channel %q is enabled", channelEmailWebhook)
+	}
+	if err := validateWebhookURL(rawURL); err != nil {
+		return fmt.Errorf("invalid INTEGRATION_EMAIL_WEBHOOK_URL: %w", err)
+	}
+
+	address, err := mail.ParseAddress(strings.TrimSpace(cfg.EmailFrom))
+	if err != nil {
+		return fmt.Errorf("invalid INTEGRATION_EMAIL_FROM: %w", err)
+	}
+	if strings.TrimSpace(address.Address) == "" {
+		return fmt.Errorf("INTEGRATION_EMAIL_FROM is required when channel %q is enabled", channelEmailWebhook)
+	}
+	return nil
 }
 
 func isIntegrationTestEnvironment() bool {

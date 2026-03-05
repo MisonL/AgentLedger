@@ -18,8 +18,8 @@ func TestParseChannels(t *testing.T) {
 	}{
 		{
 			name: "all channels",
-			raw:  "webhook,wecom,dingtalk,feishu",
-			want: []integrationChannel{channelWebhook, channelWeCom, channelDingTalk, channelFeishu},
+			raw:  "webhook,wecom,dingtalk,feishu,email,email_webhook",
+			want: []integrationChannel{channelWebhook, channelWeCom, channelDingTalk, channelFeishu, channelEmail, channelEmailWebhook},
 		},
 		{
 			name: "trim and dedupe",
@@ -131,6 +131,145 @@ func TestLoadIntegrationConfigMissingEnabledChannelURL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "INTEGRATION_WECOM_WEBHOOK_URL") {
 		t.Fatalf("error mismatch: %v", err)
+	}
+}
+
+func TestLoadIntegrationConfigEmailChannelValidation(t *testing.T) {
+	setBaseIntegrationEnvs(t)
+
+	t.Setenv("INTEGRATION_CHANNELS", "email")
+	t.Setenv("INTEGRATION_EMAIL_SMTP_HOST", "smtp.example.com")
+	t.Setenv("INTEGRATION_EMAIL_SMTP_PORT", "587")
+	t.Setenv("INTEGRATION_EMAIL_SMTP_USER", "mailer")
+	t.Setenv("INTEGRATION_EMAIL_SMTP_PASS", "super-secret")
+	t.Setenv("INTEGRATION_EMAIL_FROM", "alerts@example.com")
+	t.Setenv("INTEGRATION_EMAIL_SMTP_TLS_MODE", "starttls")
+
+	cfg, err := loadIntegrationConfig()
+	if err != nil {
+		t.Fatalf("loadIntegrationConfig returned error: %v", err)
+	}
+
+	if !reflect.DeepEqual(cfg.Channels, []integrationChannel{channelEmail}) {
+		t.Fatalf("email channels mismatch: got %v", cfg.Channels)
+	}
+	if cfg.EmailSMTPHost != "smtp.example.com" {
+		t.Fatalf("email smtp host mismatch: got %q", cfg.EmailSMTPHost)
+	}
+	if cfg.EmailSMTPPort != 587 {
+		t.Fatalf("email smtp port mismatch: got %d want %d", cfg.EmailSMTPPort, 587)
+	}
+	if cfg.EmailSMTPUser != "mailer" {
+		t.Fatalf("email smtp user mismatch: got %q", cfg.EmailSMTPUser)
+	}
+	if cfg.EmailSMTPPass != "super-secret" {
+		t.Fatalf("email smtp pass mismatch: got %q", cfg.EmailSMTPPass)
+	}
+	if cfg.EmailFrom != "alerts@example.com" {
+		t.Fatalf("email from mismatch: got %q", cfg.EmailFrom)
+	}
+	if cfg.EmailSMTPTLSMode != smtpTLSModeSTARTTLS {
+		t.Fatalf("email tls mode mismatch: got %q want %q", cfg.EmailSMTPTLSMode, smtpTLSModeSTARTTLS)
+	}
+}
+
+func TestLoadIntegrationConfigMissingEmailChannelEnv(t *testing.T) {
+	setBaseIntegrationEnvs(t)
+
+	t.Setenv("INTEGRATION_CHANNELS", "email")
+	t.Setenv("INTEGRATION_EMAIL_SMTP_HOST", "")
+	t.Setenv("INTEGRATION_EMAIL_SMTP_USER", "mailer")
+	t.Setenv("INTEGRATION_EMAIL_SMTP_PASS", "super-secret")
+	t.Setenv("INTEGRATION_EMAIL_FROM", "alerts@example.com")
+	t.Setenv("INTEGRATION_EMAIL_SMTP_TLS_MODE", "starttls")
+
+	_, err := loadIntegrationConfig()
+	if err == nil {
+		t.Fatal("expected missing email smtp host to fail")
+	}
+	if !strings.Contains(err.Error(), "INTEGRATION_EMAIL_SMTP_HOST") {
+		t.Fatalf("error mismatch: %v", err)
+	}
+}
+
+func TestLoadIntegrationConfigEmailWebhookChannelValidation(t *testing.T) {
+	setBaseIntegrationEnvs(t)
+
+	t.Setenv("INTEGRATION_CHANNELS", "email_webhook")
+	t.Setenv("INTEGRATION_EMAIL_WEBHOOK_URL", "")
+
+	_, err := loadIntegrationConfig()
+	if err == nil {
+		t.Fatal("expected missing email webhook url to fail")
+	}
+	if !strings.Contains(err.Error(), "INTEGRATION_EMAIL_WEBHOOK_URL") {
+		t.Fatalf("error mismatch: %v", err)
+	}
+}
+
+func TestLoadIntegrationConfigEmailWebhookChannelRequiresEmailFrom(t *testing.T) {
+	setBaseIntegrationEnvs(t)
+
+	t.Setenv("INTEGRATION_CHANNELS", "email_webhook")
+	t.Setenv("INTEGRATION_EMAIL_WEBHOOK_URL", "https://example.com/email-webhook")
+	t.Setenv("INTEGRATION_EMAIL_FROM", "")
+
+	_, err := loadIntegrationConfig()
+	if err == nil {
+		t.Fatal("expected missing email from to fail for email_webhook channel")
+	}
+	if !strings.Contains(err.Error(), "INTEGRATION_EMAIL_FROM") {
+		t.Fatalf("error mismatch: %v", err)
+	}
+}
+
+func TestLoadIntegrationConfigEmailWebhookChannelValid(t *testing.T) {
+	setBaseIntegrationEnvs(t)
+
+	t.Setenv("INTEGRATION_CHANNELS", "email_webhook")
+	t.Setenv("INTEGRATION_EMAIL_WEBHOOK_URL", "https://example.com/email-webhook")
+	t.Setenv("INTEGRATION_EMAIL_FROM", "alerts@example.com")
+
+	cfg, err := loadIntegrationConfig()
+	if err != nil {
+		t.Fatalf("loadIntegrationConfig returned error: %v", err)
+	}
+	if !reflect.DeepEqual(cfg.Channels, []integrationChannel{channelEmailWebhook}) {
+		t.Fatalf("email webhook channels mismatch: got %v", cfg.Channels)
+	}
+	if cfg.ChannelURLs[channelEmailWebhook] != "https://example.com/email-webhook" {
+		t.Fatalf("email webhook url mismatch: got %q", cfg.ChannelURLs[channelEmailWebhook])
+	}
+	if cfg.EmailFrom != "alerts@example.com" {
+		t.Fatalf("email from mismatch: got %q", cfg.EmailFrom)
+	}
+}
+
+func TestSMTPTLSModeFromEnv(t *testing.T) {
+	const key = "INTEGRATION_EMAIL_SMTP_TLS_MODE_UNIT_TEST"
+	t.Setenv(key, "")
+
+	got, err := smtpTLSModeFromEnv(key, smtpTLSModeSTARTTLS)
+	if err != nil {
+		t.Fatalf("smtpTLSModeFromEnv returned error: %v", err)
+	}
+	if got != smtpTLSModeSTARTTLS {
+		t.Fatalf("default smtp tls mode mismatch: got %q want %q", got, smtpTLSModeSTARTTLS)
+	}
+
+	t.Setenv(key, "tls")
+	got, err = smtpTLSModeFromEnv(key, smtpTLSModeSTARTTLS)
+	if err != nil {
+		t.Fatalf("smtpTLSModeFromEnv returned error: %v", err)
+	}
+	if got != smtpTLSModeTLS {
+		t.Fatalf("tls mode mismatch: got %q want %q", got, smtpTLSModeTLS)
+	}
+
+	t.Setenv(key, "broken")
+	_, err = smtpTLSModeFromEnv(key, smtpTLSModeSTARTTLS)
+	if err == nil || !strings.Contains(err.Error(), "supported: none,starttls,tls") {
+		t.Fatalf("expected invalid smtp tls mode error, got: %v", err)
 	}
 }
 
@@ -396,6 +535,13 @@ func setBaseIntegrationEnvs(t *testing.T) {
 	t.Setenv("INTEGRATION_DLQ_SUBJECT", "integration.dispatch")
 	t.Setenv("INTEGRATION_ROUTING_MODE", "broadcast")
 	t.Setenv("CONTROL_PLANE_BASE_URL", "https://control.example.com")
+	t.Setenv("INTEGRATION_EMAIL_WEBHOOK_URL", "")
+	t.Setenv("INTEGRATION_EMAIL_SMTP_HOST", "")
+	t.Setenv("INTEGRATION_EMAIL_SMTP_PORT", "")
+	t.Setenv("INTEGRATION_EMAIL_SMTP_USER", "")
+	t.Setenv("INTEGRATION_EMAIL_SMTP_PASS", "")
+	t.Setenv("INTEGRATION_EMAIL_FROM", "")
+	t.Setenv("INTEGRATION_EMAIL_SMTP_TLS_MODE", "")
 
 	t.Setenv("INTEGRATION_WEBHOOK_TIMEOUT", "10s")
 	t.Setenv("INTEGRATION_RETRY_MAX", "5")
