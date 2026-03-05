@@ -27,6 +27,14 @@ import {
   fetchMcpApprovals,
   fetchMcpInvocations,
   fetchMcpPolicies,
+  fetchOpenPlatformApiKeys,
+  fetchOpenPlatformOpenApiSummary,
+  fetchOpenPlatformQualityDaily,
+  fetchOpenPlatformQualityScorecards,
+  fetchOpenPlatformReplayBaselines,
+  fetchOpenPlatformReplayDiff,
+  fetchOpenPlatformReplayJobs,
+  fetchOpenPlatformWebhooks,
   fetchReplicationJobs,
   fetchResidencyPolicy,
   fetchResidencyRegions,
@@ -50,10 +58,15 @@ import {
   publishRuleAsset,
   rejectMcpApproval,
   rollbackRuleAsset,
+  revokeOpenPlatformApiKey,
   searchSessions,
   setUnauthorizedHandler,
   testSourceConnection,
   simulateAlertOrchestration,
+  replayOpenPlatformWebhook,
+  deleteOpenPlatformWebhook,
+  upsertOpenPlatformApiKey,
+  upsertOpenPlatformWebhook,
   upsertMcpPolicy,
   upsertAlertOrchestrationRule,
   upsertResidencyPolicy,
@@ -87,6 +100,16 @@ import type {
   MetricKey,
   PricingCatalogEntry,
   PricingCatalogUpsertInput,
+  OpenPlatformApiKey,
+  OpenPlatformApiKeyStatus,
+  OpenPlatformOpenApiSummary,
+  OpenPlatformQualityDailyItem,
+  OpenPlatformQualityScorecard,
+  OpenPlatformReplayBaseline,
+  OpenPlatformReplayDiffItem,
+  OpenPlatformReplayJob,
+  OpenPlatformReplayJobStatus,
+  OpenPlatformWebhook,
   RegionDescriptor,
   ReplicationJob,
   ReplicationJobStatus,
@@ -374,6 +397,51 @@ const MCP_APPROVAL_STATUS_FILTER_OPTIONS: Array<
   { value: "rejected", label: "rejected" },
 ];
 
+const OPEN_PLATFORM_API_KEY_STATUS_FILTER_OPTIONS: Array<
+  { value: ""; label: string } | { value: OpenPlatformApiKeyStatus; label: string }
+> = [
+  { value: "", label: "全部状态" },
+  { value: "active", label: "active" },
+  { value: "disabled", label: "disabled" },
+];
+
+const OPEN_PLATFORM_WEBHOOK_ENABLED_FILTER_OPTIONS: Array<
+  { value: ""; label: string } | { value: "true" | "false"; label: string }
+> = [
+  { value: "", label: "全部 webhook" },
+  { value: "true", label: "enabled=true" },
+  { value: "false", label: "enabled=false" },
+];
+
+const OPEN_PLATFORM_QUALITY_METRIC_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "", label: "全部指标" },
+  { value: "accuracy", label: "accuracy" },
+  { value: "consistency", label: "consistency" },
+  { value: "groundedness", label: "groundedness" },
+  { value: "safety", label: "safety" },
+  { value: "latency", label: "latency" },
+];
+
+const OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS = [
+  "api_key.created",
+  "api_key.revoked",
+  "quality.event.created",
+  "quality.scorecard.updated",
+  "replay.job.started",
+  "replay.job.completed",
+  "replay.job.failed",
+] as const;
+
+const OPEN_PLATFORM_REPLAY_JOB_STATUS_FILTER_OPTIONS: Array<
+  { value: ""; label: string } | { value: OpenPlatformReplayJobStatus; label: string }
+> = [
+  { value: "", label: "全部任务状态" },
+  { value: "queued", label: "queued" },
+  { value: "running", label: "running" },
+  { value: "succeeded", label: "succeeded" },
+  { value: "failed", label: "failed" },
+];
+
 function createEmptyPricingEntry(): PricingEntryFormState {
   return {
     model: "",
@@ -659,6 +727,22 @@ function parseOptionalNonNegativeInteger(value: string): number | undefined {
     return undefined;
   }
   return parsed;
+}
+
+function parseCommaSeparatedValues(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item, index, list) => item.length > 0 && list.indexOf(item) === index);
+}
+
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function triggerBrowserDownload(file: { blob: Blob; filename: string }) {
@@ -2460,6 +2544,86 @@ function GovernancePage() {
   const [mcpFeedback, setMcpFeedback] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
 
+  const [openApiSummaryPayload, setOpenApiSummaryPayload] =
+    useState<OpenPlatformOpenApiSummary | null>(null);
+  const [openApiFeedback, setOpenApiFeedback] = useState<string | null>(null);
+  const [openApiError, setOpenApiError] = useState<string | null>(null);
+  const [hasLoadedOpenApiSummary, setHasLoadedOpenApiSummary] = useState(false);
+
+  const [apiKeyStatusFilter, setApiKeyStatusFilter] = useState<OpenPlatformApiKeyStatus | "">("");
+  const [apiKeyKeyword, setApiKeyKeyword] = useState("");
+  const [apiKeyId, setApiKeyId] = useState("");
+  const [apiKeyName, setApiKeyName] = useState("");
+  const [apiKeyScopesInput, setApiKeyScopesInput] = useState("");
+  const [apiKeyExpiresAt, setApiKeyExpiresAt] = useState("");
+  const [apiKeyEnabled, setApiKeyEnabled] = useState(true);
+  const [apiKeyRevokeReason, setApiKeyRevokeReason] = useState("");
+  const [apiKeyPayload, setApiKeyPayload] = useState<{ items: OpenPlatformApiKey[]; total: number } | null>(
+    null
+  );
+  const [apiKeyFeedback, setApiKeyFeedback] = useState<string | null>(null);
+  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
+  const [hasLoadedApiKeys, setHasLoadedApiKeys] = useState(false);
+
+  const [webhookEnabledFilter, setWebhookEnabledFilter] = useState<"" | "true" | "false">("");
+  const [webhookKeyword, setWebhookKeyword] = useState("");
+  const [webhookId, setWebhookId] = useState("");
+  const [webhookName, setWebhookName] = useState("");
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookEventsInput, setWebhookEventsInput] = useState("");
+  const [webhookEnabled, setWebhookEnabled] = useState(true);
+  const [webhookReplayEventType, setWebhookReplayEventType] = useState("");
+  const [webhookReplayFrom, setWebhookReplayFrom] = useState("");
+  const [webhookReplayTo, setWebhookReplayTo] = useState("");
+  const [webhookReplayLimit, setWebhookReplayLimit] = useState("100");
+  const [webhookReplayDryRun, setWebhookReplayDryRun] = useState(true);
+  const [webhookPayload, setWebhookPayload] = useState<{ items: OpenPlatformWebhook[]; total: number } | null>(
+    null
+  );
+  const [webhookFeedback, setWebhookFeedback] = useState<string | null>(null);
+  const [webhookError, setWebhookError] = useState<string | null>(null);
+  const [hasLoadedWebhooks, setHasLoadedWebhooks] = useState(false);
+
+  const [qualityDailyDate, setQualityDailyDate] = useState("");
+  const [qualityDailyMetric, setQualityDailyMetric] = useState("");
+  const [qualityScorecardTeam, setQualityScorecardTeam] = useState("");
+  const [qualityDailyPayload, setQualityDailyPayload] = useState<{
+    items: OpenPlatformQualityDailyItem[];
+    total: number;
+  } | null>(null);
+  const [qualityScorecardPayload, setQualityScorecardPayload] = useState<{
+    items: OpenPlatformQualityScorecard[];
+    total: number;
+  } | null>(null);
+  const [qualityFeedback, setQualityFeedback] = useState<string | null>(null);
+  const [qualityError, setQualityError] = useState<string | null>(null);
+  const [hasLoadedQualityDaily, setHasLoadedQualityDaily] = useState(false);
+  const [hasLoadedQualityScorecards, setHasLoadedQualityScorecards] = useState(false);
+
+  const [replayBaselineKeyword, setReplayBaselineKeyword] = useState("");
+  const [replayJobsBaselineIdFilter, setReplayJobsBaselineIdFilter] = useState("");
+  const [replayJobsStatusFilter, setReplayJobsStatusFilter] = useState<OpenPlatformReplayJobStatus | "">("");
+  const [replayDiffBaselineId, setReplayDiffBaselineId] = useState("");
+  const [replayDiffJobId, setReplayDiffJobId] = useState("");
+  const [replayDiffKeyword, setReplayDiffKeyword] = useState("");
+  const [replayBaselinePayload, setReplayBaselinePayload] = useState<{
+    items: OpenPlatformReplayBaseline[];
+    total: number;
+  } | null>(null);
+  const [replayJobPayload, setReplayJobPayload] = useState<{
+    items: OpenPlatformReplayJob[];
+    total: number;
+  } | null>(null);
+  const [replayDiffPayload, setReplayDiffPayload] = useState<{
+    items: OpenPlatformReplayDiffItem[];
+    total: number;
+  } | null>(null);
+  const [replayFeedback, setReplayFeedback] = useState<string | null>(null);
+  const [replayError, setReplayError] = useState<string | null>(null);
+  const [hasLoadedReplayBaselines, setHasLoadedReplayBaselines] = useState(false);
+  const [hasLoadedReplayJobs, setHasLoadedReplayJobs] = useState(false);
+  const [hasLoadedReplayDiff, setHasLoadedReplayDiff] = useState(false);
+
   const [sessionExportFormat, setSessionExportFormat] = useState<ExportFormat>("csv");
   const [usageExportFormat, setUsageExportFormat] = useState<ExportFormat>("csv");
   const [usageExportDimension, setUsageExportDimension] =
@@ -2585,6 +2749,26 @@ function GovernancePage() {
       ...(mcpInvocationToolId.trim().length > 0 ? { toolId: mcpInvocationToolId.trim() } : {}),
     }),
     [mcpInvocationToolId]
+  );
+
+  const apiKeyQueryInput = useMemo(
+    () => ({
+      limit: 50,
+      ...(apiKeyStatusFilter ? { status: apiKeyStatusFilter } : {}),
+      ...(apiKeyKeyword.trim().length > 0 ? { keyword: apiKeyKeyword.trim() } : {}),
+    }),
+    [apiKeyKeyword, apiKeyStatusFilter]
+  );
+
+  const webhookQueryInput = useMemo(
+    () => ({
+      limit: 50,
+      ...(typeof parseBooleanSelect(webhookEnabledFilter) === "boolean"
+        ? { enabled: parseBooleanSelect(webhookEnabledFilter) }
+        : {}),
+      ...(webhookKeyword.trim().length > 0 ? { keyword: webhookKeyword.trim() } : {}),
+    }),
+    [webhookEnabledFilter, webhookKeyword]
   );
 
   const alertsQuery = useQuery({
@@ -3095,6 +3279,286 @@ function GovernancePage() {
     },
   });
 
+  const loadOpenApiSummaryMutation = useMutation({
+    mutationFn: () => fetchOpenPlatformOpenApiSummary(),
+    onSuccess: (summary) => {
+      setOpenApiError(null);
+      setHasLoadedOpenApiSummary(true);
+      setOpenApiSummaryPayload(summary);
+      setOpenApiFeedback(`OpenAPI 摘要已加载，版本 ${summary.version}。`);
+    },
+    onError: (error) => {
+      setOpenApiFeedback(null);
+      setHasLoadedOpenApiSummary(true);
+      setOpenApiError(`OpenAPI 摘要加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadApiKeysMutation = useMutation({
+    mutationFn: (input: { status?: OpenPlatformApiKeyStatus; keyword?: string; limit: number }) =>
+      fetchOpenPlatformApiKeys(input),
+    onSuccess: (payload) => {
+      setApiKeyError(null);
+      setHasLoadedApiKeys(true);
+      setApiKeyPayload({ items: payload.items, total: payload.total });
+      setApiKeyFeedback(`API Key 列表已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setApiKeyFeedback(null);
+      setHasLoadedApiKeys(true);
+      setApiKeyError(`API Key 列表加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const upsertApiKeyMutation = useMutation({
+    mutationFn: ({
+      keyId,
+      input,
+    }: {
+      keyId: string;
+      input: {
+        name: string;
+        scopes: string[];
+        enabled: boolean;
+        expiresAt?: string;
+      };
+    }) => upsertOpenPlatformApiKey(keyId, input),
+    onSuccess: async (apiKey) => {
+      setApiKeyError(null);
+      setApiKeyFeedback(`API Key ${apiKey.id} 已保存。`);
+      setApiKeyId(apiKey.id);
+      setApiKeyName(apiKey.name);
+      setApiKeyScopesInput(apiKey.scopes.join(","));
+      setApiKeyEnabled(apiKey.status === "active");
+      setApiKeyExpiresAt(apiKey.expiresAt ? apiKey.expiresAt.slice(0, 10) : "");
+      try {
+        const payload = await fetchOpenPlatformApiKeys(apiKeyQueryInput);
+        setHasLoadedApiKeys(true);
+        setApiKeyPayload({ items: payload.items, total: payload.total });
+      } catch (error) {
+        setApiKeyFeedback(`API Key ${apiKey.id} 已保存，但列表刷新失败：${toErrorMessage(error)}`);
+      }
+    },
+    onError: (error) => {
+      setApiKeyFeedback(null);
+      setApiKeyError(`保存 API Key 失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const revokeApiKeyMutation = useMutation({
+    mutationFn: ({ keyId, reason }: { keyId: string; reason?: string }) =>
+      revokeOpenPlatformApiKey(keyId, reason),
+    onSuccess: async (apiKey) => {
+      setApiKeyError(null);
+      setApiKeyFeedback(`API Key ${apiKey.id} 已吊销。`);
+      if (apiKey.id === apiKeyId.trim()) {
+        setApiKeyEnabled(false);
+      }
+      try {
+        const payload = await fetchOpenPlatformApiKeys(apiKeyQueryInput);
+        setHasLoadedApiKeys(true);
+        setApiKeyPayload({ items: payload.items, total: payload.total });
+      } catch (error) {
+        setApiKeyFeedback(`API Key ${apiKey.id} 已吊销，但列表刷新失败：${toErrorMessage(error)}`);
+      }
+    },
+    onError: (error) => {
+      setApiKeyFeedback(null);
+      setApiKeyError(`吊销 API Key 失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadWebhooksMutation = useMutation({
+    mutationFn: (input: { enabled?: boolean; keyword?: string; limit: number }) =>
+      fetchOpenPlatformWebhooks(input),
+    onSuccess: (payload) => {
+      setWebhookError(null);
+      setHasLoadedWebhooks(true);
+      setWebhookPayload({ items: payload.items, total: payload.total });
+      setWebhookFeedback(`Webhook 列表已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setWebhookFeedback(null);
+      setHasLoadedWebhooks(true);
+      setWebhookError(`Webhook 列表加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const upsertWebhookMutation = useMutation({
+    mutationFn: ({
+      webhookId,
+      input,
+    }: {
+      webhookId: string;
+      input: {
+        name: string;
+        url: string;
+        events: string[];
+        enabled: boolean;
+      };
+    }) => upsertOpenPlatformWebhook(webhookId, input),
+    onSuccess: async (webhook) => {
+      setWebhookError(null);
+      setWebhookFeedback(`Webhook ${webhook.id} 已保存。`);
+      setWebhookId(webhook.id);
+      setWebhookName(webhook.name);
+      setWebhookUrl(webhook.url);
+      setWebhookEventsInput(webhook.events.join(","));
+      setWebhookEnabled(webhook.enabled);
+      try {
+        const payload = await fetchOpenPlatformWebhooks(webhookQueryInput);
+        setHasLoadedWebhooks(true);
+        setWebhookPayload({ items: payload.items, total: payload.total });
+      } catch (error) {
+        setWebhookFeedback(`Webhook ${webhook.id} 已保存，但列表刷新失败：${toErrorMessage(error)}`);
+      }
+    },
+    onError: (error) => {
+      setWebhookFeedback(null);
+      setWebhookError(`保存 Webhook 失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const deleteWebhookMutation = useMutation({
+    mutationFn: ({ webhookId }: { webhookId: string }) =>
+      deleteOpenPlatformWebhook(webhookId),
+    onSuccess: async (_result, variables) => {
+      setWebhookError(null);
+      setWebhookFeedback(`Webhook ${variables.webhookId} 已删除。`);
+      if (variables.webhookId === webhookId.trim()) {
+        setWebhookId("");
+        setWebhookName("");
+        setWebhookUrl("");
+        setWebhookEventsInput("");
+        setWebhookEnabled(true);
+      }
+      try {
+        const payload = await fetchOpenPlatformWebhooks(webhookQueryInput);
+        setHasLoadedWebhooks(true);
+        setWebhookPayload({ items: payload.items, total: payload.total });
+      } catch (error) {
+        setWebhookFeedback(
+          `Webhook ${variables.webhookId} 已删除，但列表刷新失败：${toErrorMessage(error)}`
+        );
+      }
+    },
+    onError: (error) => {
+      setWebhookFeedback(null);
+      setWebhookError(`删除 Webhook 失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const replayWebhookMutation = useMutation({
+    mutationFn: ({
+      webhookId,
+      input,
+    }: {
+      webhookId: string;
+      input: {
+        eventType?: string;
+        from?: string;
+        to?: string;
+        limit?: number;
+        dryRun?: boolean;
+      };
+    }) => replayOpenPlatformWebhook(webhookId, input),
+    onSuccess: (result) => {
+      setWebhookError(null);
+      setWebhookFeedback(
+        `Webhook ${result.webhookId} 回放任务 ${result.id} 已排队（dryRun=${result.dryRun ? "true" : "false"}）。`
+      );
+    },
+    onError: (error) => {
+      setWebhookFeedback(null);
+      setWebhookError(`回放 Webhook 失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadQualityDailyMutation = useMutation({
+    mutationFn: (input: { date?: string; metric?: string; limit: number }) =>
+      fetchOpenPlatformQualityDaily(input),
+    onSuccess: (payload) => {
+      setQualityError(null);
+      setHasLoadedQualityDaily(true);
+      setQualityDailyPayload({ items: payload.items, total: payload.total });
+      setQualityFeedback(`Quality daily 已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setQualityFeedback(null);
+      setHasLoadedQualityDaily(true);
+      setQualityError(`Quality daily 加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadQualityScorecardsMutation = useMutation({
+    mutationFn: (input: { team?: string; limit: number }) => fetchOpenPlatformQualityScorecards(input),
+    onSuccess: (payload) => {
+      setQualityError(null);
+      setHasLoadedQualityScorecards(true);
+      setQualityScorecardPayload({ items: payload.items, total: payload.total });
+      setQualityFeedback(`Quality scorecards 已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setQualityFeedback(null);
+      setHasLoadedQualityScorecards(true);
+      setQualityError(`Quality scorecards 加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadReplayBaselinesMutation = useMutation({
+    mutationFn: (input: { keyword?: string; limit: number }) => fetchOpenPlatformReplayBaselines(input),
+    onSuccess: (payload) => {
+      setReplayError(null);
+      setHasLoadedReplayBaselines(true);
+      setReplayBaselinePayload({ items: payload.items, total: payload.total });
+      setReplayFeedback(`Replay baseline 已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setHasLoadedReplayBaselines(true);
+      setReplayError(`Replay baseline 加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadReplayJobsMutation = useMutation({
+    mutationFn: (input: {
+      baselineId?: string;
+      status?: OpenPlatformReplayJobStatus;
+      limit: number;
+    }) => fetchOpenPlatformReplayJobs(input),
+    onSuccess: (payload) => {
+      setReplayError(null);
+      setHasLoadedReplayJobs(true);
+      setReplayJobPayload({ items: payload.items, total: payload.total });
+      setReplayFeedback(`Replay jobs 已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setHasLoadedReplayJobs(true);
+      setReplayError(`Replay jobs 加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadReplayDiffMutation = useMutation({
+    mutationFn: (input: {
+      baselineId: string;
+      jobId: string;
+      keyword?: string;
+      limit: number;
+    }) => fetchOpenPlatformReplayDiff(input),
+    onSuccess: (payload) => {
+      setReplayError(null);
+      setHasLoadedReplayDiff(true);
+      setReplayDiffPayload({ items: payload.items, total: payload.total });
+      setReplayFeedback(`Replay diff 已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setHasLoadedReplayDiff(true);
+      setReplayError(`Replay diff 加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
   const exportSessionsMutation = useMutation({
     mutationFn: (format: ExportFormat) => exportSessions(format, { limit: 200 }),
     onSuccess: (file) => {
@@ -3186,6 +3650,23 @@ function GovernancePage() {
   const mcpPolicyItems: McpToolPolicy[] = mcpPoliciesQuery.data?.items ?? [];
   const mcpApprovalItems: McpApprovalRequest[] = mcpApprovalsQuery.data?.items ?? [];
   const mcpInvocationItems: McpInvocationAudit[] = mcpInvocationsQuery.data?.items ?? [];
+  const apiKeyItems: OpenPlatformApiKey[] = apiKeyPayload?.items ?? [];
+  const webhookItems: OpenPlatformWebhook[] = webhookPayload?.items ?? [];
+  const qualityDailyItems: OpenPlatformQualityDailyItem[] = qualityDailyPayload?.items ?? [];
+  const qualityScorecardItems: OpenPlatformQualityScorecard[] = qualityScorecardPayload?.items ?? [];
+  const replayBaselineItems: OpenPlatformReplayBaseline[] = replayBaselinePayload?.items ?? [];
+  const replayJobItems: OpenPlatformReplayJob[] = replayJobPayload?.items ?? [];
+  const replayDiffItems: OpenPlatformReplayDiffItem[] = replayDiffPayload?.items ?? [];
+  const knownReplayBaselineIds = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...replayBaselineItems.map((item) => item.id),
+          ...replayJobItems.map((item) => item.baselineId),
+        ])
+      ).sort((left, right) => left.localeCompare(right)),
+    [replayBaselineItems, replayJobItems]
+  );
 
   return (
     <>
@@ -5319,6 +5800,1113 @@ function GovernancePage() {
               )}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <section className="panel">
+        <header>
+          <h2>开放平台工作台</h2>
+          <p>OpenAPI、API Key、Webhook、Quality、Replay 一站式治理。</p>
+        </header>
+
+        <div className="open-platform-grid">
+          <article className="open-platform-card">
+            <h3>OpenAPI 摘要</h3>
+            <p>查询当前租户开放接口规模与标签分布。</p>
+            <button
+              type="button"
+              className="submit-button"
+              disabled={loadOpenApiSummaryMutation.isPending}
+              onClick={() => {
+                setOpenApiFeedback(null);
+                setOpenApiError(null);
+                loadOpenApiSummaryMutation.mutate();
+              }}
+            >
+              {loadOpenApiSummaryMutation.isPending ? "加载中..." : "加载 OpenAPI 摘要"}
+            </button>
+            {openApiFeedback ? <p className="feedback success">{openApiFeedback}</p> : null}
+            {openApiError ? <p className="feedback error">{openApiError}</p> : null}
+            {openApiSummaryPayload ? (
+              <div className="open-platform-summary-list">
+                <p>
+                  version: <strong>{openApiSummaryPayload.version}</strong>
+                </p>
+                <p>
+                  paths: <strong>{openApiSummaryPayload.totalPaths.toLocaleString("zh-CN")}</strong>
+                </p>
+                <p>
+                  operations:{" "}
+                  <strong>{openApiSummaryPayload.totalOperations.toLocaleString("zh-CN")}</strong>
+                </p>
+                <p>
+                  generatedAt: <strong>{formatDateTime(openApiSummaryPayload.generatedAt)}</strong>
+                </p>
+                <div className="table-wrapper">
+                  <table className="session-table">
+                    <thead>
+                      <tr>
+                        <th>tag</th>
+                        <th>operations</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {openApiSummaryPayload.tags.length === 0 ? (
+                        <tr>
+                          <td className="table-empty-cell" colSpan={2}>
+                            当前无 tags
+                          </td>
+                        </tr>
+                      ) : (
+                        openApiSummaryPayload.tags.map((tag) => (
+                          <tr key={tag.tag}>
+                            <td>{tag.tag}</td>
+                            <td>{tag.operations.toLocaleString("zh-CN")}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : hasLoadedOpenApiSummary ? (
+              <p className="feedback empty">已加载，但未返回摘要数据。</p>
+            ) : (
+              <p className="feedback empty">尚未加载 OpenAPI 摘要。</p>
+            )}
+          </article>
+
+          <article className="open-platform-card">
+            <h3>API Key 管理</h3>
+            <p>支持列表查询与 API Key 更新。</p>
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="open-platform-api-key-status-filter">
+                状态（API Key）
+                <select
+                  id="open-platform-api-key-status-filter"
+                  value={apiKeyStatusFilter}
+                  onChange={(event) =>
+                    setApiKeyStatusFilter(event.target.value as OpenPlatformApiKeyStatus | "")
+                  }
+                >
+                  {OPEN_PLATFORM_API_KEY_STATUS_FILTER_OPTIONS.map((option) => (
+                    <option key={option.value || "all"} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="inline-field governance-wide-field" htmlFor="open-platform-api-key-keyword">
+                关键字（API Key）
+                <input
+                  id="open-platform-api-key-keyword"
+                  type="text"
+                  value={apiKeyKeyword}
+                  onChange={(event) => setApiKeyKeyword(event.target.value)}
+                  placeholder="按 ID 或名称筛选"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadApiKeysMutation.isPending}
+                onClick={() => {
+                  setApiKeyFeedback(null);
+                  setApiKeyError(null);
+                  loadApiKeysMutation.mutate(apiKeyQueryInput);
+                }}
+              >
+                {loadApiKeysMutation.isPending ? "加载中..." : "加载 API Key 列表"}
+              </button>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="open-platform-api-key-id">
+                API Key ID
+                <input
+                  id="open-platform-api-key-id"
+                  type="text"
+                  value={apiKeyId}
+                  onChange={(event) => setApiKeyId(event.target.value)}
+                  placeholder="例如：key-agent-build"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-api-key-name">
+                API Key 名称
+                <input
+                  id="open-platform-api-key-name"
+                  type="text"
+                  value={apiKeyName}
+                  onChange={(event) => setApiKeyName(event.target.value)}
+                  placeholder="例如：CI 机器人"
+                />
+              </label>
+
+              <label className="inline-field governance-wide-field" htmlFor="open-platform-api-key-scopes">
+                scopes（逗号分隔）
+                <input
+                  id="open-platform-api-key-scopes"
+                  type="text"
+                  value={apiKeyScopesInput}
+                  onChange={(event) => setApiKeyScopesInput(event.target.value)}
+                  placeholder="read,write,admin"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-api-key-expires-at">
+                过期日期（可选）
+                <input
+                  id="open-platform-api-key-expires-at"
+                  type="date"
+                  value={apiKeyExpiresAt}
+                  onChange={(event) => setApiKeyExpiresAt(event.target.value)}
+                />
+              </label>
+
+              <label className="inline-field governance-wide-field" htmlFor="open-platform-api-key-revoke-reason">
+                吊销原因（可选）
+                <input
+                  id="open-platform-api-key-revoke-reason"
+                  type="text"
+                  value={apiKeyRevokeReason}
+                  onChange={(event) => setApiKeyRevokeReason(event.target.value)}
+                  placeholder="例如：密钥轮换"
+                />
+              </label>
+
+              <label className="checkbox-field" htmlFor="open-platform-api-key-enabled">
+                <input
+                  id="open-platform-api-key-enabled"
+                  type="checkbox"
+                  checked={apiKeyEnabled}
+                  onChange={(event) => setApiKeyEnabled(event.target.checked)}
+                />
+                启用 API Key
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={upsertApiKeyMutation.isPending}
+                onClick={() => {
+                  const normalizedApiKeyId = apiKeyId.trim();
+                  const normalizedName = apiKeyName.trim();
+                  const rawScopes = parseCommaSeparatedValues(apiKeyScopesInput).map((item) =>
+                    item.toLowerCase()
+                  );
+                  const invalidScopes = rawScopes.filter(
+                    (item) => !["read", "write", "admin"].includes(item)
+                  );
+                  const scopes = rawScopes.filter((item) =>
+                    ["read", "write", "admin"].includes(item)
+                  );
+                  const expiresAt = apiKeyExpiresAt.trim();
+                  if (!normalizedApiKeyId) {
+                    setApiKeyFeedback(null);
+                    setApiKeyError("API Key ID 不能为空。");
+                    return;
+                  }
+                  if (!normalizedName) {
+                    setApiKeyFeedback(null);
+                    setApiKeyError("API Key 名称不能为空。");
+                    return;
+                  }
+                  if (scopes.length === 0) {
+                    setApiKeyFeedback(null);
+                    setApiKeyError("至少填写一个 scope。");
+                    return;
+                  }
+                  if (invalidScopes.length > 0) {
+                    setApiKeyFeedback(null);
+                    setApiKeyError(
+                      `存在不支持的 scope：${invalidScopes.join(",")}。可选值：read,write,admin`
+                    );
+                    return;
+                  }
+                  if (expiresAt && Number.isNaN(Date.parse(expiresAt))) {
+                    setApiKeyFeedback(null);
+                    setApiKeyError("过期日期格式不合法。");
+                    return;
+                  }
+                  setApiKeyFeedback(null);
+                  setApiKeyError(null);
+                  upsertApiKeyMutation.mutate({
+                    keyId: normalizedApiKeyId,
+                    input: {
+                      name: normalizedName,
+                      scopes,
+                      enabled: apiKeyEnabled,
+                      expiresAt: expiresAt || undefined,
+                    },
+                  });
+                }}
+              >
+                {upsertApiKeyMutation.isPending ? "保存中..." : "保存 API Key"}
+              </button>
+            </div>
+
+            {apiKeyFeedback ? <p className="feedback success">{apiKeyFeedback}</p> : null}
+            {apiKeyError ? <p className="feedback error">{apiKeyError}</p> : null}
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>名称</th>
+                    <th>状态</th>
+                    <th>Scopes</th>
+                    <th>过期时间</th>
+                    <th>最近使用</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {apiKeyItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={7}>
+                        {hasLoadedApiKeys
+                          ? "无匹配 API Key。"
+                          : "尚未加载 API Key，请点击“加载 API Key 列表”。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    apiKeyItems.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.id}</td>
+                        <td>{item.name}</td>
+                        <td>{item.status}</td>
+                        <td>{item.scopes.join(",")}</td>
+                        <td>{item.expiresAt ? formatDateTime(item.expiresAt) : "--"}</td>
+                        <td>{item.lastUsedAt ? formatDateTime(item.lastUsedAt) : "--"}</td>
+                        <td>
+                          <div className="governance-action-row">
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() => {
+                                setApiKeyId(item.id);
+                                setApiKeyName(item.name);
+                                setApiKeyScopesInput(item.scopes.join(","));
+                                setApiKeyEnabled(item.status === "active");
+                                setApiKeyExpiresAt(item.expiresAt ? item.expiresAt.slice(0, 10) : "");
+                              }}
+                            >
+                              载入
+                            </button>
+                            {item.status === "active" ? (
+                              <button
+                                type="button"
+                                className="table-action"
+                                disabled={
+                                  revokeApiKeyMutation.isPending &&
+                                  revokeApiKeyMutation.variables?.keyId === item.id
+                                }
+                                onClick={() => {
+                                  setApiKeyFeedback(null);
+                                  setApiKeyError(null);
+                                  revokeApiKeyMutation.mutate({
+                                    keyId: item.id,
+                                    reason: apiKeyRevokeReason.trim() || undefined,
+                                  });
+                                }}
+                              >
+                                {revokeApiKeyMutation.isPending &&
+                                revokeApiKeyMutation.variables?.keyId === item.id
+                                  ? "吊销中..."
+                                  : "吊销"}
+                              </button>
+                            ) : (
+                              <span className="tiny-feedback tiny-feedback-success">已吊销</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article className="open-platform-card">
+            <h3>Webhook 管理</h3>
+            <p>支持 webhook 列表查询和配置更新。</p>
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="open-platform-webhook-enabled-filter">
+                启用状态（Webhook）
+                <select
+                  id="open-platform-webhook-enabled-filter"
+                  value={webhookEnabledFilter}
+                  onChange={(event) =>
+                    setWebhookEnabledFilter(event.target.value as "" | "true" | "false")
+                  }
+                >
+                  {OPEN_PLATFORM_WEBHOOK_ENABLED_FILTER_OPTIONS.map((option) => (
+                    <option key={option.value || "all"} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="inline-field governance-wide-field" htmlFor="open-platform-webhook-keyword">
+                关键字（Webhook）
+                <input
+                  id="open-platform-webhook-keyword"
+                  type="text"
+                  value={webhookKeyword}
+                  onChange={(event) => setWebhookKeyword(event.target.value)}
+                  placeholder="按 ID、名称或 URL 过滤"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadWebhooksMutation.isPending}
+                onClick={() => {
+                  setWebhookFeedback(null);
+                  setWebhookError(null);
+                  loadWebhooksMutation.mutate(webhookQueryInput);
+                }}
+              >
+                {loadWebhooksMutation.isPending ? "加载中..." : "加载 Webhook 列表"}
+              </button>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="open-platform-webhook-id">
+                Webhook ID
+                <input
+                  id="open-platform-webhook-id"
+                  type="text"
+                  value={webhookId}
+                  onChange={(event) => setWebhookId(event.target.value)}
+                  placeholder="例如：webhook-alert-1"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-webhook-name">
+                Webhook 名称
+                <input
+                  id="open-platform-webhook-name"
+                  type="text"
+                  value={webhookName}
+                  onChange={(event) => setWebhookName(event.target.value)}
+                  placeholder="例如：告警通知"
+                />
+              </label>
+
+              <label className="inline-field governance-wide-field" htmlFor="open-platform-webhook-url">
+                回调 URL
+                <input
+                  id="open-platform-webhook-url"
+                  type="url"
+                  value={webhookUrl}
+                  onChange={(event) => setWebhookUrl(event.target.value)}
+                  placeholder="https://hooks.example.com/alert"
+                />
+              </label>
+
+              <label className="inline-field governance-wide-field" htmlFor="open-platform-webhook-events">
+                events（逗号分隔）
+                <input
+                  id="open-platform-webhook-events"
+                  type="text"
+                  value={webhookEventsInput}
+                  onChange={(event) => setWebhookEventsInput(event.target.value)}
+                  placeholder="alert.open,alert.resolved"
+                />
+              </label>
+
+              <label className="checkbox-field" htmlFor="open-platform-webhook-enabled">
+                <input
+                  id="open-platform-webhook-enabled"
+                  type="checkbox"
+                  checked={webhookEnabled}
+                  onChange={(event) => setWebhookEnabled(event.target.checked)}
+                />
+                启用 Webhook
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={upsertWebhookMutation.isPending}
+                onClick={() => {
+                  const normalizedWebhookId = webhookId.trim();
+                  const normalizedName = webhookName.trim();
+                  const normalizedUrl = webhookUrl.trim();
+                  const events = parseCommaSeparatedValues(webhookEventsInput).map((item) =>
+                    item.toLowerCase()
+                  );
+                  if (!normalizedWebhookId) {
+                    setWebhookFeedback(null);
+                    setWebhookError("Webhook ID 不能为空。");
+                    return;
+                  }
+                  if (!normalizedName) {
+                    setWebhookFeedback(null);
+                    setWebhookError("Webhook 名称不能为空。");
+                    return;
+                  }
+                  if (!isValidHttpUrl(normalizedUrl)) {
+                    setWebhookFeedback(null);
+                    setWebhookError("Webhook URL 必须是 http/https 地址。");
+                    return;
+                  }
+                  if (events.length === 0) {
+                    setWebhookFeedback(null);
+                    setWebhookError("至少填写一个事件名。");
+                    return;
+                  }
+                  setWebhookFeedback(null);
+                  setWebhookError(null);
+                  upsertWebhookMutation.mutate({
+                    webhookId: normalizedWebhookId,
+                    input: {
+                      name: normalizedName,
+                      url: normalizedUrl,
+                      events,
+                      enabled: webhookEnabled,
+                    },
+                  });
+                }}
+              >
+                {upsertWebhookMutation.isPending ? "保存中..." : "保存 Webhook"}
+              </button>
+            </div>
+
+            <datalist id="open-platform-webhook-event-options">
+              {OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS.map((eventType) => (
+                <option key={eventType} value={eventType} />
+              ))}
+            </datalist>
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="open-platform-webhook-replay-event-type">
+                回放事件类型（可选）
+                <input
+                  id="open-platform-webhook-replay-event-type"
+                  type="text"
+                  list="open-platform-webhook-event-options"
+                  value={webhookReplayEventType}
+                  onChange={(event) => setWebhookReplayEventType(event.target.value)}
+                  placeholder="例如：api_key.created"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-webhook-replay-from">
+                回放起始时间（可选）
+                <input
+                  id="open-platform-webhook-replay-from"
+                  type="datetime-local"
+                  value={webhookReplayFrom}
+                  onChange={(event) => setWebhookReplayFrom(event.target.value)}
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-webhook-replay-to">
+                回放结束时间（可选）
+                <input
+                  id="open-platform-webhook-replay-to"
+                  type="datetime-local"
+                  value={webhookReplayTo}
+                  onChange={(event) => setWebhookReplayTo(event.target.value)}
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-webhook-replay-limit">
+                回放条数上限
+                <input
+                  id="open-platform-webhook-replay-limit"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={webhookReplayLimit}
+                  onChange={(event) => setWebhookReplayLimit(event.target.value)}
+                />
+              </label>
+
+              <label className="checkbox-field" htmlFor="open-platform-webhook-replay-dry-run">
+                <input
+                  id="open-platform-webhook-replay-dry-run"
+                  type="checkbox"
+                  checked={webhookReplayDryRun}
+                  onChange={(event) => setWebhookReplayDryRun(event.target.checked)}
+                />
+                Dry Run
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={replayWebhookMutation.isPending}
+                onClick={() => {
+                  const normalizedWebhookId = webhookId.trim();
+                  const normalizedEventType = webhookReplayEventType.trim();
+                  const normalizedFrom = webhookReplayFrom.trim();
+                  const normalizedTo = webhookReplayTo.trim();
+                  const replayLimit = Number(webhookReplayLimit);
+                  if (!normalizedWebhookId) {
+                    setWebhookFeedback(null);
+                    setWebhookError("回放前请先填写或载入 Webhook ID。");
+                    return;
+                  }
+                  if (
+                    normalizedEventType &&
+                    !OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS.includes(
+                      normalizedEventType as (typeof OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS)[number]
+                    )
+                  ) {
+                    setWebhookFeedback(null);
+                    setWebhookError(
+                      `事件类型不合法：${normalizedEventType}。可选值：${OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS.join(",")}`
+                    );
+                    return;
+                  }
+                  if (!Number.isInteger(replayLimit) || replayLimit <= 0) {
+                    setWebhookFeedback(null);
+                    setWebhookError("回放条数上限必须是正整数。");
+                    return;
+                  }
+                  const fromTs = normalizedFrom ? Date.parse(normalizedFrom) : NaN;
+                  const toTs = normalizedTo ? Date.parse(normalizedTo) : NaN;
+                  if (normalizedFrom && Number.isNaN(fromTs)) {
+                    setWebhookFeedback(null);
+                    setWebhookError("回放起始时间格式不合法。");
+                    return;
+                  }
+                  if (normalizedTo && Number.isNaN(toTs)) {
+                    setWebhookFeedback(null);
+                    setWebhookError("回放结束时间格式不合法。");
+                    return;
+                  }
+                  if (!Number.isNaN(fromTs) && !Number.isNaN(toTs) && fromTs > toTs) {
+                    setWebhookFeedback(null);
+                    setWebhookError("回放时间范围非法：起始时间不能晚于结束时间。");
+                    return;
+                  }
+                  setWebhookFeedback(null);
+                  setWebhookError(null);
+                  replayWebhookMutation.mutate({
+                    webhookId: normalizedWebhookId,
+                    input: {
+                      eventType: normalizedEventType || undefined,
+                      from: normalizedFrom ? new Date(fromTs).toISOString() : undefined,
+                      to: normalizedTo ? new Date(toTs).toISOString() : undefined,
+                      limit: replayLimit,
+                      dryRun: webhookReplayDryRun,
+                    },
+                  });
+                }}
+              >
+                {replayWebhookMutation.isPending ? "回放中..." : "回放 Webhook"}
+              </button>
+            </div>
+
+            {webhookFeedback ? <p className="feedback success">{webhookFeedback}</p> : null}
+            {webhookError ? <p className="feedback error">{webhookError}</p> : null}
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>名称</th>
+                    <th>URL</th>
+                    <th>events</th>
+                    <th>enabled</th>
+                    <th>最近投递</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {webhookItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={7}>
+                        {hasLoadedWebhooks
+                          ? "无匹配 Webhook。"
+                          : "尚未加载 Webhook，请点击“加载 Webhook 列表”。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    webhookItems.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.id}</td>
+                        <td>{item.name}</td>
+                        <td>{item.url}</td>
+                        <td>{item.events.join(",")}</td>
+                        <td>{item.enabled ? "true" : "false"}</td>
+                        <td>{item.lastDeliveryAt ? formatDateTime(item.lastDeliveryAt) : "--"}</td>
+                        <td>
+                          <div className="governance-action-row">
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() => {
+                                setWebhookId(item.id);
+                                setWebhookName(item.name);
+                                setWebhookUrl(item.url);
+                                setWebhookEventsInput(item.events.join(","));
+                                setWebhookEnabled(item.enabled);
+                              }}
+                            >
+                              载入
+                            </button>
+                            <button
+                              type="button"
+                              className="table-action"
+                              disabled={
+                                deleteWebhookMutation.isPending &&
+                                deleteWebhookMutation.variables?.webhookId === item.id
+                              }
+                              onClick={() => {
+                                setWebhookFeedback(null);
+                                setWebhookError(null);
+                                deleteWebhookMutation.mutate({
+                                  webhookId: item.id,
+                                });
+                              }}
+                            >
+                              {deleteWebhookMutation.isPending &&
+                              deleteWebhookMutation.variables?.webhookId === item.id
+                                ? "删除中..."
+                                : "删除"}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article className="open-platform-card">
+            <h3>Quality（daily/scorecards）</h3>
+            <p>按日期查看 daily 指标，并按团队查询 scorecards。</p>
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="open-platform-quality-daily-date">
+                日期（Quality daily）
+                <input
+                  id="open-platform-quality-daily-date"
+                  type="date"
+                  value={qualityDailyDate}
+                  onChange={(event) => setQualityDailyDate(event.target.value)}
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-quality-daily-metric">
+                指标（Quality daily）
+                <select
+                  id="open-platform-quality-daily-metric"
+                  value={qualityDailyMetric}
+                  onChange={(event) => setQualityDailyMetric(event.target.value)}
+                >
+                  {OPEN_PLATFORM_QUALITY_METRIC_OPTIONS.map((option) => (
+                    <option key={option.label} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadQualityDailyMutation.isPending}
+                onClick={() => {
+                  if (qualityDailyDate.trim() && Number.isNaN(Date.parse(qualityDailyDate))) {
+                    setQualityFeedback(null);
+                    setQualityError("Quality daily 日期格式不合法。");
+                    return;
+                  }
+                  setQualityFeedback(null);
+                  setQualityError(null);
+                  loadQualityDailyMutation.mutate({
+                    date: qualityDailyDate.trim() || undefined,
+                    metric: qualityDailyMetric.trim() || undefined,
+                    limit: 50,
+                  });
+                }}
+              >
+                {loadQualityDailyMutation.isPending ? "查询中..." : "加载 Quality daily"}
+              </button>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="open-platform-quality-scorecard-team">
+                指标（scorecards）
+                <input
+                  id="open-platform-quality-scorecard-team"
+                  type="text"
+                  value={qualityScorecardTeam}
+                  onChange={(event) => setQualityScorecardTeam(event.target.value)}
+                  placeholder="可选，例如：accuracy"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadQualityScorecardsMutation.isPending}
+                onClick={() => {
+                  setQualityFeedback(null);
+                  setQualityError(null);
+                  loadQualityScorecardsMutation.mutate({
+                    team: qualityScorecardTeam.trim() || undefined,
+                    limit: 50,
+                  });
+                }}
+              >
+                {loadQualityScorecardsMutation.isPending ? "查询中..." : "加载 Quality scorecards"}
+              </button>
+            </div>
+
+            {qualityFeedback ? <p className="feedback success">{qualityFeedback}</p> : null}
+            {qualityError ? <p className="feedback error">{qualityError}</p> : null}
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>date</th>
+                    <th>metric</th>
+                    <th>value</th>
+                    <th>target</th>
+                    <th>score</th>
+                    <th>status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {qualityDailyItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={6}>
+                        {hasLoadedQualityDaily
+                          ? "无匹配 daily 数据。"
+                          : "尚未加载 daily 数据。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    qualityDailyItems.map((item) => (
+                      <tr key={`${item.date}:${item.metric}`}>
+                        <td>{item.date}</td>
+                        <td>{item.metric}</td>
+                        <td>{item.value}</td>
+                        <td>{item.target}</td>
+                        <td>{item.score.toFixed(2)}</td>
+                        <td>{item.status}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>metric</th>
+                    <th>updatedBy</th>
+                    <th>targetScore(%)</th>
+                    <th>updatedAt</th>
+                    <th>highlights</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {qualityScorecardItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={6}>
+                        {hasLoadedQualityScorecards
+                          ? "无匹配 scorecards。"
+                          : "尚未加载 scorecards。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    qualityScorecardItems.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.id}</td>
+                        <td>{item.team}</td>
+                        <td>{item.owner}</td>
+                        <td>{item.overallScore.toFixed(1)}</td>
+                        <td>{formatDateTime(item.publishedAt)}</td>
+                        <td>{item.highlights.join(" | ") || "--"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article className="open-platform-card">
+            <h3>Replay（baseline/jobs/diff）</h3>
+            <p>回放基线、任务进度与差异结果查询。</p>
+            <datalist id="open-platform-replay-baseline-options">
+              {knownReplayBaselineIds.map((baselineId) => (
+                <option key={baselineId} value={baselineId} />
+              ))}
+            </datalist>
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field governance-wide-field" htmlFor="open-platform-replay-baseline-keyword">
+                关键字（baseline）
+                <input
+                  id="open-platform-replay-baseline-keyword"
+                  type="text"
+                  value={replayBaselineKeyword}
+                  onChange={(event) => setReplayBaselineKeyword(event.target.value)}
+                  placeholder="按 baseline 名称检索"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadReplayBaselinesMutation.isPending}
+                onClick={() => {
+                  setReplayFeedback(null);
+                  setReplayError(null);
+                  loadReplayBaselinesMutation.mutate({
+                    keyword: replayBaselineKeyword.trim() || undefined,
+                    limit: 50,
+                  });
+                }}
+              >
+                {loadReplayBaselinesMutation.isPending ? "查询中..." : "加载 Replay baselines"}
+              </button>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="open-platform-replay-jobs-baseline-id">
+                baselineId（jobs）
+                <input
+                  id="open-platform-replay-jobs-baseline-id"
+                  type="text"
+                  list="open-platform-replay-baseline-options"
+                  value={replayJobsBaselineIdFilter}
+                  onChange={(event) => setReplayJobsBaselineIdFilter(event.target.value)}
+                  placeholder="可选"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-replay-jobs-status">
+                状态（jobs）
+                <select
+                  id="open-platform-replay-jobs-status"
+                  value={replayJobsStatusFilter}
+                  onChange={(event) =>
+                    setReplayJobsStatusFilter(event.target.value as OpenPlatformReplayJobStatus | "")
+                  }
+                >
+                  {OPEN_PLATFORM_REPLAY_JOB_STATUS_FILTER_OPTIONS.map((option) => (
+                    <option key={option.value || "all"} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadReplayJobsMutation.isPending}
+                onClick={() => {
+                  setReplayFeedback(null);
+                  setReplayError(null);
+                  loadReplayJobsMutation.mutate({
+                    baselineId: replayJobsBaselineIdFilter.trim() || undefined,
+                    status: replayJobsStatusFilter || undefined,
+                    limit: 50,
+                  });
+                }}
+              >
+                {loadReplayJobsMutation.isPending ? "查询中..." : "加载 Replay jobs"}
+              </button>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="open-platform-replay-diff-baseline-id">
+                baselineId（diff）
+                <input
+                  id="open-platform-replay-diff-baseline-id"
+                  type="text"
+                  list="open-platform-replay-baseline-options"
+                  value={replayDiffBaselineId}
+                  onChange={(event) => setReplayDiffBaselineId(event.target.value)}
+                  placeholder="必填"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-replay-diff-job-id">
+                jobId（diff）
+                <input
+                  id="open-platform-replay-diff-job-id"
+                  type="text"
+                  value={replayDiffJobId}
+                  onChange={(event) => setReplayDiffJobId(event.target.value)}
+                  placeholder="必填"
+                />
+              </label>
+
+              <label className="inline-field governance-wide-field" htmlFor="open-platform-replay-diff-keyword">
+                关键字（diff）
+                <input
+                  id="open-platform-replay-diff-keyword"
+                  type="text"
+                  value={replayDiffKeyword}
+                  onChange={(event) => setReplayDiffKeyword(event.target.value)}
+                  placeholder="可选，按 caseId 或 summary"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadReplayDiffMutation.isPending}
+                onClick={() => {
+                  const baselineId = replayDiffBaselineId.trim();
+                  const jobId = replayDiffJobId.trim();
+                  if (!baselineId) {
+                    setReplayFeedback(null);
+                    setReplayError("Replay diff 的 baselineId 不能为空。");
+                    return;
+                  }
+                  if (!jobId) {
+                    setReplayFeedback(null);
+                    setReplayError("Replay diff 的 jobId 不能为空。");
+                    return;
+                  }
+                  setReplayFeedback(null);
+                  setReplayError(null);
+                  loadReplayDiffMutation.mutate({
+                    baselineId,
+                    jobId,
+                    keyword: replayDiffKeyword.trim() || undefined,
+                    limit: 50,
+                  });
+                }}
+              >
+                {loadReplayDiffMutation.isPending ? "查询中..." : "加载 Replay diff"}
+              </button>
+            </div>
+
+            {replayFeedback ? <p className="feedback success">{replayFeedback}</p> : null}
+            {replayError ? <p className="feedback error">{replayError}</p> : null}
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>name</th>
+                    <th>model</th>
+                    <th>dataset</th>
+                    <th>updatedAt</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {replayBaselineItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={5}>
+                        {hasLoadedReplayBaselines
+                          ? "无匹配 baseline。"
+                          : "尚未加载 baseline。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    replayBaselineItems.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.id}</td>
+                        <td>{item.name}</td>
+                        <td>{item.model}</td>
+                        <td>{item.dataset}</td>
+                        <td>{formatDateTime(item.updatedAt)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>baselineId</th>
+                    <th>status</th>
+                    <th>cases</th>
+                    <th>createdAt</th>
+                    <th>finishedAt</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {replayJobItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={6}>
+                        {hasLoadedReplayJobs ? "无匹配 jobs。" : "尚未加载 jobs。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    replayJobItems.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.id}</td>
+                        <td>{item.baselineId}</td>
+                        <td>{item.status}</td>
+                        <td>
+                          {item.passedCases}/{item.totalCases}（failed: {item.failedCases}）
+                        </td>
+                        <td>{formatDateTime(item.createdAt)}</td>
+                        <td>{item.finishedAt ? formatDateTime(item.finishedAt) : "--"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>caseId</th>
+                    <th>summary</th>
+                    <th>verdict</th>
+                    <th>deltaScore</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {replayDiffItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={5}>
+                        {hasLoadedReplayDiff ? "无匹配 diff。" : "尚未加载 diff。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    replayDiffItems.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.id}</td>
+                        <td>{item.caseId}</td>
+                        <td>{item.summary}</td>
+                        <td>{item.verdict}</td>
+                        <td>{item.deltaScore.toFixed(3)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </article>
         </div>
       </section>
 

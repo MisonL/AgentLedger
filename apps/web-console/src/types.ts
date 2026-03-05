@@ -581,6 +581,220 @@ export interface McpInvocationCreateInput {
   metadata?: Record<string, unknown>;
 }
 
+export type OpenPlatformApiKeyStatus = "active" | "disabled";
+export type OpenPlatformReplayJobStatus = "queued" | "running" | "succeeded" | "failed";
+export type OpenPlatformQualityDailyStatus = "pass" | "warn" | "fail";
+export type OpenPlatformReplayDiffVerdict = "improved" | "regressed" | "unchanged";
+
+export interface OpenPlatformOpenApiTagSummary {
+  tag: string;
+  operations: number;
+}
+
+export interface OpenPlatformOpenApiSummary {
+  version: string;
+  totalPaths: number;
+  totalOperations: number;
+  generatedAt: string;
+  tags: OpenPlatformOpenApiTagSummary[];
+}
+
+export interface OpenPlatformApiKey {
+  id: string;
+  tenantId: string;
+  name: string;
+  maskedKey: string;
+  status: OpenPlatformApiKeyStatus;
+  scopes: string[];
+  expiresAt?: string;
+  lastUsedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OpenPlatformApiKeyListInput {
+  status?: OpenPlatformApiKeyStatus;
+  keyword?: string;
+  limit?: number;
+}
+
+export interface OpenPlatformApiKeyListResponse {
+  items: OpenPlatformApiKey[];
+  total: number;
+  filters: OpenPlatformApiKeyListInput;
+}
+
+export interface OpenPlatformApiKeyUpsertInput {
+  name: string;
+  scopes: string[];
+  enabled: boolean;
+  expiresAt?: string;
+  note?: string;
+}
+
+export interface OpenPlatformWebhook {
+  id: string;
+  tenantId: string;
+  name: string;
+  url: string;
+  events: string[];
+  enabled: boolean;
+  lastDeliveryAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OpenPlatformWebhookListInput {
+  enabled?: boolean;
+  keyword?: string;
+  limit?: number;
+}
+
+export interface OpenPlatformWebhookListResponse {
+  items: OpenPlatformWebhook[];
+  total: number;
+  filters: OpenPlatformWebhookListInput;
+}
+
+export interface OpenPlatformWebhookUpsertInput {
+  name: string;
+  url: string;
+  events: string[];
+  enabled: boolean;
+  secret?: string;
+}
+
+export interface OpenPlatformWebhookReplayInput {
+  eventType?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  dryRun?: boolean;
+}
+
+export interface OpenPlatformWebhookReplayResult {
+  id: string;
+  webhookId: string;
+  status: string;
+  dryRun: boolean;
+  filters: {
+    eventType?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+  };
+  requestedAt: string;
+}
+
+export interface OpenPlatformQualityDailyQueryInput {
+  date?: string;
+  metric?: string;
+  limit?: number;
+}
+
+export interface OpenPlatformQualityDailyItem {
+  date: string;
+  metric: string;
+  value: number;
+  target: number;
+  score: number;
+  status: OpenPlatformQualityDailyStatus;
+}
+
+export interface OpenPlatformQualityDailyResponse {
+  items: OpenPlatformQualityDailyItem[];
+  total: number;
+  filters: OpenPlatformQualityDailyQueryInput;
+}
+
+export interface OpenPlatformQualityScorecardListInput {
+  team?: string;
+  owner?: string;
+  limit?: number;
+}
+
+export interface OpenPlatformQualityScorecard {
+  id: string;
+  team: string;
+  owner: string;
+  overallScore: number;
+  publishedAt: string;
+  highlights: string[];
+}
+
+export interface OpenPlatformQualityScorecardListResponse {
+  items: OpenPlatformQualityScorecard[];
+  total: number;
+  filters: OpenPlatformQualityScorecardListInput;
+}
+
+export interface OpenPlatformReplayBaseline {
+  id: string;
+  name: string;
+  model: string;
+  dataset: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OpenPlatformReplayBaselineListInput {
+  keyword?: string;
+  limit?: number;
+}
+
+export interface OpenPlatformReplayBaselineListResponse {
+  items: OpenPlatformReplayBaseline[];
+  total: number;
+  filters: OpenPlatformReplayBaselineListInput;
+}
+
+export interface OpenPlatformReplayJob {
+  id: string;
+  baselineId: string;
+  status: OpenPlatformReplayJobStatus;
+  totalCases: number;
+  passedCases: number;
+  failedCases: number;
+  createdAt: string;
+  finishedAt?: string;
+}
+
+export interface OpenPlatformReplayJobListInput {
+  baselineId?: string;
+  status?: OpenPlatformReplayJobStatus;
+  limit?: number;
+}
+
+export interface OpenPlatformReplayJobListResponse {
+  items: OpenPlatformReplayJob[];
+  total: number;
+  filters: OpenPlatformReplayJobListInput;
+}
+
+export interface OpenPlatformReplayDiffQueryInput {
+  baselineId: string;
+  jobId: string;
+  keyword?: string;
+  limit?: number;
+}
+
+export interface OpenPlatformReplayDiffItem {
+  id: string;
+  baselineId: string;
+  jobId: string;
+  caseId: string;
+  summary: string;
+  verdict: OpenPlatformReplayDiffVerdict;
+  deltaScore: number;
+}
+
+export interface OpenPlatformReplayDiffResponse {
+  items: OpenPlatformReplayDiffItem[];
+  total: number;
+  filters: OpenPlatformReplayDiffQueryInput;
+}
+
 export interface SessionEvent {
   id: string;
   sessionId: string;

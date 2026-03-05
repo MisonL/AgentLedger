@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   clearAuthTokens,
+  deleteOpenPlatformWebhook,
   exportSessions,
   exportUsage,
   exchangeExternalAuthCode,
@@ -20,6 +21,8 @@ import {
   fetchUsageWeeklySummary,
   getAccessToken,
   hasAccessToken,
+  replayOpenPlatformWebhook,
+  revokeOpenPlatformApiKey,
   searchSessions,
   setAuthTokens,
   setUnauthorizedHandler,
@@ -1015,6 +1018,96 @@ describe("api mock fallback gate", () => {
     expect(JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}"))).toEqual({
       status: "acknowledged",
     });
+  });
+
+  test("open platform 支持吊销 API Key、删除 Webhook 与回放 Webhook", async () => {
+    env.DEV = false;
+    setAuthTokens({
+      accessToken: "access-token-open-platform-actions",
+      refreshToken: "refresh-token-open-platform-actions",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/api-keys/ak-op-1/revoke") && method === "POST") {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({ reason: "rotate-2026" });
+        return mockJsonResponse({
+          id: "ak-op-1",
+          tenantId: "default",
+          name: "release-bot",
+          scope: "read",
+          status: "revoked",
+          keyPrefix: "sk_live_revoke",
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-02T00:00:00.000Z",
+        });
+      }
+
+      if (url.endsWith("/api/v1/webhooks/wh-op-1") && method === "DELETE") {
+        return mockJsonResponse({ success: true });
+      }
+
+      if (url.endsWith("/api/v1/webhooks/wh-op-2/replay") && method === "POST") {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+          eventType: "api_key.created",
+          limit: 20,
+          dryRun: true,
+        });
+        return mockJsonResponse({
+          id: "replay-wh-op-2",
+          webhookId: "wh-op-2",
+          status: "queued",
+          dryRun: true,
+          filters: {
+            eventType: "api_key.created",
+            limit: 20,
+          },
+          requestedAt: "2026-03-03T12:30:00.000Z",
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    await expect(revokeOpenPlatformApiKey("ak-op-1", "rotate-2026")).resolves.toEqual(
+      expect.objectContaining({
+        id: "ak-op-1",
+        status: "disabled",
+      })
+    );
+    await expect(deleteOpenPlatformWebhook("wh-op-1")).resolves.toBeUndefined();
+    await expect(
+      replayOpenPlatformWebhook("wh-op-2", {
+        eventType: "api_key.created",
+        limit: 20,
+        dryRun: true,
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: "replay-wh-op-2",
+        webhookId: "wh-op-2",
+        status: "queued",
+        dryRun: true,
+      })
+    );
+
+    expect(
+      fetchSpy.mock.calls.some(([url]) =>
+        toUrl(url).endsWith("/api/v1/api-keys/ak-op-1/revoke")
+      )
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url]) => toUrl(url).endsWith("/api/v1/webhooks/wh-op-1"))
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url]) =>
+        toUrl(url).endsWith("/api/v1/webhooks/wh-op-2/replay")
+      )
+    ).toBe(true);
   });
 
   test("exportSessions 与 exportUsage 支持 csv 下载", async () => {

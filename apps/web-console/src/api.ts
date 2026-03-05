@@ -41,6 +41,36 @@ import type {
   McpToolPolicyListResponse,
   McpToolPolicyUpsertInput,
   McpToolPolicy,
+  OpenPlatformApiKey,
+  OpenPlatformApiKeyListInput,
+  OpenPlatformApiKeyListResponse,
+  OpenPlatformApiKeyStatus,
+  OpenPlatformApiKeyUpsertInput,
+  OpenPlatformOpenApiSummary,
+  OpenPlatformQualityDailyItem,
+  OpenPlatformQualityDailyQueryInput,
+  OpenPlatformQualityDailyResponse,
+  OpenPlatformQualityDailyStatus,
+  OpenPlatformQualityScorecard,
+  OpenPlatformQualityScorecardListInput,
+  OpenPlatformQualityScorecardListResponse,
+  OpenPlatformReplayBaseline,
+  OpenPlatformReplayBaselineListInput,
+  OpenPlatformReplayBaselineListResponse,
+  OpenPlatformReplayDiffItem,
+  OpenPlatformReplayDiffQueryInput,
+  OpenPlatformReplayDiffResponse,
+  OpenPlatformReplayDiffVerdict,
+  OpenPlatformReplayJob,
+  OpenPlatformReplayJobListInput,
+  OpenPlatformReplayJobListResponse,
+  OpenPlatformReplayJobStatus,
+  OpenPlatformWebhook,
+  OpenPlatformWebhookListInput,
+  OpenPlatformWebhookListResponse,
+  OpenPlatformWebhookReplayInput,
+  OpenPlatformWebhookReplayResult,
+  OpenPlatformWebhookUpsertInput,
   AuthUserProfile,
   PricingCatalog,
   PricingCatalogEntry,
@@ -151,6 +181,26 @@ const RULE_APPROVAL_DECISIONS: RuleApprovalDecision[] = ["approved", "rejected"]
 const MCP_RISK_LEVELS: McpRiskLevel[] = ["low", "medium", "high"];
 const MCP_TOOL_DECISIONS: McpToolDecision[] = ["allow", "deny", "require_approval"];
 const MCP_APPROVAL_STATUSES = ["pending", "approved", "rejected"] as const;
+const OPEN_PLATFORM_API_KEY_STATUSES: OpenPlatformApiKeyStatus[] = [
+  "active",
+  "disabled",
+];
+const OPEN_PLATFORM_QUALITY_DAILY_STATUSES: OpenPlatformQualityDailyStatus[] = [
+  "pass",
+  "warn",
+  "fail",
+];
+const OPEN_PLATFORM_REPLAY_JOB_STATUSES: OpenPlatformReplayJobStatus[] = [
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+];
+const OPEN_PLATFORM_REPLAY_DIFF_VERDICTS: OpenPlatformReplayDiffVerdict[] = [
+  "improved",
+  "regressed",
+  "unchanged",
+];
 
 function daysAgo(days: number): Date {
   const date = new Date();
@@ -355,6 +405,38 @@ function isMcpApprovalStatus(value: unknown): value is McpApprovalRequest["statu
   return (
     typeof value === "string" &&
     MCP_APPROVAL_STATUSES.includes(value as McpApprovalRequest["status"])
+  );
+}
+
+function isOpenPlatformApiKeyStatus(value: unknown): value is OpenPlatformApiKeyStatus {
+  return (
+    typeof value === "string" &&
+    OPEN_PLATFORM_API_KEY_STATUSES.includes(value as OpenPlatformApiKeyStatus)
+  );
+}
+
+function isOpenPlatformQualityDailyStatus(
+  value: unknown
+): value is OpenPlatformQualityDailyStatus {
+  return (
+    typeof value === "string" &&
+    OPEN_PLATFORM_QUALITY_DAILY_STATUSES.includes(value as OpenPlatformQualityDailyStatus)
+  );
+}
+
+function isOpenPlatformReplayJobStatus(value: unknown): value is OpenPlatformReplayJobStatus {
+  return (
+    typeof value === "string" &&
+    OPEN_PLATFORM_REPLAY_JOB_STATUSES.includes(value as OpenPlatformReplayJobStatus)
+  );
+}
+
+function isOpenPlatformReplayDiffVerdict(
+  value: unknown
+): value is OpenPlatformReplayDiffVerdict {
+  return (
+    typeof value === "string" &&
+    OPEN_PLATFORM_REPLAY_DIFF_VERDICTS.includes(value as OpenPlatformReplayDiffVerdict)
   );
 }
 
@@ -774,6 +856,414 @@ function isMcpInvocationListResponse(value: unknown): value is McpInvocationList
     Number.isInteger(value.total) &&
     value.total >= 0 &&
     filtersOk
+  );
+}
+
+function isHttpUrl(value: unknown): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isOpenPlatformOpenApiSummary(value: unknown): value is OpenPlatformOpenApiSummary {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const tagsOk =
+    Array.isArray(value.tags) &&
+    value.tags.every((item) => {
+      if (!isRecord(item)) {
+        return false;
+      }
+      return (
+        typeof item.tag === "string" &&
+        typeof item.operations === "number" &&
+        Number.isInteger(item.operations) &&
+        item.operations >= 0
+      );
+    });
+  return (
+    typeof value.version === "string" &&
+    value.version.trim().length > 0 &&
+    typeof value.totalPaths === "number" &&
+    Number.isInteger(value.totalPaths) &&
+    value.totalPaths >= 0 &&
+    typeof value.totalOperations === "number" &&
+    Number.isInteger(value.totalOperations) &&
+    value.totalOperations >= 0 &&
+    isISODateString(value.generatedAt) &&
+    tagsOk
+  );
+}
+
+function isOpenPlatformApiKey(value: unknown): value is OpenPlatformApiKey {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const expiresAtOk =
+    value.expiresAt === undefined || value.expiresAt === null || isISODateString(value.expiresAt);
+  const lastUsedAtOk =
+    value.lastUsedAt === undefined ||
+    value.lastUsedAt === null ||
+    isISODateString(value.lastUsedAt);
+  return (
+    typeof value.id === "string" &&
+    typeof value.tenantId === "string" &&
+    typeof value.name === "string" &&
+    typeof value.maskedKey === "string" &&
+    isOpenPlatformApiKeyStatus(value.status) &&
+    Array.isArray(value.scopes) &&
+    value.scopes.every((scope) => typeof scope === "string" && scope.trim().length > 0) &&
+    expiresAtOk &&
+    lastUsedAtOk &&
+    isISODateString(value.createdAt) &&
+    isISODateString(value.updatedAt)
+  );
+}
+
+function isOpenPlatformApiKeyListInput(value: unknown): value is OpenPlatformApiKeyListInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const statusOk = value.status === undefined || isOpenPlatformApiKeyStatus(value.status);
+  const keywordOk = value.keyword === undefined || typeof value.keyword === "string";
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
+  return statusOk && keywordOk && limitOk;
+}
+
+function isOpenPlatformApiKeyListResponse(value: unknown): value is OpenPlatformApiKeyListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isOpenPlatformApiKey(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isOpenPlatformApiKeyListInput(value.filters)
+  );
+}
+
+function isOpenPlatformWebhook(value: unknown): value is OpenPlatformWebhook {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const lastDeliveryAtOk =
+    value.lastDeliveryAt === undefined ||
+    value.lastDeliveryAt === null ||
+    isISODateString(value.lastDeliveryAt);
+  return (
+    typeof value.id === "string" &&
+    typeof value.tenantId === "string" &&
+    typeof value.name === "string" &&
+    isHttpUrl(value.url) &&
+    Array.isArray(value.events) &&
+    value.events.every((event) => typeof event === "string" && event.trim().length > 0) &&
+    typeof value.enabled === "boolean" &&
+    lastDeliveryAtOk &&
+    isISODateString(value.createdAt) &&
+    isISODateString(value.updatedAt)
+  );
+}
+
+function isOpenPlatformWebhookListInput(value: unknown): value is OpenPlatformWebhookListInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const enabledOk = value.enabled === undefined || typeof value.enabled === "boolean";
+  const keywordOk = value.keyword === undefined || typeof value.keyword === "string";
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
+  return enabledOk && keywordOk && limitOk;
+}
+
+function isOpenPlatformWebhookListResponse(value: unknown): value is OpenPlatformWebhookListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isOpenPlatformWebhook(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isOpenPlatformWebhookListInput(value.filters)
+  );
+}
+
+function isOpenPlatformWebhookReplayResult(
+  value: unknown
+): value is OpenPlatformWebhookReplayResult {
+  if (!isRecord(value) || !isRecord(value.filters)) {
+    return false;
+  }
+  const eventTypeOk =
+    value.filters.eventType === undefined || typeof value.filters.eventType === "string";
+  const fromOk = value.filters.from === undefined || isISODateString(value.filters.from);
+  const toOk = value.filters.to === undefined || isISODateString(value.filters.to);
+  const limitOk =
+    value.filters.limit === undefined ||
+    (typeof value.filters.limit === "number" &&
+      Number.isInteger(value.filters.limit) &&
+      value.filters.limit > 0);
+  return (
+    typeof value.id === "string" &&
+    typeof value.webhookId === "string" &&
+    typeof value.status === "string" &&
+    typeof value.dryRun === "boolean" &&
+    eventTypeOk &&
+    fromOk &&
+    toOk &&
+    limitOk &&
+    isISODateString(value.requestedAt)
+  );
+}
+
+function isOpenPlatformQualityDailyQueryInput(
+  value: unknown
+): value is OpenPlatformQualityDailyQueryInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const dateOk = value.date === undefined || isISODateString(value.date);
+  const metricOk = value.metric === undefined || typeof value.metric === "string";
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
+  return dateOk && metricOk && limitOk;
+}
+
+function isOpenPlatformQualityDailyItem(value: unknown): value is OpenPlatformQualityDailyItem {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.date === "string" &&
+    !Number.isNaN(Date.parse(value.date)) &&
+    typeof value.metric === "string" &&
+    typeof value.value === "number" &&
+    Number.isFinite(value.value) &&
+    typeof value.target === "number" &&
+    Number.isFinite(value.target) &&
+    typeof value.score === "number" &&
+    Number.isFinite(value.score) &&
+    isOpenPlatformQualityDailyStatus(value.status)
+  );
+}
+
+function isOpenPlatformQualityDailyResponse(
+  value: unknown
+): value is OpenPlatformQualityDailyResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isOpenPlatformQualityDailyItem(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isOpenPlatformQualityDailyQueryInput(value.filters)
+  );
+}
+
+function isOpenPlatformQualityScorecardListInput(
+  value: unknown
+): value is OpenPlatformQualityScorecardListInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const teamOk = value.team === undefined || typeof value.team === "string";
+  const ownerOk = value.owner === undefined || typeof value.owner === "string";
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
+  return teamOk && ownerOk && limitOk;
+}
+
+function isOpenPlatformQualityScorecard(value: unknown): value is OpenPlatformQualityScorecard {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.id === "string" &&
+    typeof value.team === "string" &&
+    typeof value.owner === "string" &&
+    typeof value.overallScore === "number" &&
+    Number.isFinite(value.overallScore) &&
+    isISODateString(value.publishedAt) &&
+    Array.isArray(value.highlights) &&
+    value.highlights.every((item) => typeof item === "string")
+  );
+}
+
+function isOpenPlatformQualityScorecardListResponse(
+  value: unknown
+): value is OpenPlatformQualityScorecardListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isOpenPlatformQualityScorecard(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isOpenPlatformQualityScorecardListInput(value.filters)
+  );
+}
+
+function isOpenPlatformReplayBaseline(value: unknown): value is OpenPlatformReplayBaseline {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const descriptionOk =
+    value.description === undefined || value.description === null || typeof value.description === "string";
+  return (
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.model === "string" &&
+    typeof value.dataset === "string" &&
+    descriptionOk &&
+    isISODateString(value.createdAt) &&
+    isISODateString(value.updatedAt)
+  );
+}
+
+function isOpenPlatformReplayBaselineListInput(
+  value: unknown
+): value is OpenPlatformReplayBaselineListInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const keywordOk = value.keyword === undefined || typeof value.keyword === "string";
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
+  return keywordOk && limitOk;
+}
+
+function isOpenPlatformReplayBaselineListResponse(
+  value: unknown
+): value is OpenPlatformReplayBaselineListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isOpenPlatformReplayBaseline(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isOpenPlatformReplayBaselineListInput(value.filters)
+  );
+}
+
+function isOpenPlatformReplayJob(value: unknown): value is OpenPlatformReplayJob {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const finishedAtOk =
+    value.finishedAt === undefined || value.finishedAt === null || isISODateString(value.finishedAt);
+  return (
+    typeof value.id === "string" &&
+    typeof value.baselineId === "string" &&
+    isOpenPlatformReplayJobStatus(value.status) &&
+    typeof value.totalCases === "number" &&
+    Number.isInteger(value.totalCases) &&
+    value.totalCases >= 0 &&
+    typeof value.passedCases === "number" &&
+    Number.isInteger(value.passedCases) &&
+    value.passedCases >= 0 &&
+    typeof value.failedCases === "number" &&
+    Number.isInteger(value.failedCases) &&
+    value.failedCases >= 0 &&
+    value.passedCases + value.failedCases <= value.totalCases &&
+    isISODateString(value.createdAt) &&
+    finishedAtOk
+  );
+}
+
+function isOpenPlatformReplayJobListInput(value: unknown): value is OpenPlatformReplayJobListInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const baselineIdOk = value.baselineId === undefined || typeof value.baselineId === "string";
+  const statusOk = value.status === undefined || isOpenPlatformReplayJobStatus(value.status);
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
+  return baselineIdOk && statusOk && limitOk;
+}
+
+function isOpenPlatformReplayJobListResponse(
+  value: unknown
+): value is OpenPlatformReplayJobListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isOpenPlatformReplayJob(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isOpenPlatformReplayJobListInput(value.filters)
+  );
+}
+
+function isOpenPlatformReplayDiffQueryInput(
+  value: unknown
+): value is OpenPlatformReplayDiffQueryInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const baselineIdOk = typeof value.baselineId === "string";
+  const jobIdOk = typeof value.jobId === "string";
+  const keywordOk = value.keyword === undefined || typeof value.keyword === "string";
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
+  return baselineIdOk && jobIdOk && keywordOk && limitOk;
+}
+
+function isOpenPlatformReplayDiffItem(value: unknown): value is OpenPlatformReplayDiffItem {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.id === "string" &&
+    typeof value.baselineId === "string" &&
+    typeof value.jobId === "string" &&
+    typeof value.caseId === "string" &&
+    typeof value.summary === "string" &&
+    isOpenPlatformReplayDiffVerdict(value.verdict) &&
+    typeof value.deltaScore === "number" &&
+    Number.isFinite(value.deltaScore)
+  );
+}
+
+function isOpenPlatformReplayDiffResponse(value: unknown): value is OpenPlatformReplayDiffResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isOpenPlatformReplayDiffItem(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isOpenPlatformReplayDiffQueryInput(value.filters)
   );
 }
 
@@ -1545,6 +2035,126 @@ function buildMcpInvocationListQuery(input?: McpInvocationListInput): string {
 
   const query = params.toString();
   return query.length > 0 ? `?${query}` : "";
+}
+
+function buildOpenPlatformApiKeyListQuery(input?: OpenPlatformApiKeyListInput): string {
+  if (!input) {
+    return "";
+  }
+  const params = new URLSearchParams();
+  if (input.status) {
+    params.set("status", input.status === "disabled" ? "revoked" : input.status);
+  }
+  if (typeof input.keyword === "string" && input.keyword.trim().length > 0) {
+    params.set("keyword", input.keyword.trim());
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit >= 1) {
+    params.set("limit", String(input.limit));
+  }
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildOpenPlatformWebhookListQuery(input?: OpenPlatformWebhookListInput): string {
+  if (!input) {
+    return "";
+  }
+  const params = new URLSearchParams();
+  if (typeof input.enabled === "boolean") {
+    params.set("status", input.enabled ? "active" : "paused");
+  }
+  if (typeof input.keyword === "string" && input.keyword.trim().length > 0) {
+    params.set("keyword", input.keyword.trim());
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit >= 1) {
+    params.set("limit", String(input.limit));
+  }
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildOpenPlatformQualityDailyQuery(input?: OpenPlatformQualityDailyQueryInput): string {
+  if (!input) {
+    return "";
+  }
+  const params = new URLSearchParams();
+  if (typeof input.date === "string" && input.date.trim().length > 0) {
+    const normalized = input.date.trim();
+    params.set("from", `${normalized}T00:00:00.000Z`);
+    params.set("to", `${normalized}T23:59:59.999Z`);
+  }
+  if (typeof input.metric === "string" && input.metric.trim().length > 0) {
+    params.set("metric", input.metric.trim());
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit >= 1) {
+    params.set("limit", String(input.limit));
+  }
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildOpenPlatformQualityScorecardListQuery(
+  input?: OpenPlatformQualityScorecardListInput
+): string {
+  if (!input) {
+    return "";
+  }
+  const params = new URLSearchParams();
+  if (typeof input.team === "string" && input.team.trim().length > 0) {
+    params.set("metric", input.team.trim());
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit >= 1) {
+    params.set("limit", String(input.limit));
+  }
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildOpenPlatformReplayBaselineListQuery(
+  input?: OpenPlatformReplayBaselineListInput
+): string {
+  if (!input) {
+    return "";
+  }
+  const params = new URLSearchParams();
+  if (typeof input.keyword === "string" && input.keyword.trim().length > 0) {
+    params.set("keyword", input.keyword.trim());
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit >= 1) {
+    params.set("limit", String(input.limit));
+  }
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildOpenPlatformReplayJobListQuery(input?: OpenPlatformReplayJobListInput): string {
+  if (!input) {
+    return "";
+  }
+  const params = new URLSearchParams();
+  if (typeof input.baselineId === "string" && input.baselineId.trim().length > 0) {
+    params.set("baselineId", input.baselineId.trim());
+  }
+  if (input.status) {
+    const status =
+      input.status === "queued"
+        ? "pending"
+        : input.status === "succeeded"
+          ? "completed"
+          : input.status;
+    params.set("status", status);
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit >= 1) {
+    params.set("limit", String(input.limit));
+  }
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildOpenPlatformReplayDiffQuery(input: OpenPlatformReplayDiffQueryInput): string {
+  const params = new URLSearchParams();
+  params.set("baselineId", input.baselineId);
+  return params.toString().length > 0 ? `?${params.toString()}` : "";
 }
 
 function buildSessionExportQuery(format: ExportFormat, input?: SessionSearchInput): string {
@@ -3151,4 +3761,662 @@ export async function createMcpInvocation(
     throw new Error("mcp.invocations.create 返回结构不合法");
   }
   return result;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function asIsoDateString(value: unknown): string | null {
+  return typeof value === "string" && isISODateString(value) ? value : null;
+}
+
+function asFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function mapOpenPlatformApiKey(value: unknown): OpenPlatformApiKey | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const id = asString(value.id);
+  const tenantId = asString(value.tenantId);
+  const name = asString(value.name);
+  const scope = asString(value.scope);
+  const keyPrefix = asString(value.keyPrefix);
+  const createdAt = asIsoDateString(value.createdAt);
+  const updatedAt = asIsoDateString(value.updatedAt);
+  const status = value.status === "active" ? "active" : value.status === "revoked" ? "disabled" : null;
+  if (!id || !tenantId || !name || !scope || !keyPrefix || !createdAt || !updatedAt || !status) {
+    return null;
+  }
+  const lastUsedAt = asIsoDateString(value.lastUsedAt) ?? undefined;
+  const expiresAt = asIsoDateString(value.expiresAt) ?? undefined;
+  return {
+    id,
+    tenantId,
+    name,
+    maskedKey: `${keyPrefix}***`,
+    status,
+    scopes: [scope],
+    expiresAt,
+    lastUsedAt,
+    createdAt,
+    updatedAt,
+  };
+}
+
+function mapOpenPlatformWebhook(value: unknown): OpenPlatformWebhook | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const id = asString(value.id);
+  const tenantId = asString(value.tenantId);
+  const name = asString(value.name);
+  const url = asString(value.url);
+  const createdAt = asIsoDateString(value.createdAt);
+  const updatedAt = asIsoDateString(value.updatedAt);
+  const events = Array.isArray(value.events)
+    ? value.events.map((item) => asString(item)).filter((item): item is string => Boolean(item))
+    : [];
+  const status = asString(value.status);
+  if (!id || !tenantId || !name || !url || !createdAt || !updatedAt || !status || events.length === 0) {
+    return null;
+  }
+  return {
+    id,
+    tenantId,
+    name,
+    url,
+    events,
+    enabled: status === "active",
+    lastDeliveryAt: asIsoDateString(value.lastSuccessAt) ?? undefined,
+    createdAt,
+    updatedAt,
+  };
+}
+
+function mapReplayStatus(value: unknown): OpenPlatformReplayJobStatus | null {
+  if (value === "pending") {
+    return "queued";
+  }
+  if (value === "running") {
+    return "running";
+  }
+  if (value === "completed") {
+    return "succeeded";
+  }
+  if (value === "failed" || value === "cancelled") {
+    return "failed";
+  }
+  return null;
+}
+
+export async function fetchOpenPlatformOpenApiSummary(
+  signal?: AbortSignal
+): Promise<OpenPlatformOpenApiSummary> {
+  const result = await requestJson<unknown>("/api/v1/openapi.json", undefined, signal);
+  if (!isRecord(result)) {
+    throw new Error("openapi.json 返回结构不合法");
+  }
+  const pathsRecord = isRecord(result.paths) ? result.paths : {};
+  let totalOperations = 0;
+  const tagCounter = new Map<string, number>();
+  for (const value of Object.values(pathsRecord)) {
+    if (!isRecord(value)) {
+      continue;
+    }
+    for (const [method, operation] of Object.entries(value)) {
+      if (!["get", "post", "put", "patch", "delete", "head", "options"].includes(method)) {
+        continue;
+      }
+      totalOperations += 1;
+      if (isRecord(operation) && Array.isArray(operation.tags)) {
+        for (const rawTag of operation.tags) {
+          const tag = asString(rawTag);
+          if (!tag) {
+            continue;
+          }
+          tagCounter.set(tag, (tagCounter.get(tag) ?? 0) + 1);
+        }
+      }
+    }
+  }
+  const summary: OpenPlatformOpenApiSummary = {
+    version: asString(result.openapi) ?? "unknown",
+    totalPaths: Object.keys(pathsRecord).length,
+    totalOperations,
+    generatedAt: new Date().toISOString(),
+    tags: Array.from(tagCounter.entries())
+      .map(([tag, operations]) => ({ tag, operations }))
+      .sort((a, b) => a.tag.localeCompare(b.tag)),
+  };
+  if (!isOpenPlatformOpenApiSummary(summary)) {
+    throw new Error("openapi.summary 结构不合法");
+  }
+  return summary;
+}
+
+export async function fetchOpenPlatformApiKeys(
+  input?: OpenPlatformApiKeyListInput,
+  signal?: AbortSignal
+): Promise<OpenPlatformApiKeyListResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v1/api-keys${buildOpenPlatformApiKeyListQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    throw new Error("api-keys 返回结构不合法");
+  }
+  const items = result.items
+    .map((item) => mapOpenPlatformApiKey(item))
+    .filter((item): item is OpenPlatformApiKey => Boolean(item));
+  const payload: OpenPlatformApiKeyListResponse = {
+    items,
+    total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
+    filters: {
+      status: input?.status,
+      keyword: input?.keyword,
+      limit: input?.limit,
+    },
+  };
+  if (!isOpenPlatformApiKeyListResponse(payload)) {
+    throw new Error("api-keys 解析后结构不合法");
+  }
+  return payload;
+}
+
+export async function upsertOpenPlatformApiKey(
+  keyId: string,
+  input: OpenPlatformApiKeyUpsertInput,
+  signal?: AbortSignal
+): Promise<OpenPlatformApiKey> {
+  const normalizedKeyId = keyId.trim();
+  if (!normalizedKeyId) {
+    throw new Error("apiKeyId 不能为空。");
+  }
+  const scopes = input.scopes.filter((item) => item.trim().length > 0);
+  if (scopes.length === 0) {
+    throw new Error("至少需要一个 scope。");
+  }
+  const created = await requestJson<unknown>(
+    "/api/v1/api-keys",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        name: input.name,
+        scope: scopes[0],
+      }),
+    },
+    signal
+  );
+  if (!isRecord(created)) {
+    throw new Error("api-keys.create 返回结构不合法");
+  }
+  const createdId = asString(created.id) ?? normalizedKeyId;
+  if (!input.enabled) {
+    await requestJson<unknown>(
+      `/api/v1/api-keys/${encodeURIComponent(createdId)}/revoke`,
+      {
+        method: "POST",
+        body: JSON.stringify({ reason: "disabled via web console" }),
+      },
+      signal
+    );
+  }
+  const latestList = await fetchOpenPlatformApiKeys({ keyword: createdId, limit: 50 }, signal);
+  const matched = latestList.items.find((item) => item.id === createdId);
+  if (matched) {
+    return matched;
+  }
+  return {
+    id: createdId,
+    tenantId: asString(created.tenantId) ?? "default",
+    name: input.name,
+    maskedKey: `${asString(created.keyPrefix) ?? "sk_live"}***`,
+    status: input.enabled ? "active" : "disabled",
+    scopes,
+    expiresAt: input.expiresAt,
+    createdAt: asIsoDateString(created.createdAt) ?? new Date().toISOString(),
+    updatedAt: asIsoDateString(created.createdAt) ?? new Date().toISOString(),
+  };
+}
+
+export async function revokeOpenPlatformApiKey(
+  keyId: string,
+  reason?: string,
+  signal?: AbortSignal
+): Promise<OpenPlatformApiKey> {
+  const normalizedKeyId = keyId.trim();
+  if (!normalizedKeyId) {
+    throw new Error("apiKeyId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/api-keys/${encodeURIComponent(normalizedKeyId)}/revoke`,
+    {
+      method: "POST",
+      body: JSON.stringify(reason?.trim() ? { reason: reason.trim() } : {}),
+    },
+    signal
+  );
+  const mapped = mapOpenPlatformApiKey(result);
+  if (!mapped) {
+    throw new Error("api-keys.revoke 返回结构不合法");
+  }
+  return mapped;
+}
+
+export async function fetchOpenPlatformWebhooks(
+  input?: OpenPlatformWebhookListInput,
+  signal?: AbortSignal
+): Promise<OpenPlatformWebhookListResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v1/webhooks${buildOpenPlatformWebhookListQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    throw new Error("webhooks 返回结构不合法");
+  }
+  const items = result.items
+    .map((item) => mapOpenPlatformWebhook(item))
+    .filter((item): item is OpenPlatformWebhook => Boolean(item));
+  const payload: OpenPlatformWebhookListResponse = {
+    items,
+    total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
+    filters: {
+      enabled: input?.enabled,
+      keyword: input?.keyword,
+      limit: input?.limit,
+    },
+  };
+  if (!isOpenPlatformWebhookListResponse(payload)) {
+    throw new Error("webhooks 解析后结构不合法");
+  }
+  return payload;
+}
+
+export async function upsertOpenPlatformWebhook(
+  webhookId: string,
+  input: OpenPlatformWebhookUpsertInput,
+  signal?: AbortSignal
+): Promise<OpenPlatformWebhook> {
+  const normalizedWebhookId = webhookId.trim();
+  if (!normalizedWebhookId) {
+    throw new Error("webhookId 不能为空。");
+  }
+  const body = {
+    name: input.name,
+    url: input.url,
+    events: input.events,
+    status: input.enabled ? "active" : "paused",
+    ...(input.secret ? { secret: input.secret } : {}),
+  };
+  let result: unknown;
+  try {
+    result = await requestJson<unknown>(
+      `/api/v1/webhooks/${encodeURIComponent(normalizedWebhookId)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      },
+      signal
+    );
+  } catch (error) {
+    const isNotFound =
+      (error instanceof ApiError && error.status === 404) ||
+      (error instanceof Error && error.message.includes("404")) ||
+      String(error).includes("404");
+    if (!isNotFound) {
+      throw error;
+    }
+    result = await requestJson<unknown>(
+      "/api/v1/webhooks",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+      signal
+    );
+  }
+  const mapped = mapOpenPlatformWebhook(result);
+  if (!mapped) {
+    throw new Error("webhooks.upsert 返回结构不合法");
+  }
+  return mapped;
+}
+
+export async function deleteOpenPlatformWebhook(
+  webhookId: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const normalizedWebhookId = webhookId.trim();
+  if (!normalizedWebhookId) {
+    throw new Error("webhookId 不能为空。");
+  }
+  await requestJson<unknown>(
+    `/api/v1/webhooks/${encodeURIComponent(normalizedWebhookId)}`,
+    { method: "DELETE" },
+    signal
+  );
+}
+
+export async function replayOpenPlatformWebhook(
+  webhookId: string,
+  input?: OpenPlatformWebhookReplayInput,
+  signal?: AbortSignal
+): Promise<OpenPlatformWebhookReplayResult> {
+  const normalizedWebhookId = webhookId.trim();
+  if (!normalizedWebhookId) {
+    throw new Error("webhookId 不能为空。");
+  }
+  const normalizedInput = {
+    ...(input?.eventType?.trim() ? { eventType: input.eventType.trim() } : {}),
+    ...(input?.from?.trim() ? { from: input.from.trim() } : {}),
+    ...(input?.to?.trim() ? { to: input.to.trim() } : {}),
+    ...(typeof input?.limit === "number" && Number.isInteger(input.limit) && input.limit > 0
+      ? { limit: input.limit }
+      : {}),
+    ...(typeof input?.dryRun === "boolean" ? { dryRun: input.dryRun } : {}),
+  };
+  const result = await requestJson<unknown>(
+    `/api/v1/webhooks/${encodeURIComponent(normalizedWebhookId)}/replay`,
+    {
+      method: "POST",
+      body: JSON.stringify(normalizedInput),
+    },
+    signal
+  );
+  if (!isOpenPlatformWebhookReplayResult(result)) {
+    throw new Error("webhooks.replay 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchOpenPlatformQualityDaily(
+  input?: OpenPlatformQualityDailyQueryInput,
+  signal?: AbortSignal
+): Promise<OpenPlatformQualityDailyResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v1/quality/metrics/daily${buildOpenPlatformQualityDailyQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    throw new Error("quality.daily 返回结构不合法");
+  }
+  const items: OpenPlatformQualityDailyItem[] = result.items
+    .map((item) => {
+      if (!isRecord(item)) {
+        return null;
+      }
+      const date = asString(item.date);
+      const metric = asString(item.metric);
+      const avgScore = asFiniteNumber(item.avgScore);
+      if (!date || !metric || avgScore === null) {
+        return null;
+      }
+      const normalizedScore = Math.max(0, Math.min(avgScore, 1));
+      return {
+        date,
+        metric,
+        value: normalizedScore,
+        target: 0.8,
+        score: normalizedScore,
+        status: normalizedScore >= 0.9 ? "pass" : normalizedScore >= 0.75 ? "warn" : "fail",
+      } satisfies OpenPlatformQualityDailyItem;
+    })
+    .filter((item): item is OpenPlatformQualityDailyItem => Boolean(item));
+  const payload: OpenPlatformQualityDailyResponse = {
+    items,
+    total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
+    filters: {
+      date: input?.date,
+      metric: input?.metric,
+      limit: input?.limit,
+    },
+  };
+  if (!isOpenPlatformQualityDailyResponse(payload)) {
+    throw new Error("quality.daily 解析后结构不合法");
+  }
+  return payload;
+}
+
+export async function fetchOpenPlatformQualityScorecards(
+  input?: OpenPlatformQualityScorecardListInput,
+  signal?: AbortSignal
+): Promise<OpenPlatformQualityScorecardListResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v1/quality/scorecards${buildOpenPlatformQualityScorecardListQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    throw new Error("quality.scorecards 返回结构不合法");
+  }
+  const items: OpenPlatformQualityScorecard[] = result.items
+    .map((item) => {
+      if (!isRecord(item)) {
+        return null;
+      }
+      const id = asString(item.id);
+      const metric = asString(item.metric);
+      const updatedAt = asIsoDateString(item.updatedAt);
+      const targetScore = asFiniteNumber(item.targetScore);
+      if (!id || !metric || !updatedAt || targetScore === null) {
+        return null;
+      }
+      const highlights: string[] = [
+        `warning=${Number(asFiniteNumber(item.warningScore) ?? 0).toFixed(2)}`,
+        `critical=${Number(asFiniteNumber(item.criticalScore) ?? 0).toFixed(2)}`,
+        `enabled=${item.enabled === false ? "false" : "true"}`,
+      ];
+      return {
+        id,
+        team: metric,
+        owner: asString(item.updatedByUserId) ?? "--",
+        overallScore: Number((targetScore * 100).toFixed(2)),
+        publishedAt: updatedAt,
+        highlights,
+      } satisfies OpenPlatformQualityScorecard;
+    })
+    .filter((item): item is OpenPlatformQualityScorecard => Boolean(item));
+  const payload: OpenPlatformQualityScorecardListResponse = {
+    items,
+    total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
+    filters: {
+      team: input?.team,
+      owner: input?.owner,
+      limit: input?.limit,
+    },
+  };
+  if (!isOpenPlatformQualityScorecardListResponse(payload)) {
+    throw new Error("quality.scorecards 解析后结构不合法");
+  }
+  return payload;
+}
+
+export async function fetchOpenPlatformReplayBaselines(
+  input?: OpenPlatformReplayBaselineListInput,
+  signal?: AbortSignal
+): Promise<OpenPlatformReplayBaselineListResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v1/replay/baselines${buildOpenPlatformReplayBaselineListQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    throw new Error("replay.baselines 返回结构不合法");
+  }
+  const items: OpenPlatformReplayBaseline[] = result.items
+    .map((item) => {
+      if (!isRecord(item)) {
+        return null;
+      }
+      const id = asString(item.id);
+      const name = asString(item.name);
+      const model = asString(item.model);
+      const datasetId = asString(item.datasetId);
+      const createdAt = asIsoDateString(item.createdAt);
+      const updatedAt = asIsoDateString(item.updatedAt);
+      if (!id || !name || !model || !datasetId || !createdAt || !updatedAt) {
+        return null;
+      }
+      const description = asString(item.promptVersion) ?? undefined;
+      const baseline: OpenPlatformReplayBaseline = {
+        id,
+        name,
+        model,
+        dataset: datasetId,
+        ...(description ? { description } : {}),
+        createdAt,
+        updatedAt,
+      };
+      return baseline;
+    })
+    .filter((item): item is OpenPlatformReplayBaseline => Boolean(item));
+  const payload: OpenPlatformReplayBaselineListResponse = {
+    items,
+    total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
+    filters: {
+      keyword: input?.keyword,
+      limit: input?.limit,
+    },
+  };
+  if (!isOpenPlatformReplayBaselineListResponse(payload)) {
+    throw new Error("replay.baselines 解析后结构不合法");
+  }
+  return payload;
+}
+
+export async function fetchOpenPlatformReplayJobs(
+  input?: OpenPlatformReplayJobListInput,
+  signal?: AbortSignal
+): Promise<OpenPlatformReplayJobListResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v1/replay/jobs${buildOpenPlatformReplayJobListQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    throw new Error("replay.jobs 返回结构不合法");
+  }
+  const items: OpenPlatformReplayJob[] = result.items
+    .map((item) => {
+      if (!isRecord(item)) {
+        return null;
+      }
+      const id = asString(item.id);
+      const baselineId = asString(item.baselineId);
+      const status = mapReplayStatus(item.status);
+      const totalCases = asFiniteNumber(item.totalCases);
+      const processedCases = asFiniteNumber(item.processedCases);
+      const regressedCases = asFiniteNumber(item.regressedCases);
+      const createdAt = asIsoDateString(item.createdAt);
+      if (
+        !id ||
+        !baselineId ||
+        !status ||
+        totalCases === null ||
+        processedCases === null ||
+        regressedCases === null ||
+        !createdAt
+      ) {
+        return null;
+      }
+      const passedCases = Math.max(0, Math.round(processedCases - regressedCases));
+      const failedCases = Math.max(0, Math.round(regressedCases));
+      const finishedAt = asIsoDateString(item.finishedAt) ?? undefined;
+      const job: OpenPlatformReplayJob = {
+        id,
+        baselineId,
+        status,
+        totalCases: Math.max(0, Math.round(totalCases)),
+        passedCases,
+        failedCases,
+        createdAt,
+        ...(finishedAt ? { finishedAt } : {}),
+      };
+      return job;
+    })
+    .filter((item): item is OpenPlatformReplayJob => Boolean(item));
+  const payload: OpenPlatformReplayJobListResponse = {
+    items,
+    total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
+    filters: {
+      baselineId: input?.baselineId,
+      status: input?.status,
+      limit: input?.limit,
+    },
+  };
+  if (!isOpenPlatformReplayJobListResponse(payload)) {
+    throw new Error("replay.jobs 解析后结构不合法");
+  }
+  return payload;
+}
+
+export async function fetchOpenPlatformReplayDiff(
+  input: OpenPlatformReplayDiffQueryInput,
+  signal?: AbortSignal
+): Promise<OpenPlatformReplayDiffResponse> {
+  const baselineId = input.baselineId.trim();
+  const jobId = input.jobId.trim();
+  if (!baselineId) {
+    throw new Error("baselineId 不能为空。");
+  }
+  if (!jobId) {
+    throw new Error("jobId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/replay/jobs/${encodeURIComponent(jobId)}/diff${buildOpenPlatformReplayDiffQuery({
+      ...input,
+      baselineId,
+      jobId,
+    })}`,
+    undefined,
+    signal
+  );
+  if (!isRecord(result) || !Array.isArray(result.diffs)) {
+    throw new Error("replay.diff 返回结构不合法");
+  }
+  const items: OpenPlatformReplayDiffItem[] = result.diffs
+    .map((item) => {
+      if (!isRecord(item)) {
+        return null;
+      }
+      const caseId = asString(item.caseId);
+      const verdict = asString(item.verdict);
+      const delta = asFiniteNumber(item.delta);
+      if (!caseId || !verdict || delta === null) {
+        return null;
+      }
+      return {
+        id: `${jobId}:${caseId}`,
+        baselineId,
+        jobId,
+        caseId,
+        summary: asString(item.detail) ?? `${asString(item.metric) ?? "metric"} delta`,
+        verdict:
+          verdict === "improved" || verdict === "regressed" || verdict === "unchanged"
+            ? verdict
+            : "unchanged",
+        deltaScore: delta,
+      } satisfies OpenPlatformReplayDiffItem;
+    })
+    .filter((item): item is OpenPlatformReplayDiffItem => Boolean(item));
+  const payload: OpenPlatformReplayDiffResponse = {
+    items,
+    total: items.length,
+    filters: {
+      baselineId,
+      jobId,
+      keyword: input.keyword,
+      limit: input.limit,
+    },
+  };
+  if (!isOpenPlatformReplayDiffResponse(payload)) {
+    throw new Error("replay.diff 解析后结构不合法");
+  }
+  return payload;
 }

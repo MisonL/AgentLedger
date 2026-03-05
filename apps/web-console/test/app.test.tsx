@@ -3,6 +3,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { clearAuthTokens, setAuthTokens } from "../src/api";
 import App from "../src/App";
 
+const GOVERNANCE_HEAVY_TEST_TIMEOUT_MS = 15_000;
+
 function toUrl(input: Parameters<typeof fetch>[0]): string {
   if (typeof input === "string") {
     return input;
@@ -1890,7 +1892,9 @@ describe("Web Console", () => {
     expect(patchCall).toBeTruthy();
   });
 
-  test("治理页支持告警编排规则筛选、保存规范化、模拟与执行日志加载", async () => {
+  test(
+    "治理页支持告警编排规则筛选、保存规范化、模拟与执行日志加载",
+    async () => {
     window.location.hash = "#/governance";
     setAuthTokens({
       accessToken: "access-token-governance-orchestration",
@@ -2315,7 +2319,9 @@ describe("Web Console", () => {
           ((init as RequestInit | undefined)?.method ?? "GET").toUpperCase() === "POST"
       )
     ).toBe(true);
-  });
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS
+  );
 
   test("治理页告警编排非法输入时会阻止请求", async () => {
     window.location.hash = "#/governance";
@@ -2472,6 +2478,497 @@ describe("Web Console", () => {
     expect(orchestrationExecutionQuerySnapshots).toHaveLength(beforeInvalidTimeRange);
   });
 
+  test(
+    "治理页开放平台工作台支持 OpenAPI/API Key/Webhook/Quality/Replay 基础联调",
+    async () => {
+    window.location.hash = "#/governance";
+    setAuthTokens({
+      accessToken: "access-token-governance-open-platform",
+      refreshToken: "refresh-token-governance-open-platform",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const apiKeys: Array<{
+      id: string;
+      tenantId: string;
+      name: string;
+      scope: "read" | "write" | "admin";
+      status: "active" | "revoked";
+      keyPrefix: string;
+      createdAt: string;
+      updatedAt: string;
+      lastUsedAt?: string;
+    }> = [
+      {
+        id: "ak-ui-1",
+        tenantId: "default",
+        name: "ci-agent",
+        scope: "read",
+        status: "active",
+        keyPrefix: "sk_live_abc123",
+        createdAt: "2026-03-03T10:00:00.000Z",
+        updatedAt: "2026-03-03T10:00:00.000Z",
+      },
+    ];
+    const webhooks: Array<{
+      id: string;
+      tenantId: string;
+      name: string;
+      url: string;
+      events: string[];
+      status: "active" | "paused" | "disabled";
+      createdAt: string;
+      updatedAt: string;
+    }> = [
+      {
+        id: "wh-ui-1",
+        tenantId: "default",
+        name: "alerts-primary",
+        url: "https://hooks.example.com/alerts",
+        events: ["api_key.created", "api_key.revoked"],
+        status: "active",
+        createdAt: "2026-03-03T10:00:00.000Z",
+        updatedAt: "2026-03-03T10:00:00.000Z",
+      },
+    ];
+
+    const fetchSpy = mockGovernancePageFetch({
+      extraHandler: async (_input, init, { method, pathname, url }) => {
+        if (pathname === "/api/v1/openapi.json" && method === "GET") {
+          return mockJsonResponse({
+            openapi: "3.0.3",
+            info: {
+              title: "AgentLedger Control Plane API",
+              version: "1.1.0",
+            },
+            paths: {
+              "/api/v1/api-keys": {
+                get: { tags: ["open-platform"] },
+                post: { tags: ["open-platform"] },
+              },
+              "/api/v1/replay/jobs/{id}/diff": {
+                get: { tags: ["replay"] },
+              },
+            },
+          });
+        }
+
+        if (pathname === "/api/v1/api-keys" && method === "GET") {
+          const parsedUrl = new URL(url, "http://localhost");
+          const status = parsedUrl.searchParams.get("status");
+          const keyword = parsedUrl.searchParams.get("keyword");
+          const limitRaw = parsedUrl.searchParams.get("limit");
+          const limit = limitRaw ? Number(limitRaw) : 50;
+          const filtered = apiKeys
+            .filter((item) => (status ? item.status === status : true))
+            .filter((item) =>
+              keyword
+                ? item.id.includes(keyword) || item.name.includes(keyword) || item.keyPrefix.includes(keyword)
+                : true
+            )
+            .slice(0, Number.isFinite(limit) ? limit : 50);
+          return mockJsonResponse({
+            items: filtered,
+            total: filtered.length,
+            filters: {
+              ...(status ? { status } : {}),
+              ...(keyword ? { keyword } : {}),
+              ...(limitRaw ? { limit } : {}),
+            },
+          });
+        }
+
+        if (pathname === "/api/v1/api-keys" && method === "POST") {
+          const payload = JSON.parse(String(init?.body ?? "{}")) as { name?: string; scope?: string };
+          const created = {
+            id: `ak-ui-${apiKeys.length + 1}`,
+            tenantId: "default",
+            name: payload.name ?? "unnamed",
+            scope: (payload.scope === "write" || payload.scope === "admin" ? payload.scope : "read") as
+              | "read"
+              | "write"
+              | "admin",
+            status: "active" as const,
+            keyPrefix: `sk_live_${apiKeys.length + 1}`,
+            createdAt: "2026-03-03T11:00:00.000Z",
+            updatedAt: "2026-03-03T11:00:00.000Z",
+          };
+          apiKeys.unshift(created);
+          return mockJsonResponse(
+            {
+              id: created.id,
+              tenantId: created.tenantId,
+              keyId: created.id,
+              keyPrefix: created.keyPrefix,
+              secret: `${created.keyPrefix}_secret`,
+              createdAt: created.createdAt,
+            },
+            201
+          );
+        }
+
+        if (pathname.match(/^\/api\/v1\/api-keys\/[^/]+\/revoke$/) && method === "POST") {
+          const id = decodeURIComponent(pathname.split("/").slice(-2)[0] ?? "");
+          const found = apiKeys.find((item) => item.id === id);
+          if (!found) {
+            return mockJsonResponse({ message: `未找到 API Key：${id}` }, 404);
+          }
+          found.status = "revoked";
+          found.updatedAt = "2026-03-03T11:30:00.000Z";
+          return mockJsonResponse(found);
+        }
+
+        if (pathname === "/api/v1/webhooks" && method === "GET") {
+          const parsedUrl = new URL(url, "http://localhost");
+          const status = parsedUrl.searchParams.get("status");
+          const keyword = parsedUrl.searchParams.get("keyword");
+          const filtered = webhooks
+            .filter((item) => (status ? item.status === status : true))
+            .filter((item) => (keyword ? item.id.includes(keyword) || item.name.includes(keyword) : true));
+          return mockJsonResponse({
+            items: filtered,
+            total: filtered.length,
+          });
+        }
+
+        if (pathname.match(/^\/api\/v1\/webhooks\/[^/]+$/) && method === "PUT") {
+          const id = decodeURIComponent(pathname.split("/").pop() ?? "");
+          const target = webhooks.find((item) => item.id === id);
+          if (!target) {
+            return mockJsonResponse({ message: `未找到 Webhook：${id}` }, 404);
+          }
+          const payload = JSON.parse(String(init?.body ?? "{}")) as {
+            name?: string;
+            url?: string;
+            events?: string[];
+            status?: "active" | "paused";
+          };
+          target.name = payload.name ?? target.name;
+          target.url = payload.url ?? target.url;
+          target.events = payload.events ?? target.events;
+          target.status = payload.status ?? target.status;
+          target.updatedAt = "2026-03-03T11:40:00.000Z";
+          return mockJsonResponse(target);
+        }
+
+        if (pathname === "/api/v1/webhooks" && method === "POST") {
+          const payload = JSON.parse(String(init?.body ?? "{}")) as {
+            name?: string;
+            url?: string;
+            events?: string[];
+            status?: "active" | "paused";
+            secret?: string;
+          };
+          const created = {
+            id: `wh-ui-${webhooks.length + 1}`,
+            tenantId: "default",
+            name: payload.name ?? "unnamed-webhook",
+            url: payload.url ?? "https://hooks.example.com/default",
+            events: payload.events ?? ["api_key.created"],
+            status: payload.status ?? "active",
+            createdAt: "2026-03-03T11:20:00.000Z",
+            updatedAt: "2026-03-03T11:20:00.000Z",
+          };
+          webhooks.unshift(created);
+          return mockJsonResponse(
+            {
+              ...created,
+              secret: payload.secret ?? "whsec_xxx",
+            },
+            201
+          );
+        }
+
+        if (pathname.match(/^\/api\/v1\/webhooks\/[^/]+$/) && method === "DELETE") {
+          const id = decodeURIComponent(pathname.split("/").pop() ?? "");
+          const existingIndex = webhooks.findIndex((item) => item.id === id);
+          if (existingIndex < 0) {
+            return mockJsonResponse({ message: `未找到 Webhook：${id}` }, 404);
+          }
+          webhooks.splice(existingIndex, 1);
+          return mockJsonResponse({ success: true });
+        }
+
+        if (pathname.match(/^\/api\/v1\/webhooks\/[^/]+\/replay$/) && method === "POST") {
+          const id = decodeURIComponent(pathname.split("/").slice(-2)[0] ?? "");
+          const payload = JSON.parse(String(init?.body ?? "{}")) as {
+            eventType?: string;
+            from?: string;
+            to?: string;
+            limit?: number;
+            dryRun?: boolean;
+          };
+          return mockJsonResponse({
+            id: `replay-${id}`,
+            webhookId: id,
+            status: "queued",
+            dryRun: payload.dryRun ?? false,
+            filters: {
+              eventType: payload.eventType,
+              from: payload.from,
+              to: payload.to,
+              limit: payload.limit ?? 100,
+            },
+            requestedAt: "2026-03-03T12:30:00.000Z",
+          });
+        }
+
+        if (pathname === "/api/v1/quality/metrics/daily" && method === "GET") {
+          return mockJsonResponse({
+            items: [
+              {
+                date: "2026-03-03",
+                metric: "accuracy",
+                avgScore: 0.92,
+                p50Score: 0.92,
+                p90Score: 0.92,
+                totalEvents: 14,
+              },
+            ],
+            total: 1,
+          });
+        }
+
+        if (pathname === "/api/v1/quality/scorecards" && method === "GET") {
+          return mockJsonResponse({
+            items: [
+              {
+                id: "accuracy",
+                tenantId: "default",
+                metric: "accuracy",
+                targetScore: 0.9,
+                warningScore: 0.8,
+                criticalScore: 0.7,
+                weight: 1,
+                enabled: true,
+                updatedByUserId: "user-1",
+                updatedAt: "2026-03-03T12:00:00.000Z",
+              },
+            ],
+            total: 1,
+          });
+        }
+
+        if (pathname === "/api/v1/replay/baselines" && method === "GET") {
+          return mockJsonResponse({
+            items: [
+              {
+                id: "baseline-ui-1",
+                tenantId: "default",
+                name: "baseline smoke",
+                datasetId: "dataset-1",
+                model: "gpt-5-codex",
+                promptVersion: "v1",
+                sampleCount: 50,
+                metadata: {},
+                createdAt: "2026-03-03T12:10:00.000Z",
+                updatedAt: "2026-03-03T12:10:00.000Z",
+              },
+            ],
+            total: 1,
+            filters: {},
+          });
+        }
+
+        if (pathname === "/api/v1/replay/jobs" && method === "GET") {
+          return mockJsonResponse({
+            items: [
+              {
+                id: "job-ui-1",
+                tenantId: "default",
+                baselineId: "baseline-ui-1",
+                candidateLabel: "candidate-v2",
+                status: "completed",
+                totalCases: 10,
+                processedCases: 10,
+                improvedCases: 6,
+                regressedCases: 2,
+                unchangedCases: 2,
+                diffs: [],
+                summary: {},
+                createdAt: "2026-03-03T12:20:00.000Z",
+                updatedAt: "2026-03-03T12:20:00.000Z",
+                startedAt: "2026-03-03T12:20:00.000Z",
+                finishedAt: "2026-03-03T12:22:00.000Z",
+              },
+            ],
+            total: 1,
+            filters: {},
+          });
+        }
+
+        if (pathname === "/api/v1/replay/jobs/job-ui-1/diff" && method === "GET") {
+          return mockJsonResponse({
+            jobId: "job-ui-1",
+            baselineId: "baseline-ui-1",
+            diffs: [
+              {
+                caseId: "case-1",
+                metric: "accuracy",
+                baselineScore: 0.7,
+                candidateScore: 0.9,
+                delta: 0.2,
+                verdict: "improved",
+                detail: "answer quality improved",
+              },
+            ],
+            summary: {},
+          });
+        }
+
+        return undefined;
+      },
+    });
+
+    render(<App />);
+
+    const section = (await screen.findByRole("heading", { name: "开放平台工作台", level: 2 })).closest(
+      "section"
+    );
+    expect(section).not.toBeNull();
+    const sectionScreen = within(section as HTMLElement);
+    const byId = <T extends HTMLElement>(id: string) => {
+      const element = (section as HTMLElement).querySelector(`#${id}`);
+      expect(element).not.toBeNull();
+      return element as T;
+    };
+
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载 OpenAPI 摘要" }));
+    expect(await sectionScreen.findByText("version:")).toBeInTheDocument();
+    expect(sectionScreen.getByText("3.0.3")).toBeInTheDocument();
+
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载 API Key 列表" }));
+    expect(await sectionScreen.findByText("ak-ui-1")).toBeInTheDocument();
+
+    fireEvent.change(byId<HTMLInputElement>("open-platform-api-key-id"), {
+      target: { value: "ak-ui-custom-1" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("open-platform-api-key-name"), {
+      target: { value: "release-bot" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("open-platform-api-key-scopes"), {
+      target: { value: "read" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "保存 API Key" }));
+    expect(await sectionScreen.findByText(/API Key .* 已保存。/)).toBeInTheDocument();
+    fireEvent.change(byId<HTMLInputElement>("open-platform-api-key-revoke-reason"), {
+      target: { value: "rotation-2026" },
+    });
+    const apiKeyRow = sectionScreen.getByText("ak-ui-1").closest("tr");
+    expect(apiKeyRow).not.toBeNull();
+    fireEvent.click(within(apiKeyRow as HTMLElement).getByRole("button", { name: "吊销" }));
+    expect(await sectionScreen.findByText("API Key ak-ui-1 已吊销。")).toBeInTheDocument();
+    expect(await sectionScreen.findByText("已吊销")).toBeInTheDocument();
+
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载 Webhook 列表" }));
+    expect(await sectionScreen.findByText("wh-ui-1")).toBeInTheDocument();
+
+    fireEvent.change(byId<HTMLInputElement>("open-platform-webhook-id"), {
+      target: { value: "wh-ui-custom-2" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("open-platform-webhook-name"), {
+      target: { value: "pipeline-alert" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("open-platform-webhook-url"), {
+      target: { value: "https://hooks.example.com/pipeline-alert" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("open-platform-webhook-events"), {
+      target: { value: "api_key.created" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "保存 Webhook" }));
+    expect(
+      await sectionScreen.findByText(
+        (content) => content.includes("Webhook") && content.includes("已保存")
+      )
+    ).toBeInTheDocument();
+    fireEvent.change(byId<HTMLInputElement>("open-platform-webhook-replay-event-type"), {
+      target: { value: "api_key.created" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("open-platform-webhook-replay-limit"), {
+      target: { value: "20" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "回放 Webhook" }));
+    expect(
+      await sectionScreen.findByText((content) => content.includes("回放任务") && content.includes("已排队"))
+    ).toBeInTheDocument();
+    const webhookRow = sectionScreen.getByText("wh-ui-1").closest("tr");
+    expect(webhookRow).not.toBeNull();
+    fireEvent.click(within(webhookRow as HTMLElement).getByRole("button", { name: "删除" }));
+    expect(await sectionScreen.findByText("Webhook wh-ui-1 已删除。")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(sectionScreen.queryByText("wh-ui-1")).not.toBeInTheDocument();
+    });
+
+    fireEvent.change(byId<HTMLSelectElement>("open-platform-quality-daily-metric"), {
+      target: { value: "accuracy" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载 Quality daily" }));
+    expect(await sectionScreen.findByText("accuracy")).toBeInTheDocument();
+    fireEvent.change(byId<HTMLInputElement>("open-platform-quality-scorecard-team"), {
+      target: { value: "accuracy" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载 Quality scorecards" }));
+    expect(await sectionScreen.findByText("user-1")).toBeInTheDocument();
+
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载 Replay baselines" }));
+    expect(await sectionScreen.findByText("baseline-ui-1")).toBeInTheDocument();
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载 Replay jobs" }));
+    expect(await sectionScreen.findByText("job-ui-1")).toBeInTheDocument();
+    fireEvent.change(byId<HTMLInputElement>("open-platform-replay-diff-baseline-id"), {
+      target: { value: "baseline-ui-1" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("open-platform-replay-diff-job-id"), {
+      target: { value: "job-ui-1" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载 Replay diff" }));
+    expect(await sectionScreen.findByText("case-1")).toBeInTheDocument();
+
+    expect(
+      fetchSpy.mock.calls.some(([url]) => new URL(toUrl(url), "http://localhost").pathname === "/api/v1/openapi.json")
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url]) => new URL(toUrl(url), "http://localhost").pathname === "/api/v1/api-keys")
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url, init]) => {
+        const requestInit = init as RequestInit | undefined;
+        return (
+          new URL(toUrl(url), "http://localhost").pathname === "/api/v1/api-keys/ak-ui-1/revoke" &&
+          (requestInit?.method ?? "GET").toUpperCase() === "POST"
+        );
+      })
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url]) => new URL(toUrl(url), "http://localhost").pathname === "/api/v1/webhooks")
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url, init]) => {
+        const requestInit = init as RequestInit | undefined;
+        return (
+          new URL(toUrl(url), "http://localhost").pathname === "/api/v1/webhooks/wh-ui-2/replay" &&
+          (requestInit?.method ?? "GET").toUpperCase() === "POST"
+        );
+      })
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url, init]) => {
+        const requestInit = init as RequestInit | undefined;
+        return (
+          new URL(toUrl(url), "http://localhost").pathname === "/api/v1/webhooks/wh-ui-1" &&
+          (requestInit?.method ?? "GET").toUpperCase() === "DELETE"
+        );
+      })
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url]) =>
+        new URL(toUrl(url), "http://localhost").pathname.startsWith("/api/v1/replay/jobs")
+      )
+    ).toBe(true);
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS
+  );
+
   test("治理页在 single_region 模式配置副本地域时会阻止保存且不发起 PUT", async () => {
     window.location.hash = "#/governance";
     setAuthTokens({
@@ -2575,7 +3072,9 @@ describe("Web Console", () => {
     ).toBeGreaterThanOrEqual(2);
   });
 
-  test("治理页 Rule Hub 切换资产后会刷新发布/回滚/审批版本输入框", async () => {
+  test(
+    "治理页 Rule Hub 切换资产后会刷新发布/回滚/审批版本输入框",
+    async () => {
     window.location.hash = "#/governance";
     setAuthTokens({
       accessToken: "access-token-governance-rule-hub-switch",
@@ -2631,7 +3130,9 @@ describe("Web Console", () => {
       expect(rollbackVersionInput.value).toBe("9");
       expect(approvalVersionInput.value).toBe("9");
     });
-  });
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS
+  );
 
   test("治理页支持 Sessions/Usage 导出", async () => {
     window.location.hash = "#/governance";

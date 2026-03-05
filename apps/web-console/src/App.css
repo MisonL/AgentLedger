@@ -785,6 +785,34 @@
   gap: 12px;
 }
 
+.open-platform-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+}
+
+.open-platform-card {
+  border: 1px solid #d5e2ee;
+  border-radius: 10px;
+  padding: 12px;
+  background: #fff;
+}
+
+.open-platform-card h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.open-platform-card p {
+  margin: 0 0 10px;
+  color: #4c6b87;
+}
+
+.open-platform-summary-list {
+  display: grid;
+  gap: 8px;
+}
+
 .secondary-button {
   background: #fff;
   color: #184567;
