@@ -1,6 +1,7 @@
 import type {
   Alert,
   AlertOrchestrationChannel,
+  AlertOrchestrationDispatchMode,
   AlertOrchestrationExecutionCreateInput,
   AlertOrchestrationExecutionListInput,
   AlertOrchestrationExecutionLog,
@@ -42,6 +43,7 @@ import type {
   PricingCatalogEntry,
   RegionDescriptor,
   ReplicationJob,
+  ReplicationJobApproveInput,
   ReplicationJobCancelInput,
   ReplicationJobCreateInput,
   ReplicationJobListInput,
@@ -79,11 +81,13 @@ import type {
   UsageModelItem,
   UsageMonthlyItem,
   UsageSessionBreakdownItem,
+  WebhookEventType,
   OrgRole,
   TenantRole,
 } from "../contracts";
 
-export type ReplayJobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+export type ReplayJobStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+export type WebhookReplayTaskStatus = "queued" | "running" | "completed" | "failed";
 
 const DEFAULT_SESSION_LIMIT = 50;
 const DEFAULT_ALERT_LIMIT = 50;
@@ -93,10 +97,14 @@ const DEFAULT_SYNC_JOB_LIMIT = 50;
 const DEFAULT_PARSE_FAILURE_LIMIT = 50;
 const MAX_PARSE_FAILURE_LIMIT = 500;
 const DEFAULT_WEBHOOK_ENDPOINT_LIMIT = 200;
+const DEFAULT_WEBHOOK_REPLAY_TASK_LIMIT = 100;
+const DEFAULT_WEBHOOK_REPLAY_EVENT_LIMIT = 200;
 const DEFAULT_QUALITY_DAILY_METRIC_LIMIT = 60;
 const DEFAULT_QUALITY_SCORECARD_LIMIT = 100;
 const DEFAULT_REPLAY_BASELINE_LIMIT = 100;
 const DEFAULT_REPLAY_JOB_LIMIT = 100;
+const DEFAULT_REPLAY_DATASET_CASE_LIMIT = 1000;
+const DEFAULT_REPLAY_ARTIFACT_LIMIT = 20;
 const MAX_ALERT_ORCHESTRATION_EXECUTION_LIMIT = 200;
 const SOURCE_TYPES: ReadonlyArray<SourceType> = ["local", "ssh", "sync-cache"];
 const SOURCE_ACCESS_MODES: ReadonlyArray<SourceAccessMode> = ["realtime", "sync", "hybrid"];
@@ -142,9 +150,29 @@ const MCP_APPROVAL_STATUSES: ReadonlyArray<McpApprovalStatus> = [
 const REPLAY_JOB_STATUS_SET: ReadonlyArray<ReplayJobStatus> = [
   "pending",
   "running",
-  "succeeded",
+  "completed",
   "failed",
   "cancelled",
+];
+const WEBHOOK_REPLAY_TASK_STATUS_SET: ReadonlyArray<WebhookReplayTaskStatus> = [
+  "queued",
+  "running",
+  "completed",
+  "failed",
+];
+const WEBHOOK_EVENT_TYPES: ReadonlyArray<WebhookEventType> = [
+  "api_key.created",
+  "api_key.revoked",
+  "quality.event.created",
+  "quality.scorecard.updated",
+  "replay.job.started",
+  "replay.job.completed",
+  "replay.job.failed",
+  "replay.run.started",
+  "replay.run.completed",
+  "replay.run.regression_detected",
+  "replay.run.failed",
+  "replay.run.cancelled",
 ];
 const AUDIT_LEVEL_SET: ReadonlyArray<AuditLevel> = ["info", "warning", "error", "critical"];
 const TENANT_ROLE_SET: ReadonlyArray<TenantRole> = [
@@ -201,6 +229,28 @@ const DEFAULT_REGIONS: ReadonlyArray<RegionDescriptor> = [
     description: "海外合规区域",
   },
 ];
+const QUALITY_EXTERNAL_GROUP_BY_TO_COLUMN: Readonly<Record<QualityExternalMetricGroupBy, string>> = {
+  provider: "provider",
+  repo: "repository",
+  workflow: "workflow",
+  runId: "run_id",
+};
+const USAGE_AGGREGATE_PROJECT_SQL = `COALESCE(
+  NULLIF(to_jsonb(sess)->>'project', ''),
+  NULLIF(to_jsonb(sess)->>'project_id', ''),
+  NULLIF(to_jsonb(sess)->>'workspace', ''),
+  NULLIF(to_jsonb(sess)->>'workspace_id', ''),
+  NULLIF(to_jsonb(sess)->>'repo', ''),
+  NULLIF(to_jsonb(sess)->>'repository', ''),
+  NULLIF(src.workspace_id, ''),
+  NULLIF(sess.source_metadata->>'project', ''),
+  NULLIF(sess.source_metadata->>'project_id', ''),
+  NULLIF(sess.source_metadata->>'workspace', ''),
+  NULLIF(sess.source_metadata->>'workspace_id', ''),
+  NULLIF(sess.source_metadata->>'repo', ''),
+  NULLIF(sess.source_metadata->>'repository', ''),
+  ''
+)`;
 
 type DbRow = Record<string, unknown>;
 
@@ -363,6 +413,7 @@ export interface UsageAggregateQueryInput {
   tenantId?: string;
   from?: string;
   to?: string;
+  project?: string;
   limit?: number;
 }
 
@@ -469,6 +520,8 @@ interface NormalizedAlertOrchestrationExecutionListInput {
   sourceId?: string;
   dedupeHit?: boolean;
   suppressed?: boolean;
+  dispatchMode?: AlertOrchestrationDispatchMode;
+  hasConflict?: boolean;
   simulated?: boolean;
   from?: string;
   to?: string;
@@ -525,6 +578,23 @@ interface NormalizedQualityDailyMetricsInput {
   from?: string;
   to?: string;
   scorecardKey?: string;
+  provider?: string;
+  repo?: string;
+  workflow?: string;
+  runId?: string;
+  groupBy?: QualityExternalMetricGroupBy;
+  limit: number;
+}
+
+interface NormalizedQualityExternalMetricGroupsInput {
+  from?: string;
+  to?: string;
+  scorecardKey?: string;
+  provider?: string;
+  repo?: string;
+  workflow?: string;
+  runId?: string;
+  groupBy: QualityExternalMetricGroupBy;
   limit: number;
 }
 
@@ -538,9 +608,42 @@ interface NormalizedReplayBaselineListInput {
   limit: number;
 }
 
+interface NormalizedReplayDatasetListInput {
+  keyword?: string;
+  limit: number;
+}
+
+interface NormalizedReplayDatasetCaseListInput {
+  limit: number;
+}
+
 interface NormalizedReplayJobListInput {
   baselineId?: string;
   status?: ReplayJobStatus;
+  limit: number;
+}
+
+interface NormalizedReplayRunListInput {
+  datasetId?: string;
+  status?: ReplayJobStatus;
+  limit: number;
+}
+
+interface NormalizedReplayArtifactListInput {
+  limit: number;
+}
+
+interface NormalizedWebhookReplayTaskListInput {
+  webhookId?: string;
+  status?: WebhookReplayTaskStatus;
+  limit: number;
+  cursor?: string;
+}
+
+interface NormalizedWebhookReplayEventListInput {
+  eventTypes: WebhookEventType[];
+  from?: string;
+  to?: string;
   limit: number;
 }
 
@@ -555,6 +658,7 @@ interface NormalizedUsageAggregateInput {
   tenantId: string;
   from?: string;
   to?: string;
+  project?: string;
   limit: number;
 }
 
@@ -800,6 +904,7 @@ export interface WebhookEndpoint {
   enabled: boolean;
   eventTypes: string[];
   secretHash?: string;
+  secretCiphertext?: string;
   headers: Record<string, string>;
   createdAt: string;
   updatedAt: string;
@@ -811,6 +916,7 @@ export interface CreateWebhookEndpointInput {
   enabled?: boolean;
   eventTypes?: string[];
   secretHash?: string;
+  secretCiphertext?: string;
   headers?: Record<string, string>;
 }
 
@@ -820,7 +926,81 @@ export interface UpdateWebhookEndpointInput {
   enabled?: boolean;
   eventTypes?: string[];
   secretHash?: string | null;
+  secretCiphertext?: string | null;
   headers?: Record<string, string>;
+}
+
+export interface WebhookReplayFilters {
+  eventType?: string;
+  from?: string;
+  to?: string;
+  limit: number;
+}
+
+export interface WebhookReplayTask {
+  id: string;
+  tenantId: string;
+  webhookId: string;
+  status: WebhookReplayTaskStatus;
+  dryRun: boolean;
+  filters: WebhookReplayFilters;
+  result: Record<string, unknown>;
+  error?: string;
+  requestedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateWebhookReplayTaskInput {
+  webhookId: string;
+  dryRun: boolean;
+  filters: WebhookReplayFilters;
+  result?: Record<string, unknown>;
+  status?: WebhookReplayTaskStatus;
+  error?: string;
+  requestedAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+export interface UpdateWebhookReplayTaskInput {
+  fromStatuses?: WebhookReplayTaskStatus[];
+  status?: WebhookReplayTaskStatus;
+  result?: Record<string, unknown>;
+  error?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  updatedAt?: string;
+}
+
+export interface ListWebhookReplayTasksInput {
+  webhookId?: string;
+  status?: WebhookReplayTaskStatus;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface WebhookReplayTaskListResult {
+  items: WebhookReplayTask[];
+  total: number;
+  nextCursor: string | null;
+}
+
+export interface WebhookReplayEvent {
+  id: string;
+  tenantId: string;
+  eventType: WebhookEventType;
+  occurredAt: string;
+  payload: Record<string, unknown>;
+}
+
+export interface ListWebhookReplayEventsInput {
+  eventTypes: WebhookEventType[];
+  from?: string;
+  to?: string;
+  limit?: number;
 }
 
 export interface QualityEvent {
@@ -828,15 +1008,24 @@ export interface QualityEvent {
   tenantId: string;
   scorecardKey: string;
   metricKey?: string;
+  externalSource?: QualityExternalSourceMetadata;
   score: number;
   passed: boolean;
   metadata: Record<string, unknown>;
   createdAt: string;
 }
 
+export interface QualityExternalSourceMetadata {
+  provider: string;
+  repo?: string;
+  workflow?: string;
+  runId?: string;
+}
+
 export interface CreateQualityEventInput {
   scorecardKey: string;
   metricKey?: string;
+  externalSource?: QualityExternalSourceMetadata;
   score: number;
   passed?: boolean;
   metadata?: Record<string, unknown>;
@@ -847,11 +1036,30 @@ export interface ListQualityDailyMetricsInput {
   from?: string;
   to?: string;
   scorecardKey?: string;
+  provider?: string;
+  repo?: string;
+  workflow?: string;
+  runId?: string;
   limit?: number;
 }
 
 export interface QualityDailyMetric {
   date: string;
+  total: number;
+  passed: number;
+  failed: number;
+  averageScore: number;
+}
+
+export type QualityExternalMetricGroupBy = "provider" | "repo" | "workflow" | "runId";
+
+export interface ListQualityExternalMetricGroupsInput extends ListQualityDailyMetricsInput {
+  groupBy: QualityExternalMetricGroupBy;
+}
+
+export interface QualityExternalMetricGroup {
+  groupBy: QualityExternalMetricGroupBy;
+  value: string;
   total: number;
   passed: number;
   failed: number;
@@ -941,6 +1149,159 @@ export interface CreateReplayJobInput {
 export interface ListReplayJobsInput {
   baselineId?: string;
   status?: ReplayJobStatus;
+  limit?: number;
+}
+
+export interface UpdateReplayJobInput {
+  status?: ReplayJobStatus;
+  fromStatuses?: ReplayJobStatus[];
+  summary?: Record<string, unknown>;
+  diff?: Record<string, unknown>;
+  error?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  updatedAt?: string;
+}
+
+export interface ReplayDataset {
+  id: string;
+  tenantId: string;
+  name: string;
+  description?: string;
+  model: string;
+  promptVersion?: string;
+  externalDatasetId?: string;
+  caseCount: number;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateReplayDatasetInput {
+  name: string;
+  description?: string;
+  model: string;
+  promptVersion?: string;
+  externalDatasetId?: string;
+  caseCount?: number;
+  metadata?: Record<string, unknown>;
+  createdAt?: string;
+}
+
+export interface ListReplayDatasetsInput {
+  keyword?: string;
+  limit?: number;
+}
+
+export interface ReplayDatasetCase {
+  id: string;
+  tenantId: string;
+  datasetId: string;
+  caseId: string;
+  sortOrder: number;
+  input: string;
+  expectedOutput?: string;
+  baselineOutput?: string;
+  candidateInput?: string;
+  metadata: Record<string, unknown>;
+  checksum?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReplayDatasetCaseInput {
+  caseId?: string;
+  sortOrder?: number;
+  input: string;
+  expectedOutput?: string;
+  baselineOutput?: string;
+  candidateInput?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ListReplayDatasetCasesInput {
+  limit?: number;
+}
+
+export interface ReplayRun {
+  id: string;
+  tenantId: string;
+  datasetId: string;
+  status: ReplayJobStatus;
+  parameters: Record<string, unknown>;
+  summary: Record<string, unknown>;
+  diff: Record<string, unknown>;
+  error?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateReplayRunInput {
+  datasetId: string;
+  status?: ReplayJobStatus;
+  parameters?: Record<string, unknown>;
+  summary?: Record<string, unknown>;
+  diff?: Record<string, unknown>;
+  error?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  createdAt?: string;
+}
+
+export interface ListReplayRunsInput {
+  datasetId?: string;
+  status?: ReplayJobStatus;
+  limit?: number;
+}
+
+export interface UpdateReplayRunInput {
+  status?: ReplayJobStatus;
+  fromStatuses?: ReplayJobStatus[];
+  summary?: Record<string, unknown>;
+  diff?: Record<string, unknown>;
+  error?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  updatedAt?: string;
+}
+
+export type ReplayArtifactStorageBackend = "local" | "object" | "hybrid";
+export type ReplayArtifactType = "summary" | "diff" | "cases";
+
+export interface ReplayArtifact {
+  id: string;
+  tenantId: string;
+  runId: string;
+  datasetId: string;
+  artifactType: ReplayArtifactType;
+  name: string;
+  description?: string;
+  contentType: string;
+  byteSize: number;
+  checksum?: string;
+  storageBackend: ReplayArtifactStorageBackend;
+  storageKey: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReplayArtifactInput {
+  artifactType: ReplayArtifactType;
+  name: string;
+  description?: string;
+  contentType: string;
+  byteSize: number;
+  checksum?: string;
+  storageBackend: ReplayArtifactStorageBackend;
+  storageKey: string;
+  metadata?: Record<string, unknown>;
+  createdAt?: string;
+}
+
+export interface ListReplayArtifactsInput {
   limit?: number;
 }
 
@@ -1739,6 +2100,12 @@ function toMcpApprovalStatus(value: unknown): McpApprovalStatus {
 }
 
 function toReplayJobStatus(value: unknown): ReplayJobStatus {
+  if (value === "succeeded" || value === "success") {
+    return "completed";
+  }
+  if (value === "canceled") {
+    return "cancelled";
+  }
   if (
     typeof value === "string" &&
     REPLAY_JOB_STATUS_SET.includes(value as ReplayJobStatus)
@@ -1746,6 +2113,35 @@ function toReplayJobStatus(value: unknown): ReplayJobStatus {
     return value as ReplayJobStatus;
   }
   return "pending";
+}
+
+function toWebhookReplayTaskStatus(value: unknown): WebhookReplayTaskStatus {
+  if (value === "success" || value === "succeeded") {
+    return "completed";
+  }
+  if (value === "canceled") {
+    return "failed";
+  }
+  if (
+    typeof value === "string" &&
+    WEBHOOK_REPLAY_TASK_STATUS_SET.includes(value as WebhookReplayTaskStatus)
+  ) {
+    return value as WebhookReplayTaskStatus;
+  }
+  return "queued";
+}
+
+function toWebhookEventType(value: unknown): WebhookEventType | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  return WEBHOOK_EVENT_TYPES.includes(normalized as WebhookEventType)
+    ? (normalized as WebhookEventType)
+    : undefined;
 }
 
 function toAuditLevel(value: unknown): AuditLevel {
@@ -2080,6 +2476,7 @@ function mapAlertOrchestrationExecutionRow(row: DbRow): AlertOrchestrationExecut
   const alertId = firstNonEmptyString(row.alert_id);
   const severityRaw = firstNonEmptyString(row.severity);
   const sourceId = firstNonEmptyString(row.source_id);
+  const metadata = toDbRow(row.metadata) ?? {};
 
   return {
     id: firstNonEmptyString(row.id) ?? "",
@@ -2090,13 +2487,30 @@ function mapAlertOrchestrationExecutionRow(row: DbRow): AlertOrchestrationExecut
     severity: severityRaw ? toAlertSeverity(severityRaw) : undefined,
     sourceId: sourceId ?? undefined,
     channels,
+    dispatchMode: resolveAlertOrchestrationDispatchMode(metadata),
     conflictRuleIds,
     dedupeHit: toBoolean(row.dedupe_hit, false),
     suppressed: toBoolean(row.suppressed, false),
     simulated: toBoolean(row.simulated, false),
-    metadata: toDbRow(row.metadata) ?? {},
+    metadata,
     createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
   };
+}
+
+function resolveAlertOrchestrationDispatchMode(
+  metadata: DbRow | null | undefined
+): AlertOrchestrationDispatchMode {
+  const normalizedDispatchMode = firstNonEmptyString(
+    metadata?.dispatchMode,
+    metadata?.dispatch_mode
+  );
+  if (normalizedDispatchMode === "fallback") {
+    return "fallback";
+  }
+  if (normalizedDispatchMode === "rule") {
+    return "rule";
+  }
+  return toBoolean(metadata?.fallback, false) ? "fallback" : "rule";
 }
 
 function mapRuleScopeBinding(value: unknown): RuleScopeBinding {
@@ -2271,21 +2685,117 @@ function mapWebhookEndpointRow(row: DbRow): WebhookEndpoint {
     enabled: toBoolean(row.enabled, true),
     eventTypes: normalizeDistinctStringArray(toJsonArray(row.event_types), { lowerCase: true }),
     secretHash: firstNonEmptyString(row.secret_hash) ?? undefined,
+    secretCiphertext: firstNonEmptyString(row.secret_ciphertext) ?? undefined,
     headers: normalizeStringRecord(row.headers),
     createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
     updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
   };
 }
 
+function normalizeWebhookReplayFilters(value: unknown): WebhookReplayFilters {
+  const record = toDbRow(value) ?? {};
+  const limitRaw = toOptionalNonNegativeInteger(record.limit);
+  const limit = Math.min(500, Math.max(1, limitRaw ?? DEFAULT_WEBHOOK_REPLAY_TASK_LIMIT));
+  return {
+    eventType: firstNonEmptyString(record.eventType) ?? undefined,
+    from: toIsoString(record.from) ?? undefined,
+    to: toIsoString(record.to) ?? undefined,
+    limit,
+  };
+}
+
+function mapWebhookReplayTaskRow(row: DbRow): WebhookReplayTask {
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    webhookId: firstNonEmptyString(row.webhook_id) ?? "",
+    status: toWebhookReplayTaskStatus(row.status),
+    dryRun: toBoolean(row.dry_run, true),
+    filters: normalizeWebhookReplayFilters(row.filters),
+    result: toDbRow(row.result) ?? {},
+    error: firstNonEmptyString(row.error) ?? undefined,
+    requestedAt: toIsoString(row.requested_at) ?? new Date().toISOString(),
+    startedAt: toIsoString(row.started_at) ?? undefined,
+    finishedAt: toIsoString(row.finished_at) ?? undefined,
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function normalizeQualityExternalSourceMetadata(
+  value: unknown
+): QualityExternalSourceMetadata | undefined {
+  const row = toDbRow(value);
+  if (!row) {
+    return undefined;
+  }
+  const provider = firstNonEmptyString(row.provider)?.toLowerCase();
+  if (!provider) {
+    return undefined;
+  }
+  const repo = firstNonEmptyString(row.repo)?.toLowerCase() ?? undefined;
+  const workflow = firstNonEmptyString(row.workflow) ?? undefined;
+  const runId = firstNonEmptyString(row.runId) ?? undefined;
+  return {
+    provider,
+    repo,
+    workflow,
+    runId,
+  };
+}
+
+function extractQualityExternalSourceFromMetadata(value: unknown): QualityExternalSourceMetadata | undefined {
+  const metadata = toDbRow(value);
+  if (!metadata) {
+    return undefined;
+  }
+  const nested = toDbRow(metadata.externalSource);
+  const merged = {
+    provider: nested?.provider ?? metadata.provider,
+    repo: nested?.repo ?? metadata.repo,
+    workflow: nested?.workflow ?? metadata.workflow,
+    runId: nested?.runId ?? metadata.runId ?? metadata.run_id,
+  };
+  return normalizeQualityExternalSourceMetadata(merged);
+}
+
+function mergeQualityExternalSourceIntoMetadata(
+  metadata: Record<string, unknown>,
+  externalSource: QualityExternalSourceMetadata | undefined
+): Record<string, unknown> {
+  if (!externalSource) {
+    return { ...metadata };
+  }
+  return {
+    ...metadata,
+    externalSource: {
+      provider: externalSource.provider,
+      ...(externalSource.repo ? { repo: externalSource.repo } : {}),
+      ...(externalSource.workflow ? { workflow: externalSource.workflow } : {}),
+      ...(externalSource.runId ? { runId: externalSource.runId } : {}),
+    },
+  };
+}
+
 function mapQualityEventRow(row: DbRow): QualityEvent {
+  const metadata = toDbRow(row.metadata) ?? {};
+  const externalSource =
+    normalizeQualityExternalSourceMetadata({
+      provider: row.provider,
+      repo: row.repository,
+      workflow: row.workflow,
+      runId: row.run_id,
+    }) ?? extractQualityExternalSourceFromMetadata(metadata);
+
   return {
     id: firstNonEmptyString(row.id) ?? "",
     tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
     scorecardKey: firstNonEmptyString(row.scorecard_key) ?? "unknown",
     metricKey: firstNonEmptyString(row.metric_key) ?? undefined,
+    externalSource,
     score: normalizeQualityScore(row.score),
     passed: toBoolean(row.passed, false),
-    metadata: toDbRow(row.metadata) ?? {},
+    metadata: mergeQualityExternalSourceIntoMetadata(metadata, externalSource),
     createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
   };
 }
@@ -2318,6 +2828,49 @@ function mapReplayBaselineRow(row: DbRow): ReplayBaseline {
   };
 }
 
+function mapReplayDatasetRow(row: DbRow): ReplayDataset {
+  const metadata = toDbRow(row.metadata) ?? {};
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    name: firstNonEmptyString(row.name, row.id) ?? "",
+    description: firstNonEmptyString(row.description) ?? undefined,
+    model: firstNonEmptyString(row.model, metadata.model) ?? "unknown",
+    promptVersion:
+      firstNonEmptyString(row.prompt_version, metadata.promptVersion, metadata.prompt_version) ??
+      undefined,
+    externalDatasetId:
+      firstNonEmptyString(
+        row.external_dataset_id,
+        row.dataset_ref,
+        metadata.datasetId,
+        metadata.datasetRef
+      ) ?? undefined,
+    caseCount: Math.max(0, Math.trunc(toNumber(row.case_count, toNumber(row.scenario_count, 0)))),
+    metadata,
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapReplayDatasetCaseRow(row: DbRow): ReplayDatasetCase {
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    datasetId: firstNonEmptyString(row.dataset_id) ?? "",
+    caseId: firstNonEmptyString(row.case_id, row.id) ?? "",
+    sortOrder: Math.max(0, Math.trunc(toNumber(row.sort_order, 0))),
+    input: firstNonEmptyString(row.input_text, row.input) ?? "",
+    expectedOutput: firstNonEmptyString(row.expected_output) ?? undefined,
+    baselineOutput: firstNonEmptyString(row.baseline_output) ?? undefined,
+    candidateInput: firstNonEmptyString(row.candidate_input) ?? undefined,
+    metadata: toDbRow(row.metadata) ?? {},
+    checksum: firstNonEmptyString(row.checksum) ?? undefined,
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
 function mapReplayJobRow(row: DbRow): ReplayJob {
   return {
     id: firstNonEmptyString(row.id) ?? "",
@@ -2332,6 +2885,138 @@ function mapReplayJobRow(row: DbRow): ReplayJob {
     finishedAt: toIsoString(row.finished_at) ?? undefined,
     createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
     updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapReplayRunRow(row: DbRow): ReplayRun {
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    datasetId: firstNonEmptyString(row.dataset_id, row.baseline_id) ?? "",
+    status: toReplayJobStatus(row.status),
+    parameters: toDbRow(row.parameters) ?? {},
+    summary: toDbRow(row.summary_payload ?? row.summary) ?? {},
+    diff: toDbRow(row.diff_payload ?? row.diff) ?? {},
+    error: firstNonEmptyString(row.error) ?? undefined,
+    startedAt: toIsoString(row.started_at) ?? undefined,
+    finishedAt: toIsoString(row.finished_at) ?? undefined,
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function toReplayArtifactType(value: unknown): ReplayArtifactType {
+  if (value === "summary" || value === "diff" || value === "cases") {
+    return value;
+  }
+  return "summary";
+}
+
+function toReplayArtifactStorageBackend(value: unknown): ReplayArtifactStorageBackend {
+  if (value === "local" || value === "object" || value === "hybrid") {
+    return value;
+  }
+  return "local";
+}
+
+function mapReplayArtifactRow(row: DbRow): ReplayArtifact {
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    runId: firstNonEmptyString(row.run_id) ?? "",
+    datasetId: firstNonEmptyString(row.dataset_id) ?? "",
+    artifactType: toReplayArtifactType(row.artifact_type),
+    name: firstNonEmptyString(row.name) ?? "artifact",
+    description: firstNonEmptyString(row.description) ?? undefined,
+    contentType: firstNonEmptyString(row.content_type) ?? "application/octet-stream",
+    byteSize: Math.max(0, Math.trunc(toNumber(row.byte_size, 0))),
+    checksum: firstNonEmptyString(row.checksum) ?? undefined,
+    storageBackend: toReplayArtifactStorageBackend(row.storage_backend),
+    storageKey: firstNonEmptyString(row.storage_key) ?? "",
+    metadata: toDbRow(row.metadata) ?? {},
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapReplayDatasetToBaseline(dataset: ReplayDataset): ReplayBaseline {
+  return {
+    id: dataset.id,
+    tenantId: dataset.tenantId,
+    name: dataset.name,
+    description: dataset.description,
+    datasetRef: dataset.externalDatasetId,
+    scenarioCount: dataset.caseCount,
+    metadata: {
+      model: dataset.model,
+      ...(dataset.promptVersion ? { promptVersion: dataset.promptVersion } : {}),
+      ...dataset.metadata,
+    },
+    createdAt: dataset.createdAt,
+    updatedAt: dataset.updatedAt,
+  };
+}
+
+function mapReplayBaselineToDataset(input: {
+  tenantId: string;
+  id: string;
+  name: string;
+  description?: string;
+  datasetRef?: string;
+  scenarioCount: number;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}): ReplayDataset {
+  return {
+    id: input.id,
+    tenantId: input.tenantId,
+    name: input.name,
+    description: input.description,
+    model: firstNonEmptyString(input.metadata.model) ?? "unknown",
+    promptVersion: firstNonEmptyString(
+      input.metadata.promptVersion,
+      input.metadata.prompt_version
+    ) ?? undefined,
+    externalDatasetId: input.datasetRef,
+    caseCount: input.scenarioCount,
+    metadata: { ...input.metadata },
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+  };
+}
+
+function mapReplayRunToJob(run: ReplayRun): ReplayJob {
+  return {
+    id: run.id,
+    tenantId: run.tenantId,
+    baselineId: run.datasetId,
+    status: run.status,
+    parameters: { ...run.parameters },
+    summary: { ...run.summary },
+    diff: { ...run.diff },
+    error: run.error,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+  };
+}
+
+function mapReplayJobToRun(input: ReplayJob): ReplayRun {
+  return {
+    id: input.id,
+    tenantId: input.tenantId,
+    datasetId: input.baselineId,
+    status: input.status,
+    parameters: { ...input.parameters },
+    summary: { ...input.summary },
+    diff: { ...input.diff },
+    error: input.error,
+    startedAt: input.startedAt,
+    finishedAt: input.finishedAt,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
   };
 }
 
@@ -2600,6 +3285,11 @@ function normalizeAlertOrchestrationExecutionListInput(
     sourceId: firstNonEmptyString(input.sourceId) ?? undefined,
     dedupeHit: typeof input.dedupeHit === "boolean" ? input.dedupeHit : undefined,
     suppressed: typeof input.suppressed === "boolean" ? input.suppressed : undefined,
+    dispatchMode:
+      input.dispatchMode === "rule" || input.dispatchMode === "fallback"
+        ? input.dispatchMode
+        : undefined,
+    hasConflict: typeof input.hasConflict === "boolean" ? input.hasConflict : undefined,
     simulated: typeof input.simulated === "boolean" ? input.simulated : undefined,
     from: from ?? undefined,
     to: to ?? undefined,
@@ -2693,12 +3383,54 @@ function normalizeQualityDailyMetricsInput(
 ): NormalizedQualityDailyMetricsInput {
   const rawLimit = toOptionalNonNegativeInteger(input.limit);
   const limit = Math.min(366, Math.max(1, rawLimit ?? DEFAULT_QUALITY_DAILY_METRIC_LIMIT));
+  const groupByRaw = firstNonEmptyString((input as { groupBy?: unknown }).groupBy);
+  const groupBy =
+    groupByRaw &&
+    Object.prototype.hasOwnProperty.call(QUALITY_EXTERNAL_GROUP_BY_TO_COLUMN, groupByRaw)
+      ? (groupByRaw as QualityExternalMetricGroupBy)
+      : undefined;
   return {
     from: toIsoString(input.from) ?? undefined,
     to: toIsoString(input.to) ?? undefined,
     scorecardKey: firstNonEmptyString(input.scorecardKey) ?? undefined,
+    provider: normalizeQualityExternalFilterValue(input.provider, { lowerCase: true }),
+    repo: normalizeQualityExternalFilterValue(input.repo, { lowerCase: true }),
+    workflow: normalizeQualityExternalFilterValue(input.workflow),
+    runId: normalizeQualityExternalFilterValue(input.runId),
+    groupBy,
     limit,
   };
+}
+
+function normalizeQualityExternalMetricGroupsInput(
+  input: ListQualityExternalMetricGroupsInput
+): NormalizedQualityExternalMetricGroupsInput {
+  const normalized = normalizeQualityDailyMetricsInput(input);
+  return {
+    from: normalized.from,
+    to: normalized.to,
+    scorecardKey: normalized.scorecardKey,
+    provider: normalized.provider,
+    repo: normalized.repo,
+    workflow: normalized.workflow,
+    runId: normalized.runId,
+    groupBy: input.groupBy,
+    limit: normalized.limit,
+  };
+}
+
+function normalizeQualityExternalFilterValue(
+  value: unknown,
+  options: { lowerCase?: boolean } = {}
+): string | undefined {
+  const normalized = firstNonEmptyString(value) ?? undefined;
+  if (!normalized) {
+    return undefined;
+  }
+  if (options.lowerCase) {
+    return normalized.toLowerCase();
+  }
+  return normalized;
 }
 
 function normalizeQualityScorecardListInput(
@@ -2723,6 +3455,26 @@ function normalizeReplayBaselineListInput(
   };
 }
 
+function normalizeReplayDatasetListInput(
+  input: ListReplayDatasetsInput = {}
+): NormalizedReplayDatasetListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(200, Math.max(1, rawLimit ?? DEFAULT_REPLAY_BASELINE_LIMIT));
+  return {
+    keyword: firstNonEmptyString(input.keyword) ?? undefined,
+    limit,
+  };
+}
+
+function normalizeReplayDatasetCaseListInput(
+  input: ListReplayDatasetCasesInput = {}
+): NormalizedReplayDatasetCaseListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  return {
+    limit: Math.min(5000, Math.max(1, rawLimit ?? DEFAULT_REPLAY_DATASET_CASE_LIMIT)),
+  };
+}
+
 function normalizeReplayJobListInput(
   input: ListReplayJobsInput = {}
 ): NormalizedReplayJobListInput {
@@ -2734,6 +3486,75 @@ function normalizeReplayJobListInput(
     status: statusRaw ? toReplayJobStatus(statusRaw) : undefined,
     limit,
   };
+}
+
+function normalizeReplayRunListInput(
+  input: ListReplayRunsInput = {}
+): NormalizedReplayRunListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(200, Math.max(1, rawLimit ?? DEFAULT_REPLAY_JOB_LIMIT));
+  const statusRaw = firstNonEmptyString(input.status);
+  return {
+    datasetId: firstNonEmptyString(input.datasetId) ?? undefined,
+    status: statusRaw ? toReplayJobStatus(statusRaw) : undefined,
+    limit,
+  };
+}
+
+function normalizeReplayArtifactListInput(
+  input: ListReplayArtifactsInput = {}
+): NormalizedReplayArtifactListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  return {
+    limit: Math.min(100, Math.max(1, rawLimit ?? DEFAULT_REPLAY_ARTIFACT_LIMIT)),
+  };
+}
+
+function normalizeWebhookReplayTaskListInput(
+  input: ListWebhookReplayTasksInput = {}
+): NormalizedWebhookReplayTaskListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(500, Math.max(1, rawLimit ?? DEFAULT_WEBHOOK_REPLAY_TASK_LIMIT));
+  const statusRaw = firstNonEmptyString(input.status);
+  return {
+    webhookId: firstNonEmptyString(input.webhookId) ?? undefined,
+    status:
+      statusRaw &&
+      WEBHOOK_REPLAY_TASK_STATUS_SET.includes(statusRaw as WebhookReplayTaskStatus)
+        ? (statusRaw as WebhookReplayTaskStatus)
+        : undefined,
+    limit,
+    cursor: firstNonEmptyString(input.cursor) ?? undefined,
+  };
+}
+
+function normalizeWebhookReplayEventListInput(
+  input: ListWebhookReplayEventsInput
+): NormalizedWebhookReplayEventListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(500, Math.max(1, rawLimit ?? DEFAULT_WEBHOOK_REPLAY_EVENT_LIMIT));
+  const eventTypes = normalizeDistinctStringArray(input.eventTypes, { lowerCase: true })
+    .map((item) => toWebhookEventType(item))
+    .filter((item): item is WebhookEventType => Boolean(item));
+
+  return {
+    eventTypes,
+    from: toIsoString(input.from) ?? undefined,
+    to: toIsoString(input.to) ?? undefined,
+    limit,
+  };
+}
+
+function compareWebhookReplayEventDesc(left: WebhookReplayEvent, right: WebhookReplayEvent): number {
+  const leftTs = Date.parse(left.occurredAt);
+  const rightTs = Date.parse(right.occurredAt);
+  if (Number.isFinite(leftTs) && Number.isFinite(rightTs) && leftTs !== rightTs) {
+    return rightTs - leftTs;
+  }
+  if (left.occurredAt !== right.occurredAt) {
+    return right.occurredAt.localeCompare(left.occurredAt);
+  }
+  return right.id.localeCompare(left.id);
 }
 
 function normalizeHeatmapTimezone(value: string | undefined): string {
@@ -2779,6 +3600,7 @@ function normalizeUsageAggregateInput(
     tenantId: firstNonEmptyString(input?.tenantId) ?? DEFAULT_TENANT_ID,
     from: normalizedFrom ?? undefined,
     to: normalizedTo ?? undefined,
+    project: firstNonEmptyString(input?.project)?.toLowerCase() ?? undefined,
     limit,
   };
 }
@@ -3072,8 +3894,13 @@ class ControlPlaneRepository {
   private readonly memoryApiKeys: ApiKey[] = [];
   private readonly memoryApiKeyByHash = new Map<string, MemoryApiKeyHashRecord>();
   private readonly memoryWebhookEndpoints: WebhookEndpoint[] = [];
+  private readonly memoryWebhookReplayTasks: WebhookReplayTask[] = [];
   private readonly memoryQualityEvents: QualityEvent[] = [];
   private readonly memoryQualityScorecards: QualityScorecard[] = [];
+  private readonly memoryReplayDatasets: ReplayDataset[] = [];
+  private readonly memoryReplayDatasetCases: ReplayDatasetCase[] = [];
+  private readonly memoryReplayRuns: ReplayRun[] = [];
+  private readonly memoryReplayArtifacts: ReplayArtifact[] = [];
   private readonly memoryReplayBaselines: ReplayBaseline[] = [];
   private readonly memoryReplayJobs: ReplayJob[] = [];
   private readonly memoryReplayJobDiffById = new Map<string, MemoryReplayJobDiffRecord>();
@@ -4139,6 +4966,10 @@ class ControlPlaneRepository {
         params.push(normalized.to);
         whereClauses.push(`sess.started_at <= $${params.length}::timestamptz`);
       }
+      if (normalized.project) {
+        params.push(normalized.project);
+        whereClauses.push(`LOWER(${USAGE_AGGREGATE_PROJECT_SQL}) = $${params.length}`);
+      }
 
       const result = await pool.query(
         `WITH event_cost AS (
@@ -4260,6 +5091,10 @@ class ControlPlaneRepository {
         params.push(normalized.to);
         whereClauses.push(`sess.started_at <= $${params.length}::timestamptz`);
       }
+      if (normalized.project) {
+        params.push(normalized.project);
+        whereClauses.push(`LOWER(${USAGE_AGGREGATE_PROJECT_SQL}) = $${params.length}`);
+      }
 
       const result = await pool.query(
         `WITH event_cost AS (
@@ -4374,6 +5209,10 @@ class ControlPlaneRepository {
       if (normalized.to) {
         params.push(normalized.to);
         whereClauses.push(`sess.started_at <= $${params.length}::timestamptz`);
+      }
+      if (normalized.project) {
+        params.push(normalized.project);
+        whereClauses.push(`LOWER(${USAGE_AGGREGATE_PROJECT_SQL}) = $${params.length}`);
       }
       params.push(normalized.limit);
 
@@ -4493,6 +5332,10 @@ class ControlPlaneRepository {
       if (normalized.to) {
         params.push(normalized.to);
         whereClauses.push(`sess.started_at <= $${params.length}::timestamptz`);
+      }
+      if (normalized.project) {
+        params.push(normalized.project);
+        whereClauses.push(`LOWER(${USAGE_AGGREGATE_PROJECT_SQL}) = $${params.length}`);
       }
       params.push(normalized.limit);
 
@@ -6789,6 +7632,8 @@ class ControlPlaneRepository {
     try {
       const params: unknown[] = [normalizedTenantId];
       const whereClauses: string[] = ["tenant_id = $1"];
+      const fallbackDispatchWhereSql =
+        "(COALESCE(metadata ->> 'dispatchMode', '') = 'fallback' OR COALESCE(metadata ->> 'fallback', '') = 'true')";
 
       if (normalized.ruleId) {
         params.push(normalized.ruleId);
@@ -6817,6 +7662,20 @@ class ControlPlaneRepository {
       if (normalized.suppressed !== undefined) {
         params.push(normalized.suppressed);
         whereClauses.push(`suppressed = $${params.length}`);
+      }
+      if (normalized.dispatchMode) {
+        whereClauses.push(
+          normalized.dispatchMode === "fallback"
+            ? fallbackDispatchWhereSql
+            : `NOT ${fallbackDispatchWhereSql}`
+        );
+      }
+      if (normalized.hasConflict !== undefined) {
+        whereClauses.push(
+          normalized.hasConflict
+            ? "jsonb_array_length(COALESCE(conflict_rule_ids, '[]'::jsonb)) > 0"
+            : "jsonb_array_length(COALESCE(conflict_rule_ids, '[]'::jsonb)) = 0"
+        );
       }
       if (normalized.simulated !== undefined) {
         params.push(normalized.simulated);
@@ -6905,6 +7764,7 @@ class ControlPlaneRepository {
     const conflictRuleIds = normalizeDistinctStringArray(input.conflictRuleIds);
     const severityRaw = firstNonEmptyString(input.severity);
     const createdAt = toIsoString(input.createdAt) ?? new Date().toISOString();
+    const metadata = toDbRow(input.metadata) ?? {};
     const execution: AlertOrchestrationExecutionLog = {
       id: firstNonEmptyString(input.id) ?? crypto.randomUUID(),
       tenantId: normalizedTenantId,
@@ -6914,11 +7774,15 @@ class ControlPlaneRepository {
       severity: severityRaw ? toAlertSeverity(severityRaw) : undefined,
       sourceId: firstNonEmptyString(input.sourceId) ?? undefined,
       channels,
+      dispatchMode:
+        input.dispatchMode === "rule" || input.dispatchMode === "fallback"
+          ? input.dispatchMode
+          : resolveAlertOrchestrationDispatchMode(metadata),
       conflictRuleIds,
       dedupeHit: input.dedupeHit === true,
       suppressed: input.suppressed === true,
       simulated: input.simulated === true,
-      metadata: toDbRow(input.metadata) ?? {},
+      metadata,
       createdAt,
     };
 
@@ -7404,6 +8268,77 @@ class ControlPlaneRepository {
         normalizedJobId,
         reason,
         firstNonEmptyString(options.userId) ?? undefined,
+        updatedAt
+      );
+    }
+  }
+
+  async approveReplicationJob(
+    tenantId: string,
+    jobId: string,
+    input: ReplicationJobApproveInput = {},
+    options: {
+      userId?: string;
+    } = {}
+  ): Promise<ReplicationJob | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedJobId = firstNonEmptyString(jobId);
+    if (!normalizedJobId) {
+      return null;
+    }
+    const updatedAt = new Date().toISOString();
+    const reason = firstNonEmptyString(input.reason) ?? undefined;
+    const approverUserId = firstNonEmptyString(options.userId) ?? undefined;
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.approveReplicationJobInMemory(
+        normalizedTenantId,
+        normalizedJobId,
+        reason,
+        approverUserId,
+        updatedAt
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `UPDATE residency_replication_jobs
+         SET status = 'running',
+             reason = COALESCE($3, reason),
+             approved_by_user_id = COALESCE($4, approved_by_user_id),
+             started_at = COALESCE(started_at, $5::timestamptz),
+             updated_at = $5::timestamptz
+         WHERE tenant_id = $1
+           AND id = $2
+           AND status = 'pending'
+         RETURNING id,
+                   tenant_id,
+                   source_region,
+                   target_region,
+                   status,
+                   reason,
+                   created_by_user_id,
+                   approved_by_user_id,
+                   metadata,
+                   created_at,
+                   updated_at,
+                   started_at,
+                   finished_at`,
+        [normalizedTenantId, normalizedJobId, reason ?? null, approverUserId ?? null, updatedAt]
+      );
+      const row = result.rows[0];
+      if (row) {
+        return mapReplicationJobRow(row);
+      }
+      return await this.getReplicationJobById(normalizedTenantId, normalizedJobId);
+    } catch (error) {
+      this.disableDb(error, "审批区域复制任务失败");
+      return this.approveReplicationJobInMemory(
+        normalizedTenantId,
+        normalizedJobId,
+        reason,
+        approverUserId,
         updatedAt
       );
     }
@@ -10244,6 +11179,7 @@ class ControlPlaneRepository {
                 enabled,
                 event_types,
                 secret_hash,
+                secret_ciphertext,
                 headers,
                 created_at,
                 updated_at
@@ -10284,6 +11220,7 @@ class ControlPlaneRepository {
                 enabled,
                 event_types,
                 secret_hash,
+                secret_ciphertext,
                 headers,
                 created_at,
                 updated_at
@@ -10320,6 +11257,7 @@ class ControlPlaneRepository {
       enabled: input.enabled !== false,
       eventTypes: normalizeDistinctStringArray(input.eventTypes, { lowerCase: true }),
       secretHash: firstNonEmptyString(input.secretHash) ?? undefined,
+      secretCiphertext: firstNonEmptyString(input.secretCiphertext) ?? undefined,
       headers: normalizeStringRecord(input.headers),
       createdAt: now,
       updatedAt: now,
@@ -10340,6 +11278,7 @@ class ControlPlaneRepository {
            enabled,
            event_types,
            secret_hash,
+           secret_ciphertext,
            headers,
            created_at,
            updated_at
@@ -10352,9 +11291,10 @@ class ControlPlaneRepository {
            $5,
            $6::jsonb,
            $7,
-           $8::jsonb,
-           $9::timestamptz,
-           $9::timestamptz
+           $8,
+           $9::jsonb,
+           $10::timestamptz,
+           $10::timestamptz
          )
          ON CONFLICT (tenant_id, name)
          DO NOTHING
@@ -10365,6 +11305,7 @@ class ControlPlaneRepository {
                    enabled,
                    event_types,
                    secret_hash,
+                   secret_ciphertext,
                    headers,
                    created_at,
                    updated_at`,
@@ -10376,6 +11317,7 @@ class ControlPlaneRepository {
           endpoint.enabled,
           safeStringifyJson(endpoint.eventTypes),
           endpoint.secretHash ?? null,
+          endpoint.secretCiphertext ?? null,
           safeStringifyJson(endpoint.headers),
           endpoint.createdAt,
         ]
@@ -10416,6 +11358,7 @@ class ControlPlaneRepository {
     }
 
     const hasSecretHash = Object.prototype.hasOwnProperty.call(input, "secretHash");
+    const hasSecretCiphertext = Object.prototype.hasOwnProperty.call(input, "secretCiphertext");
     const normalizedInput: UpdateWebhookEndpointInput = {
       name: firstNonEmptyString(input.name) ?? undefined,
       url: firstNonEmptyString(input.url) ?? undefined,
@@ -10424,6 +11367,9 @@ class ControlPlaneRepository {
         ? normalizeDistinctStringArray(input.eventTypes, { lowerCase: true })
         : undefined,
       secretHash: hasSecretHash ? firstNonEmptyString(input.secretHash ?? undefined) ?? null : undefined,
+      secretCiphertext: hasSecretCiphertext
+        ? firstNonEmptyString(input.secretCiphertext ?? undefined) ?? null
+        : undefined,
       headers: input.headers !== undefined ? normalizeStringRecord(input.headers) : undefined,
     };
     const hasEventTypes = Array.isArray(normalizedInput.eventTypes);
@@ -10437,6 +11383,7 @@ class ControlPlaneRepository {
         normalizedEndpointId,
         normalizedInput,
         hasSecretHash,
+        hasSecretCiphertext,
         updatedAt
       );
     }
@@ -10455,11 +11402,15 @@ class ControlPlaneRepository {
                WHEN $8::boolean THEN $9
                ELSE secret_hash
              END,
+             secret_ciphertext = CASE
+               WHEN $10::boolean THEN $11
+               ELSE secret_ciphertext
+             END,
              headers = CASE
-               WHEN $10::boolean THEN $11::jsonb
+               WHEN $12::boolean THEN $13::jsonb
                ELSE headers
              END,
-             updated_at = $12::timestamptz
+             updated_at = $14::timestamptz
          WHERE tenant_id = $1
            AND id = $2
          RETURNING id,
@@ -10469,6 +11420,7 @@ class ControlPlaneRepository {
                    enabled,
                    event_types,
                    secret_hash,
+                   secret_ciphertext,
                    headers,
                    created_at,
                    updated_at`,
@@ -10482,6 +11434,8 @@ class ControlPlaneRepository {
           safeStringifyJson(normalizedInput.eventTypes ?? []),
           hasSecretHash,
           hasSecretHash ? normalizedInput.secretHash ?? null : null,
+          hasSecretCiphertext,
+          hasSecretCiphertext ? normalizedInput.secretCiphertext ?? null : null,
           hasHeaders,
           safeStringifyJson(normalizedInput.headers ?? {}),
           updatedAt,
@@ -10496,6 +11450,7 @@ class ControlPlaneRepository {
         normalizedEndpointId,
         normalizedInput,
         hasSecretHash,
+        hasSecretCiphertext,
         updatedAt
       );
     }
@@ -10528,6 +11483,424 @@ class ControlPlaneRepository {
     }
   }
 
+  async createWebhookReplayTask(
+    tenantId: string,
+    input: CreateWebhookReplayTaskInput
+  ): Promise<WebhookReplayTask> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const webhookId = firstNonEmptyString(input.webhookId);
+    if (!webhookId) {
+      throw new Error("webhook_replay_task_webhook_id_required");
+    }
+
+    const now = new Date().toISOString();
+    const replayTask: WebhookReplayTask = {
+      id: crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      webhookId,
+      status: input.status ? toWebhookReplayTaskStatus(input.status) : "queued",
+      dryRun: input.dryRun !== false,
+      filters: normalizeWebhookReplayFilters(input.filters),
+      result: toDbRow(input.result) ?? {},
+      error: firstNonEmptyString(input.error) ?? undefined,
+      requestedAt: toIsoString(input.requestedAt) ?? now,
+      startedAt: toIsoString(input.startedAt) ?? undefined,
+      finishedAt: toIsoString(input.finishedAt) ?? undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.createWebhookReplayTaskToMemory(replayTask);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO webhook_replay_tasks (
+           id,
+           tenant_id,
+           webhook_id,
+           status,
+           dry_run,
+           filters,
+           result,
+           error,
+           requested_at,
+           started_at,
+           finished_at,
+           created_at,
+           updated_at
+         )
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6::jsonb,
+           $7::jsonb,
+           $8,
+           $9::timestamptz,
+           $10::timestamptz,
+           $11::timestamptz,
+           $12::timestamptz,
+           $12::timestamptz
+         )
+         RETURNING id,
+                   tenant_id,
+                   webhook_id,
+                   status,
+                   dry_run,
+                   filters,
+                   result,
+                   error,
+                   requested_at,
+                   started_at,
+                   finished_at,
+                   created_at,
+                   updated_at`,
+        [
+          replayTask.id,
+          replayTask.tenantId,
+          replayTask.webhookId,
+          replayTask.status,
+          replayTask.dryRun,
+          safeStringifyJson(replayTask.filters),
+          safeStringifyJson(replayTask.result),
+          replayTask.error ?? null,
+          replayTask.requestedAt,
+          replayTask.startedAt ?? null,
+          replayTask.finishedAt ?? null,
+          replayTask.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        return this.createWebhookReplayTaskToMemory(replayTask);
+      }
+      return mapWebhookReplayTaskRow(row);
+    } catch (error) {
+      this.disableDb(error, "写入 webhook_replay_tasks 失败");
+      return this.createWebhookReplayTaskToMemory(replayTask);
+    }
+  }
+
+  async listWebhookReplayTasks(
+    tenantId: string,
+    input: ListWebhookReplayTasksInput = {}
+  ): Promise<WebhookReplayTaskListResult> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalized = normalizeWebhookReplayTaskListInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listWebhookReplayTasksFromMemory(normalizedTenantId, normalized);
+    }
+
+    try {
+      const cursor = decodeTimePaginationCursor(normalized.cursor);
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+
+      if (normalized.webhookId) {
+        params.push(normalized.webhookId);
+        whereClauses.push(`webhook_id = $${params.length}`);
+      }
+      if (normalized.status) {
+        params.push(normalized.status);
+        whereClauses.push(`status = $${params.length}`);
+      }
+      if (cursor) {
+        params.push(cursor.timestamp);
+        params.push(cursor.id);
+        whereClauses.push(
+          `(requested_at < $${params.length - 1}::timestamptz OR (requested_at = $${params.length - 1}::timestamptz AND id < $${params.length}))`
+        );
+      }
+      params.push(normalized.limit + 1);
+
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                webhook_id,
+                status,
+                dry_run,
+                filters,
+                result,
+                error,
+                requested_at,
+                started_at,
+                finished_at,
+                created_at,
+                updated_at,
+                to_char(requested_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+                  AS requested_at_cursor
+         FROM webhook_replay_tasks
+         WHERE ${whereClauses.join("\n           AND ")}
+         ORDER BY requested_at DESC, id DESC
+         LIMIT $${params.length}`,
+        params
+      );
+
+      const hasMore = result.rows.length > normalized.limit;
+      const cursorRows = hasMore ? result.rows.slice(0, normalized.limit) : result.rows;
+      const items = cursorRows.map((row) => mapWebhookReplayTaskRow(row));
+
+      const lastCursorRow = cursorRows[cursorRows.length - 1];
+      const cursorTimestamp =
+        firstNonEmptyString((lastCursorRow as DbRow | undefined)?.requested_at_cursor) ??
+        items[items.length - 1]?.requestedAt;
+      const nextCursor =
+        hasMore &&
+        typeof cursorTimestamp === "string" &&
+        Number.isFinite(Date.parse(cursorTimestamp)) &&
+        items.length > 0
+          ? encodeTimePaginationCursor({
+              timestamp: cursorTimestamp,
+              id: items[items.length - 1]?.id ?? "",
+            })
+          : null;
+
+      return {
+        items,
+        total: items.length,
+        nextCursor,
+      };
+    } catch (error) {
+      this.disableDb(error, "查询 webhook_replay_tasks 失败");
+      return this.listWebhookReplayTasksFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
+  async getWebhookReplayTaskById(
+    tenantId: string,
+    taskId: string
+  ): Promise<WebhookReplayTask | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedTaskId = firstNonEmptyString(taskId);
+    if (!normalizedTaskId) {
+      return null;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getWebhookReplayTaskByIdFromMemory(normalizedTenantId, normalizedTaskId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                webhook_id,
+                status,
+                dry_run,
+                filters,
+                result,
+                error,
+                requested_at,
+                started_at,
+                finished_at,
+                created_at,
+                updated_at
+         FROM webhook_replay_tasks
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedTaskId]
+      );
+      const row = result.rows[0];
+      return row ? mapWebhookReplayTaskRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "按 id 查询 webhook_replay_tasks 失败");
+      return this.getWebhookReplayTaskByIdFromMemory(normalizedTenantId, normalizedTaskId);
+    }
+  }
+
+  async updateWebhookReplayTask(
+    tenantId: string,
+    taskId: string,
+    input: UpdateWebhookReplayTaskInput
+  ): Promise<WebhookReplayTask | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedTaskId = firstNonEmptyString(taskId);
+    if (!normalizedTaskId) {
+      return null;
+    }
+
+    const hasStatus = Object.prototype.hasOwnProperty.call(input, "status");
+    const hasResult = Object.prototype.hasOwnProperty.call(input, "result");
+    const hasError = Object.prototype.hasOwnProperty.call(input, "error");
+    const hasStartedAt = Object.prototype.hasOwnProperty.call(input, "startedAt");
+    const hasFinishedAt = Object.prototype.hasOwnProperty.call(input, "finishedAt");
+    const normalizedStatus =
+      hasStatus && firstNonEmptyString(input.status)
+        ? toWebhookReplayTaskStatus(input.status)
+        : undefined;
+    const normalizedResult = hasResult ? toDbRow(input.result) ?? {} : undefined;
+    const normalizedError = hasError ? firstNonEmptyString(input.error ?? undefined) ?? null : undefined;
+    const normalizedStartedAt = hasStartedAt ? toIsoString(input.startedAt ?? undefined) ?? null : undefined;
+    const normalizedFinishedAt = hasFinishedAt
+      ? toIsoString(input.finishedAt ?? undefined) ?? null
+      : undefined;
+    const updatedAt = toIsoString(input.updatedAt) ?? new Date().toISOString();
+    const normalizedFromStatuses = (input.fromStatuses ?? [])
+      .map((status) => firstNonEmptyString(status))
+      .filter((status): status is string => Boolean(status))
+      .map((status) => toWebhookReplayTaskStatus(status));
+    const hasFromStatuses = normalizedFromStatuses.length > 0;
+
+    if (!hasStatus && !hasResult && !hasError && !hasStartedAt && !hasFinishedAt) {
+      return this.getWebhookReplayTaskById(normalizedTenantId, normalizedTaskId);
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.updateWebhookReplayTaskInMemory(
+        normalizedTenantId,
+        normalizedTaskId,
+        {
+          status: normalizedStatus,
+          result: normalizedResult,
+          error: normalizedError,
+          startedAt: normalizedStartedAt,
+          finishedAt: normalizedFinishedAt,
+          updatedAt,
+          fromStatuses: hasFromStatuses ? normalizedFromStatuses : undefined,
+        },
+        {
+          hasStatus,
+          hasResult,
+          hasError,
+          hasStartedAt,
+          hasFinishedAt,
+        }
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `UPDATE webhook_replay_tasks
+         SET status = CASE
+               WHEN $3::boolean THEN $4
+               ELSE status
+             END,
+             result = CASE
+               WHEN $5::boolean THEN $6::jsonb
+               ELSE result
+             END,
+             error = CASE
+               WHEN $7::boolean THEN $8
+               ELSE error
+             END,
+             started_at = CASE
+               WHEN $9::boolean THEN $10::timestamptz
+               ELSE started_at
+             END,
+             finished_at = CASE
+               WHEN $11::boolean THEN $12::timestamptz
+               ELSE finished_at
+             END,
+             updated_at = $13::timestamptz
+         WHERE tenant_id = $1
+           AND id = $2
+           AND (
+             NOT $14::boolean
+             OR status = ANY($15::text[])
+           )
+         RETURNING id,
+                   tenant_id,
+                   webhook_id,
+                   status,
+                   dry_run,
+                   filters,
+                   result,
+                   error,
+                   requested_at,
+                   started_at,
+                   finished_at,
+                   created_at,
+                   updated_at`,
+        [
+          normalizedTenantId,
+          normalizedTaskId,
+          hasStatus,
+          normalizedStatus ?? null,
+          hasResult,
+          safeStringifyJson(normalizedResult ?? {}),
+          hasError,
+          hasError ? normalizedError : null,
+          hasStartedAt,
+          hasStartedAt ? normalizedStartedAt : null,
+          hasFinishedAt,
+          hasFinishedAt ? normalizedFinishedAt : null,
+          updatedAt,
+          hasFromStatuses,
+          normalizedFromStatuses,
+        ]
+      );
+      const row = result.rows[0];
+      return row ? mapWebhookReplayTaskRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "更新 webhook_replay_tasks 失败");
+      return this.updateWebhookReplayTaskInMemory(
+        normalizedTenantId,
+        normalizedTaskId,
+        {
+          status: normalizedStatus,
+          result: normalizedResult,
+          error: normalizedError,
+          startedAt: normalizedStartedAt,
+          finishedAt: normalizedFinishedAt,
+          updatedAt,
+          fromStatuses: hasFromStatuses ? normalizedFromStatuses : undefined,
+        },
+        {
+          hasStatus,
+          hasResult,
+          hasError,
+          hasStartedAt,
+          hasFinishedAt,
+        }
+      );
+    }
+  }
+
+  async listWebhookReplayEvents(
+    tenantId: string,
+    input: ListWebhookReplayEventsInput
+  ): Promise<WebhookReplayEvent[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalized = normalizeWebhookReplayEventListInput(input);
+    if (normalized.eventTypes.length === 0) {
+      return [];
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listWebhookReplayEventsFromMemory(normalizedTenantId, normalized);
+    }
+
+    try {
+      const items: WebhookReplayEvent[] = [];
+      for (const eventType of normalized.eventTypes) {
+        const currentItems = await this.queryWebhookReplayEventsByType(
+          pool,
+          normalizedTenantId,
+          eventType,
+          normalized.from,
+          normalized.to,
+          normalized.limit
+        );
+        items.push(...currentItems);
+      }
+
+      return items.sort(compareWebhookReplayEventDesc).slice(0, normalized.limit);
+    } catch (error) {
+      this.disableDb(error, "查询 webhook replay events 失败");
+      return this.listWebhookReplayEventsFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
   async createQualityEvent(tenantId: string, input: CreateQualityEventInput): Promise<QualityEvent> {
     const normalizedTenantId = normalizeScopedTenantId(tenantId);
     const scorecardKey = firstNonEmptyString(input.scorecardKey);
@@ -10536,14 +11909,19 @@ class ControlPlaneRepository {
     }
     const createdAt = toIsoString(input.createdAt) ?? new Date().toISOString();
     const score = normalizeQualityScore(input.score);
+    const metadata = toDbRow(input.metadata) ?? {};
+    const externalSource =
+      normalizeQualityExternalSourceMetadata(input.externalSource) ??
+      extractQualityExternalSourceFromMetadata(metadata);
     const qualityEvent: QualityEvent = {
       id: crypto.randomUUID(),
       tenantId: normalizedTenantId,
       scorecardKey,
       metricKey: firstNonEmptyString(input.metricKey) ?? undefined,
+      externalSource,
       score,
       passed: typeof input.passed === "boolean" ? input.passed : score >= 0.8,
-      metadata: toDbRow(input.metadata) ?? {},
+      metadata: mergeQualityExternalSourceIntoMetadata(metadata, externalSource),
       createdAt,
     };
 
@@ -10559,16 +11937,37 @@ class ControlPlaneRepository {
            tenant_id,
            scorecard_key,
            metric_key,
+           provider,
+           repository,
+           workflow,
+           run_id,
            score,
            passed,
            metadata,
            created_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::timestamptz)
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6,
+           $7,
+           $8,
+           $9,
+           $10,
+           $11::jsonb,
+           $12::timestamptz
+         )
          RETURNING id,
                    tenant_id,
                    scorecard_key,
                    metric_key,
+                   provider,
+                   repository,
+                   workflow,
+                   run_id,
                    score,
                    passed,
                    metadata,
@@ -10578,6 +11977,10 @@ class ControlPlaneRepository {
           qualityEvent.tenantId,
           qualityEvent.scorecardKey,
           qualityEvent.metricKey ?? null,
+          qualityEvent.externalSource?.provider ?? null,
+          qualityEvent.externalSource?.repo ?? null,
+          qualityEvent.externalSource?.workflow ?? null,
+          qualityEvent.externalSource?.runId ?? null,
           qualityEvent.score,
           qualityEvent.passed,
           safeStringifyJson(qualityEvent.metadata),
@@ -10621,6 +12024,22 @@ class ControlPlaneRepository {
         params.push(normalized.scorecardKey);
         whereClauses.push(`scorecard_key = $${params.length}`);
       }
+      if (normalized.provider) {
+        params.push(normalized.provider);
+        whereClauses.push(`LOWER(COALESCE(provider, '')) = $${params.length}`);
+      }
+      if (normalized.repo) {
+        params.push(normalized.repo);
+        whereClauses.push(`LOWER(COALESCE(repository, '')) = $${params.length}`);
+      }
+      if (normalized.workflow) {
+        params.push(normalized.workflow);
+        whereClauses.push(`workflow = $${params.length}`);
+      }
+      if (normalized.runId) {
+        params.push(normalized.runId);
+        whereClauses.push(`run_id = $${params.length}`);
+      }
       params.push(normalized.limit);
       const result = await pool.query(
         `SELECT to_char((created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS metric_date,
@@ -10645,6 +12064,78 @@ class ControlPlaneRepository {
     } catch (error) {
       this.disableDb(error, "聚合 quality_events 日指标失败");
       return this.listQualityDailyMetricsFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
+  async listQualityExternalMetricGroups(
+    tenantId: string,
+    input: ListQualityExternalMetricGroupsInput
+  ): Promise<QualityExternalMetricGroup[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalized = normalizeQualityExternalMetricGroupsInput(input);
+    const groupColumn = QUALITY_EXTERNAL_GROUP_BY_TO_COLUMN[normalized.groupBy];
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listQualityExternalMetricGroupsFromMemory(normalizedTenantId, normalized);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+      if (normalized.from) {
+        params.push(normalized.from);
+        whereClauses.push(`created_at >= $${params.length}::timestamptz`);
+      }
+      if (normalized.to) {
+        params.push(normalized.to);
+        whereClauses.push(`created_at <= $${params.length}::timestamptz`);
+      }
+      if (normalized.scorecardKey) {
+        params.push(normalized.scorecardKey);
+        whereClauses.push(`scorecard_key = $${params.length}`);
+      }
+      if (normalized.provider) {
+        params.push(normalized.provider);
+        whereClauses.push(`LOWER(COALESCE(provider, '')) = $${params.length}`);
+      }
+      if (normalized.repo) {
+        params.push(normalized.repo);
+        whereClauses.push(`LOWER(COALESCE(repository, '')) = $${params.length}`);
+      }
+      if (normalized.workflow) {
+        params.push(normalized.workflow);
+        whereClauses.push(`workflow = $${params.length}`);
+      }
+      if (normalized.runId) {
+        params.push(normalized.runId);
+        whereClauses.push(`run_id = $${params.length}`);
+      }
+
+      params.push(normalized.limit);
+      const result = await pool.query(
+        `SELECT COALESCE(NULLIF(${groupColumn}, ''), 'unknown') AS group_value,
+                COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE passed)::int AS passed,
+                COUNT(*) FILTER (WHERE NOT passed)::int AS failed,
+                AVG(score)::double precision AS average_score
+         FROM quality_events
+         WHERE ${whereClauses.join(" AND ")}
+         GROUP BY group_value
+         ORDER BY total DESC, group_value ASC
+         LIMIT $${params.length}`,
+        params
+      );
+      return result.rows.map((row) => ({
+        groupBy: normalized.groupBy,
+        value: firstNonEmptyString(row.group_value) ?? "unknown",
+        total: Math.max(0, Math.trunc(toNumber(row.total, 0))),
+        passed: Math.max(0, Math.trunc(toNumber(row.passed, 0))),
+        failed: Math.max(0, Math.trunc(toNumber(row.failed, 0))),
+        averageScore: Number(normalizeQualityScore(row.average_score).toFixed(6)),
+      }));
+    } catch (error) {
+      this.disableDb(error, "聚合 quality_events 外部维度失败");
+      return this.listQualityExternalMetricGroupsFromMemory(normalizedTenantId, normalized);
     }
   }
 
@@ -10770,23 +12261,29 @@ class ControlPlaneRepository {
     }
   }
 
-  async createReplayBaseline(
+  async createReplayDataset(
     tenantId: string,
-    input: CreateReplayBaselineInput
-  ): Promise<ReplayBaseline> {
+    input: CreateReplayDatasetInput
+  ): Promise<ReplayDataset> {
     const normalizedTenantId = normalizeScopedTenantId(tenantId);
     const name = firstNonEmptyString(input.name);
+    const model = firstNonEmptyString(input.model);
     if (!name) {
-      throw new Error("replay_baseline_name_required");
+      throw new Error("replay_dataset_name_required");
+    }
+    if (!model) {
+      throw new Error("replay_dataset_model_required");
     }
     const now = toIsoString(input.createdAt) ?? new Date().toISOString();
-    const replayBaseline: ReplayBaseline = {
+    const dataset: ReplayDataset = {
       id: crypto.randomUUID(),
       tenantId: normalizedTenantId,
       name,
       description: firstNonEmptyString(input.description) ?? undefined,
-      datasetRef: firstNonEmptyString(input.datasetRef) ?? undefined,
-      scenarioCount: Math.max(0, Math.trunc(toNumber(input.scenarioCount, 0))),
+      model,
+      promptVersion: firstNonEmptyString(input.promptVersion) ?? undefined,
+      externalDatasetId: firstNonEmptyString(input.externalDatasetId) ?? undefined,
+      caseCount: Math.max(0, Math.trunc(toNumber(input.caseCount, 0))),
       metadata: toDbRow(input.metadata) ?? {},
       createdAt: now,
       updatedAt: now,
@@ -10794,78 +12291,92 @@ class ControlPlaneRepository {
 
     const pool = await this.getPool();
     if (!pool) {
-      return this.createReplayBaselineToMemory(replayBaseline);
+      return this.createReplayDatasetToMemory(dataset);
     }
 
     try {
       const result = await pool.query(
-        `INSERT INTO replay_baselines (
+        `INSERT INTO replay_datasets (
            id,
            tenant_id,
            name,
            description,
-           dataset_ref,
-           scenario_count,
+           model,
+           prompt_version,
+           external_dataset_id,
+           case_count,
            metadata,
            created_at,
            updated_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::timestamptz, $8::timestamptz)
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6,
+           $7,
+           $8,
+           $9::jsonb,
+           $10::timestamptz,
+           $10::timestamptz
+         )
          ON CONFLICT (tenant_id, name)
          DO NOTHING
          RETURNING id,
                    tenant_id,
                    name,
                    description,
-                   dataset_ref,
-                   scenario_count,
+                   model,
+                   prompt_version,
+                   external_dataset_id,
+                   case_count,
                    metadata,
                    created_at,
                    updated_at`,
         [
-          replayBaseline.id,
-          replayBaseline.tenantId,
-          replayBaseline.name,
-          replayBaseline.description ?? null,
-          replayBaseline.datasetRef ?? null,
-          replayBaseline.scenarioCount,
-          safeStringifyJson(replayBaseline.metadata),
-          replayBaseline.createdAt,
+          dataset.id,
+          dataset.tenantId,
+          dataset.name,
+          dataset.description ?? null,
+          dataset.model,
+          dataset.promptVersion ?? null,
+          dataset.externalDatasetId ?? null,
+          dataset.caseCount,
+          safeStringifyJson(dataset.metadata),
+          dataset.createdAt,
         ]
       );
       const row = result.rows[0];
       if (!row) {
-        throw new Error(
-          `replay_baseline_name_already_exists:${replayBaseline.tenantId}:${replayBaseline.name}`
-        );
+        throw new Error(`replay_dataset_name_already_exists:${dataset.tenantId}:${dataset.name}`);
       }
-      return mapReplayBaselineRow(row);
+      return mapReplayDatasetRow(row);
     } catch (error) {
       if (
         error instanceof Error &&
-        error.message.startsWith("replay_baseline_name_already_exists:")
+        error.message.startsWith("replay_dataset_name_already_exists:")
       ) {
         throw error;
       }
       if (isPgUniqueViolation(error)) {
-        throw new Error(
-          `replay_baseline_name_already_exists:${replayBaseline.tenantId}:${replayBaseline.name}`
-        );
+        throw new Error(`replay_dataset_name_already_exists:${dataset.tenantId}:${dataset.name}`);
       }
-      this.disableDb(error, "写入 replay_baselines 失败");
-      return this.createReplayBaselineToMemory(replayBaseline);
+      this.disableDb(error, "写入 replay_datasets 失败");
+      return this.createReplayDatasetToMemory(dataset);
     }
   }
 
-  async listReplayBaselines(
+  async listReplayDatasets(
     tenantId: string,
-    input: ListReplayBaselinesInput = {}
-  ): Promise<ReplayBaseline[]> {
+    input: ListReplayDatasetsInput = {}
+  ): Promise<ReplayDataset[]> {
     const normalizedTenantId = normalizeScopedTenantId(tenantId);
-    const normalized = normalizeReplayBaselineListInput(input);
+    const normalized = normalizeReplayDatasetListInput(input);
     const pool = await this.getPool();
     if (!pool) {
-      return this.listReplayBaselinesFromMemory(normalizedTenantId, normalized);
+      return this.listReplayDatasetsFromMemory(normalizedTenantId, normalized);
     }
 
     try {
@@ -10883,35 +12394,289 @@ class ControlPlaneRepository {
                 tenant_id,
                 name,
                 description,
-                dataset_ref,
-                scenario_count,
+                model,
+                prompt_version,
+                external_dataset_id,
+                case_count,
                 metadata,
                 created_at,
                 updated_at
-         FROM replay_baselines
+         FROM replay_datasets
          WHERE ${whereClauses.join(" AND ")}
          ORDER BY updated_at DESC, id DESC
          LIMIT $${params.length}`,
         params
       );
-      return result.rows.map(mapReplayBaselineRow);
+      return result.rows.map(mapReplayDatasetRow);
     } catch (error) {
-      this.disableDb(error, "查询 replay_baselines 失败");
-      return this.listReplayBaselinesFromMemory(normalizedTenantId, normalized);
+      this.disableDb(error, "查询 replay_datasets 失败");
+      return this.listReplayDatasetsFromMemory(normalizedTenantId, normalized);
     }
   }
 
-  async createReplayJob(tenantId: string, input: CreateReplayJobInput): Promise<ReplayJob> {
+  async getReplayDatasetById(tenantId: string, datasetId: string): Promise<ReplayDataset | null> {
     const normalizedTenantId = normalizeScopedTenantId(tenantId);
-    const baselineId = firstNonEmptyString(input.baselineId);
-    if (!baselineId) {
-      throw new Error("replay_job_baseline_id_required");
+    const normalizedDatasetId = firstNonEmptyString(datasetId);
+    if (!normalizedDatasetId) {
+      return null;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getReplayDatasetByIdFromMemory(normalizedTenantId, normalizedDatasetId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                name,
+                description,
+                model,
+                prompt_version,
+                external_dataset_id,
+                case_count,
+                metadata,
+                created_at,
+                updated_at
+         FROM replay_datasets
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedDatasetId]
+      );
+      const row = result.rows[0];
+      return row ? mapReplayDatasetRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询 replay_datasets 单条记录失败");
+      return this.getReplayDatasetByIdFromMemory(normalizedTenantId, normalizedDatasetId);
+    }
+  }
+
+  async replaceReplayDatasetCases(
+    tenantId: string,
+    datasetId: string,
+    cases: ReplayDatasetCaseInput[]
+  ): Promise<ReplayDatasetCase[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedDatasetId = firstNonEmptyString(datasetId);
+    if (!normalizedDatasetId) {
+      throw new Error("replay_dataset_case_dataset_id_required");
+    }
+
+    const normalizedCases = cases
+      .map((item, index) => {
+        const inputText = firstNonEmptyString(item.input);
+        if (!inputText) {
+          throw new Error(`replay_dataset_case_input_required:${index}`);
+        }
+        const now = new Date().toISOString();
+        return {
+          id: crypto.randomUUID(),
+          tenantId: normalizedTenantId,
+          datasetId: normalizedDatasetId,
+          caseId: firstNonEmptyString(item.caseId) ?? `case-${index + 1}`,
+          sortOrder: Math.max(0, Math.trunc(toNumber(item.sortOrder, index))),
+          input: inputText,
+          expectedOutput: firstNonEmptyString(item.expectedOutput) ?? undefined,
+          baselineOutput: firstNonEmptyString(item.baselineOutput) ?? undefined,
+          candidateInput: firstNonEmptyString(item.candidateInput) ?? undefined,
+          metadata: toDbRow(item.metadata) ?? {},
+          checksum: undefined,
+          createdAt: now,
+          updatedAt: now,
+        } satisfies ReplayDatasetCase;
+      })
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.caseId.localeCompare(b.caseId));
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.replaceReplayDatasetCasesInMemory(
+        normalizedTenantId,
+        normalizedDatasetId,
+        normalizedCases
+      );
+    }
+
+    try {
+      return await this.withTransaction(pool, async (client) => {
+        const datasetResult = await client.query(
+          `SELECT 1
+           FROM replay_datasets
+           WHERE tenant_id = $1
+             AND id = $2
+           LIMIT 1`,
+          [normalizedTenantId, normalizedDatasetId]
+        );
+        if (!datasetResult.rows[0]) {
+          throw new Error(`replay_dataset_not_found:${normalizedTenantId}:${normalizedDatasetId}`);
+        }
+
+        await client.query(
+          `DELETE FROM replay_dataset_cases
+           WHERE tenant_id = $1
+             AND dataset_id = $2`,
+          [normalizedTenantId, normalizedDatasetId]
+        );
+
+        for (const item of normalizedCases) {
+          await client.query(
+            `INSERT INTO replay_dataset_cases (
+               id,
+               tenant_id,
+               dataset_id,
+               case_id,
+               sort_order,
+               input_text,
+               expected_output,
+               baseline_output,
+               candidate_input,
+               metadata,
+               checksum,
+               created_at,
+               updated_at
+             )
+             VALUES (
+               $1,
+               $2,
+               $3,
+               $4,
+               $5,
+               $6,
+               $7,
+               $8,
+               $9,
+               $10::jsonb,
+               $11,
+               $12::timestamptz,
+               $13::timestamptz
+             )`,
+            [
+              item.id,
+              item.tenantId,
+              item.datasetId,
+              item.caseId,
+              item.sortOrder,
+              item.input,
+              item.expectedOutput ?? null,
+              item.baselineOutput ?? null,
+              item.candidateInput ?? null,
+              safeStringifyJson(item.metadata),
+              item.checksum ?? null,
+              item.createdAt,
+              item.updatedAt,
+            ]
+          );
+        }
+
+        await client.query(
+          `UPDATE replay_datasets
+           SET case_count = $3,
+               updated_at = $4::timestamptz
+           WHERE tenant_id = $1
+             AND id = $2`,
+          [normalizedTenantId, normalizedDatasetId, normalizedCases.length, new Date().toISOString()]
+        );
+
+        const refreshed = await client.query(
+          `SELECT id,
+                  tenant_id,
+                  dataset_id,
+                  case_id,
+                  sort_order,
+                  input_text,
+                  expected_output,
+                  baseline_output,
+                  candidate_input,
+                  metadata,
+                  checksum,
+                  created_at,
+                  updated_at
+           FROM replay_dataset_cases
+           WHERE tenant_id = $1
+             AND dataset_id = $2
+           ORDER BY sort_order ASC, case_id ASC, id ASC`,
+          [normalizedTenantId, normalizedDatasetId]
+        );
+        return refreshed.rows.map(mapReplayDatasetCaseRow);
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("replay_dataset_not_found:")) {
+        throw error;
+      }
+      this.disableDb(error, "写入 replay_dataset_cases 失败");
+      return this.replaceReplayDatasetCasesInMemory(
+        normalizedTenantId,
+        normalizedDatasetId,
+        normalizedCases
+      );
+    }
+  }
+
+  async listReplayDatasetCases(
+    tenantId: string,
+    datasetId: string,
+    input: ListReplayDatasetCasesInput = {}
+  ): Promise<ReplayDatasetCase[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedDatasetId = firstNonEmptyString(datasetId);
+    if (!normalizedDatasetId) {
+      return [];
+    }
+    const normalized = normalizeReplayDatasetCaseListInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listReplayDatasetCasesFromMemory(
+        normalizedTenantId,
+        normalizedDatasetId,
+        normalized
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                dataset_id,
+                case_id,
+                sort_order,
+                input_text,
+                expected_output,
+                baseline_output,
+                candidate_input,
+                metadata,
+                checksum,
+                created_at,
+                updated_at
+         FROM replay_dataset_cases
+         WHERE tenant_id = $1
+           AND dataset_id = $2
+         ORDER BY sort_order ASC, case_id ASC, id ASC
+         LIMIT $3`,
+        [normalizedTenantId, normalizedDatasetId, normalized.limit]
+      );
+      return result.rows.map(mapReplayDatasetCaseRow);
+    } catch (error) {
+      this.disableDb(error, "查询 replay_dataset_cases 失败");
+      return this.listReplayDatasetCasesFromMemory(
+        normalizedTenantId,
+        normalizedDatasetId,
+        normalized
+      );
+    }
+  }
+
+  async createReplayRun(tenantId: string, input: CreateReplayRunInput): Promise<ReplayRun> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const datasetId = firstNonEmptyString(input.datasetId);
+    if (!datasetId) {
+      throw new Error("replay_run_dataset_id_required");
     }
     const now = toIsoString(input.createdAt) ?? new Date().toISOString();
-    const replayJob: ReplayJob = {
+    const replayRun: ReplayRun = {
       id: crypto.randomUUID(),
       tenantId: normalizedTenantId,
-      baselineId,
+      datasetId,
       status: toReplayJobStatus(input.status),
       parameters: toDbRow(input.parameters) ?? {},
       summary: toDbRow(input.summary) ?? {},
@@ -10925,27 +12690,27 @@ class ControlPlaneRepository {
 
     const pool = await this.getPool();
     if (!pool) {
-      return this.createReplayJobToMemory(replayJob);
+      return this.createReplayRunToMemory(replayRun);
     }
 
     try {
-      const baselineResult = await pool.query(
+      const datasetResult = await pool.query(
         `SELECT 1
-         FROM replay_baselines
+         FROM replay_datasets
          WHERE tenant_id = $1
            AND id = $2
          LIMIT 1`,
-        [replayJob.tenantId, replayJob.baselineId]
+        [replayRun.tenantId, replayRun.datasetId]
       );
-      if (!baselineResult.rows[0]) {
-        throw new Error(`replay_baseline_not_found:${replayJob.tenantId}:${replayJob.baselineId}`);
+      if (!datasetResult.rows[0]) {
+        throw new Error(`replay_dataset_not_found:${replayRun.tenantId}:${replayRun.datasetId}`);
       }
 
       const result = await pool.query(
-        `INSERT INTO replay_jobs (
+        `INSERT INTO replay_runs (
            id,
            tenant_id,
-           baseline_id,
+           dataset_id,
            status,
            parameters,
            summary_payload,
@@ -10972,7 +12737,7 @@ class ControlPlaneRepository {
          )
          RETURNING id,
                    tenant_id,
-                   baseline_id,
+                   dataset_id,
                    status,
                    parameters,
                    summary_payload,
@@ -10983,53 +12748,50 @@ class ControlPlaneRepository {
                    created_at,
                    updated_at`,
         [
-          replayJob.id,
-          replayJob.tenantId,
-          replayJob.baselineId,
-          replayJob.status,
-          safeStringifyJson(replayJob.parameters),
-          safeStringifyJson(replayJob.summary),
-          safeStringifyJson(replayJob.diff),
-          replayJob.error ?? null,
-          replayJob.startedAt ?? null,
-          replayJob.finishedAt ?? null,
-          replayJob.createdAt,
+          replayRun.id,
+          replayRun.tenantId,
+          replayRun.datasetId,
+          replayRun.status,
+          safeStringifyJson(replayRun.parameters),
+          safeStringifyJson(replayRun.summary),
+          safeStringifyJson(replayRun.diff),
+          replayRun.error ?? null,
+          replayRun.startedAt ?? null,
+          replayRun.finishedAt ?? null,
+          replayRun.createdAt,
         ]
       );
       const row = result.rows[0];
       if (!row) {
-        return this.createReplayJobToMemory(replayJob);
+        return this.createReplayRunToMemory(replayRun);
       }
-      return mapReplayJobRow(row);
+      return mapReplayRunRow(row);
     } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message.startsWith("replay_baseline_not_found:")
-      ) {
+      if (error instanceof Error && error.message.startsWith("replay_dataset_not_found:")) {
         throw error;
       }
-      this.disableDb(error, "写入 replay_jobs 失败");
-      return this.createReplayJobToMemory(replayJob);
+      this.disableDb(error, "写入 replay_runs 失败");
+      return this.createReplayRunToMemory(replayRun);
     }
   }
 
-  async listReplayJobs(
+  async listReplayRuns(
     tenantId: string,
-    input: ListReplayJobsInput = {}
-  ): Promise<ReplayJob[]> {
+    input: ListReplayRunsInput = {}
+  ): Promise<ReplayRun[]> {
     const normalizedTenantId = normalizeScopedTenantId(tenantId);
-    const normalized = normalizeReplayJobListInput(input);
+    const normalized = normalizeReplayRunListInput(input);
     const pool = await this.getPool();
     if (!pool) {
-      return this.listReplayJobsFromMemory(normalizedTenantId, normalized);
+      return this.listReplayRunsFromMemory(normalizedTenantId, normalized);
     }
 
     try {
       const params: unknown[] = [normalizedTenantId];
       const whereClauses: string[] = ["tenant_id = $1"];
-      if (normalized.baselineId) {
-        params.push(normalized.baselineId);
-        whereClauses.push(`baseline_id = $${params.length}`);
+      if (normalized.datasetId) {
+        params.push(normalized.datasetId);
+        whereClauses.push(`dataset_id = $${params.length}`);
       }
       if (normalized.status) {
         params.push(normalized.status);
@@ -11039,7 +12801,7 @@ class ControlPlaneRepository {
       const result = await pool.query(
         `SELECT id,
                 tenant_id,
-                baseline_id,
+                dataset_id,
                 status,
                 parameters,
                 summary_payload,
@@ -11049,35 +12811,35 @@ class ControlPlaneRepository {
                 finished_at,
                 created_at,
                 updated_at
-         FROM replay_jobs
+         FROM replay_runs
          WHERE ${whereClauses.join(" AND ")}
          ORDER BY created_at DESC, id DESC
          LIMIT $${params.length}`,
         params
       );
-      return result.rows.map(mapReplayJobRow);
+      return result.rows.map(mapReplayRunRow);
     } catch (error) {
-      this.disableDb(error, "查询 replay_jobs 失败");
-      return this.listReplayJobsFromMemory(normalizedTenantId, normalized);
+      this.disableDb(error, "查询 replay_runs 失败");
+      return this.listReplayRunsFromMemory(normalizedTenantId, normalized);
     }
   }
 
-  async getReplayJobById(tenantId: string, replayJobId: string): Promise<ReplayJob | null> {
+  async getReplayRunById(tenantId: string, runId: string): Promise<ReplayRun | null> {
     const normalizedTenantId = normalizeScopedTenantId(tenantId);
-    const normalizedReplayJobId = firstNonEmptyString(replayJobId);
-    if (!normalizedReplayJobId) {
+    const normalizedRunId = firstNonEmptyString(runId);
+    if (!normalizedRunId) {
       return null;
     }
     const pool = await this.getPool();
     if (!pool) {
-      return this.getReplayJobByIdFromMemory(normalizedTenantId, normalizedReplayJobId);
+      return this.getReplayRunByIdFromMemory(normalizedTenantId, normalizedRunId);
     }
 
     try {
       const result = await pool.query(
         `SELECT id,
                 tenant_id,
-                baseline_id,
+                dataset_id,
                 status,
                 parameters,
                 summary_payload,
@@ -11087,49 +12849,493 @@ class ControlPlaneRepository {
                 finished_at,
                 created_at,
                 updated_at
-         FROM replay_jobs
+         FROM replay_runs
          WHERE tenant_id = $1
            AND id = $2
          LIMIT 1`,
-        [normalizedTenantId, normalizedReplayJobId]
+        [normalizedTenantId, normalizedRunId]
       );
       const row = result.rows[0];
-      return row ? mapReplayJobRow(row) : null;
+      return row ? mapReplayRunRow(row) : null;
     } catch (error) {
-      this.disableDb(error, "查询 replay_jobs 单条记录失败");
-      return this.getReplayJobByIdFromMemory(normalizedTenantId, normalizedReplayJobId);
+      this.disableDb(error, "查询 replay_runs 单条记录失败");
+      return this.getReplayRunByIdFromMemory(normalizedTenantId, normalizedRunId);
     }
+  }
+
+  async getReplayRunDiff(
+    tenantId: string,
+    runId: string
+  ): Promise<Record<string, unknown> | null> {
+    const replayRun = await this.getReplayRunById(tenantId, runId);
+    if (!replayRun) {
+      return null;
+    }
+    return { ...replayRun.diff };
+  }
+
+  async updateReplayRun(
+    tenantId: string,
+    runId: string,
+    input: UpdateReplayRunInput
+  ): Promise<ReplayRun | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedRunId = firstNonEmptyString(runId);
+    if (!normalizedRunId) {
+      return null;
+    }
+
+    const hasStatus = input.status !== undefined;
+    const hasSummary = Object.prototype.hasOwnProperty.call(input, "summary");
+    const hasDiff = Object.prototype.hasOwnProperty.call(input, "diff");
+    const hasError = Object.prototype.hasOwnProperty.call(input, "error");
+    const hasStartedAt = Object.prototype.hasOwnProperty.call(input, "startedAt");
+    const hasFinishedAt = Object.prototype.hasOwnProperty.call(input, "finishedAt");
+    const normalizedStatus = hasStatus ? toReplayJobStatus(input.status) : undefined;
+    const normalizedSummary = hasSummary ? toDbRow(input.summary) ?? {} : undefined;
+    const normalizedDiff = hasDiff ? toDbRow(input.diff) ?? {} : undefined;
+    const normalizedError = hasError ? firstNonEmptyString(input.error) ?? null : null;
+    const normalizedStartedAt = hasStartedAt
+      ? input.startedAt === null
+        ? null
+        : toIsoString(input.startedAt)
+      : null;
+    const normalizedFinishedAt = hasFinishedAt
+      ? input.finishedAt === null
+        ? null
+        : toIsoString(input.finishedAt)
+      : null;
+    const normalizedUpdatedAt = toIsoString(input.updatedAt) ?? new Date().toISOString();
+    const fromStatuses = normalizeDistinctStringArray(input.fromStatuses)
+      .map((status) => toReplayJobStatus(status))
+      .filter((status, index, collection) => collection.indexOf(status) === index);
+
+    if (!hasStatus && !hasSummary && !hasDiff && !hasError && !hasStartedAt && !hasFinishedAt) {
+      return this.getReplayRunById(normalizedTenantId, normalizedRunId);
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.updateReplayRunInMemory(normalizedTenantId, normalizedRunId, {
+        status: normalizedStatus,
+        fromStatuses,
+        summary: normalizedSummary,
+        diff: normalizedDiff,
+        error: hasError ? normalizedError : undefined,
+        startedAt: hasStartedAt ? normalizedStartedAt : undefined,
+        finishedAt: hasFinishedAt ? normalizedFinishedAt : undefined,
+        updatedAt: normalizedUpdatedAt,
+      });
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId, normalizedRunId];
+      const setClauses: string[] = [];
+      if (hasStatus) {
+        params.push(normalizedStatus);
+        setClauses.push(`status = $${params.length}`);
+      }
+      if (hasSummary) {
+        params.push(safeStringifyJson(normalizedSummary));
+        setClauses.push(`summary_payload = $${params.length}::jsonb`);
+      }
+      if (hasDiff) {
+        params.push(safeStringifyJson(normalizedDiff));
+        setClauses.push(`diff_payload = $${params.length}::jsonb`);
+      }
+      if (hasError) {
+        params.push(normalizedError);
+        setClauses.push(`error = $${params.length}`);
+      }
+      if (hasStartedAt) {
+        params.push(normalizedStartedAt);
+        setClauses.push(`started_at = $${params.length}::timestamptz`);
+      }
+      if (hasFinishedAt) {
+        params.push(normalizedFinishedAt);
+        setClauses.push(`finished_at = $${params.length}::timestamptz`);
+      }
+      params.push(normalizedUpdatedAt);
+      setClauses.push(`updated_at = $${params.length}::timestamptz`);
+
+      const whereClauses = [`tenant_id = $1`, `id = $2`];
+      if (fromStatuses.length > 0) {
+        params.push(fromStatuses);
+        whereClauses.push(`status = ANY($${params.length}::text[])`);
+      }
+
+      const result = await pool.query(
+        `UPDATE replay_runs
+         SET ${setClauses.join(", ")}
+         WHERE ${whereClauses.join(" AND ")}
+         RETURNING id,
+                   tenant_id,
+                   dataset_id,
+                   status,
+                   parameters,
+                   summary_payload,
+                   diff_payload,
+                   error,
+                   started_at,
+                   finished_at,
+                   created_at,
+                   updated_at`,
+        params
+      );
+      const row = result.rows[0];
+      return row ? mapReplayRunRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "更新 replay_runs 失败");
+      return this.updateReplayRunInMemory(normalizedTenantId, normalizedRunId, {
+        status: normalizedStatus,
+        fromStatuses,
+        summary: normalizedSummary,
+        diff: normalizedDiff,
+        error: hasError ? normalizedError : undefined,
+        startedAt: hasStartedAt ? normalizedStartedAt : undefined,
+        finishedAt: hasFinishedAt ? normalizedFinishedAt : undefined,
+        updatedAt: normalizedUpdatedAt,
+      });
+    }
+  }
+
+  async upsertReplayArtifacts(
+    tenantId: string,
+    runId: string,
+    items: ReplayArtifactInput[]
+  ): Promise<ReplayArtifact[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedRunId = firstNonEmptyString(runId);
+    if (!normalizedRunId) {
+      throw new Error("replay_artifact_run_id_required");
+    }
+
+    const replayRun = await this.getReplayRunById(normalizedTenantId, normalizedRunId);
+    if (!replayRun) {
+      throw new Error(`replay_run_not_found:${normalizedTenantId}:${normalizedRunId}`);
+    }
+
+    const normalizedItems = items.map((item) => {
+      const now = toIsoString(item.createdAt) ?? new Date().toISOString();
+      return {
+        id: crypto.randomUUID(),
+        tenantId: normalizedTenantId,
+        runId: normalizedRunId,
+        datasetId: replayRun.datasetId,
+        artifactType: toReplayArtifactType(item.artifactType),
+        name: firstNonEmptyString(item.name) ?? `${item.artifactType}.json`,
+        description: firstNonEmptyString(item.description) ?? undefined,
+        contentType: firstNonEmptyString(item.contentType) ?? "application/octet-stream",
+        byteSize: Math.max(0, Math.trunc(toNumber(item.byteSize, 0))),
+        checksum: firstNonEmptyString(item.checksum) ?? undefined,
+        storageBackend: toReplayArtifactStorageBackend(item.storageBackend),
+        storageKey: firstNonEmptyString(item.storageKey) ?? "",
+        metadata: toDbRow(item.metadata) ?? {},
+        createdAt: now,
+        updatedAt: now,
+      } satisfies ReplayArtifact;
+    });
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.upsertReplayArtifactsInMemory(
+        normalizedTenantId,
+        normalizedRunId,
+        normalizedItems
+      );
+    }
+
+    try {
+      return await this.withTransaction(pool, async (client) => {
+        for (const item of normalizedItems) {
+          await client.query(
+            `INSERT INTO replay_artifacts (
+               id,
+               tenant_id,
+               run_id,
+               dataset_id,
+               artifact_type,
+               name,
+               description,
+               content_type,
+               byte_size,
+               checksum,
+               storage_backend,
+               storage_key,
+               metadata,
+               created_at,
+               updated_at
+             )
+             VALUES (
+               $1,
+               $2,
+               $3,
+               $4,
+               $5,
+               $6,
+               $7,
+               $8,
+               $9,
+               $10,
+               $11,
+               $12,
+               $13::jsonb,
+               $14::timestamptz,
+               $15::timestamptz
+             )
+             ON CONFLICT (tenant_id, run_id, artifact_type)
+             DO UPDATE SET
+               dataset_id = EXCLUDED.dataset_id,
+               name = EXCLUDED.name,
+               description = EXCLUDED.description,
+               content_type = EXCLUDED.content_type,
+               byte_size = EXCLUDED.byte_size,
+               checksum = EXCLUDED.checksum,
+               storage_backend = EXCLUDED.storage_backend,
+               storage_key = EXCLUDED.storage_key,
+               metadata = EXCLUDED.metadata,
+               updated_at = EXCLUDED.updated_at`,
+            [
+              item.id,
+              item.tenantId,
+              item.runId,
+              item.datasetId,
+              item.artifactType,
+              item.name,
+              item.description ?? null,
+              item.contentType,
+              item.byteSize,
+              item.checksum ?? null,
+              item.storageBackend,
+              item.storageKey,
+              safeStringifyJson(item.metadata),
+              item.createdAt,
+              item.updatedAt,
+            ]
+          );
+        }
+
+        const refreshed = await client.query(
+          `SELECT id,
+                  tenant_id,
+                  run_id,
+                  dataset_id,
+                  artifact_type,
+                  name,
+                  description,
+                  content_type,
+                  byte_size,
+                  checksum,
+                  storage_backend,
+                  storage_key,
+                  metadata,
+                  created_at,
+                  updated_at
+           FROM replay_artifacts
+           WHERE tenant_id = $1
+             AND run_id = $2
+           ORDER BY created_at ASC, artifact_type ASC`,
+          [normalizedTenantId, normalizedRunId]
+        );
+        return refreshed.rows.map(mapReplayArtifactRow);
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("replay_run_not_found:")) {
+        throw error;
+      }
+      this.disableDb(error, "写入 replay_artifacts 失败");
+      return this.upsertReplayArtifactsInMemory(
+        normalizedTenantId,
+        normalizedRunId,
+        normalizedItems
+      );
+    }
+  }
+
+  async listReplayArtifacts(
+    tenantId: string,
+    runId: string,
+    input: ListReplayArtifactsInput = {}
+  ): Promise<ReplayArtifact[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedRunId = firstNonEmptyString(runId);
+    if (!normalizedRunId) {
+      return [];
+    }
+    const normalized = normalizeReplayArtifactListInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listReplayArtifactsFromMemory(normalizedTenantId, normalizedRunId, normalized);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                run_id,
+                dataset_id,
+                artifact_type,
+                name,
+                description,
+                content_type,
+                byte_size,
+                checksum,
+                storage_backend,
+                storage_key,
+                metadata,
+                created_at,
+                updated_at
+         FROM replay_artifacts
+         WHERE tenant_id = $1
+           AND run_id = $2
+         ORDER BY created_at ASC, artifact_type ASC
+         LIMIT $3`,
+        [normalizedTenantId, normalizedRunId, normalized.limit]
+      );
+      return result.rows.map(mapReplayArtifactRow);
+    } catch (error) {
+      this.disableDb(error, "查询 replay_artifacts 失败");
+      return this.listReplayArtifactsFromMemory(normalizedTenantId, normalizedRunId, normalized);
+    }
+  }
+
+  async getReplayArtifactByType(
+    tenantId: string,
+    runId: string,
+    artifactType: ReplayArtifactType
+  ): Promise<ReplayArtifact | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedRunId = firstNonEmptyString(runId);
+    if (!normalizedRunId) {
+      return null;
+    }
+    const normalizedType = toReplayArtifactType(artifactType);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getReplayArtifactByTypeFromMemory(normalizedTenantId, normalizedRunId, normalizedType);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                run_id,
+                dataset_id,
+                artifact_type,
+                name,
+                description,
+                content_type,
+                byte_size,
+                checksum,
+                storage_backend,
+                storage_key,
+                metadata,
+                created_at,
+                updated_at
+         FROM replay_artifacts
+         WHERE tenant_id = $1
+           AND run_id = $2
+           AND artifact_type = $3
+         LIMIT 1`,
+        [normalizedTenantId, normalizedRunId, normalizedType]
+      );
+      const row = result.rows[0];
+      return row ? mapReplayArtifactRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询 replay_artifacts 单条记录失败");
+      return this.getReplayArtifactByTypeFromMemory(
+        normalizedTenantId,
+        normalizedRunId,
+        normalizedType
+      );
+    }
+  }
+
+  async createReplayBaseline(
+    tenantId: string,
+    input: CreateReplayBaselineInput
+  ): Promise<ReplayBaseline> {
+    const dataset = await this.createReplayDataset(tenantId, {
+      name: input.name,
+      description: input.description,
+      model: firstNonEmptyString(toDbRow(input.metadata)?.model) ?? "unknown",
+      promptVersion: firstNonEmptyString(
+        toDbRow(input.metadata)?.promptVersion,
+        toDbRow(input.metadata)?.prompt_version
+      ) ?? undefined,
+      externalDatasetId: input.datasetRef,
+      caseCount: input.scenarioCount,
+      metadata: input.metadata,
+      createdAt: input.createdAt,
+    });
+    return mapReplayDatasetToBaseline(dataset);
+  }
+
+  async listReplayBaselines(
+    tenantId: string,
+    input: ListReplayBaselinesInput = {}
+  ): Promise<ReplayBaseline[]> {
+    const items = await this.listReplayDatasets(tenantId, {
+      keyword: input.keyword,
+      limit: input.limit,
+    });
+    return items.map(mapReplayDatasetToBaseline);
+  }
+
+  async getReplayBaselineById(
+    tenantId: string,
+    baselineId: string
+  ): Promise<ReplayBaseline | null> {
+    const dataset = await this.getReplayDatasetById(tenantId, baselineId);
+    return dataset ? mapReplayDatasetToBaseline(dataset) : null;
+  }
+
+  async createReplayJob(tenantId: string, input: CreateReplayJobInput): Promise<ReplayJob> {
+    const replayRun = await this.createReplayRun(tenantId, {
+      datasetId: input.baselineId,
+      status: input.status,
+      parameters: input.parameters,
+      summary: input.summary,
+      diff: input.diff,
+      error: input.error,
+      startedAt: input.startedAt,
+      finishedAt: input.finishedAt,
+      createdAt: input.createdAt,
+    });
+    return mapReplayRunToJob(replayRun);
+  }
+
+  async listReplayJobs(
+    tenantId: string,
+    input: ListReplayJobsInput = {}
+  ): Promise<ReplayJob[]> {
+    const items = await this.listReplayRuns(tenantId, {
+      datasetId: input.baselineId,
+      status: input.status,
+      limit: input.limit,
+    });
+    return items.map(mapReplayRunToJob);
+  }
+
+  async getReplayJobById(tenantId: string, replayJobId: string): Promise<ReplayJob | null> {
+    const replayRun = await this.getReplayRunById(tenantId, replayJobId);
+    return replayRun ? mapReplayRunToJob(replayRun) : null;
   }
 
   async getReplayJobDiff(
     tenantId: string,
     replayJobId: string
   ): Promise<Record<string, unknown> | null> {
-    const normalizedTenantId = normalizeScopedTenantId(tenantId);
-    const normalizedReplayJobId = firstNonEmptyString(replayJobId);
-    if (!normalizedReplayJobId) {
-      return null;
-    }
-    const pool = await this.getPool();
-    if (!pool) {
-      return this.getReplayJobDiffFromMemory(normalizedTenantId, normalizedReplayJobId);
-    }
+    return this.getReplayRunDiff(tenantId, replayJobId);
+  }
 
-    try {
-      const result = await pool.query(
-        `SELECT diff_payload
-         FROM replay_jobs
-         WHERE tenant_id = $1
-           AND id = $2
-         LIMIT 1`,
-        [normalizedTenantId, normalizedReplayJobId]
-      );
-      const row = result.rows[0];
-      return row ? toDbRow(row.diff_payload) ?? {} : null;
-    } catch (error) {
-      this.disableDb(error, "查询 replay_jobs diff 失败");
-      return this.getReplayJobDiffFromMemory(normalizedTenantId, normalizedReplayJobId);
-    }
+  async updateReplayJob(
+    tenantId: string,
+    replayJobId: string,
+    input: UpdateReplayJobInput
+  ): Promise<ReplayJob | null> {
+    const replayRun = await this.updateReplayRun(tenantId, replayJobId, input);
+    return replayRun ? mapReplayRunToJob(replayRun) : null;
   }
 
   private async getPool(): Promise<PgPool | null> {
@@ -14099,6 +16305,7 @@ class ControlPlaneRepository {
          enabled BOOLEAN NOT NULL DEFAULT TRUE,
          event_types JSONB NOT NULL DEFAULT '[]'::jsonb,
          secret_hash TEXT,
+         secret_ciphertext TEXT,
          headers JSONB NOT NULL DEFAULT '{}'::jsonb,
          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -14113,6 +16320,7 @@ class ControlPlaneRepository {
          ADD COLUMN IF NOT EXISTS enabled BOOLEAN,
          ADD COLUMN IF NOT EXISTS event_types JSONB NOT NULL DEFAULT '[]'::jsonb,
          ADD COLUMN IF NOT EXISTS secret_hash TEXT,
+         ADD COLUMN IF NOT EXISTS secret_ciphertext TEXT,
          ADD COLUMN IF NOT EXISTS headers JSONB NOT NULL DEFAULT '{}'::jsonb,
          ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
          ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
@@ -14129,6 +16337,7 @@ class ControlPlaneRepository {
              ELSE '[]'::jsonb
            END,
            secret_hash = NULLIF(secret_hash, ''),
+           secret_ciphertext = NULLIF(secret_ciphertext, ''),
            headers = CASE
              WHEN jsonb_typeof(headers) = 'object' THEN headers
              ELSE '{}'::jsonb
@@ -14145,6 +16354,7 @@ class ControlPlaneRepository {
           OR event_types IS NULL
           OR jsonb_typeof(event_types) <> 'array'
           OR secret_hash = ''
+          OR secret_ciphertext = ''
           OR headers IS NULL
           OR jsonb_typeof(headers) <> 'object'
           OR created_at IS NULL
@@ -14167,11 +16377,106 @@ class ControlPlaneRepository {
     );
 
     await pool.query(
+      `CREATE TABLE IF NOT EXISTS webhook_replay_tasks (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         webhook_id TEXT NOT NULL DEFAULT '',
+         status TEXT NOT NULL DEFAULT 'queued',
+         dry_run BOOLEAN NOT NULL DEFAULT TRUE,
+         filters JSONB NOT NULL DEFAULT '{}'::jsonb,
+         result JSONB NOT NULL DEFAULT '{}'::jsonb,
+         error TEXT,
+         requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         started_at TIMESTAMPTZ,
+         finished_at TIMESTAMPTZ,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE webhook_replay_tasks
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS webhook_id TEXT,
+         ADD COLUMN IF NOT EXISTS status TEXT,
+         ADD COLUMN IF NOT EXISTS dry_run BOOLEAN,
+         ADD COLUMN IF NOT EXISTS filters JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS result JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS error TEXT,
+         ADD COLUMN IF NOT EXISTS requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE webhook_replay_tasks
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           webhook_id = COALESCE(NULLIF(webhook_id, ''), 'unknown-webhook'),
+           status = CASE
+             WHEN status IN ('queued', 'running', 'completed', 'failed') THEN status
+             WHEN status IN ('success', 'succeeded') THEN 'completed'
+             WHEN status IN ('canceled', 'cancelled') THEN 'failed'
+             ELSE 'queued'
+           END,
+           dry_run = COALESCE(dry_run, TRUE),
+           filters = CASE
+             WHEN jsonb_typeof(filters) = 'object' THEN filters
+             ELSE '{}'::jsonb
+           END,
+           result = CASE
+             WHEN jsonb_typeof(result) = 'object' THEN result
+             ELSE '{}'::jsonb
+           END,
+           error = NULLIF(error, ''),
+           requested_at = COALESCE(requested_at, created_at, NOW()),
+           started_at = started_at,
+           finished_at = finished_at,
+           created_at = COALESCE(created_at, requested_at, NOW()),
+           updated_at = COALESCE(updated_at, created_at, requested_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR webhook_id IS NULL
+          OR webhook_id = ''
+          OR status IS NULL
+          OR status NOT IN ('queued', 'running', 'completed', 'failed', 'success', 'succeeded', 'canceled', 'cancelled')
+          OR dry_run IS NULL
+          OR filters IS NULL
+          OR jsonb_typeof(filters) <> 'object'
+          OR result IS NULL
+          OR jsonb_typeof(result) <> 'object'
+          OR error = ''
+          OR requested_at IS NULL
+          OR created_at IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_replay_tasks_tenant_id_unique
+       ON webhook_replay_tasks (tenant_id, id)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_webhook_replay_tasks_tenant_webhook_requested_at
+       ON webhook_replay_tasks (tenant_id, webhook_id, requested_at DESC, id DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_webhook_replay_tasks_tenant_status_updated_at
+       ON webhook_replay_tasks (tenant_id, status, updated_at DESC, id DESC)`
+    );
+
+    await pool.query(
       `CREATE TABLE IF NOT EXISTS quality_events (
          id TEXT PRIMARY KEY,
          tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
          scorecard_key TEXT NOT NULL DEFAULT 'default',
          metric_key TEXT,
+         provider TEXT,
+         repository TEXT,
+         workflow TEXT,
+         run_id TEXT,
          score NUMERIC(10, 6) NOT NULL DEFAULT 0,
          passed BOOLEAN NOT NULL DEFAULT FALSE,
          metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -14184,6 +16489,10 @@ class ControlPlaneRepository {
          ADD COLUMN IF NOT EXISTS tenant_id TEXT,
          ADD COLUMN IF NOT EXISTS scorecard_key TEXT,
          ADD COLUMN IF NOT EXISTS metric_key TEXT,
+         ADD COLUMN IF NOT EXISTS provider TEXT,
+         ADD COLUMN IF NOT EXISTS repository TEXT,
+         ADD COLUMN IF NOT EXISTS workflow TEXT,
+         ADD COLUMN IF NOT EXISTS run_id TEXT,
          ADD COLUMN IF NOT EXISTS score NUMERIC(10, 6),
          ADD COLUMN IF NOT EXISTS passed BOOLEAN,
          ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -14195,6 +16504,43 @@ class ControlPlaneRepository {
        SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
            scorecard_key = COALESCE(NULLIF(scorecard_key, ''), 'default'),
            metric_key = NULLIF(metric_key, ''),
+           provider = NULLIF(
+             LOWER(
+               COALESCE(
+                 NULLIF(provider, ''),
+                 NULLIF(metadata->'externalSource'->>'provider', ''),
+                 NULLIF(metadata->>'provider', '')
+               )
+             ),
+             ''
+           ),
+           repository = NULLIF(
+             LOWER(
+               COALESCE(
+                 NULLIF(repository, ''),
+                 NULLIF(metadata->'externalSource'->>'repo', ''),
+                 NULLIF(metadata->>'repo', '')
+               )
+             ),
+             ''
+           ),
+           workflow = NULLIF(
+             COALESCE(
+               NULLIF(workflow, ''),
+               NULLIF(metadata->'externalSource'->>'workflow', ''),
+               NULLIF(metadata->>'workflow', '')
+             ),
+             ''
+           ),
+           run_id = NULLIF(
+             COALESCE(
+               NULLIF(run_id, ''),
+               NULLIF(metadata->'externalSource'->>'runId', ''),
+               NULLIF(metadata->>'runId', ''),
+               NULLIF(metadata->>'run_id', '')
+             ),
+             ''
+           ),
            score = GREATEST(COALESCE(score, 0), 0),
            passed = COALESCE(passed, FALSE),
            metadata = COALESCE(metadata, '{}'::jsonb),
@@ -14204,6 +16550,39 @@ class ControlPlaneRepository {
           OR scorecard_key IS NULL
           OR scorecard_key = ''
           OR metric_key = ''
+          OR provider = ''
+          OR repository = ''
+          OR workflow = ''
+          OR run_id = ''
+          OR (
+            provider IS NULL
+            AND (
+              NULLIF(metadata->'externalSource'->>'provider', '') IS NOT NULL
+              OR NULLIF(metadata->>'provider', '') IS NOT NULL
+            )
+          )
+          OR (
+            repository IS NULL
+            AND (
+              NULLIF(metadata->'externalSource'->>'repo', '') IS NOT NULL
+              OR NULLIF(metadata->>'repo', '') IS NOT NULL
+            )
+          )
+          OR (
+            workflow IS NULL
+            AND (
+              NULLIF(metadata->'externalSource'->>'workflow', '') IS NOT NULL
+              OR NULLIF(metadata->>'workflow', '') IS NOT NULL
+            )
+          )
+          OR (
+            run_id IS NULL
+            AND (
+              NULLIF(metadata->'externalSource'->>'runId', '') IS NOT NULL
+              OR NULLIF(metadata->>'runId', '') IS NOT NULL
+              OR NULLIF(metadata->>'run_id', '') IS NOT NULL
+            )
+          )
           OR score IS NULL
           OR score < 0
           OR passed IS NULL
@@ -14224,6 +16603,18 @@ class ControlPlaneRepository {
     await pool.query(
       `CREATE INDEX IF NOT EXISTS idx_quality_events_tenant_scorecard_created_at
        ON quality_events (tenant_id, scorecard_key, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_quality_events_tenant_external_created_at
+       ON quality_events (
+         tenant_id,
+         provider,
+         repository,
+         workflow,
+         run_id,
+         created_at DESC
+       )`
     );
 
     await pool.query(
@@ -14403,8 +16794,8 @@ class ControlPlaneRepository {
        SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
            baseline_id = COALESCE(NULLIF(baseline_id, ''), id),
            status = CASE
-             WHEN status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled') THEN status
-             WHEN status = 'success' THEN 'succeeded'
+             WHEN status IN ('pending', 'running', 'completed', 'failed', 'cancelled') THEN status
+             WHEN status IN ('succeeded', 'success') THEN 'completed'
              WHEN status = 'canceled' THEN 'cancelled'
              ELSE 'pending'
            END,
@@ -14430,7 +16821,7 @@ class ControlPlaneRepository {
           OR baseline_id IS NULL
           OR baseline_id = ''
           OR status IS NULL
-          OR status NOT IN ('pending', 'running', 'succeeded', 'failed', 'cancelled')
+          OR status NOT IN ('pending', 'running', 'completed', 'failed', 'cancelled')
           OR parameters IS NULL
           OR jsonb_typeof(parameters) <> 'object'
           OR summary_payload IS NULL
@@ -14455,6 +16846,320 @@ class ControlPlaneRepository {
     await pool.query(
       `CREATE INDEX IF NOT EXISTS idx_replay_jobs_tenant_status_updated_at
        ON replay_jobs (tenant_id, status, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS replay_datasets (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         name TEXT NOT NULL DEFAULT '',
+         description TEXT,
+         model TEXT NOT NULL DEFAULT 'unknown',
+         prompt_version TEXT,
+         external_dataset_id TEXT,
+         case_count INTEGER NOT NULL DEFAULT 0,
+         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE replay_datasets
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS name TEXT,
+         ADD COLUMN IF NOT EXISTS description TEXT,
+         ADD COLUMN IF NOT EXISTS model TEXT NOT NULL DEFAULT 'unknown',
+         ADD COLUMN IF NOT EXISTS prompt_version TEXT,
+         ADD COLUMN IF NOT EXISTS external_dataset_id TEXT,
+         ADD COLUMN IF NOT EXISTS case_count INTEGER NOT NULL DEFAULT 0,
+         ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE replay_datasets
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           name = COALESCE(NULLIF(name, ''), id),
+           description = NULLIF(description, ''),
+           model = COALESCE(NULLIF(model, ''), 'unknown'),
+           prompt_version = NULLIF(prompt_version, ''),
+           external_dataset_id = NULLIF(external_dataset_id, ''),
+           case_count = GREATEST(COALESCE(case_count, 0), 0),
+           metadata = CASE
+             WHEN jsonb_typeof(metadata) = 'object' THEN metadata
+             ELSE '{}'::jsonb
+           END,
+           created_at = COALESCE(created_at, NOW()),
+           updated_at = COALESCE(updated_at, created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR name IS NULL
+          OR name = ''
+          OR model IS NULL
+          OR model = ''
+          OR case_count IS NULL
+          OR case_count < 0
+          OR metadata IS NULL
+          OR jsonb_typeof(metadata) <> 'object'
+          OR created_at IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `INSERT INTO replay_datasets (
+         id,
+         tenant_id,
+         name,
+         description,
+         model,
+         prompt_version,
+         external_dataset_id,
+         case_count,
+         metadata,
+         created_at,
+         updated_at
+       )
+       SELECT id,
+              tenant_id,
+              name,
+              description,
+              COALESCE(NULLIF(metadata->>'model', ''), 'unknown'),
+              NULLIF(metadata->>'promptVersion', ''),
+              dataset_ref,
+              scenario_count,
+              metadata,
+              created_at,
+              updated_at
+       FROM replay_baselines
+       ON CONFLICT (id) DO NOTHING`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_replay_datasets_tenant_id_unique
+       ON replay_datasets (tenant_id, id)`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_replay_datasets_tenant_name_unique
+       ON replay_datasets (tenant_id, name)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_replay_datasets_tenant_updated_at
+       ON replay_datasets (tenant_id, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS replay_dataset_cases (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         dataset_id TEXT NOT NULL,
+         case_id TEXT NOT NULL,
+         sort_order INTEGER NOT NULL DEFAULT 0,
+         input_text TEXT NOT NULL DEFAULT '',
+         expected_output TEXT,
+         baseline_output TEXT,
+         candidate_input TEXT,
+         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         checksum TEXT,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE replay_dataset_cases
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS dataset_id TEXT,
+         ADD COLUMN IF NOT EXISTS case_id TEXT,
+         ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0,
+         ADD COLUMN IF NOT EXISTS input_text TEXT NOT NULL DEFAULT '',
+         ADD COLUMN IF NOT EXISTS expected_output TEXT,
+         ADD COLUMN IF NOT EXISTS baseline_output TEXT,
+         ADD COLUMN IF NOT EXISTS candidate_input TEXT,
+         ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS checksum TEXT,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_replay_dataset_cases_tenant_case_unique
+       ON replay_dataset_cases (tenant_id, dataset_id, case_id)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_replay_dataset_cases_tenant_sort
+       ON replay_dataset_cases (tenant_id, dataset_id, sort_order ASC, case_id ASC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS replay_runs (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         dataset_id TEXT NOT NULL,
+         status TEXT NOT NULL DEFAULT 'pending',
+         parameters JSONB NOT NULL DEFAULT '{}'::jsonb,
+         summary_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+         diff_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+         error TEXT,
+         started_at TIMESTAMPTZ,
+         finished_at TIMESTAMPTZ,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE replay_runs
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS dataset_id TEXT,
+         ADD COLUMN IF NOT EXISTS status TEXT,
+         ADD COLUMN IF NOT EXISTS parameters JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS summary_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS diff_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS error TEXT,
+         ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE replay_runs
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           dataset_id = COALESCE(NULLIF(dataset_id, ''), id),
+           status = CASE
+             WHEN status IN ('pending', 'running', 'completed', 'failed', 'cancelled') THEN status
+             WHEN status IN ('succeeded', 'success') THEN 'completed'
+             WHEN status = 'canceled' THEN 'cancelled'
+             ELSE 'pending'
+           END,
+           parameters = CASE
+             WHEN jsonb_typeof(parameters) = 'object' THEN parameters
+             ELSE '{}'::jsonb
+           END,
+           summary_payload = CASE
+             WHEN jsonb_typeof(summary_payload) = 'object' THEN summary_payload
+             ELSE '{}'::jsonb
+           END,
+           diff_payload = CASE
+             WHEN jsonb_typeof(diff_payload) = 'object' THEN diff_payload
+             ELSE '{}'::jsonb
+           END,
+           error = NULLIF(error, ''),
+           created_at = COALESCE(created_at, NOW()),
+           updated_at = COALESCE(updated_at, created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR dataset_id IS NULL
+          OR dataset_id = ''
+          OR status IS NULL
+          OR status NOT IN ('pending', 'running', 'completed', 'failed', 'cancelled')
+          OR parameters IS NULL
+          OR jsonb_typeof(parameters) <> 'object'
+          OR summary_payload IS NULL
+          OR jsonb_typeof(summary_payload) <> 'object'
+          OR diff_payload IS NULL
+          OR jsonb_typeof(diff_payload) <> 'object'
+          OR created_at IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `INSERT INTO replay_runs (
+         id,
+         tenant_id,
+         dataset_id,
+         status,
+         parameters,
+         summary_payload,
+         diff_payload,
+         error,
+         started_at,
+         finished_at,
+         created_at,
+         updated_at
+       )
+       SELECT id,
+              tenant_id,
+              baseline_id,
+              status,
+              parameters,
+              summary_payload,
+              diff_payload,
+              error,
+              started_at,
+              finished_at,
+              created_at,
+              updated_at
+       FROM replay_jobs
+       ON CONFLICT (id) DO NOTHING`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_replay_runs_tenant_id_unique
+       ON replay_runs (tenant_id, id)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_replay_runs_tenant_dataset_created_at
+       ON replay_runs (tenant_id, dataset_id, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_replay_runs_tenant_status_updated_at
+       ON replay_runs (tenant_id, status, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS replay_artifacts (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         run_id TEXT NOT NULL,
+         dataset_id TEXT NOT NULL,
+         artifact_type TEXT NOT NULL,
+         name TEXT NOT NULL DEFAULT '',
+         description TEXT,
+         content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+         byte_size BIGINT NOT NULL DEFAULT 0,
+         checksum TEXT,
+         storage_backend TEXT NOT NULL DEFAULT 'local',
+         storage_key TEXT NOT NULL DEFAULT '',
+         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE replay_artifacts
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS run_id TEXT,
+         ADD COLUMN IF NOT EXISTS dataset_id TEXT,
+         ADD COLUMN IF NOT EXISTS artifact_type TEXT,
+         ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT '',
+         ADD COLUMN IF NOT EXISTS description TEXT,
+         ADD COLUMN IF NOT EXISTS content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+         ADD COLUMN IF NOT EXISTS byte_size BIGINT NOT NULL DEFAULT 0,
+         ADD COLUMN IF NOT EXISTS checksum TEXT,
+         ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'local',
+         ADD COLUMN IF NOT EXISTS storage_key TEXT NOT NULL DEFAULT '',
+         ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_replay_artifacts_tenant_run_type_unique
+       ON replay_artifacts (tenant_id, run_id, artifact_type)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_replay_artifacts_tenant_dataset_created_at
+       ON replay_artifacts (tenant_id, dataset_id, created_at DESC)`
     );
   }
 
@@ -14658,6 +17363,7 @@ class ControlPlaneRepository {
     endpointId: string,
     input: UpdateWebhookEndpointInput,
     hasSecretHash: boolean,
+    hasSecretCiphertext: boolean,
     updatedAt: string
   ): WebhookEndpoint | null {
     const index = this.memoryWebhookEndpoints.findIndex(
@@ -14691,6 +17397,9 @@ class ControlPlaneRepository {
       secretHash: hasSecretHash
         ? firstNonEmptyString(input.secretHash ?? undefined) ?? undefined
         : current.secretHash,
+      secretCiphertext: hasSecretCiphertext
+        ? firstNonEmptyString(input.secretCiphertext ?? undefined) ?? undefined
+        : current.secretCiphertext,
       headers: input.headers ? { ...input.headers } : { ...current.headers },
       updatedAt,
     };
@@ -14709,9 +17418,972 @@ class ControlPlaneRepository {
     return true;
   }
 
+  private cloneWebhookReplayTask(task: WebhookReplayTask): WebhookReplayTask {
+    return {
+      ...task,
+      filters: { ...task.filters },
+      result: { ...task.result },
+    };
+  }
+
+  private createWebhookReplayTaskToMemory(task: WebhookReplayTask): WebhookReplayTask {
+    const cloned = this.cloneWebhookReplayTask(task);
+    this.memoryWebhookReplayTasks.unshift(cloned);
+    return this.cloneWebhookReplayTask(cloned);
+  }
+
+  private getWebhookReplayTaskByIdFromMemory(
+    tenantId: string,
+    taskId: string
+  ): WebhookReplayTask | null {
+    const matched = this.memoryWebhookReplayTasks.find(
+      (task) => task.tenantId === tenantId && task.id === taskId
+    );
+    return matched ? this.cloneWebhookReplayTask(matched) : null;
+  }
+
+  private listWebhookReplayTasksFromMemory(
+    tenantId: string,
+    input: NormalizedWebhookReplayTaskListInput
+  ): WebhookReplayTaskListResult {
+    const cursor = decodeTimePaginationCursor(input.cursor);
+    const items = this.memoryWebhookReplayTasks.filter((task) => {
+      if (task.tenantId !== tenantId) {
+        return false;
+      }
+      if (input.webhookId && task.webhookId !== input.webhookId) {
+        return false;
+      }
+      if (input.status && task.status !== input.status) {
+        return false;
+      }
+      if (cursor) {
+        const requestedAtTimestamp = Date.parse(task.requestedAt);
+        const cursorTimestamp = Date.parse(cursor.timestamp);
+        if (Number.isFinite(requestedAtTimestamp) && Number.isFinite(cursorTimestamp)) {
+          if (requestedAtTimestamp < cursorTimestamp) {
+            return true;
+          }
+          if (requestedAtTimestamp > cursorTimestamp) {
+            return false;
+          }
+          return task.id < cursor.id;
+        }
+        const requestedAtCompare = task.requestedAt.localeCompare(cursor.timestamp);
+        if (requestedAtCompare < 0) {
+          return true;
+        }
+        if (requestedAtCompare > 0) {
+          return false;
+        }
+        return task.id < cursor.id;
+      }
+      return true;
+    });
+
+    const sorted = items.sort(
+      (a, b) => b.requestedAt.localeCompare(a.requestedAt) || b.id.localeCompare(a.id)
+    );
+    const sliced = sorted.slice(0, input.limit);
+    const nextCursor =
+      sorted.length > input.limit && sliced.length > 0
+        ? encodeTimePaginationCursor({
+            timestamp: sliced[sliced.length - 1]?.requestedAt ?? new Date().toISOString(),
+            id: sliced[sliced.length - 1]?.id ?? "",
+          })
+        : null;
+
+    return {
+      items: sliced.map((task) => this.cloneWebhookReplayTask(task)),
+      total: sliced.length,
+      nextCursor,
+    };
+  }
+
+  private updateWebhookReplayTaskInMemory(
+    tenantId: string,
+    taskId: string,
+    input: {
+      fromStatuses?: WebhookReplayTaskStatus[];
+      status?: WebhookReplayTaskStatus;
+      result?: Record<string, unknown>;
+      error?: string | null;
+      startedAt?: string | null;
+      finishedAt?: string | null;
+      updatedAt: string;
+    },
+    flags: {
+      hasStatus: boolean;
+      hasResult: boolean;
+      hasError: boolean;
+      hasStartedAt: boolean;
+      hasFinishedAt: boolean;
+    }
+  ): WebhookReplayTask | null {
+    const index = this.memoryWebhookReplayTasks.findIndex(
+      (task) => task.tenantId === tenantId && task.id === taskId
+    );
+    if (index < 0) {
+      return null;
+    }
+    const current = this.memoryWebhookReplayTasks[index];
+    if (!current) {
+      return null;
+    }
+
+    if (
+      Array.isArray(input.fromStatuses) &&
+      input.fromStatuses.length > 0 &&
+      !input.fromStatuses.includes(current.status)
+    ) {
+      return null;
+    }
+
+    const updated: WebhookReplayTask = {
+      ...current,
+      status: flags.hasStatus ? input.status ?? current.status : current.status,
+      result: flags.hasResult ? { ...(input.result ?? {}) } : { ...current.result },
+      error: flags.hasError ? firstNonEmptyString(input.error ?? undefined) ?? undefined : current.error,
+      startedAt: flags.hasStartedAt
+        ? toIsoString(input.startedAt ?? undefined) ?? undefined
+        : current.startedAt,
+      finishedAt: flags.hasFinishedAt
+        ? toIsoString(input.finishedAt ?? undefined) ?? undefined
+        : current.finishedAt,
+      updatedAt: input.updatedAt,
+      filters: { ...current.filters },
+    };
+
+    this.memoryWebhookReplayTasks[index] = updated;
+    return this.cloneWebhookReplayTask(updated);
+  }
+
+  private buildWebhookReplayEventForApiKeyCreated(apiKey: ApiKey): WebhookReplayEvent {
+    return {
+      id: `api_key.created:${apiKey.id}`,
+      tenantId: apiKey.tenantId,
+      eventType: "api_key.created",
+      occurredAt: apiKey.createdAt,
+      payload: {
+        eventType: "api_key.created",
+        apiKeyId: apiKey.id,
+        name: apiKey.name,
+        scopes: [...apiKey.scopes],
+        createdAt: apiKey.createdAt,
+        updatedAt: apiKey.updatedAt,
+      },
+    };
+  }
+
+  private buildWebhookReplayEventForApiKeyRevoked(apiKey: ApiKey): WebhookReplayEvent | null {
+    if (!apiKey.revokedAt) {
+      return null;
+    }
+    return {
+      id: `api_key.revoked:${apiKey.id}`,
+      tenantId: apiKey.tenantId,
+      eventType: "api_key.revoked",
+      occurredAt: apiKey.revokedAt,
+      payload: {
+        eventType: "api_key.revoked",
+        apiKeyId: apiKey.id,
+        name: apiKey.name,
+        scopes: [...apiKey.scopes],
+        revokedAt: apiKey.revokedAt,
+        updatedAt: apiKey.updatedAt,
+      },
+    };
+  }
+
+  private buildWebhookReplayEventForQualityEvent(
+    qualityEvent: QualityEvent
+  ): WebhookReplayEvent {
+    return {
+      id: `quality.event.created:${qualityEvent.id}`,
+      tenantId: qualityEvent.tenantId,
+      eventType: "quality.event.created",
+      occurredAt: qualityEvent.createdAt,
+      payload: {
+        eventType: "quality.event.created",
+        qualityEventId: qualityEvent.id,
+        metric: qualityEvent.metricKey ?? qualityEvent.scorecardKey,
+        scorecardKey: qualityEvent.scorecardKey,
+        score: qualityEvent.score,
+        passed: qualityEvent.passed,
+        externalSource: qualityEvent.externalSource
+          ? { ...qualityEvent.externalSource }
+          : undefined,
+        metadata: { ...qualityEvent.metadata },
+        createdAt: qualityEvent.createdAt,
+      },
+    };
+  }
+
+  private buildWebhookReplayEventForQualityScorecard(
+    scorecard: QualityScorecard
+  ): WebhookReplayEvent {
+    return {
+      id: `quality.scorecard.updated:${scorecard.scorecardKey}:${scorecard.updatedAt}`,
+      tenantId: scorecard.tenantId,
+      eventType: "quality.scorecard.updated",
+      occurredAt: scorecard.updatedAt,
+      payload: {
+        eventType: "quality.scorecard.updated",
+        scorecardKey: scorecard.scorecardKey,
+        title: scorecard.title,
+        description: scorecard.description,
+        score: scorecard.score,
+        dimensions: { ...scorecard.dimensions },
+        metadata: { ...scorecard.metadata },
+        createdAt: scorecard.createdAt,
+        updatedAt: scorecard.updatedAt,
+      },
+    };
+  }
+
+  private buildWebhookReplayEventForReplayJobStarted(
+    replayJob: ReplayJob
+  ): WebhookReplayEvent | null {
+    if (!replayJob.startedAt) {
+      return null;
+    }
+    return {
+      id: `replay.job.started:${replayJob.id}`,
+      tenantId: replayJob.tenantId,
+      eventType: "replay.job.started",
+      occurredAt: replayJob.startedAt,
+      payload: {
+        eventType: "replay.job.started",
+        replayJobId: replayJob.id,
+        baselineId: replayJob.baselineId,
+        status: replayJob.status,
+        parameters: { ...replayJob.parameters },
+        summary: { ...replayJob.summary },
+        startedAt: replayJob.startedAt,
+        createdAt: replayJob.createdAt,
+        updatedAt: replayJob.updatedAt,
+      },
+    };
+  }
+
+  private buildReplayRunWebhookPayloadBase(
+    replayJob: ReplayJob
+  ): Record<string, unknown> {
+    return {
+      runId: replayJob.id,
+      jobId: replayJob.id,
+      replayJobId: replayJob.id,
+      datasetId: replayJob.baselineId,
+      baselineId: replayJob.baselineId,
+      status: replayJob.status,
+      parameters: { ...replayJob.parameters },
+      summary: { ...replayJob.summary },
+      createdAt: replayJob.createdAt,
+      updatedAt: replayJob.updatedAt,
+      startedAt: replayJob.startedAt,
+      finishedAt: replayJob.finishedAt,
+    };
+  }
+
+  private hasReplayRegressions(replayJob: ReplayJob): boolean {
+    return Math.max(
+      0,
+      Math.trunc(
+        toNumber(
+          (replayJob.summary as Record<string, unknown> | undefined)?.regressedCases,
+          0
+        )
+      )
+    ) > 0;
+  }
+
+  private buildWebhookReplayEventForReplayJobCompleted(
+    replayJob: ReplayJob
+  ): WebhookReplayEvent | null {
+    if (replayJob.status !== "completed") {
+      return null;
+    }
+    const occurredAt = replayJob.finishedAt ?? replayJob.updatedAt;
+    if (!occurredAt) {
+      return null;
+    }
+    return {
+      id: `replay.job.completed:${replayJob.id}`,
+      tenantId: replayJob.tenantId,
+      eventType: "replay.job.completed",
+      occurredAt,
+      payload: {
+        eventType: "replay.job.completed",
+        replayJobId: replayJob.id,
+        baselineId: replayJob.baselineId,
+        status: replayJob.status,
+        parameters: { ...replayJob.parameters },
+        summary: { ...replayJob.summary },
+        diff: { ...replayJob.diff },
+        finishedAt: replayJob.finishedAt,
+        createdAt: replayJob.createdAt,
+        updatedAt: replayJob.updatedAt,
+      },
+    };
+  }
+
+  private buildWebhookReplayEventForReplayRunCompleted(
+    replayJob: ReplayJob
+  ): WebhookReplayEvent | null {
+    if (replayJob.status !== "completed") {
+      return null;
+    }
+    const occurredAt = replayJob.finishedAt ?? replayJob.updatedAt;
+    if (!occurredAt) {
+      return null;
+    }
+    return {
+      id: `replay.run.completed:${replayJob.id}`,
+      tenantId: replayJob.tenantId,
+      eventType: "replay.run.completed",
+      occurredAt,
+      payload: {
+        eventType: "replay.run.completed",
+        ...this.buildReplayRunWebhookPayloadBase(replayJob),
+        diff: { ...replayJob.diff },
+      },
+    };
+  }
+
+  private buildWebhookReplayEventForReplayRunStarted(
+    replayJob: ReplayJob
+  ): WebhookReplayEvent | null {
+    if (!replayJob.startedAt) {
+      return null;
+    }
+    return {
+      id: `replay.run.started:${replayJob.id}`,
+      tenantId: replayJob.tenantId,
+      eventType: "replay.run.started",
+      occurredAt: replayJob.startedAt,
+      payload: {
+        eventType: "replay.run.started",
+        ...this.buildReplayRunWebhookPayloadBase(replayJob),
+      },
+    };
+  }
+
+  private buildWebhookReplayEventForReplayRunRegressionDetected(
+    replayJob: ReplayJob
+  ): WebhookReplayEvent | null {
+    if (replayJob.status !== "completed" || !this.hasReplayRegressions(replayJob)) {
+      return null;
+    }
+    const occurredAt = replayJob.finishedAt ?? replayJob.updatedAt;
+    if (!occurredAt) {
+      return null;
+    }
+    return {
+      id: `replay.run.regression_detected:${replayJob.id}`,
+      tenantId: replayJob.tenantId,
+      eventType: "replay.run.regression_detected",
+      occurredAt,
+      payload: {
+        eventType: "replay.run.regression_detected",
+        ...this.buildReplayRunWebhookPayloadBase(replayJob),
+        diff: { ...replayJob.diff },
+      },
+    };
+  }
+
+  private buildWebhookReplayEventForReplayJobFailed(
+    replayJob: ReplayJob
+  ): WebhookReplayEvent | null {
+    if (replayJob.status !== "failed") {
+      return null;
+    }
+    const occurredAt = replayJob.finishedAt ?? replayJob.updatedAt;
+    if (!occurredAt) {
+      return null;
+    }
+    return {
+      id: `replay.job.failed:${replayJob.id}`,
+      tenantId: replayJob.tenantId,
+      eventType: "replay.job.failed",
+      occurredAt,
+      payload: {
+        eventType: "replay.job.failed",
+        replayJobId: replayJob.id,
+        baselineId: replayJob.baselineId,
+        status: replayJob.status,
+        error: replayJob.error,
+        parameters: { ...replayJob.parameters },
+        summary: { ...replayJob.summary },
+        finishedAt: replayJob.finishedAt,
+        createdAt: replayJob.createdAt,
+        updatedAt: replayJob.updatedAt,
+      },
+    };
+  }
+
+  private buildWebhookReplayEventForReplayRunFailed(
+    replayJob: ReplayJob
+  ): WebhookReplayEvent | null {
+    if (replayJob.status !== "failed") {
+      return null;
+    }
+    const occurredAt = replayJob.finishedAt ?? replayJob.updatedAt;
+    if (!occurredAt) {
+      return null;
+    }
+    return {
+      id: `replay.run.failed:${replayJob.id}`,
+      tenantId: replayJob.tenantId,
+      eventType: "replay.run.failed",
+      occurredAt,
+      payload: {
+        eventType: "replay.run.failed",
+        ...this.buildReplayRunWebhookPayloadBase(replayJob),
+        error: replayJob.error,
+      },
+    };
+  }
+
+  private buildWebhookReplayEventForReplayRunCancelled(
+    replayJob: ReplayJob
+  ): WebhookReplayEvent | null {
+    if (replayJob.status !== "cancelled") {
+      return null;
+    }
+    const occurredAt = replayJob.finishedAt ?? replayJob.updatedAt;
+    if (!occurredAt) {
+      return null;
+    }
+    return {
+      id: `replay.run.cancelled:${replayJob.id}`,
+      tenantId: replayJob.tenantId,
+      eventType: "replay.run.cancelled",
+      occurredAt,
+      payload: {
+        eventType: "replay.run.cancelled",
+        ...this.buildReplayRunWebhookPayloadBase(replayJob),
+        error: replayJob.error,
+      },
+    };
+  }
+
+  private matchesWebhookReplayEventTimeRange(
+    event: WebhookReplayEvent,
+    from?: string,
+    to?: string
+  ): boolean {
+    const occurredAtTs = Date.parse(event.occurredAt);
+    const fromTs = from ? Date.parse(from) : Number.NaN;
+    const toTs = to ? Date.parse(to) : Number.NaN;
+    if (Number.isFinite(fromTs) && Number.isFinite(occurredAtTs) && occurredAtTs < fromTs) {
+      return false;
+    }
+    if (Number.isFinite(toTs) && Number.isFinite(occurredAtTs) && occurredAtTs > toTs) {
+      return false;
+    }
+    if (!Number.isFinite(occurredAtTs)) {
+      if (from && event.occurredAt < from) {
+        return false;
+      }
+      if (to && event.occurredAt > to) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private async queryWebhookReplayEventsByType(
+    pool: PgQueryable,
+    tenantId: string,
+    eventType: WebhookEventType,
+    from: string | undefined,
+    to: string | undefined,
+    limit: number
+  ): Promise<WebhookReplayEvent[]> {
+    if (limit <= 0) {
+      return [];
+    }
+
+    if (eventType === "api_key.created") {
+      const params: unknown[] = [tenantId];
+      const whereClauses = ["tenant_id = $1"];
+      if (from) {
+        params.push(from);
+        whereClauses.push(`created_at >= $${params.length}::timestamptz`);
+      }
+      if (to) {
+        params.push(to);
+        whereClauses.push(`created_at <= $${params.length}::timestamptz`);
+      }
+      params.push(limit);
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                name,
+                key_hash,
+                scopes,
+                last_used_at,
+                revoked_at,
+                created_at,
+                updated_at
+         FROM api_keys
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY created_at DESC, id DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      return result.rows.map((row) => this.buildWebhookReplayEventForApiKeyCreated(mapApiKeyRow(row)));
+    }
+
+    if (eventType === "api_key.revoked") {
+      const params: unknown[] = [tenantId];
+      const whereClauses = ["tenant_id = $1", "revoked_at IS NOT NULL"];
+      if (from) {
+        params.push(from);
+        whereClauses.push(`revoked_at >= $${params.length}::timestamptz`);
+      }
+      if (to) {
+        params.push(to);
+        whereClauses.push(`revoked_at <= $${params.length}::timestamptz`);
+      }
+      params.push(limit);
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                name,
+                key_hash,
+                scopes,
+                last_used_at,
+                revoked_at,
+                created_at,
+                updated_at
+         FROM api_keys
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY revoked_at DESC, id DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      return result.rows
+        .map((row) => this.buildWebhookReplayEventForApiKeyRevoked(mapApiKeyRow(row)))
+        .filter((row): row is WebhookReplayEvent => Boolean(row));
+    }
+
+    if (eventType === "quality.event.created") {
+      const params: unknown[] = [tenantId];
+      const whereClauses = ["tenant_id = $1"];
+      if (from) {
+        params.push(from);
+        whereClauses.push(`created_at >= $${params.length}::timestamptz`);
+      }
+      if (to) {
+        params.push(to);
+        whereClauses.push(`created_at <= $${params.length}::timestamptz`);
+      }
+      params.push(limit);
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                scorecard_key,
+                metric_key,
+                provider,
+                repository,
+                workflow,
+                run_id,
+                score,
+                passed,
+                metadata,
+                created_at
+         FROM quality_events
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY created_at DESC, id DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      return result.rows.map((row) =>
+        this.buildWebhookReplayEventForQualityEvent(mapQualityEventRow(row))
+      );
+    }
+
+    if (eventType === "quality.scorecard.updated") {
+      const params: unknown[] = [tenantId];
+      const whereClauses = ["tenant_id = $1"];
+      if (from) {
+        params.push(from);
+        whereClauses.push(`updated_at >= $${params.length}::timestamptz`);
+      }
+      if (to) {
+        params.push(to);
+        whereClauses.push(`updated_at <= $${params.length}::timestamptz`);
+      }
+      params.push(limit);
+      const result = await pool.query(
+        `SELECT tenant_id,
+                scorecard_key,
+                title,
+                description,
+                score,
+                dimensions,
+                metadata,
+                created_at,
+                updated_at
+         FROM quality_scorecards
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY updated_at DESC, scorecard_key DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      return result.rows.map((row) =>
+        this.buildWebhookReplayEventForQualityScorecard(mapQualityScorecardRow(row))
+      );
+    }
+
+    if (eventType === "replay.job.started") {
+      const params: unknown[] = [tenantId];
+      const whereClauses = ["tenant_id = $1", "started_at IS NOT NULL"];
+      if (from) {
+        params.push(from);
+        whereClauses.push(`started_at >= $${params.length}::timestamptz`);
+      }
+      if (to) {
+        params.push(to);
+        whereClauses.push(`started_at <= $${params.length}::timestamptz`);
+      }
+      params.push(limit);
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                dataset_id AS baseline_id,
+                status,
+                parameters,
+                summary_payload,
+                diff_payload,
+                error,
+                started_at,
+                finished_at,
+                created_at,
+                updated_at
+         FROM replay_runs
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY started_at DESC, id DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      return result.rows
+        .map((row) => this.buildWebhookReplayEventForReplayJobStarted(mapReplayJobRow(row)))
+        .filter((row): row is WebhookReplayEvent => Boolean(row));
+    }
+
+    if (eventType === "replay.run.started") {
+      const params: unknown[] = [tenantId];
+      const whereClauses = ["tenant_id = $1", "started_at IS NOT NULL"];
+      if (from) {
+        params.push(from);
+        whereClauses.push(`started_at >= $${params.length}::timestamptz`);
+      }
+      if (to) {
+        params.push(to);
+        whereClauses.push(`started_at <= $${params.length}::timestamptz`);
+      }
+      params.push(limit);
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                dataset_id AS baseline_id,
+                status,
+                parameters,
+                summary_payload,
+                diff_payload,
+                error,
+                started_at,
+                finished_at,
+                created_at,
+                updated_at
+         FROM replay_runs
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY started_at DESC, id DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      return result.rows
+        .map((row) => this.buildWebhookReplayEventForReplayRunStarted(mapReplayJobRow(row)))
+        .filter((row): row is WebhookReplayEvent => Boolean(row));
+    }
+
+    if (
+      eventType === "replay.job.completed" ||
+      eventType === "replay.job.failed" ||
+      eventType === "replay.run.cancelled" ||
+      eventType === "replay.run.completed" ||
+      eventType === "replay.run.failed" ||
+      eventType === "replay.run.regression_detected"
+    ) {
+      const targetStatus =
+        eventType === "replay.job.failed" || eventType === "replay.run.failed"
+          ? "failed"
+          : eventType === "replay.run.cancelled"
+            ? "cancelled"
+            : "completed";
+      const occurredAtSql = "COALESCE(finished_at, updated_at)";
+      const params: unknown[] = [tenantId, targetStatus];
+      const whereClauses = ["tenant_id = $1", "status = $2", `${occurredAtSql} IS NOT NULL`];
+      if (eventType === "replay.run.regression_detected") {
+        whereClauses.push(
+          "COALESCE(NULLIF(summary_payload ->> 'regressedCases', ''), '0')::int > 0"
+        );
+      }
+      if (from) {
+        params.push(from);
+        whereClauses.push(`${occurredAtSql} >= $${params.length}::timestamptz`);
+      }
+      if (to) {
+        params.push(to);
+        whereClauses.push(`${occurredAtSql} <= $${params.length}::timestamptz`);
+      }
+      params.push(limit);
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                dataset_id AS baseline_id,
+                status,
+                parameters,
+                summary_payload,
+                diff_payload,
+                error,
+                started_at,
+                finished_at,
+                created_at,
+                updated_at
+         FROM replay_runs
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY ${occurredAtSql} DESC, id DESC
+         LIMIT $${params.length}`,
+        params
+      );
+
+      if (eventType === "replay.job.completed") {
+        return result.rows
+          .map((row) => this.buildWebhookReplayEventForReplayJobCompleted(mapReplayJobRow(row)))
+          .filter((row): row is WebhookReplayEvent => Boolean(row));
+      }
+      if (eventType === "replay.run.completed") {
+        return result.rows
+          .map((row) => this.buildWebhookReplayEventForReplayRunCompleted(mapReplayJobRow(row)))
+          .filter((row): row is WebhookReplayEvent => Boolean(row));
+      }
+      if (eventType === "replay.run.regression_detected") {
+        return result.rows
+          .map((row) =>
+            this.buildWebhookReplayEventForReplayRunRegressionDetected(mapReplayJobRow(row))
+          )
+          .filter((row): row is WebhookReplayEvent => Boolean(row));
+      }
+      if (eventType === "replay.run.failed") {
+        return result.rows
+          .map((row) => this.buildWebhookReplayEventForReplayRunFailed(mapReplayJobRow(row)))
+          .filter((row): row is WebhookReplayEvent => Boolean(row));
+      }
+      if (eventType === "replay.run.cancelled") {
+        return result.rows
+          .map((row) => this.buildWebhookReplayEventForReplayRunCancelled(mapReplayJobRow(row)))
+          .filter((row): row is WebhookReplayEvent => Boolean(row));
+      }
+      return result.rows
+        .map((row) => this.buildWebhookReplayEventForReplayJobFailed(mapReplayJobRow(row)))
+        .filter((row): row is WebhookReplayEvent => Boolean(row));
+    }
+
+    return [];
+  }
+
+  private listWebhookReplayEventsFromMemory(
+    tenantId: string,
+    input: NormalizedWebhookReplayEventListInput
+  ): WebhookReplayEvent[] {
+    const items: WebhookReplayEvent[] = [];
+    for (const eventType of input.eventTypes) {
+      if (eventType === "api_key.created") {
+        for (const apiKey of this.memoryApiKeys) {
+          if (apiKey.tenantId !== tenantId) {
+            continue;
+          }
+          items.push(this.buildWebhookReplayEventForApiKeyCreated(this.cloneApiKey(apiKey)));
+        }
+        continue;
+      }
+
+      if (eventType === "api_key.revoked") {
+        for (const apiKey of this.memoryApiKeys) {
+          if (apiKey.tenantId !== tenantId) {
+            continue;
+          }
+          const replayEvent = this.buildWebhookReplayEventForApiKeyRevoked(
+            this.cloneApiKey(apiKey)
+          );
+          if (replayEvent) {
+            items.push(replayEvent);
+          }
+        }
+        continue;
+      }
+
+      if (eventType === "quality.event.created") {
+        for (const qualityEvent of this.memoryQualityEvents) {
+          if (qualityEvent.tenantId !== tenantId) {
+            continue;
+          }
+          items.push(
+            this.buildWebhookReplayEventForQualityEvent(this.cloneQualityEvent(qualityEvent))
+          );
+        }
+        continue;
+      }
+
+      if (eventType === "quality.scorecard.updated") {
+        for (const scorecard of this.memoryQualityScorecards) {
+          if (scorecard.tenantId !== tenantId) {
+            continue;
+          }
+          items.push(
+            this.buildWebhookReplayEventForQualityScorecard(
+              this.cloneQualityScorecard(scorecard)
+            )
+          );
+        }
+        continue;
+      }
+
+      if (eventType === "replay.job.started") {
+        for (const replayRun of this.memoryReplayRuns) {
+          if (replayRun.tenantId !== tenantId) {
+            continue;
+          }
+          const replayEvent = this.buildWebhookReplayEventForReplayJobStarted(
+            mapReplayRunToJob(this.cloneReplayRun(replayRun))
+          );
+          if (replayEvent) {
+            items.push(replayEvent);
+          }
+        }
+        continue;
+      }
+
+      if (eventType === "replay.run.started") {
+        for (const replayRun of this.memoryReplayRuns) {
+          if (replayRun.tenantId !== tenantId) {
+            continue;
+          }
+          const replayEvent = this.buildWebhookReplayEventForReplayRunStarted(
+            mapReplayRunToJob(this.cloneReplayRun(replayRun))
+          );
+          if (replayEvent) {
+            items.push(replayEvent);
+          }
+        }
+        continue;
+      }
+
+      if (eventType === "replay.job.completed") {
+        for (const replayRun of this.memoryReplayRuns) {
+          if (replayRun.tenantId !== tenantId) {
+            continue;
+          }
+          const replayEvent = this.buildWebhookReplayEventForReplayJobCompleted(
+            mapReplayRunToJob(this.cloneReplayRun(replayRun))
+          );
+          if (replayEvent) {
+            items.push(replayEvent);
+          }
+        }
+        continue;
+      }
+
+      if (eventType === "replay.job.failed") {
+        for (const replayRun of this.memoryReplayRuns) {
+          if (replayRun.tenantId !== tenantId) {
+            continue;
+          }
+          const replayEvent = this.buildWebhookReplayEventForReplayJobFailed(
+            mapReplayRunToJob(this.cloneReplayRun(replayRun))
+          );
+          if (replayEvent) {
+            items.push(replayEvent);
+          }
+        }
+        continue;
+      }
+
+      if (eventType === "replay.run.completed") {
+        for (const replayRun of this.memoryReplayRuns) {
+          if (replayRun.tenantId !== tenantId) {
+            continue;
+          }
+          const replayEvent = this.buildWebhookReplayEventForReplayRunCompleted(
+            mapReplayRunToJob(this.cloneReplayRun(replayRun))
+          );
+          if (replayEvent) {
+            items.push(replayEvent);
+          }
+        }
+        continue;
+      }
+
+      if (eventType === "replay.run.regression_detected") {
+        for (const replayRun of this.memoryReplayRuns) {
+          if (replayRun.tenantId !== tenantId) {
+            continue;
+          }
+          const replayEvent = this.buildWebhookReplayEventForReplayRunRegressionDetected(
+            mapReplayRunToJob(this.cloneReplayRun(replayRun))
+          );
+          if (replayEvent) {
+            items.push(replayEvent);
+          }
+        }
+        continue;
+      }
+
+      if (eventType === "replay.run.failed") {
+        for (const replayRun of this.memoryReplayRuns) {
+          if (replayRun.tenantId !== tenantId) {
+            continue;
+          }
+          const replayEvent = this.buildWebhookReplayEventForReplayRunFailed(
+            mapReplayRunToJob(this.cloneReplayRun(replayRun))
+          );
+          if (replayEvent) {
+            items.push(replayEvent);
+          }
+        }
+        continue;
+      }
+
+      if (eventType === "replay.run.cancelled") {
+        for (const replayRun of this.memoryReplayRuns) {
+          if (replayRun.tenantId !== tenantId) {
+            continue;
+          }
+          const replayEvent = this.buildWebhookReplayEventForReplayRunCancelled(
+            mapReplayRunToJob(this.cloneReplayRun(replayRun))
+          );
+          if (replayEvent) {
+            items.push(replayEvent);
+          }
+        }
+      }
+    }
+
+    return items
+      .filter((item) => this.matchesWebhookReplayEventTimeRange(item, input.from, input.to))
+      .sort(compareWebhookReplayEventDesc)
+      .slice(0, input.limit);
+  }
+
   private cloneQualityEvent(qualityEvent: QualityEvent): QualityEvent {
     return {
       ...qualityEvent,
+      externalSource: qualityEvent.externalSource
+        ? { ...qualityEvent.externalSource }
+        : undefined,
       metadata: { ...qualityEvent.metadata },
     };
   }
@@ -14742,6 +18414,21 @@ class ControlPlaneRepository {
         continue;
       }
       if (input.scorecardKey && qualityEvent.scorecardKey !== input.scorecardKey) {
+        continue;
+      }
+      const externalSource =
+        qualityEvent.externalSource ??
+        extractQualityExternalSourceFromMetadata(qualityEvent.metadata);
+      if (input.provider && externalSource?.provider !== input.provider) {
+        continue;
+      }
+      if (input.repo && externalSource?.repo !== input.repo) {
+        continue;
+      }
+      if (input.workflow && externalSource?.workflow !== input.workflow) {
+        continue;
+      }
+      if (input.runId && externalSource?.runId !== input.runId) {
         continue;
       }
       const createdAtTimestamp = Date.parse(qualityEvent.createdAt);
@@ -14780,6 +18467,103 @@ class ControlPlaneRepository {
       }))
       .sort((a, b) => b.date.localeCompare(a.date))
       .slice(0, input.limit);
+  }
+
+  private listQualityExternalMetricGroupsFromMemory(
+    tenantId: string,
+    input: NormalizedQualityExternalMetricGroupsInput
+  ): QualityExternalMetricGroup[] {
+    const fromTimestamp = input.from ? Date.parse(input.from) : undefined;
+    const toTimestamp = input.to ? Date.parse(input.to) : undefined;
+    const buckets = new Map<
+      string,
+      {
+        total: number;
+        passed: number;
+        failed: number;
+        scoreSum: number;
+      }
+    >();
+
+    for (const qualityEvent of this.memoryQualityEvents) {
+      if (qualityEvent.tenantId !== tenantId) {
+        continue;
+      }
+      if (input.scorecardKey && qualityEvent.scorecardKey !== input.scorecardKey) {
+        continue;
+      }
+      const externalSource =
+        qualityEvent.externalSource ??
+        extractQualityExternalSourceFromMetadata(qualityEvent.metadata);
+      if (input.provider && externalSource?.provider !== input.provider) {
+        continue;
+      }
+      if (input.repo && externalSource?.repo !== input.repo) {
+        continue;
+      }
+      if (input.workflow && externalSource?.workflow !== input.workflow) {
+        continue;
+      }
+      if (input.runId && externalSource?.runId !== input.runId) {
+        continue;
+      }
+
+      const createdAtTimestamp = Date.parse(qualityEvent.createdAt);
+      if (fromTimestamp !== undefined && createdAtTimestamp < fromTimestamp) {
+        continue;
+      }
+      if (toTimestamp !== undefined && createdAtTimestamp > toTimestamp) {
+        continue;
+      }
+
+      const groupValue = this.getQualityExternalGroupValue(externalSource, input.groupBy);
+      const bucket = buckets.get(groupValue) ?? {
+        total: 0,
+        passed: 0,
+        failed: 0,
+        scoreSum: 0,
+      };
+      bucket.total += 1;
+      if (qualityEvent.passed) {
+        bucket.passed += 1;
+      } else {
+        bucket.failed += 1;
+      }
+      bucket.scoreSum += normalizeQualityScore(qualityEvent.score);
+      buckets.set(groupValue, bucket);
+    }
+
+    return [...buckets.entries()]
+      .map(([value, bucket]) => ({
+        groupBy: input.groupBy,
+        value,
+        total: bucket.total,
+        passed: bucket.passed,
+        failed: bucket.failed,
+        averageScore:
+          bucket.total > 0 ? Number((bucket.scoreSum / bucket.total).toFixed(6)) : 0,
+      }))
+      .sort((a, b) => b.total - a.total || a.value.localeCompare(b.value))
+      .slice(0, input.limit);
+  }
+
+  private getQualityExternalGroupValue(
+    externalSource: QualityExternalSourceMetadata | undefined,
+    groupBy: QualityExternalMetricGroupBy
+  ): string {
+    if (!externalSource) {
+      return "unknown";
+    }
+    if (groupBy === "provider") {
+      return externalSource.provider ?? "unknown";
+    }
+    if (groupBy === "repo") {
+      return externalSource.repo ?? "unknown";
+    }
+    if (groupBy === "workflow") {
+      return externalSource.workflow ?? "unknown";
+    }
+    return externalSource.runId ?? "unknown";
   }
 
   private cloneQualityScorecard(qualityScorecard: QualityScorecard): QualityScorecard {
@@ -14826,6 +18610,262 @@ class ControlPlaneRepository {
     return this.cloneQualityScorecard(qualityScorecard);
   }
 
+  private cloneReplayDataset(replayDataset: ReplayDataset): ReplayDataset {
+    return {
+      ...replayDataset,
+      metadata: { ...replayDataset.metadata },
+    };
+  }
+
+  private createReplayDatasetToMemory(replayDataset: ReplayDataset): ReplayDataset {
+    const existing = this.memoryReplayDatasets.find(
+      (item) => item.tenantId === replayDataset.tenantId && item.name === replayDataset.name
+    );
+    if (existing) {
+      throw new Error(
+        `replay_dataset_name_already_exists:${replayDataset.tenantId}:${replayDataset.name}`
+      );
+    }
+    this.memoryReplayDatasets.unshift(this.cloneReplayDataset(replayDataset));
+    return this.cloneReplayDataset(replayDataset);
+  }
+
+  private listReplayDatasetsFromMemory(
+    tenantId: string,
+    input: NormalizedReplayDatasetListInput
+  ): ReplayDataset[] {
+    const keyword = input.keyword?.toLowerCase();
+    return this.memoryReplayDatasets
+      .filter((replayDataset) => {
+        if (replayDataset.tenantId !== tenantId) {
+          return false;
+        }
+        if (!keyword) {
+          return true;
+        }
+        return (
+          replayDataset.name.toLowerCase().includes(keyword) ||
+          (replayDataset.description ?? "").toLowerCase().includes(keyword)
+        );
+      })
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id))
+      .slice(0, input.limit)
+      .map((replayDataset) => this.cloneReplayDataset(replayDataset));
+  }
+
+  private getReplayDatasetByIdFromMemory(tenantId: string, datasetId: string): ReplayDataset | null {
+    const matched = this.memoryReplayDatasets.find(
+      (replayDataset) => replayDataset.tenantId === tenantId && replayDataset.id === datasetId
+    );
+    return matched ? this.cloneReplayDataset(matched) : null;
+  }
+
+  private cloneReplayDatasetCase(replayDatasetCase: ReplayDatasetCase): ReplayDatasetCase {
+    return {
+      ...replayDatasetCase,
+      metadata: { ...replayDatasetCase.metadata },
+    };
+  }
+
+  private replaceReplayDatasetCasesInMemory(
+    tenantId: string,
+    datasetId: string,
+    cases: ReplayDatasetCase[]
+  ): ReplayDatasetCase[] {
+    const datasetIndex = this.memoryReplayDatasets.findIndex(
+      (item) => item.tenantId === tenantId && item.id === datasetId
+    );
+    if (datasetIndex < 0) {
+      throw new Error(`replay_dataset_not_found:${tenantId}:${datasetId}`);
+    }
+    this.memoryReplayDatasetCases.splice(
+      0,
+      this.memoryReplayDatasetCases.length,
+      ...this.memoryReplayDatasetCases.filter(
+        (item) => item.tenantId !== tenantId || item.datasetId !== datasetId
+      ),
+      ...cases.map((item) => this.cloneReplayDatasetCase(item))
+    );
+    const currentDataset = this.memoryReplayDatasets[datasetIndex];
+    if (currentDataset) {
+      this.memoryReplayDatasets[datasetIndex] = {
+        ...currentDataset,
+        caseCount: cases.length,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    return cases.map((item) => this.cloneReplayDatasetCase(item));
+  }
+
+  private listReplayDatasetCasesFromMemory(
+    tenantId: string,
+    datasetId: string,
+    input: NormalizedReplayDatasetCaseListInput
+  ): ReplayDatasetCase[] {
+    return this.memoryReplayDatasetCases
+      .filter((item) => item.tenantId === tenantId && item.datasetId === datasetId)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.caseId.localeCompare(b.caseId))
+      .slice(0, input.limit)
+      .map((item) => this.cloneReplayDatasetCase(item));
+  }
+
+  private cloneReplayRun(replayRun: ReplayRun): ReplayRun {
+    return {
+      ...replayRun,
+      parameters: { ...replayRun.parameters },
+      summary: { ...replayRun.summary },
+      diff: { ...replayRun.diff },
+    };
+  }
+
+  private createReplayRunToMemory(replayRun: ReplayRun): ReplayRun {
+    const datasetExists = this.memoryReplayDatasets.some(
+      (item) => item.tenantId === replayRun.tenantId && item.id === replayRun.datasetId
+    );
+    if (!datasetExists) {
+      throw new Error(`replay_dataset_not_found:${replayRun.tenantId}:${replayRun.datasetId}`);
+    }
+    this.memoryReplayRuns.unshift(this.cloneReplayRun(replayRun));
+    return this.cloneReplayRun(replayRun);
+  }
+
+  private listReplayRunsFromMemory(
+    tenantId: string,
+    input: NormalizedReplayRunListInput
+  ): ReplayRun[] {
+    return this.memoryReplayRuns
+      .filter((replayRun) => {
+        if (replayRun.tenantId !== tenantId) {
+          return false;
+        }
+        if (input.datasetId && replayRun.datasetId !== input.datasetId) {
+          return false;
+        }
+        if (input.status && replayRun.status !== input.status) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(0, input.limit)
+      .map((replayRun) => this.cloneReplayRun(replayRun));
+  }
+
+  private getReplayRunByIdFromMemory(tenantId: string, runId: string): ReplayRun | null {
+    const matched = this.memoryReplayRuns.find(
+      (replayRun) => replayRun.tenantId === tenantId && replayRun.id === runId
+    );
+    return matched ? this.cloneReplayRun(matched) : null;
+  }
+
+  private updateReplayRunInMemory(
+    tenantId: string,
+    runId: string,
+    input: {
+      status?: ReplayJobStatus;
+      fromStatuses?: ReplayJobStatus[];
+      summary?: Record<string, unknown>;
+      diff?: Record<string, unknown>;
+      error?: string | null;
+      startedAt?: string | null;
+      finishedAt?: string | null;
+      updatedAt: string;
+    }
+  ): ReplayRun | null {
+    const index = this.memoryReplayRuns.findIndex(
+      (replayRun) => replayRun.tenantId === tenantId && replayRun.id === runId
+    );
+    if (index < 0) {
+      return null;
+    }
+
+    const current = this.memoryReplayRuns[index];
+    if (!current) {
+      return null;
+    }
+    if (
+      input.fromStatuses &&
+      input.fromStatuses.length > 0 &&
+      !input.fromStatuses.includes(current.status)
+    ) {
+      return null;
+    }
+
+    const updated: ReplayRun = {
+      ...current,
+      updatedAt: input.updatedAt,
+      parameters: { ...current.parameters },
+      summary: input.summary ? { ...input.summary } : { ...current.summary },
+      diff: input.diff ? { ...input.diff } : { ...current.diff },
+    };
+
+    if (input.status) {
+      updated.status = input.status;
+    }
+    if (input.error !== undefined) {
+      updated.error = input.error ?? undefined;
+    }
+    if (input.startedAt !== undefined) {
+      updated.startedAt = input.startedAt ?? undefined;
+    }
+    if (input.finishedAt !== undefined) {
+      updated.finishedAt = input.finishedAt ?? undefined;
+    }
+
+    this.memoryReplayRuns[index] = updated;
+    return this.cloneReplayRun(updated);
+  }
+
+  private cloneReplayArtifact(replayArtifact: ReplayArtifact): ReplayArtifact {
+    return {
+      ...replayArtifact,
+      metadata: { ...replayArtifact.metadata },
+    };
+  }
+
+  private upsertReplayArtifactsInMemory(
+    tenantId: string,
+    runId: string,
+    items: ReplayArtifact[]
+  ): ReplayArtifact[] {
+    this.memoryReplayArtifacts.splice(
+      0,
+      this.memoryReplayArtifacts.length,
+      ...this.memoryReplayArtifacts.filter(
+        (item) =>
+          item.tenantId !== tenantId ||
+          item.runId !== runId ||
+          !items.some((candidate) => candidate.artifactType === item.artifactType)
+      ),
+      ...items.map((item) => this.cloneReplayArtifact(item))
+    );
+    return items.map((item) => this.cloneReplayArtifact(item));
+  }
+
+  private listReplayArtifactsFromMemory(
+    tenantId: string,
+    runId: string,
+    input: NormalizedReplayArtifactListInput
+  ): ReplayArtifact[] {
+    return this.memoryReplayArtifacts
+      .filter((item) => item.tenantId === tenantId && item.runId === runId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.artifactType.localeCompare(b.artifactType))
+      .slice(0, input.limit)
+      .map((item) => this.cloneReplayArtifact(item));
+  }
+
+  private getReplayArtifactByTypeFromMemory(
+    tenantId: string,
+    runId: string,
+    artifactType: ReplayArtifactType
+  ): ReplayArtifact | null {
+    const matched = this.memoryReplayArtifacts.find(
+      (item) =>
+        item.tenantId === tenantId && item.runId === runId && item.artifactType === artifactType
+    );
+    return matched ? this.cloneReplayArtifact(matched) : null;
+  }
+
   private cloneReplayBaseline(replayBaseline: ReplayBaseline): ReplayBaseline {
     return {
       ...replayBaseline,
@@ -14834,39 +18874,19 @@ class ControlPlaneRepository {
   }
 
   private createReplayBaselineToMemory(replayBaseline: ReplayBaseline): ReplayBaseline {
-    const existing = this.memoryReplayBaselines.find(
-      (item) => item.tenantId === replayBaseline.tenantId && item.name === replayBaseline.name
+    return mapReplayDatasetToBaseline(
+      this.createReplayDatasetToMemory(mapReplayBaselineToDataset(replayBaseline))
     );
-    if (existing) {
-      throw new Error(
-        `replay_baseline_name_already_exists:${replayBaseline.tenantId}:${replayBaseline.name}`
-      );
-    }
-    this.memoryReplayBaselines.unshift(this.cloneReplayBaseline(replayBaseline));
-    return this.cloneReplayBaseline(replayBaseline);
   }
 
   private listReplayBaselinesFromMemory(
     tenantId: string,
     input: NormalizedReplayBaselineListInput
   ): ReplayBaseline[] {
-    const keyword = input.keyword?.toLowerCase();
-    return this.memoryReplayBaselines
-      .filter((replayBaseline) => {
-        if (replayBaseline.tenantId !== tenantId) {
-          return false;
-        }
-        if (!keyword) {
-          return true;
-        }
-        return (
-          replayBaseline.name.toLowerCase().includes(keyword) ||
-          (replayBaseline.description ?? "").toLowerCase().includes(keyword)
-        );
-      })
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id))
-      .slice(0, input.limit)
-      .map((replayBaseline) => this.cloneReplayBaseline(replayBaseline));
+    return this.listReplayDatasetsFromMemory(tenantId, {
+      keyword: input.keyword,
+      limit: input.limit,
+    }).map(mapReplayDatasetToBaseline);
   }
 
   private cloneReplayJob(replayJob: ReplayJob): ReplayJob {
@@ -14879,70 +18899,49 @@ class ControlPlaneRepository {
   }
 
   private createReplayJobToMemory(replayJob: ReplayJob): ReplayJob {
-    const baselineExists = this.memoryReplayBaselines.some(
-      (item) => item.tenantId === replayJob.tenantId && item.id === replayJob.baselineId
-    );
-    if (!baselineExists) {
-      throw new Error(`replay_baseline_not_found:${replayJob.tenantId}:${replayJob.baselineId}`);
-    }
-    this.memoryReplayJobs.unshift(this.cloneReplayJob(replayJob));
-    this.memoryReplayJobDiffById.set(
-      buildTenantScopedLookupKey(replayJob.tenantId, replayJob.id),
-      {
-        tenantId: replayJob.tenantId,
-        replayJobId: replayJob.id,
-        diff: { ...replayJob.diff },
-      }
-    );
-    return this.cloneReplayJob(replayJob);
+    return mapReplayRunToJob(this.createReplayRunToMemory(mapReplayJobToRun(replayJob)));
   }
 
   private listReplayJobsFromMemory(
     tenantId: string,
     input: NormalizedReplayJobListInput
   ): ReplayJob[] {
-    return this.memoryReplayJobs
-      .filter((replayJob) => {
-        if (replayJob.tenantId !== tenantId) {
-          return false;
-        }
-        if (input.baselineId && replayJob.baselineId !== input.baselineId) {
-          return false;
-        }
-        if (input.status && replayJob.status !== input.status) {
-          return false;
-        }
-        return true;
-      })
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
-      .slice(0, input.limit)
-      .map((replayJob) => this.cloneReplayJob(replayJob));
+    return this.listReplayRunsFromMemory(tenantId, {
+      datasetId: input.baselineId,
+      status: input.status,
+      limit: input.limit,
+    }).map(mapReplayRunToJob);
   }
 
   private getReplayJobByIdFromMemory(tenantId: string, replayJobId: string): ReplayJob | null {
-    const matched = this.memoryReplayJobs.find(
-      (replayJob) => replayJob.tenantId === tenantId && replayJob.id === replayJobId
-    );
-    return matched ? this.cloneReplayJob(matched) : null;
+    const run = this.getReplayRunByIdFromMemory(tenantId, replayJobId);
+    return run ? mapReplayRunToJob(run) : null;
   }
 
   private getReplayJobDiffFromMemory(
     tenantId: string,
     replayJobId: string
   ): Record<string, unknown> | null {
-    const lookupKey = buildTenantScopedLookupKey(tenantId, replayJobId);
-    const indexed = this.memoryReplayJobDiffById.get(lookupKey);
-    if (indexed) {
-      return { ...indexed.diff };
-    }
+    const run = this.getReplayRunByIdFromMemory(tenantId, replayJobId);
+    return run ? { ...run.diff } : null;
+  }
 
-    const matched = this.memoryReplayJobs.find(
-      (replayJob) => replayJob.tenantId === tenantId && replayJob.id === replayJobId
-    );
-    if (!matched) {
-      return null;
+  private updateReplayJobInMemory(
+    tenantId: string,
+    replayJobId: string,
+    input: {
+      status?: ReplayJobStatus;
+      fromStatuses?: ReplayJobStatus[];
+      summary?: Record<string, unknown>;
+      diff?: Record<string, unknown>;
+      error?: string | null;
+      startedAt?: string | null;
+      finishedAt?: string | null;
+      updatedAt: string;
     }
-    return { ...matched.diff };
+  ): ReplayJob | null {
+    const run = this.updateReplayRunInMemory(tenantId, replayJobId, input);
+    return run ? mapReplayRunToJob(run) : null;
   }
 
   private listSourcesFromMemory(tenantId: string): Source[] {
@@ -15507,8 +19506,10 @@ class ControlPlaneRepository {
 
   private listUsageDailyFromMemory(input: NormalizedUsageAggregateInput): UsageDailyItem[] {
     const sourceTenantById = new Map<string, string>();
+    const sourceById = new Map<string, Source>();
     for (const source of this.memorySources) {
       sourceTenantById.set(source.id, this.resolveSourceTenantIdFromMemory(source));
+      sourceById.set(source.id, source);
     }
     const fromTimestamp = input.from ? Date.parse(input.from) : undefined;
     const toTimestamp = input.to ? Date.parse(input.to) : undefined;
@@ -15539,6 +19540,12 @@ class ControlPlaneRepository {
       }
       if (toTimestamp !== undefined && startedAt > toTimestamp) {
         continue;
+      }
+      if (input.project) {
+        const dimensions = resolveSessionFilterDimensions(session, sourceById.get(session.sourceId));
+        if (!matchesCaseInsensitiveFilter(dimensions.project, input.project)) {
+          continue;
+        }
       }
 
       const day = new Date(startedAt).toISOString().slice(0, 10);
@@ -15588,8 +19595,10 @@ class ControlPlaneRepository {
 
   private listUsageMonthlyFromMemory(input: NormalizedUsageAggregateInput): UsageMonthlyItem[] {
     const sourceTenantById = new Map<string, string>();
+    const sourceById = new Map<string, Source>();
     for (const source of this.memorySources) {
       sourceTenantById.set(source.id, this.resolveSourceTenantIdFromMemory(source));
+      sourceById.set(source.id, source);
     }
     const fromTimestamp = input.from ? Date.parse(input.from) : undefined;
     const toTimestamp = input.to ? Date.parse(input.to) : undefined;
@@ -15620,6 +19629,12 @@ class ControlPlaneRepository {
       }
       if (toTimestamp !== undefined && startedAt > toTimestamp) {
         continue;
+      }
+      if (input.project) {
+        const dimensions = resolveSessionFilterDimensions(session, sourceById.get(session.sourceId));
+        if (!matchesCaseInsensitiveFilter(dimensions.project, input.project)) {
+          continue;
+        }
       }
       const date = new Date(startedAt);
       const month = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-01T00:00:00.000Z`;
@@ -15663,8 +19678,10 @@ class ControlPlaneRepository {
 
   private listUsageModelRankingFromMemory(input: NormalizedUsageAggregateInput): UsageModelItem[] {
     const sourceTenantById = new Map<string, string>();
+    const sourceById = new Map<string, Source>();
     for (const source of this.memorySources) {
       sourceTenantById.set(source.id, this.resolveSourceTenantIdFromMemory(source));
+      sourceById.set(source.id, source);
     }
     const fromTimestamp = input.from ? Date.parse(input.from) : undefined;
     const toTimestamp = input.to ? Date.parse(input.to) : undefined;
@@ -15695,6 +19712,12 @@ class ControlPlaneRepository {
       }
       if (toTimestamp !== undefined && startedAt > toTimestamp) {
         continue;
+      }
+      if (input.project) {
+        const dimensions = resolveSessionFilterDimensions(session, sourceById.get(session.sourceId));
+        if (!matchesCaseInsensitiveFilter(dimensions.project, input.project)) {
+          continue;
+        }
       }
       const model = firstNonEmptyString(session.model, "unknown") ?? "unknown";
       const sessionCost = resolveSessionUsageCostSnapshotFromRecord(
@@ -15741,8 +19764,10 @@ class ControlPlaneRepository {
     input: NormalizedUsageAggregateInput
   ): UsageSessionBreakdownItem[] {
     const sourceTenantById = new Map<string, string>();
+    const sourceById = new Map<string, Source>();
     for (const source of this.memorySources) {
       sourceTenantById.set(source.id, this.resolveSourceTenantIdFromMemory(source));
+      sourceById.set(source.id, source);
     }
     const fromTimestamp = input.from ? Date.parse(input.from) : undefined;
     const toTimestamp = input.to ? Date.parse(input.to) : undefined;
@@ -15761,6 +19786,12 @@ class ControlPlaneRepository {
       }
       if (toTimestamp !== undefined && startedAt > toTimestamp) {
         continue;
+      }
+      if (input.project) {
+        const dimensions = resolveSessionFilterDimensions(session, sourceById.get(session.sourceId));
+        if (!matchesCaseInsensitiveFilter(dimensions.project, input.project)) {
+          continue;
+        }
       }
 
       const sessionCost = resolveSessionUsageCostSnapshotFromRecord(
@@ -16433,6 +20464,15 @@ class ControlPlaneRepository {
         if (input.suppressed !== undefined && execution.suppressed !== input.suppressed) {
           return false;
         }
+        if (input.dispatchMode && execution.dispatchMode !== input.dispatchMode) {
+          return false;
+        }
+        if (
+          input.hasConflict !== undefined &&
+          (execution.conflictRuleIds.length > 0) !== input.hasConflict
+        ) {
+          return false;
+        }
         if (input.simulated !== undefined && execution.simulated !== input.simulated) {
           return false;
         }
@@ -16581,6 +20621,39 @@ class ControlPlaneRepository {
       reason: reason ?? current.reason,
       approvedByUserId: userId ?? current.approvedByUserId,
       finishedAt: current.finishedAt ?? updatedAt,
+      updatedAt,
+      metadata: { ...current.metadata },
+    };
+    this.memoryReplicationJobs[index] = updated;
+    return this.cloneReplicationJob(updated);
+  }
+
+  private approveReplicationJobInMemory(
+    tenantId: string,
+    jobId: string,
+    reason: string | undefined,
+    userId: string | undefined,
+    updatedAt: string
+  ): ReplicationJob | null {
+    const index = this.memoryReplicationJobs.findIndex(
+      (job) => job.tenantId === tenantId && job.id === jobId
+    );
+    if (index < 0) {
+      return null;
+    }
+    const current = this.memoryReplicationJobs[index];
+    if (!current) {
+      return null;
+    }
+    if (current.status !== "pending") {
+      return this.cloneReplicationJob(current);
+    }
+    const updated: ReplicationJob = {
+      ...current,
+      status: "running",
+      reason: reason ?? current.reason,
+      approvedByUserId: userId ?? current.approvedByUserId,
+      startedAt: current.startedAt ?? updatedAt,
       updatedAt,
       metadata: { ...current.metadata },
     };

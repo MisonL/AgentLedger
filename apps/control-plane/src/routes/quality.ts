@@ -6,6 +6,8 @@ import {
 import type {
   AppendAuditLogInput,
   QualityDailyMetric,
+  QualityExternalMetricGroup,
+  QualityExternalSourceMetadata,
   QualityScorecard,
 } from "../data/repository";
 import { getControlPlaneRepository } from "../data/repository";
@@ -25,6 +27,7 @@ const QUALITY_METRIC_SET = new Set([
 ]);
 
 type QualityMetric = "accuracy" | "consistency" | "groundedness" | "safety" | "latency";
+type QualityExternalGroupBy = "provider" | "repo" | "workflow" | "runId";
 
 function firstNonEmptyString(value: unknown): string | undefined {
   if (typeof value !== "string") {
@@ -76,6 +79,34 @@ function toQualityMetric(value: unknown): QualityMetric {
     return normalized as QualityMetric;
   }
   return "accuracy";
+}
+
+function toQualityExternalGroupBy(value: unknown): QualityExternalGroupBy | undefined {
+  const normalized = firstNonEmptyString(value)?.toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized === "provider" || normalized === "repo" || normalized === "workflow") {
+    return normalized;
+  }
+  if (normalized === "runid" || normalized === "run_id") {
+    return "runId";
+  }
+  return undefined;
+}
+
+function normalizeQualityExternalFilter(
+  value: unknown,
+  options: { lowerCase?: boolean } = {}
+): string | undefined {
+  const normalized = firstNonEmptyString(value);
+  if (!normalized) {
+    return undefined;
+  }
+  if (options.lowerCase) {
+    return normalized.toLowerCase();
+  }
+  return normalized;
 }
 
 function toPositiveInteger(value: unknown, fallback: number): number {
@@ -137,6 +168,20 @@ function mapDailyMetric(metric: QualityDailyMetric, selectedMetric: QualityMetri
     p50Score: avg,
     p90Score: avg,
     totalEvents: metric.total,
+  };
+}
+
+function mapQualityExternalMetricGroup(metric: QualityExternalMetricGroup) {
+  const avg = fromRepositoryScore(metric.averageScore);
+  const passRate = metric.total > 0 ? Number((metric.passed / metric.total).toFixed(6)) : 0;
+  return {
+    groupBy: metric.groupBy,
+    value: metric.value,
+    totalEvents: metric.total,
+    passedEvents: metric.passed,
+    failedEvents: metric.failed,
+    passRate,
+    avgScore: avg,
   };
 }
 
@@ -232,10 +277,16 @@ qualityRoutes.post("/quality/events", async (c) => {
     replayJobId: validation.data.replayJobId,
     notes: validation.data.notes,
     occurredAt: validation.data.occurredAt,
+    ...(validation.data.externalSource
+      ? {
+          externalSource: validation.data.externalSource,
+        }
+      : {}),
   };
   const created = await repository.createQualityEvent(auth.tenantId, {
     scorecardKey: validation.data.metric,
     metricKey: validation.data.metric,
+    externalSource: validation.data.externalSource,
     score: toRepositoryScore(validation.data.score),
     passed: toRepositoryScore(validation.data.score) >= 0.8,
     metadata,
@@ -255,6 +306,7 @@ qualityRoutes.post("/quality/events", async (c) => {
       eventId: created.id,
       metric: validation.data.metric,
       score: validation.data.score,
+      externalSource: validation.data.externalSource,
     },
   });
 
@@ -264,12 +316,13 @@ qualityRoutes.post("/quality/events", async (c) => {
       tenantId: auth.tenantId,
       sessionId: validation.data.sessionId,
       replayJobId: validation.data.replayJobId,
+      externalSource: validation.data.externalSource,
       metric: validation.data.metric,
       score: validation.data.score,
       sampleCount: validation.data.sampleCount,
       occurredAt: validation.data.occurredAt,
       notes: validation.data.notes,
-      metadata: validation.data.metadata ?? {},
+      metadata,
       createdAt: created.createdAt,
     },
     201
@@ -304,16 +357,51 @@ qualityRoutes.get("/quality/metrics/daily", async (c) => {
     return c.json({ message: "limit 必须是 1 到 365 的整数。" }, 400);
   }
 
+  const provider = normalizeQualityExternalFilter(c.req.query("provider"), { lowerCase: true });
+  const repo = normalizeQualityExternalFilter(c.req.query("repo"), { lowerCase: true });
+  const workflow = normalizeQualityExternalFilter(c.req.query("workflow"));
+  const runId = normalizeQualityExternalFilter(c.req.query("runId"));
+  const groupByRaw = c.req.query("groupBy");
+  const groupBy = toQualityExternalGroupBy(groupByRaw);
+  if (groupByRaw !== undefined && !groupBy) {
+    return c.json(
+      { message: "groupBy 必须是 provider/repo/workflow/runId 之一。" },
+      400
+    );
+  }
+
   const items = await repository.listQualityDailyMetrics(auth.tenantId, {
     from: range.from,
     to: range.to,
     scorecardKey: metricQuery ? metric : undefined,
+    provider,
+    repo,
+    workflow,
+    runId,
     limit,
   });
+  const groups = groupBy
+    ? await repository.listQualityExternalMetricGroups(auth.tenantId, {
+        from: range.from,
+        to: range.to,
+        scorecardKey: metricQuery ? metric : undefined,
+        provider,
+        repo,
+        workflow,
+        runId,
+        groupBy,
+        limit: Math.min(limit, 200),
+      })
+    : [];
 
   return c.json({
     items: items.map((item) => mapDailyMetric(item, metric)),
     total: items.length,
+    ...(groupBy
+      ? {
+          groups: groups.map(mapQualityExternalMetricGroup),
+        }
+      : {}),
   });
 });
 

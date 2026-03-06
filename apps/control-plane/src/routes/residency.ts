@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import {
+  validateReplicationJobApproveInput,
   validateReplicationJobCancelInput,
   validateReplicationJobCreateInput,
   validateReplicationJobListInput,
@@ -228,6 +229,62 @@ residencyRoutes.post("/residency/replication-jobs/:id/cancel", async (c) => {
       tenantId: auth.tenantId,
       resourceId: job.id,
       status: job.status,
+      reason: job.reason,
+    },
+  });
+  return c.json(job);
+});
+
+residencyRoutes.post("/residency/replication-jobs/:id/approve", async (c) => {
+  const auth = await requireTenantAccess(c, "write");
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const jobId = c.req.param("id")?.trim();
+  if (!jobId) {
+    return c.json({ message: "jobId 必须为非空字符串。" }, 400);
+  }
+
+  const body = await c.req.json().catch(() => undefined);
+  const result = validateReplicationJobApproveInput(body);
+  if (!result.success) {
+    return c.json({ message: result.error }, 400);
+  }
+
+  const current = await repository.getReplicationJobById(auth.tenantId, jobId);
+  if (!current) {
+    return c.json({ message: `未找到复制任务 ${jobId}。` }, 404);
+  }
+  if (current.status !== "pending") {
+    return c.json({ message: `复制任务 ${jobId} 当前状态为 ${current.status}，无法审批。` }, 409);
+  }
+
+  const job = await repository.approveReplicationJob(auth.tenantId, jobId, result.data, {
+    userId: auth.userId,
+  });
+  if (!job) {
+    return c.json({ message: `未找到复制任务 ${jobId}。` }, 404);
+  }
+  if (job.status !== "running") {
+    return c.json({ message: `复制任务 ${jobId} 当前状态为 ${job.status}，无法审批。` }, 409);
+  }
+
+  const requestId = c.get("requestId");
+  await appendAuditLogSafely({
+    tenantId: auth.tenantId,
+    eventId: `cp:${requestId}`,
+    action: "control_plane.residency.replication_job_approved",
+    level: "info",
+    detail: `Approved replication job ${job.id}.`,
+    metadata: {
+      requestId,
+      tenantId: auth.tenantId,
+      resourceId: job.id,
+      status: job.status,
+      sourceRegion: job.sourceRegion,
+      targetRegion: job.targetRegion,
+      approvedByUserId: auth.userId,
       reason: job.reason,
     },
   });

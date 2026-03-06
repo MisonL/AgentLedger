@@ -5,6 +5,7 @@ import type {
   AddTenantMemberInput,
   Alert,
   AlertOrchestrationChannel,
+  AlertOrchestrationDispatchMode,
   AlertOrchestrationExecutionListInput,
   AlertOrchestrationEventType,
   AlertOrchestrationRuleListInput,
@@ -69,6 +70,7 @@ import type {
   McpInvocationListInput,
   OrgRole,
   ReplicationJobCancelInput,
+  ReplicationJobApproveInput,
   ReplicationJobCreateInput,
   ReplicationJobListInput,
   ReplicationJobStatus,
@@ -116,12 +118,18 @@ import type {
   TenantRole,
   PricingCatalog,
   PricingCatalogEntry,
+  QualityExternalSource,
   QualityEventCreateInput,
   QualityMetric,
   QualityScorecardUpsertInput,
+  ReplayDatasetCasesReplaceInput,
+  ReplayDatasetCreateInput,
+  ReplayDatasetMaterializeInput,
   ReplayBaselineCreateInput,
   ReplayJobCreateInput,
   ReplayJobStatus,
+  ReplayRunCreateInput,
+  ReplayRunStatus,
   UsageDailyItem,
   UsageExportDimension,
   UsageExportQueryInput,
@@ -133,6 +141,9 @@ import type {
   UsageCostMode,
   WebhookEndpointCreateInput,
   WebhookEndpointStatus,
+  WebhookReplayRequestInput,
+  WebhookReplayTaskListInput,
+  WebhookReplayTaskStatus,
   WebhookEndpointUpdateInput,
   WebhookEventType,
 } from "./types";
@@ -182,6 +193,10 @@ const ALERT_ORCHESTRATION_CHANNEL_SET = new Set<AlertOrchestrationChannel>([
   "email",
   "email_webhook",
   "ticket",
+]);
+const ALERT_ORCHESTRATION_DISPATCH_MODE_SET = new Set<AlertOrchestrationDispatchMode>([
+  "rule",
+  "fallback",
 ]);
 const DATA_RESIDENCY_MODE_SET = new Set<DataResidencyMode>(["single_region", "active_active"]);
 const REPLICATION_JOB_STATUS_SET = new Set<ReplicationJobStatus>([
@@ -241,11 +256,22 @@ const WEBHOOK_EVENT_TYPE_SET = new Set<WebhookEventType>([
   "replay.job.started",
   "replay.job.completed",
   "replay.job.failed",
+  "replay.run.started",
+  "replay.run.completed",
+  "replay.run.regression_detected",
+  "replay.run.failed",
+  "replay.run.cancelled",
 ]);
 const WEBHOOK_ENDPOINT_STATUS_SET = new Set<WebhookEndpointStatus>([
   "active",
   "paused",
   "disabled",
+]);
+const WEBHOOK_REPLAY_TASK_STATUS_SET = new Set<WebhookReplayTaskStatus>([
+  "queued",
+  "running",
+  "completed",
+  "failed",
 ]);
 const QUALITY_METRIC_SET = new Set<QualityMetric>([
   "accuracy",
@@ -254,7 +280,7 @@ const QUALITY_METRIC_SET = new Set<QualityMetric>([
   "safety",
   "latency",
 ]);
-const REPLAY_JOB_STATUS_SET = new Set<ReplayJobStatus>([
+const REPLAY_RUN_STATUS_SET = new Set<ReplayRunStatus>([
   "pending",
   "running",
   "completed",
@@ -293,6 +319,8 @@ const IDENTITY_BINDING_LIST_LIMIT_MAX = 200;
 const API_KEY_LIST_LIMIT_MAX = 200;
 const REPLAY_JOB_SAMPLE_LIMIT_MAX = 2000;
 const WEBHOOK_EVENT_COUNT_MAX = 32;
+const WEBHOOK_REPLAY_TASK_LIMIT_DEFAULT = 100;
+const WEBHOOK_REPLAY_TASK_LIMIT_MAX = 500;
 const PASSWORD_MIN_LENGTH = 8;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -531,6 +559,15 @@ export function isAlertOrchestrationChannel(value: unknown): value is AlertOrche
   );
 }
 
+export function isAlertOrchestrationDispatchMode(
+  value: unknown
+): value is AlertOrchestrationDispatchMode {
+  return (
+    typeof value === "string" &&
+    ALERT_ORCHESTRATION_DISPATCH_MODE_SET.has(value as AlertOrchestrationDispatchMode)
+  );
+}
+
 export function isDataResidencyMode(value: unknown): value is DataResidencyMode {
   return (
     typeof value === "string" &&
@@ -654,12 +691,25 @@ export function isWebhookEndpointStatus(
   );
 }
 
+export function isWebhookReplayTaskStatus(
+  value: unknown
+): value is WebhookReplayTaskStatus {
+  return (
+    typeof value === "string" &&
+    WEBHOOK_REPLAY_TASK_STATUS_SET.has(value as WebhookReplayTaskStatus)
+  );
+}
+
 export function isQualityMetric(value: unknown): value is QualityMetric {
   return typeof value === "string" && QUALITY_METRIC_SET.has(value as QualityMetric);
 }
 
+export function isReplayRunStatus(value: unknown): value is ReplayRunStatus {
+  return typeof value === "string" && REPLAY_RUN_STATUS_SET.has(value as ReplayRunStatus);
+}
+
 export function isReplayJobStatus(value: unknown): value is ReplayJobStatus {
-  return typeof value === "string" && REPLAY_JOB_STATUS_SET.has(value as ReplayJobStatus);
+  return isReplayRunStatus(value);
 }
 
 export function isBudgetGovernanceState(value: unknown): value is BudgetGovernanceState {
@@ -2669,6 +2719,114 @@ export function validateWebhookEndpointUpdateInput(
   };
 }
 
+export function validateWebhookReplayRequestInput(
+  input: unknown
+): ValidationResult<
+  WebhookReplayRequestInput & {
+    limit: number;
+    dryRun: boolean;
+  }
+> {
+  if (input !== undefined && !isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const body = isRecord(input) ? input : {};
+  const eventType = normalizeString(body.eventType);
+  const from = normalizeString(body.from);
+  const to = normalizeString(body.to);
+  const limit = toOptionalInteger(body.limit);
+  const dryRunRaw = toOptionalBoolean(body.dryRun);
+
+  if (body.eventType !== undefined && (!eventType || !isWebhookEventType(eventType))) {
+    return {
+      success: false,
+      error:
+        "eventType 仅支持 api_key.created/api_key.revoked/quality.event.created/quality.scorecard.updated/replay.job.started/replay.job.completed/replay.job.failed/replay.run.started/replay.run.completed/replay.run.regression_detected/replay.run.failed/replay.run.cancelled。",
+    };
+  }
+  if (body.from !== undefined && !from) {
+    return { success: false, error: "from 必须为非空字符串。" };
+  }
+  if (from && !isISODate(from)) {
+    return { success: false, error: "from 必须是 ISO 日期字符串。" };
+  }
+  if (body.to !== undefined && !to) {
+    return { success: false, error: "to 必须为非空字符串。" };
+  }
+  if (to && !isISODate(to)) {
+    return { success: false, error: "to 必须是 ISO 日期字符串。" };
+  }
+  if (from && to && Date.parse(from) > Date.parse(to)) {
+    return { success: false, error: "from 不能晚于 to。" };
+  }
+  if (
+    limit !== undefined &&
+    (!Number.isInteger(limit) || limit <= 0 || limit > WEBHOOK_REPLAY_TASK_LIMIT_MAX)
+  ) {
+    return {
+      success: false,
+      error: `limit 必须是 1 到 ${WEBHOOK_REPLAY_TASK_LIMIT_MAX} 的整数。`,
+    };
+  }
+  if (dryRunRaw === "invalid") {
+    return { success: false, error: "dryRun 必须是 true/false 或 1/0。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      eventType: eventType as WebhookEventType | undefined,
+      from,
+      to,
+      limit: limit ?? WEBHOOK_REPLAY_TASK_LIMIT_DEFAULT,
+      dryRun: typeof dryRunRaw === "boolean" ? dryRunRaw : true,
+    },
+  };
+}
+
+export function validateWebhookReplayTaskListInput(
+  input: unknown
+): ValidationResult<WebhookReplayTaskListInput & { limit: number }> {
+  if (!isRecord(input)) {
+    return { success: false, error: "查询参数必须是对象。" };
+  }
+
+  const webhookId = normalizeString(input.webhookId);
+  const status = normalizeString(input.status);
+  const cursor = normalizeString(input.cursor);
+  const limit = toOptionalInteger(input.limit);
+
+  if (input.webhookId !== undefined && !webhookId) {
+    return { success: false, error: "webhookId 必须为非空字符串。" };
+  }
+  if (input.status !== undefined && (!status || !isWebhookReplayTaskStatus(status))) {
+    return { success: false, error: "status 必须是 queued/running/completed/failed 之一。" };
+  }
+  if (input.cursor !== undefined && !cursor) {
+    return { success: false, error: "cursor 必须为非空字符串。" };
+  }
+  if (
+    limit !== undefined &&
+    (!Number.isInteger(limit) || limit <= 0 || limit > WEBHOOK_REPLAY_TASK_LIMIT_MAX)
+  ) {
+    return {
+      success: false,
+      error: `limit 必须是 1 到 ${WEBHOOK_REPLAY_TASK_LIMIT_MAX} 的整数。`,
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      webhookId,
+      status: status as WebhookReplayTaskStatus | undefined,
+      cursor,
+      limit: limit ?? WEBHOOK_REPLAY_TASK_LIMIT_DEFAULT,
+    },
+  };
+}
+
 export function validateQualityEventCreateInput(
   input: unknown
 ): ValidationResult<QualityEventCreateInput> {
@@ -2684,6 +2842,16 @@ export function validateQualityEventCreateInput(
   const notes = normalizeString(input.notes);
   const sampleCount = toOptionalInteger(input.sampleCount);
   const metadata = isRecord(input.metadata) ? input.metadata : undefined;
+  const externalSourceRaw =
+    isRecord(input.externalSource) || input.externalSource === undefined
+      ? input.externalSource
+      : ({
+          provider: input.provider,
+          repo: input.repo,
+          workflow: input.workflow,
+          runId: input.runId,
+        } as Record<string, unknown>);
+  const externalSource = normalizeQualityExternalSource(externalSourceRaw);
 
   if (!tenantId) {
     return { success: false, error: "tenantId 必填且必须为非空字符串。" };
@@ -2694,10 +2862,30 @@ export function validateQualityEventCreateInput(
   if (input.replayJobId !== undefined && !replayJobId) {
     return { success: false, error: "replayJobId 必须为非空字符串。" };
   }
-  if (!sessionId && !replayJobId) {
+  if (
+    input.externalSource !== undefined &&
+    externalSource === "invalid" &&
+    !isRecord(input.externalSource)
+  ) {
+    return { success: false, error: "externalSource 必须是对象。" };
+  }
+  if (
+    (input.externalSource !== undefined ||
+      input.provider !== undefined ||
+      input.repo !== undefined ||
+      input.workflow !== undefined ||
+      input.runId !== undefined) &&
+    externalSource === "invalid"
+  ) {
     return {
       success: false,
-      error: "sessionId 与 replayJobId 不能同时为空，至少提供一个。",
+      error: "externalSource.provider 必填，repo/workflow/runId 如提供必须为非空字符串。",
+    };
+  }
+  if (!sessionId && !replayJobId && externalSource !== "invalid" && !externalSource) {
+    return {
+      success: false,
+      error: "sessionId/replayJobId/externalSource 不能同时为空，至少提供一个。",
     };
   }
   if (!metric || !isQualityMetric(metric)) {
@@ -2732,6 +2920,7 @@ export function validateQualityEventCreateInput(
       tenantId,
       sessionId,
       replayJobId,
+      externalSource: externalSource === "invalid" ? undefined : externalSource,
       metric,
       score: input.score,
       sampleCount,
@@ -2740,6 +2929,52 @@ export function validateQualityEventCreateInput(
       metadata,
     },
   };
+}
+
+function normalizeQualityExternalSource(
+  input: unknown
+): QualityExternalSource | undefined | "invalid" {
+  if (input === undefined || input === null) {
+    return undefined;
+  }
+  if (!isRecord(input)) {
+    return "invalid";
+  }
+  const provider = normalizeString(input.provider);
+  const repo = normalizeString(input.repo);
+  const workflow = normalizeString(input.workflow);
+  const runId = normalizeStringLike(input.runId);
+  if (!provider) {
+    return "invalid";
+  }
+  if (input.repo !== undefined && !repo) {
+    return "invalid";
+  }
+  if (input.workflow !== undefined && !workflow) {
+    return "invalid";
+  }
+  if (input.runId !== undefined && !runId) {
+    return "invalid";
+  }
+  return {
+    provider: provider.toLowerCase(),
+    repo: repo?.toLowerCase(),
+    workflow,
+    runId,
+  };
+}
+
+function normalizeStringLike(value: unknown): string | undefined {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      return undefined;
+    }
+    return String(value);
+  }
+  if (typeof value === "bigint") {
+    return String(value);
+  }
+  return normalizeString(value);
 }
 
 export function validateQualityScorecardUpsertInput(
@@ -2803,16 +3038,16 @@ export function validateQualityScorecardUpsertInput(
   };
 }
 
-export function validateReplayBaselineCreateInput(
+export function validateReplayDatasetCreateInput(
   input: unknown
-): ValidationResult<ReplayBaselineCreateInput> {
+): ValidationResult<ReplayDatasetCreateInput> {
   if (!isRecord(input)) {
     return { success: false, error: "请求体必须是对象。" };
   }
 
   const tenantId = normalizeString(input.tenantId);
   const name = normalizeString(input.name);
-  const datasetId = normalizeString(input.datasetId);
+  const datasetRef = normalizeString(input.datasetRef) ?? normalizeString(input.datasetId);
   const model = normalizeString(input.model);
   const promptVersion = normalizeString(input.promptVersion);
   const sampleCount = toOptionalInteger(input.sampleCount);
@@ -2824,8 +3059,8 @@ export function validateReplayBaselineCreateInput(
   if (!name) {
     return { success: false, error: "name 必填且必须为非空字符串。" };
   }
-  if (!datasetId) {
-    return { success: false, error: "datasetId 必填且必须为非空字符串。" };
+  if (!datasetRef) {
+    return { success: false, error: "datasetRef 必填且必须为非空字符串。" };
   }
   if (!model) {
     return { success: false, error: "model 必填且必须为非空字符串。" };
@@ -2848,7 +3083,8 @@ export function validateReplayBaselineCreateInput(
     data: {
       tenantId,
       name,
-      datasetId,
+      datasetRef,
+      datasetId: datasetRef,
       model,
       promptVersion,
       sampleCount,
@@ -2857,15 +3093,36 @@ export function validateReplayBaselineCreateInput(
   };
 }
 
-export function validateReplayJobCreateInput(
+export function validateReplayBaselineCreateInput(
   input: unknown
-): ValidationResult<ReplayJobCreateInput> {
+): ValidationResult<ReplayBaselineCreateInput> {
+  const validation = validateReplayDatasetCreateInput(input);
+  if (!validation.success) {
+    return validation;
+  }
+  return {
+    success: true,
+    data: {
+      tenantId: validation.data.tenantId,
+      name: validation.data.name,
+      datasetId: validation.data.datasetRef,
+      model: validation.data.model,
+      promptVersion: validation.data.promptVersion,
+      sampleCount: validation.data.sampleCount,
+      metadata: validation.data.metadata,
+    },
+  };
+}
+
+export function validateReplayRunCreateInput(
+  input: unknown
+): ValidationResult<ReplayRunCreateInput> {
   if (!isRecord(input)) {
     return { success: false, error: "请求体必须是对象。" };
   }
 
   const tenantId = normalizeString(input.tenantId);
-  const baselineId = normalizeString(input.baselineId);
+  const datasetId = normalizeString(input.datasetId) ?? normalizeString(input.baselineId);
   const candidateLabel = normalizeString(input.candidateLabel);
   const from = normalizeString(input.from);
   const to = normalizeString(input.to);
@@ -2875,8 +3132,8 @@ export function validateReplayJobCreateInput(
   if (!tenantId) {
     return { success: false, error: "tenantId 必填且必须为非空字符串。" };
   }
-  if (!baselineId) {
-    return { success: false, error: "baselineId 必填且必须为非空字符串。" };
+  if (!datasetId) {
+    return { success: false, error: "datasetId 必填且必须为非空字符串。" };
   }
   if (!candidateLabel) {
     return { success: false, error: "candidateLabel 必填且必须为非空字符串。" };
@@ -2909,12 +3166,236 @@ export function validateReplayJobCreateInput(
     success: true,
     data: {
       tenantId,
-      baselineId,
+      datasetId,
+      baselineId: datasetId,
       candidateLabel,
       from,
       to,
       sampleLimit,
       metadata,
+    },
+  };
+}
+
+export function validateReplayJobCreateInput(
+  input: unknown
+): ValidationResult<ReplayJobCreateInput> {
+  const validation = validateReplayRunCreateInput(input);
+  if (!validation.success) {
+    return validation;
+  }
+  return {
+    success: true,
+    data: {
+      ...validation.data,
+      baselineId: validation.data.datasetId,
+    },
+  };
+}
+
+export function validateReplayDatasetCasesReplaceInput(
+  input: unknown
+): ValidationResult<ReplayDatasetCasesReplaceInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const tenantId = normalizeString(input.tenantId);
+  const datasetId = normalizeString(input.datasetId);
+  const items = Array.isArray(input.items) ? input.items : null;
+
+  if (!tenantId) {
+    return { success: false, error: "tenantId 必填且必须为非空字符串。" };
+  }
+  if (!datasetId) {
+    return { success: false, error: "datasetId 必填且必须为非空字符串。" };
+  }
+  if (!items) {
+    return { success: false, error: "items 必填且必须为数组。" };
+  }
+
+  const validItems: ReplayDatasetCasesReplaceInput["items"] = [];
+  for (const [index, item] of items.entries()) {
+    if (!isRecord(item)) {
+      return { success: false, error: `第 ${index + 1} 条样本必须是对象。` };
+    }
+    const caseId = normalizeString(item.caseId);
+    const sortOrder = toOptionalInteger(item.sortOrder);
+    const caseInput = normalizeString(item.input);
+    const expectedOutput = normalizeString(item.expectedOutput);
+    const baselineOutput = normalizeString(item.baselineOutput);
+    const candidateInput = normalizeString(item.candidateInput);
+    const metadata = isRecord(item.metadata) ? item.metadata : undefined;
+
+    if (!caseInput) {
+      return { success: false, error: `第 ${index + 1} 条样本缺少 input。` };
+    }
+    if (item.caseId !== undefined && !caseId) {
+      return { success: false, error: `第 ${index + 1} 条样本的 caseId 必须为非空字符串。` };
+    }
+    if (item.sortOrder !== undefined && (sortOrder === undefined || sortOrder < 0)) {
+      return {
+        success: false,
+        error: `第 ${index + 1} 条样本的 sortOrder 必须是大于等于 0 的整数。`,
+      };
+    }
+    if (item.expectedOutput !== undefined && expectedOutput === undefined) {
+      return {
+        success: false,
+        error: `第 ${index + 1} 条样本的 expectedOutput 必须为非空字符串。`,
+      };
+    }
+    if (item.baselineOutput !== undefined && baselineOutput === undefined) {
+      return {
+        success: false,
+        error: `第 ${index + 1} 条样本的 baselineOutput 必须为非空字符串。`,
+      };
+    }
+    if (item.candidateInput !== undefined && candidateInput === undefined) {
+      return {
+        success: false,
+        error: `第 ${index + 1} 条样本的 candidateInput 必须为非空字符串。`,
+      };
+    }
+    if (item.metadata !== undefined && !isRecord(item.metadata)) {
+      return { success: false, error: `第 ${index + 1} 条样本的 metadata 必须是对象。` };
+    }
+
+    validItems.push({
+      caseId,
+      sortOrder,
+      input: caseInput,
+      expectedOutput,
+      baselineOutput,
+      candidateInput,
+      metadata,
+    });
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId,
+      datasetId,
+      items: validItems,
+    },
+  };
+}
+
+export function validateReplayDatasetMaterializeInput(
+  input: unknown
+): ValidationResult<ReplayDatasetMaterializeInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const tenantId = normalizeString(input.tenantId);
+  const datasetId = normalizeString(input.datasetId);
+  const sampleLimit = toOptionalInteger(input.sampleLimit);
+  const sanitized =
+    input.sanitized === undefined
+      ? undefined
+      : typeof input.sanitized === "boolean"
+        ? input.sanitized
+        : null;
+  const snapshotVersion = normalizeString(input.snapshotVersion);
+  const rawFilters = isRecord(input.filters) ? input.filters : undefined;
+  const filters =
+    rawFilters === undefined
+      ? undefined
+      : {
+          sourceId: normalizeString(rawFilters.sourceId),
+          keyword: normalizeString(rawFilters.keyword),
+          clientType: normalizeString(rawFilters.clientType),
+          tool: normalizeString(rawFilters.tool),
+          host: normalizeString(rawFilters.host),
+          model: normalizeString(rawFilters.model),
+          project: normalizeString(rawFilters.project),
+          from: normalizeString(rawFilters.from),
+          to: normalizeString(rawFilters.to),
+        };
+  const hasFilterValue = Boolean(
+    filters &&
+      (
+        filters.sourceId ??
+        filters.keyword ??
+        filters.clientType ??
+        filters.tool ??
+        filters.host ??
+        filters.model ??
+        filters.project ??
+        filters.from ??
+        filters.to
+      )
+  );
+
+  const rawSessionIds = Array.isArray(input.sessionIds) ? input.sessionIds : undefined;
+  const sessionIds: string[] = [];
+
+  if (!tenantId) {
+    return { success: false, error: "tenantId 必填且必须为非空字符串。" };
+  }
+  if (!datasetId) {
+    return { success: false, error: "datasetId 必填且必须为非空字符串。" };
+  }
+  if (
+    sampleLimit !== undefined &&
+    (!Number.isInteger(sampleLimit) ||
+      sampleLimit <= 0 ||
+      sampleLimit > REPLAY_JOB_SAMPLE_LIMIT_MAX)
+  ) {
+    return {
+      success: false,
+      error: `sampleLimit 必须是 1 到 ${REPLAY_JOB_SAMPLE_LIMIT_MAX} 的整数。`,
+    };
+  }
+  if (input.sanitized !== undefined && sanitized === null) {
+    return { success: false, error: "sanitized 必须为布尔值。" };
+  }
+  if (input.snapshotVersion !== undefined && !snapshotVersion) {
+    return { success: false, error: "snapshotVersion 必须为非空字符串。" };
+  }
+  if (input.filters !== undefined && rawFilters === undefined) {
+    return { success: false, error: "filters 必须为对象。" };
+  }
+  if (filters?.from !== undefined && !isISODate(filters.from)) {
+    return { success: false, error: "filters.from 必须为 ISO 日期字符串。" };
+  }
+  if (filters?.to !== undefined && !isISODate(filters.to)) {
+    return { success: false, error: "filters.to 必须为 ISO 日期字符串。" };
+  }
+  if (filters?.from && filters?.to && Date.parse(filters.from) > Date.parse(filters.to)) {
+    return { success: false, error: "filters.from 不能晚于 filters.to。" };
+  }
+  if (rawSessionIds !== undefined) {
+    for (const [index, item] of rawSessionIds.entries()) {
+      const normalized = normalizeString(item);
+      if (!normalized) {
+        return { success: false, error: `第 ${index + 1} 个 sessionId 必须为非空字符串。` };
+      }
+      sessionIds.push(normalized);
+    }
+    if (sessionIds.length === 0) {
+      return { success: false, error: "sessionIds 不能为空数组。" };
+    }
+  }
+  if (sessionIds.length === 0 && !hasFilterValue) {
+    return {
+      success: false,
+      error: "sessionIds 与 filters 至少提供一项，用于限定样本来源。",
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId,
+      datasetId,
+      sessionIds: sessionIds.length > 0 ? sessionIds : undefined,
+      filters,
+      sampleLimit,
+      sanitized: sanitized ?? true,
+      snapshotVersion,
     },
   };
 }
@@ -3535,6 +4016,8 @@ export function validateAlertOrchestrationExecutionListInput(
   const sourceId = normalizeString(input.sourceId);
   const dedupeHit = toOptionalBoolean(input.dedupeHit);
   const suppressed = toOptionalBoolean(input.suppressed);
+  const dispatchMode = normalizeString(input.dispatchMode);
+  const hasConflict = toOptionalBoolean(input.hasConflict);
   const simulated = toOptionalBoolean(input.simulated);
   const from = normalizeString(input.from);
   const to = normalizeString(input.to);
@@ -3563,6 +4046,15 @@ export function validateAlertOrchestrationExecutionListInput(
   }
   if (suppressed === "invalid") {
     return { success: false, error: "suppressed 必须是 true/false 或 1/0。" };
+  }
+  if (
+    input.dispatchMode !== undefined &&
+    (!dispatchMode || !isAlertOrchestrationDispatchMode(dispatchMode))
+  ) {
+    return { success: false, error: "dispatchMode 必须是 rule/fallback 之一。" };
+  }
+  if (hasConflict === "invalid") {
+    return { success: false, error: "hasConflict 必须是 true/false 或 1/0。" };
   }
   if (simulated === "invalid") {
     return { success: false, error: "simulated 必须是 true/false 或 1/0。" };
@@ -3598,6 +4090,8 @@ export function validateAlertOrchestrationExecutionListInput(
       sourceId,
       dedupeHit: typeof dedupeHit === "boolean" ? dedupeHit : undefined,
       suppressed: typeof suppressed === "boolean" ? suppressed : undefined,
+      dispatchMode: dispatchMode as AlertOrchestrationDispatchMode | undefined,
+      hasConflict: typeof hasConflict === "boolean" ? hasConflict : undefined,
       simulated: typeof simulated === "boolean" ? simulated : undefined,
       from,
       to,
@@ -3940,6 +4434,27 @@ export function validateReplicationJobListInput(
 export function validateReplicationJobCancelInput(
   input: unknown
 ): ValidationResult<ReplicationJobCancelInput> {
+  if (input === undefined || input === null) {
+    return { success: true, data: {} };
+  }
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+  const reason = normalizeString(input.reason);
+  if (input.reason !== undefined && !reason) {
+    return { success: false, error: "reason 必须为非空字符串。" };
+  }
+  return {
+    success: true,
+    data: {
+      reason,
+    },
+  };
+}
+
+export function validateReplicationJobApproveInput(
+  input: unknown
+): ValidationResult<ReplicationJobApproveInput> {
   if (input === undefined || input === null) {
     return { success: true, data: {} };
   }

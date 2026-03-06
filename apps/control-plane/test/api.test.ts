@@ -28,6 +28,15 @@ import type {
 } from "../src/contracts";
 import { createApp } from "../src/app";
 import { getControlPlaneRepository } from "../src/data/repository";
+import {
+  flushReplayJobExecutionQueueForTests,
+  resetReplayJobExecutionWorkerForTests,
+  setReplayJobExecutionHandlerForTests,
+} from "../src/routes/replay";
+import {
+  flushWebhookReplayExecutionQueueForTests,
+  resetWebhookReplayExecutionWorkerForTests,
+} from "../src/routes/open-platform";
 import type {
   SourceParseFailure,
   UsageHeatmapQueryInput,
@@ -10779,6 +10788,7 @@ describe("Control Plane API", () => {
       executions: Array<{
         id: string;
         ruleId: string;
+        dispatchMode: string;
         simulated: boolean;
         conflictRuleIds: string[];
       }>;
@@ -10795,6 +10805,9 @@ describe("Control Plane API", () => {
     );
     expect(simulateBody.executions).toHaveLength(2);
     expect(simulateBody.executions.every((item) => item.simulated)).toBe(true);
+    expect(simulateBody.executions.every((item) => item.dispatchMode === "rule")).toBe(
+      true,
+    );
     const executionForRuleA = simulateBody.executions.find(
       (item) => item.ruleId === ruleAId,
     );
@@ -10807,7 +10820,7 @@ describe("Control Plane API", () => {
     const executionListResponse = await app.request(
       `/api/v1/alerts/orchestration/executions?eventType=alert&sourceId=${encodeURIComponent(
         sourceId,
-      )}&simulated=true&limit=20`,
+      )}&dispatchMode=rule&hasConflict=true&simulated=true&limit=20`,
       {
         headers: authHeaders,
       },
@@ -10816,12 +10829,16 @@ describe("Control Plane API", () => {
       items: Array<{
         id: string;
         ruleId: string;
+        dispatchMode: string;
         sourceId?: string;
         simulated: boolean;
+        conflictRuleIds: string[];
       }>;
       total: number;
       filters: {
         eventType?: string;
+        dispatchMode?: string;
+        hasConflict?: boolean;
         sourceId?: string;
         simulated?: boolean;
         limit?: number;
@@ -10829,6 +10846,8 @@ describe("Control Plane API", () => {
     };
     expect(executionListResponse.status).toBe(200);
     expect(executionListBody.filters.eventType).toBe("alert");
+    expect(executionListBody.filters.dispatchMode).toBe("rule");
+    expect(executionListBody.filters.hasConflict).toBe(true);
     expect(executionListBody.filters.sourceId).toBe(sourceId);
     expect(executionListBody.filters.simulated).toBe(true);
     expect(executionListBody.filters.limit).toBe(20);
@@ -10837,6 +10856,12 @@ describe("Control Plane API", () => {
     );
     expect(matchedExecutionLogs.length).toBe(2);
     expect(matchedExecutionLogs.every((item) => item.simulated)).toBe(true);
+    expect(matchedExecutionLogs.every((item) => item.dispatchMode === "rule")).toBe(
+      true,
+    );
+    expect(matchedExecutionLogs.every((item) => item.conflictRuleIds.length > 0)).toBe(
+      true,
+    );
     expect(matchedExecutionLogs.every((item) => item.sourceId === sourceId)).toBe(
       true,
     );
@@ -11939,8 +11964,46 @@ describe("Control Plane API", () => {
     const jobBody = (await createJobResponse.json()) as {
       id: string;
       tenantId: string;
+      status: string;
     };
     expect(jobBody.tenantId).toBe(tenantAId);
+    expect(jobBody.status).toBe("pending");
+
+    const approveJobResponse = await app.request(
+      `/api/v1/residency/replication-jobs/${encodeURIComponent(jobBody.id)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          reason: "审批通过用于跨区同步",
+        }),
+      }
+    );
+    expect(approveJobResponse.status).toBe(200);
+    const approvedJobBody = (await approveJobResponse.json()) as {
+      status: string;
+      approvedByUserId?: string;
+    };
+    expect(approvedJobBody.status).toBe("running");
+    expect(typeof approvedJobBody.approvedByUserId).toBe("string");
+
+    const approveAgainResponse = await app.request(
+      `/api/v1/residency/replication-jobs/${encodeURIComponent(jobBody.id)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          reason: "重复审批",
+        }),
+      }
+    );
+    expect(approveAgainResponse.status).toBe(409);
 
     const cancelJobResponse = await app.request(
       `/api/v1/residency/replication-jobs/${encodeURIComponent(jobBody.id)}/cancel`,
@@ -12436,6 +12499,7 @@ describe("Control Plane API", () => {
   test("open-platform 路由：401/403/400/主流程与租户隔离", async () => {
     const unauthorizedResponse = await app.request("/api/v1/api-keys");
     expect(unauthorizedResponse.status).toBe(401);
+    resetWebhookReplayExecutionWorkerForTests();
 
     const nonce = createNonce("open-platform-routes");
     const auth = await getDefaultAuthContext();
@@ -12498,6 +12562,88 @@ describe("Control Plane API", () => {
       auth.accessToken,
       auth.userId,
     );
+    const replayRepository = repository as unknown as {
+      createReplayBaseline?: (inputTenantId: string, input: {
+        name: string;
+        datasetRef: string;
+        scenarioCount: number;
+        metadata?: Record<string, unknown>;
+      }) => Promise<{ id: string }>;
+      createReplayJob?: (inputTenantId: string, input: {
+        baselineId: string;
+        status: string;
+        parameters?: Record<string, unknown>;
+        summary?: Record<string, unknown>;
+        diff?: Record<string, unknown>;
+        error?: string | null;
+        startedAt?: string;
+        finishedAt?: string;
+        createdAt?: string;
+      }) => Promise<{ id: string }>;
+      updateReplayJob?: (inputTenantId: string, replayJobId: string, input: {
+        fromStatuses?: string[];
+        status?: string;
+        summary?: Record<string, unknown>;
+        diff?: Record<string, unknown>;
+        error?: string | null;
+        startedAt?: string | null;
+        finishedAt?: string | null;
+        updatedAt?: string;
+      }) => Promise<{ id: string } | null>;
+    };
+    if (
+      typeof replayRepository.createReplayBaseline !== "function" ||
+      typeof replayRepository.createReplayJob !== "function" ||
+      typeof replayRepository.updateReplayJob !== "function"
+    ) {
+      throw new Error("repository replay 方法不可用，无法准备 open-platform replay 测试数据。");
+    }
+
+    const replayBaseline = await replayRepository.createReplayBaseline(tenantAId, {
+      name: `open-platform-replay-${nonce}`,
+      datasetRef: `dataset-open-platform-${nonce}`,
+      scenarioCount: 2,
+      metadata: {
+        model: "gpt-4.1",
+      },
+    });
+    const replayStartedAt = new Date().toISOString();
+    const replayCompletedAt = new Date(Date.now() + 1_000).toISOString();
+    const startedReplayJob = await replayRepository.createReplayJob(tenantAId, {
+      baselineId: replayBaseline.id,
+      status: "pending",
+      parameters: {
+        candidateLabel: `candidate-started-${nonce}`,
+      },
+      summary: {
+        totalCases: 2,
+        processedCases: 0,
+      },
+    });
+    await replayRepository.updateReplayJob(tenantAId, startedReplayJob.id, {
+      fromStatuses: ["pending"],
+      status: "running",
+      startedAt: replayStartedAt,
+      error: null,
+    });
+    const cancelledReplayJob = await replayRepository.createReplayJob(tenantAId, {
+      baselineId: replayBaseline.id,
+      status: "pending",
+      parameters: {
+        candidateLabel: `candidate-cancelled-${nonce}`,
+      },
+      summary: {
+        totalCases: 2,
+        processedCases: 0,
+      },
+    });
+    await replayRepository.updateReplayJob(tenantAId, cancelledReplayJob.id, {
+      fromStatuses: ["pending"],
+      status: "cancelled",
+      startedAt: replayStartedAt,
+      finishedAt: replayCompletedAt,
+      error: "cancelled by test",
+    });
 
     const openapiResponse = await app.request("/api/v1/openapi.json", {
       headers: tenantAHeaders,
@@ -12505,9 +12651,291 @@ describe("Control Plane API", () => {
     expect(openapiResponse.status).toBe(200);
     const openapiBody = (await openapiResponse.json()) as {
       paths?: Record<string, unknown>;
+      components?: {
+        schemas?: Record<string, unknown>;
+      };
     };
     expect(Boolean(openapiBody.paths?.["/api/v1/replay/jobs"])).toBe(true);
     expect(Boolean(openapiBody.paths?.["/api/v1/webhooks/{id}/replay"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v1/webhooks/replay-tasks"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v1/webhooks/replay-tasks/{id}"])).toBe(true);
+    const qualityEventsPath = openapiBody.paths?.["/api/v1/quality/events"] as
+      | { post?: { deprecated?: boolean } }
+      | undefined;
+    const qualityMetricsDailyPath = openapiBody.paths?.["/api/v1/quality/metrics/daily"] as
+      | { get?: { deprecated?: boolean } }
+      | undefined;
+    const qualityScorecardsPath = openapiBody.paths?.["/api/v1/quality/scorecards"] as
+      | { get?: { deprecated?: boolean } }
+      | undefined;
+    const qualityScorecardByIdPath = openapiBody.paths?.["/api/v1/quality/scorecards/{id}"] as
+      | { put?: { deprecated?: boolean } }
+      | undefined;
+    const replayBaselinesPath = openapiBody.paths?.["/api/v1/replay/baselines"] as
+      | { get?: { deprecated?: boolean }; post?: { deprecated?: boolean } }
+      | undefined;
+    const replayJobsPath = openapiBody.paths?.["/api/v1/replay/jobs"] as
+      | { get?: { deprecated?: boolean }; post?: { deprecated?: boolean } }
+      | undefined;
+    const replayJobByIdPath = openapiBody.paths?.["/api/v1/replay/jobs/{id}"] as
+      | { get?: { deprecated?: boolean } }
+      | undefined;
+    const replayDiffPath = openapiBody.paths?.["/api/v1/replay/jobs/{id}/diff"] as
+      | { get?: { deprecated?: boolean } }
+      | undefined;
+    expect(qualityEventsPath?.post?.deprecated).toBe(true);
+    expect(qualityMetricsDailyPath?.get?.deprecated).toBe(true);
+    expect(qualityScorecardsPath?.get?.deprecated).toBe(true);
+    expect(qualityScorecardByIdPath?.put?.deprecated).toBe(true);
+    expect(replayBaselinesPath?.get?.deprecated).toBe(true);
+    expect(replayBaselinesPath?.post?.deprecated).toBe(true);
+    expect(replayJobsPath?.get?.deprecated).toBe(true);
+    expect(replayJobsPath?.post?.deprecated).toBe(true);
+    expect(replayJobByIdPath?.get?.deprecated).toBe(true);
+    expect(replayDiffPath?.get?.deprecated).toBe(true);
+    expect(Boolean(openapiBody.components?.schemas?.["WebhookReplayTask"])).toBe(true);
+    expect(Boolean(openapiBody.components?.schemas?.["QualityDailyMetricsResponse"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/quality/evaluations"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/quality/metrics"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/quality/reports/cost-correlation"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/quality/reports/project-trends"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/quality/scorecards"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/quality/scorecards/{id}"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/replay/datasets"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/replay/datasets/{id}/cases"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/replay/datasets/{id}/materialize"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/replay/runs"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/replay/runs/{id}"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/replay/runs/{id}/diffs"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/replay/runs/{id}/artifacts"])).toBe(true);
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/replay/runs/{id}/artifacts/{artifactType}/download"])
+    ).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/residency/policies/current"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/residency/region-mappings"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/residency/replications"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/residency/replications/{id}/approvals"])).toBe(
+      true,
+    );
+    expect(Boolean(openapiBody.paths?.["/api/v2/residency/replications/{id}/cancel"])).toBe(true);
+    expect(Boolean(openapiBody.components?.schemas?.["QualityEvaluationInputV2"])).toBe(true);
+    expect(Boolean(openapiBody.components?.schemas?.["QualityMetricsResponseV2"])).toBe(true);
+    expect(Boolean(openapiBody.components?.schemas?.["QualityCostCorrelationResponseV2"])).toBe(
+      true,
+    );
+    expect(Boolean(openapiBody.components?.schemas?.["QualityProjectTrendResponseV2"])).toBe(
+      true,
+    );
+    const qualityProjectTrendsPath = openapiBody.paths?.[
+      "/api/v2/quality/reports/project-trends"
+    ] as
+      | {
+          get?: {
+            responses?: {
+              [status: string]: {
+                content?: {
+                  [contentType: string]: {
+                    schema?: {
+                      $ref?: string;
+                    };
+                  };
+                };
+              };
+            };
+          };
+        }
+      | undefined;
+    const replayRunDiffsPath = openapiBody.paths?.["/api/v2/replay/runs/{id}/diffs"] as
+      | {
+          get?: {
+            parameters?: Array<{ name?: string; in?: string }>;
+          };
+        }
+      | undefined;
+    const replayMaterializePath = openapiBody.paths?.[
+      "/api/v2/replay/datasets/{id}/materialize"
+    ] as
+      | {
+          post?: {
+            requestBody?: {
+              content?: {
+                [contentType: string]: {
+                  schema?: {
+                    $ref?: string;
+                  };
+                };
+              };
+            };
+            responses?: {
+              [status: string]: {
+                content?: {
+                  [contentType: string]: {
+                    schema?: {
+                      $ref?: string;
+                    };
+                  };
+                };
+              };
+            };
+          };
+        }
+      | undefined;
+    const replayDatasetInputV2 = openapiBody.components?.schemas?.["ReplayDatasetInputV2"] as
+      | {
+          required?: string[];
+          properties?: Record<string, { description?: string }>;
+        }
+      | undefined;
+    const replayDatasetMaterializeInputV2 = openapiBody.components?.schemas?.[
+      "ReplayDatasetMaterializeInputV2"
+    ] as
+      | {
+          anyOf?: Array<{ required?: string[] }>;
+          properties?: Record<string, { description?: string }>;
+        }
+      | undefined;
+    const replayDatasetMaterializeResponseV2 = openapiBody.components?.schemas?.[
+      "ReplayDatasetMaterializeResponseV2"
+    ] as
+      | {
+          required?: string[];
+          properties?: Record<string, { $ref?: string }>;
+        }
+      | undefined;
+    const replayRunInputV2 = openapiBody.components?.schemas?.["ReplayRunInputV2"] as
+      | {
+          required?: string[];
+          properties?: Record<string, { description?: string }>;
+        }
+      | undefined;
+    const replayRunV2 = openapiBody.components?.schemas?.["ReplayRunV2"] as
+      | {
+          required?: string[];
+          properties?: Record<string, { description?: string; $ref?: string }>;
+        }
+      | undefined;
+    const replayRunDiffsSchemaV2 = openapiBody.components?.schemas?.["ReplayRunDiffsResponseV2"] as
+      | {
+          properties?: Record<
+            string,
+            | { description?: string; $ref?: string }
+            | {
+                required?: string[];
+                properties?: Record<string, { description?: string }>;
+              }
+          >;
+        }
+      | undefined;
+    const replayRunSummaryV2 = openapiBody.components?.schemas?.["ReplayRunSummaryV2"] as
+      | {
+          properties?: Record<string, { $ref?: string }>;
+        }
+      | undefined;
+    const replayRunSummaryDigestV2 = openapiBody.components?.schemas?.["ReplayRunSummaryDigestV2"] as
+      | {
+          properties?: Record<string, { $ref?: string }>;
+        }
+      | undefined;
+    const replayArtifactItemV2 = openapiBody.components?.schemas?.["ReplayArtifactItemV2"] as
+      | {
+          properties?: Record<string, { $ref?: string }>;
+        }
+      | undefined;
+    const replayRunArtifactsSchemaV2 = openapiBody.components?.schemas?.[
+      "ReplayRunArtifactsResponseV2"
+    ] as
+      | {
+          required?: string[];
+          properties?: Record<string, { description?: string }>;
+        }
+      | undefined;
+    const replayRunDiffsProperties = replayRunDiffsSchemaV2?.properties as
+      | Record<string, { description?: string; $ref?: string }>
+      | undefined;
+    const replayRunDiffFilters = replayRunDiffsProperties?.filters as
+      | {
+          required?: string[];
+          properties?: Record<string, { description?: string }>;
+        }
+      | undefined;
+    expect(
+      qualityProjectTrendsPath?.get?.responses?.["200"]?.content?.["application/json"]?.schema
+        ?.$ref
+    ).toBe("#/components/schemas/QualityProjectTrendResponseV2");
+    expect(
+      replayRunDiffsPath?.get?.parameters?.some(
+        (parameter: { name?: string; in?: string }) =>
+          parameter.name === "keyword" && parameter.in === "query",
+      ),
+    ).toBe(true);
+    expect(
+      replayRunDiffsPath?.get?.parameters?.some(
+        (parameter: { name?: string; in?: string }) =>
+          parameter.name === "datasetId" && parameter.in === "query",
+      ),
+    ).toBe(true);
+    expect(
+      replayRunDiffsPath?.get?.parameters?.some(
+        (parameter: { name?: string; in?: string }) =>
+          parameter.name === "baselineId" && parameter.in === "query",
+      ),
+    ).toBe(true);
+    expect(
+      replayMaterializePath?.post?.requestBody?.content?.["application/json"]?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayDatasetMaterializeInputV2");
+    expect(
+      replayMaterializePath?.post?.responses?.["200"]?.content?.["application/json"]?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayDatasetMaterializeResponseV2");
+    expect(Boolean(openapiBody.components?.schemas?.["ReplayDatasetCaseWriteInputV2"])).toBe(
+      true,
+    );
+    expect(Boolean(openapiBody.components?.schemas?.["ReplayDatasetCasesReplaceInputV2"])).toBe(
+      true,
+    );
+    expect(replayDatasetMaterializeInputV2?.anyOf?.some((item) => item.required?.includes("sessionIds"))).toBe(
+      true,
+    );
+    expect(replayDatasetMaterializeInputV2?.anyOf?.some((item) => item.required?.includes("filters"))).toBe(
+      true,
+    );
+    expect(replayDatasetMaterializeInputV2?.properties?.sanitized?.description).toContain("默认 true");
+    expect(replayDatasetMaterializeResponseV2?.required).toContain("filters");
+    expect(replayDatasetMaterializeResponseV2?.properties?.sourceSummary?.$ref).toBe(
+      "#/components/schemas/ReplaySourceSummaryV2",
+    );
+    expect(replayDatasetInputV2?.required).toContain("datasetRef");
+    expect(replayDatasetInputV2?.required?.includes("datasetId")).toBe(false);
+    expect(replayDatasetInputV2?.properties?.datasetId?.description).toContain("兼容别名");
+    expect(replayRunInputV2?.required).toContain("datasetId");
+    expect(replayRunInputV2?.required?.includes("baselineId")).toBe(false);
+    expect(replayRunInputV2?.properties?.baselineId?.description).toContain("兼容别名");
+    expect(replayRunV2?.required?.includes("baselineId")).toBe(false);
+    expect(replayRunV2?.properties?.baselineId?.description).toContain("兼容别名");
+    expect(replayRunV2?.properties?.summary?.$ref).toBe("#/components/schemas/ReplayRunSummaryV2");
+    expect(replayRunDiffFilters?.required).toContain("datasetId");
+    expect(replayRunDiffFilters?.required?.includes("baselineId")).toBe(false);
+    expect(replayRunDiffFilters?.properties?.runId?.description).toContain(
+      "ReplayRunV2.id",
+    );
+    expect(replayRunDiffFilters?.properties?.jobId?.description).toContain("兼容别名");
+    expect(replayRunDiffsProperties?.jobId?.description).toContain("兼容别名");
+    expect(replayRunDiffsProperties?.runId?.description).toContain("ReplayRunV2.id");
+    expect(replayRunDiffsProperties?.summary?.$ref).toBe("#/components/schemas/ReplayRunSummaryV2");
+    expect(replayRunSummaryV2?.properties?.digest?.$ref).toBe(
+      "#/components/schemas/ReplayRunSummaryDigestV2",
+    );
+    expect(replayRunSummaryDigestV2?.properties?.sourceSummary?.$ref).toBe(
+      "#/components/schemas/ReplaySourceSummaryV2",
+    );
+    expect(replayRunArtifactsSchemaV2?.required).toContain("datasetId");
+    expect(replayRunArtifactsSchemaV2?.properties?.runId?.description).toContain("ReplayRunV2.id");
+    expect(replayRunArtifactsSchemaV2?.properties?.jobId?.description).toContain("兼容别名");
+    expect(replayArtifactItemV2?.properties?.inline?.$ref).toBe(
+      "#/components/schemas/ReplayArtifactInlinePreviewV2",
+    );
+    expect(Boolean(openapiBody.components?.schemas?.["ReplayRunV2"])).toBe(true);
+    expect(Boolean(openapiBody.components?.schemas?.["TenantResidencyPolicyV2"])).toBe(true);
+    expect(Boolean(openapiBody.components?.schemas?.["ReplicationJobV2"])).toBe(true);
 
     const forbiddenCreateKeyResponse = await app.request("/api/v1/api-keys", {
       method: "POST",
@@ -12590,7 +13018,13 @@ describe("Control Plane API", () => {
       body: JSON.stringify({
         name: `Open Webhook ${nonce}`,
         url: "https://example.com/webhook",
-        events: ["quality.event.created", "replay.job.completed"],
+        events: [
+          "api_key.created",
+          "quality.event.created",
+          "replay.run.started",
+          "replay.job.completed",
+          "replay.run.cancelled",
+        ],
       }),
     });
     expect(createWebhookResponse.status).toBe(201);
@@ -12634,7 +13068,7 @@ describe("Control Plane API", () => {
           ...tenantAHeaders,
         },
         body: JSON.stringify({
-          eventType: "quality.event.created",
+          eventType: "replay.run.started",
           limit: 50,
           dryRun: true,
         }),
@@ -12655,8 +13089,68 @@ describe("Control Plane API", () => {
     expect(replayBody.webhookId).toBe(createdWebhook.id);
     expect(replayBody.status).toBe("queued");
     expect(replayBody.dryRun).toBe(true);
-    expect(replayBody.filters.eventType).toBe("quality.event.created");
+    expect(replayBody.filters.eventType).toBe("replay.run.started");
     expect(replayBody.filters.limit).toBe(50);
+
+    const cancelledReplayResponse = await app.request(
+      `/api/v1/webhooks/${encodeURIComponent(createdWebhook.id)}/replay`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          eventType: "replay.run.cancelled",
+          limit: 50,
+          dryRun: true,
+        }),
+      },
+    );
+    expect(cancelledReplayResponse.status).toBe(202);
+    const cancelledReplayBody = (await cancelledReplayResponse.json()) as {
+      filters: {
+        eventType?: string;
+      };
+    };
+    expect(cancelledReplayBody.filters.eventType).toBe("replay.run.cancelled");
+
+    await flushWebhookReplayExecutionQueueForTests();
+
+    const replayTaskDetailResponse = await app.request(
+      `/api/v1/webhooks/replay-tasks/${encodeURIComponent(replayBody.id)}`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(replayTaskDetailResponse.status).toBe(200);
+    const replayTaskDetailBody = (await replayTaskDetailResponse.json()) as {
+      id: string;
+      webhookId: string;
+      status: string;
+      result?: Record<string, unknown>;
+    };
+    expect(replayTaskDetailBody.id).toBe(replayBody.id);
+    expect(replayTaskDetailBody.webhookId).toBe(createdWebhook.id);
+    expect(replayTaskDetailBody.status).toBe("completed");
+    expect(replayTaskDetailBody.result?.["executor"]).toBe("builtin-webhook-replay");
+    expect(Number(replayTaskDetailBody.result?.["scannedEvents"] ?? 0)).toBeGreaterThanOrEqual(1);
+    expect(replayTaskDetailBody.result?.["dispatchedEvents"]).toBe(0);
+    expect(replayTaskDetailBody.result?.["failedEvents"]).toBe(0);
+
+    const replayTaskListResponse = await app.request(
+      `/api/v1/webhooks/replay-tasks?webhookId=${encodeURIComponent(createdWebhook.id)}&status=completed&limit=50`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(replayTaskListResponse.status).toBe(200);
+    const replayTaskListBody = (await replayTaskListResponse.json()) as {
+      items: Array<{ id: string }>;
+      total: number;
+    };
+    expect(replayTaskListBody.items.some((item) => item.id === replayBody.id)).toBe(true);
+    expect(replayTaskListBody.total).toBeGreaterThanOrEqual(1);
 
     const crossTenantReplayResponse = await app.request(
       `/api/v1/webhooks/${encodeURIComponent(createdWebhook.id)}/replay`,
@@ -12670,6 +13164,14 @@ describe("Control Plane API", () => {
       },
     );
     expect(crossTenantReplayResponse.status).toBe(404);
+
+    const crossTenantReplayTaskResponse = await app.request(
+      `/api/v1/webhooks/replay-tasks/${encodeURIComponent(replayBody.id)}`,
+      {
+        headers: tenantBHeaders,
+      },
+    );
+    expect(crossTenantReplayTaskResponse.status).toBe(404);
 
     const replayAuditResponse = await app.request(
       `/api/v1/audits?action=control_plane.open_platform.webhook_replayed&keyword=${encodeURIComponent(
@@ -12699,6 +13201,170 @@ describe("Control Plane API", () => {
     expect(
       listWebhookTenantBBody.items.some((item) => item.id === createdWebhook.id),
     ).toBe(false);
+    resetWebhookReplayExecutionWorkerForTests();
+  });
+
+  test("open-platform webhook replay：签名头生效并在 5xx 后重试成功", async () => {
+    resetWebhookReplayExecutionWorkerForTests();
+    const nonce = createNonce("open-platform-replay-signature");
+    const auth = await getDefaultAuthContext();
+    const tenantResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `OpenPlatform Replay Tenant ${nonce}`,
+        slug: `open-platform-replay-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error("replay 签名测试：租户创建响应缺少 tenantId。");
+    }
+    const tenantHeaders = await issueTenantScopedAuthHeaders(
+      tenantId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const createKeyResponse = await app.request("/api/v1/api-keys", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantHeaders,
+      },
+      body: JSON.stringify({
+        name: `open-platform-replay-key-${nonce}`,
+        scope: "write",
+      }),
+    });
+    expect(createKeyResponse.status).toBe(201);
+
+    const replaySecret = `whsec-replay-${nonce}`;
+    const createWebhookResponse = await app.request("/api/v1/webhooks", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantHeaders,
+      },
+      body: JSON.stringify({
+        name: `Open Replay Webhook ${nonce}`,
+        url: "https://example.com/webhook-replay",
+        events: ["api_key.created"],
+        secret: replaySecret,
+      }),
+    });
+    expect(createWebhookResponse.status).toBe(201);
+    const createdWebhook = (await createWebhookResponse.json()) as { id: string };
+
+    const originalFetch = globalThis.fetch;
+    const originalRetryMax = Bun.env.WEBHOOK_REPLAY_MAX_RETRIES;
+    const originalRetryBase = Bun.env.WEBHOOK_REPLAY_RETRY_BASE_DELAY_MS;
+    const originalRetryMaxDelay = Bun.env.WEBHOOK_REPLAY_RETRY_MAX_DELAY_MS;
+    const observedRequests: Array<{
+      body: string;
+      signature: string;
+      timestamp: string;
+      algorithm: string;
+    }> = [];
+    let dispatchAttemptCount = 0;
+
+    try {
+      Bun.env.WEBHOOK_REPLAY_MAX_RETRIES = "2";
+      Bun.env.WEBHOOK_REPLAY_RETRY_BASE_DELAY_MS = "1";
+      Bun.env.WEBHOOK_REPLAY_RETRY_MAX_DELAY_MS = "5";
+
+      globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(String(input), init);
+        const body = await request.text();
+        observedRequests.push({
+          body,
+          signature: request.headers.get("x-agentledger-signature") ?? "",
+          timestamp: request.headers.get("x-agentledger-signature-timestamp") ?? "",
+          algorithm: request.headers.get("x-agentledger-signature-algorithm") ?? "",
+        });
+        dispatchAttemptCount += 1;
+        if (dispatchAttemptCount === 1) {
+          return new Response("temporary unavailable", { status: 503 });
+        }
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      }) as typeof fetch;
+
+      const now = Date.now();
+      const replayResponse = await app.request(
+        `/api/v1/webhooks/${encodeURIComponent(createdWebhook.id)}/replay`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...tenantHeaders,
+          },
+          body: JSON.stringify({
+            eventType: "api_key.created",
+            from: new Date(now - 60_000).toISOString(),
+            to: new Date(now + 60_000).toISOString(),
+            limit: 20,
+            dryRun: false,
+          }),
+        },
+      );
+      expect(replayResponse.status).toBe(202);
+      const replayTask = (await replayResponse.json()) as { id: string };
+
+      await flushWebhookReplayExecutionQueueForTests();
+
+      const replayTaskDetailResponse = await app.request(
+        `/api/v1/webhooks/replay-tasks/${encodeURIComponent(replayTask.id)}`,
+        {
+          headers: tenantHeaders,
+        },
+      );
+      expect(replayTaskDetailResponse.status).toBe(200);
+      const replayTaskDetailBody = (await replayTaskDetailResponse.json()) as {
+        status: string;
+        result?: Record<string, unknown>;
+      };
+      expect(replayTaskDetailBody.status).toBe("completed");
+      expect(Number(replayTaskDetailBody.result?.["dispatchedEvents"] ?? 0)).toBeGreaterThanOrEqual(1);
+      expect(replayTaskDetailBody.result?.["failedEvents"]).toBe(0);
+      expect(Number(replayTaskDetailBody.result?.["retryCount"] ?? 0)).toBeGreaterThanOrEqual(1);
+      expect(Number(replayTaskDetailBody.result?.["retriedEvents"] ?? 0)).toBeGreaterThanOrEqual(1);
+      expect(replayTaskDetailBody.result?.["maxRetries"]).toBe(2);
+
+      expect(dispatchAttemptCount).toBeGreaterThanOrEqual(2);
+      expect(observedRequests.length).toBeGreaterThanOrEqual(2);
+      for (const observed of observedRequests) {
+        expect(observed.timestamp.length).toBeGreaterThan(0);
+        expect(observed.algorithm).toBe("hmac-sha256");
+        const expectedSignature = `v1=${createHmac("sha256", replaySecret)
+          .update(`${observed.timestamp}.${observed.body}`)
+          .digest("hex")}`;
+        expect(observed.signature).toBe(expectedSignature);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalRetryMax === undefined) {
+        delete Bun.env.WEBHOOK_REPLAY_MAX_RETRIES;
+      } else {
+        Bun.env.WEBHOOK_REPLAY_MAX_RETRIES = originalRetryMax;
+      }
+      if (originalRetryBase === undefined) {
+        delete Bun.env.WEBHOOK_REPLAY_RETRY_BASE_DELAY_MS;
+      } else {
+        Bun.env.WEBHOOK_REPLAY_RETRY_BASE_DELAY_MS = originalRetryBase;
+      }
+      if (originalRetryMaxDelay === undefined) {
+        delete Bun.env.WEBHOOK_REPLAY_RETRY_MAX_DELAY_MS;
+      } else {
+        Bun.env.WEBHOOK_REPLAY_RETRY_MAX_DELAY_MS = originalRetryMaxDelay;
+      }
+      resetWebhookReplayExecutionWorkerForTests();
+    }
   });
 
   test("quality 路由：400/201/200 与租户隔离", async () => {
@@ -12772,6 +13438,35 @@ describe("Control Plane API", () => {
       }),
     });
     expect(createEventResponse.status).toBe(201);
+    const createExternalEventResponse = await app.request("/api/v1/quality/events", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        replayJobId: `job-${nonce}`,
+        metric: "accuracy",
+        score: 91,
+        sampleCount: 8,
+        occurredAt: "2026-03-04T10:00:00.000Z",
+        externalSource: {
+          provider: "github",
+          repo: `agentledger/${nonce}`,
+          workflow: "ci-main",
+          runId: `run-${nonce}`,
+        },
+      }),
+    });
+    expect(createExternalEventResponse.status).toBe(201);
+    const createExternalEventBody = (await createExternalEventResponse.json()) as {
+      externalSource?: {
+        provider?: string;
+        repo?: string;
+      };
+    };
+    expect(createExternalEventBody.externalSource?.provider).toBe("github");
+    expect(createExternalEventBody.externalSource?.repo).toBe(`agentledger/${nonce}`);
 
     const badDailyMetricsResponse = await app.request(
       "/api/v1/quality/metrics/daily?from=2026-03-06&to=2026-03-01",
@@ -12794,6 +13489,27 @@ describe("Control Plane API", () => {
     expect(
       dailyMetricsBody.items.some(
         (item) => item.date === "2026-03-04" && item.totalEvents >= 1,
+      ),
+    ).toBe(true);
+
+    const groupedMetricsResponse = await app.request(
+      `/api/v1/quality/metrics/daily?from=2026-03-04&to=2026-03-04&provider=github&groupBy=repo&limit=50`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(groupedMetricsResponse.status).toBe(200);
+    const groupedMetricsBody = (await groupedMetricsResponse.json()) as {
+      items: Array<{ date: string; totalEvents: number }>;
+      groups?: Array<{ groupBy: string; value: string; totalEvents: number }>;
+    };
+    expect(groupedMetricsBody.items.length).toBeGreaterThanOrEqual(1);
+    expect(
+      groupedMetricsBody.groups?.some(
+        (item) =>
+          item.groupBy === "repo" &&
+          item.value === `agentledger/${nonce}` &&
+          item.totalEvents >= 1,
       ),
     ).toBe(true);
 
@@ -12838,6 +13554,7 @@ describe("Control Plane API", () => {
   });
 
   test("replay 路由：400/201/200 与租户隔离", async () => {
+    resetReplayJobExecutionWorkerForTests();
     const nonce = createNonce("replay-routes");
     const auth = await getDefaultAuthContext();
 
@@ -12910,6 +13627,20 @@ describe("Control Plane API", () => {
     };
     expect(baseline.tenantId).toBe(tenantAId);
 
+    const duplicateBaselineResponse = await app.request("/api/v1/replay/baselines", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        name: `Regression Baseline ${nonce}`,
+        datasetId: "golden-set-v2",
+        model: "gpt-4.1",
+      }),
+    });
+    expect(duplicateBaselineResponse.status).toBe(409);
+
     const listBaselinesFilteredResponse = await app.request(
       "/api/v1/replay/baselines?model=gpt-4.1&datasetId=golden-set-v1&limit=10",
       {
@@ -12956,6 +13687,20 @@ describe("Control Plane API", () => {
     });
     expect(badCreateJobResponse.status).toBe(400);
 
+    const missingBaselineJobResponse = await app.request("/api/v1/replay/jobs", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        baselineId: "missing-baseline",
+        candidateLabel: "candidate-missing",
+        sampleLimit: 1,
+      }),
+    });
+    expect(missingBaselineJobResponse.status).toBe(404);
+
     const createJobResponse = await app.request("/api/v1/replay/jobs", {
       method: "POST",
       headers: {
@@ -12972,10 +13717,14 @@ describe("Control Plane API", () => {
     const replayJob = (await createJobResponse.json()) as {
       id: string;
       totalCases: number;
+      status: string;
+      processedCases: number;
       baselineId: string;
     };
     expect(replayJob.baselineId).toBe(baseline.id);
+    expect(replayJob.status).toBe("pending");
     expect(replayJob.totalCases).toBe(12);
+    expect(replayJob.processedCases).toBe(0);
 
     const createSafetyJobResponse = await app.request("/api/v1/replay/jobs", {
       method: "POST",
@@ -12996,9 +13745,11 @@ describe("Control Plane API", () => {
     const safetyReplayJob = (await createSafetyJobResponse.json()) as {
       id: string;
       totalCases: number;
+      status: string;
       baselineId: string;
     };
     expect(safetyReplayJob.baselineId).toBe(baseline.id);
+    expect(safetyReplayJob.status).toBe("pending");
     expect(safetyReplayJob.totalCases).toBe(8);
 
     const listJobsAResponse = await app.request("/api/v1/replay/jobs", {
@@ -13053,6 +13804,8 @@ describe("Control Plane API", () => {
     );
     expect(badTimeRangeFilterResponse.status).toBe(400);
 
+    await flushReplayJobExecutionQueueForTests();
+
     const getJobAResponse = await app.request(
       `/api/v1/replay/jobs/${encodeURIComponent(replayJob.id)}`,
       {
@@ -13060,6 +13813,13 @@ describe("Control Plane API", () => {
       },
     );
     expect(getJobAResponse.status).toBe(200);
+    const getJobABody = (await getJobAResponse.json()) as {
+      status: string;
+      processedCases: number;
+      totalCases: number;
+    };
+    expect(getJobABody.status).toBe("completed");
+    expect(getJobABody.processedCases).toBe(getJobABody.totalCases);
 
     const diffResponse = await app.request(
       `/api/v1/replay/jobs/${encodeURIComponent(replayJob.id)}/diff`,
@@ -13092,5 +13852,1019 @@ describe("Control Plane API", () => {
       },
     );
     expect(getJobBResponse.status).toBe(404);
+    resetReplayJobExecutionWorkerForTests();
+  });
+
+  test("api-v2 quality 路由：评估写入、指标查询、成本相关性与评分卡更新", async () => {
+    const nonce = createNonce("quality-v2-routes");
+    const auth = await getDefaultAuthContext();
+
+    const tenantAResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `QualityV2 Tenant A ${nonce}`,
+        slug: `quality-v2-a-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantAResult, [201]);
+    const tenantAId = extractEntityId(tenantAResult.payload);
+    if (!tenantAId) {
+      throw new Error("租户 A 创建失败，缺少 tenantId。");
+    }
+
+    const tenantBResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `QualityV2 Tenant B ${nonce}`,
+        slug: `quality-v2-b-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantBResult, [201]);
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error("租户 B 创建失败，缺少 tenantId。");
+    }
+
+    const tenantAHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      auth.accessToken,
+      auth.userId,
+    );
+    const tenantBHeaders = await issueTenantScopedAuthHeaders(
+      tenantBId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const badEvaluationResponse = await app.request("/api/v2/quality/evaluations", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        metric: "accuracy",
+        score: 120,
+      }),
+    });
+    expect(badEvaluationResponse.status).toBe(400);
+
+    const createEvaluationResponse = await app.request("/api/v2/quality/evaluations", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        sessionId: `v2-sess-${nonce}`,
+        metric: "accuracy",
+        score: 88,
+        sampleCount: 16,
+        occurredAt: "2026-03-04T08:00:00.000Z",
+      }),
+    });
+    expect(createEvaluationResponse.status).toBe(201);
+
+    const createExternalEvaluationResponse = await app.request("/api/v2/quality/evaluations", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        replayRunId: `v2-run-${nonce}`,
+        metric: "safety",
+        score: 92,
+        sampleCount: 9,
+        occurredAt: "2026-03-04T10:00:00.000Z",
+        externalSource: {
+          provider: "github",
+          repo: `agentledger/${nonce}`,
+          workflow: "ci-main",
+          runId: `run-${nonce}`,
+        },
+      }),
+    });
+    expect(createExternalEvaluationResponse.status).toBe(201);
+
+    const metricsResponse = await app.request(
+      "/api/v2/quality/metrics?from=2026-03-04&to=2026-03-04&groupBy=repo&provider=github",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(metricsResponse.status).toBe(200);
+    const metricsBody = (await metricsResponse.json()) as {
+      items: Array<{ date: string; totalEvents: number }>;
+      groups?: Array<{ groupBy: string; value: string }>;
+    };
+    expect(metricsBody.items.some((item) => item.date === "2026-03-04")).toBe(true);
+    expect(
+      metricsBody.groups?.some(
+        (group) => group.groupBy === "repo" && group.value === `agentledger/${nonce}`,
+      ),
+    ).toBe(true);
+
+    const correlationResponse = await app.request(
+      "/api/v2/quality/reports/cost-correlation?from=2026-03-04&to=2026-03-04",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(correlationResponse.status).toBe(200);
+    const correlationBody = (await correlationResponse.json()) as {
+      items: Array<{ date: string; metric: string; totalEvents: number }>;
+      summary: {
+        metric: string;
+      };
+    };
+    expect(correlationBody.summary.metric).toBe("all");
+    expect(correlationBody.items.some((item) => item.metric === "all")).toBe(true);
+    expect(correlationBody.items.some((item) => item.totalEvents >= 1)).toBe(true);
+
+    const projectTrendsResponse = await app.request(
+      "/api/v2/quality/reports/project-trends?from=2026-03-04&to=2026-03-04&provider=github&workflow=ci-main&limit=10",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(projectTrendsResponse.status).toBe(200);
+    const projectTrendsBody = (await projectTrendsResponse.json()) as {
+      items: Array<{ project: string; metric: string; totalEvents: number; totalCost: number }>;
+      summary: { metric: string; totalEvents: number; from: string; to: string };
+      filters: {
+        from: string | null;
+        to: string | null;
+        metric: string;
+        provider: string | null;
+        workflow: string | null;
+        includeUnknown: boolean;
+        limit: number;
+      };
+    };
+    expect(projectTrendsBody.summary.metric).toBe("all");
+    expect(projectTrendsBody.summary.from).toBe("2026-03-04T00:00:00.000Z");
+    expect(projectTrendsBody.summary.to).toBe("2026-03-04T23:59:59.999Z");
+    expect(projectTrendsBody.items.some((item) => item.project === `agentledger/${nonce}`)).toBe(
+      true,
+    );
+    expect(projectTrendsBody.items.some((item) => item.metric === "all")).toBe(true);
+    expect(projectTrendsBody.items.some((item) => item.totalEvents >= 1)).toBe(true);
+    expect(projectTrendsBody.items.every((item) => item.totalCost >= 0)).toBe(true);
+    expect(projectTrendsBody.filters).toEqual({
+      from: "2026-03-04T00:00:00.000Z",
+      to: "2026-03-04T23:59:59.999Z",
+      metric: "all",
+      provider: "github",
+      workflow: "ci-main",
+      includeUnknown: false,
+      limit: 10,
+    });
+
+    const tenantBProjectTrendsResponse = await app.request(
+      "/api/v2/quality/reports/project-trends?from=2026-03-04&to=2026-03-04&limit=10",
+      {
+        headers: tenantBHeaders,
+      },
+    );
+    expect(tenantBProjectTrendsResponse.status).toBe(200);
+    const tenantBProjectTrendsBody = (await tenantBProjectTrendsResponse.json()) as {
+      items: Array<{ project: string }>;
+    };
+    expect(tenantBProjectTrendsBody.items.length).toBe(0);
+
+    const upsertScorecardResponse = await app.request(
+      `/api/v2/quality/scorecards/${encodeURIComponent("accuracy")}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          targetScore: 90,
+          warningScore: 80,
+          criticalScore: 70,
+          weight: 1,
+          enabled: true,
+          updatedAt: "2026-03-04T12:00:00.000Z",
+        }),
+      },
+    );
+    expect(upsertScorecardResponse.status).toBe(200);
+
+    const listScorecardsResponse = await app.request("/api/v2/quality/scorecards", {
+      headers: tenantAHeaders,
+    });
+    expect(listScorecardsResponse.status).toBe(200);
+    const listScorecardsBody = (await listScorecardsResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(listScorecardsBody.items.some((item) => item.id === "accuracy")).toBe(true);
+
+    const listTenantBScorecardsResponse = await app.request("/api/v2/quality/scorecards", {
+      headers: tenantBHeaders,
+    });
+    expect(listTenantBScorecardsResponse.status).toBe(200);
+    const listTenantBScorecardsBody = (await listTenantBScorecardsResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(listTenantBScorecardsBody.items.some((item) => item.id === "accuracy")).toBe(false);
+  });
+
+  test("api-v2 replay 路由：数据集、运行、差异与工件链路", async () => {
+    resetReplayJobExecutionWorkerForTests();
+    setReplayJobExecutionHandlerForTests(async ({ replayJob }) => ({
+      status: "completed",
+      summary: {
+        metric: "accuracy",
+        totalCases:
+          typeof replayJob.summary["totalCases"] === "number"
+            ? replayJob.summary["totalCases"]
+            : 0,
+        processedCases:
+          typeof replayJob.summary["totalCases"] === "number"
+            ? replayJob.summary["totalCases"]
+            : 0,
+        improvedCases: 1,
+        regressedCases: 0,
+        unchangedCases:
+          typeof replayJob.summary["totalCases"] === "number"
+            ? Math.max(0, replayJob.summary["totalCases"] - 1)
+            : 0,
+      },
+      diff: {
+        items: [
+          {
+            caseId: `case-${replayJob.id}`,
+            metric: "accuracy",
+            baselineScore: 0.72,
+            candidateScore: 0.9,
+            delta: 0.18,
+            verdict: "improved",
+            detail: "accuracy improved",
+          },
+        ],
+      },
+    }));
+    try {
+      const nonce = createNonce("replay-v2-routes");
+      const auth = await getDefaultAuthContext();
+
+      const tenantAResult = await createTenantByAuth(
+        auth.accessToken,
+        {
+          name: `ReplayV2 Tenant A ${nonce}`,
+          slug: `replay-v2-a-${nonce}`,
+        },
+        auth.userId,
+      );
+      assertApiStatus(tenantAResult, [201]);
+      const tenantAId = extractEntityId(tenantAResult.payload);
+      if (!tenantAId) {
+        throw new Error("租户 A 创建失败，缺少 tenantId。");
+      }
+
+      const tenantBResult = await createTenantByAuth(
+        auth.accessToken,
+        {
+          name: `ReplayV2 Tenant B ${nonce}`,
+          slug: `replay-v2-b-${nonce}`,
+        },
+        auth.userId,
+      );
+      assertApiStatus(tenantBResult, [201]);
+      const tenantBId = extractEntityId(tenantBResult.payload);
+      if (!tenantBId) {
+        throw new Error("租户 B 创建失败，缺少 tenantId。");
+      }
+
+      const tenantAHeaders = await issueTenantScopedAuthHeaders(
+        tenantAId,
+        auth.accessToken,
+        auth.userId,
+      );
+      const tenantBHeaders = await issueTenantScopedAuthHeaders(
+        tenantBId,
+        auth.accessToken,
+        auth.userId,
+      );
+
+      const createDatasetResponse = await app.request("/api/v2/replay/datasets", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          name: `Replay Dataset ${nonce}`,
+          datasetRef: `dataset-${nonce}`,
+          model: "gpt-4.1",
+          promptVersion: "v2",
+          sampleCount: 14,
+        }),
+      });
+      expect(createDatasetResponse.status).toBe(201);
+      const dataset = (await createDatasetResponse.json()) as {
+        id: string;
+        tenantId: string;
+        datasetId?: string;
+        datasetRef?: string | null;
+      };
+      expect(dataset.tenantId).toBe(tenantAId);
+      expect(dataset.datasetId).toBe(dataset.id);
+      expect(dataset.datasetRef).toBe(`dataset-${nonce}`);
+
+      const createLegacyDatasetResponse = await app.request("/api/v2/replay/datasets", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          name: `Replay Dataset Legacy ${nonce}`,
+          datasetId: `legacy-dataset-${nonce}`,
+          model: "gpt-4.1",
+        }),
+      });
+      expect(createLegacyDatasetResponse.status).toBe(201);
+      const legacyDataset = (await createLegacyDatasetResponse.json()) as {
+        datasetRef?: string | null;
+      };
+      expect(legacyDataset.datasetRef).toBe(`legacy-dataset-${nonce}`);
+
+      const listDatasetsResponse = await app.request("/api/v2/replay/datasets?limit=20", {
+        headers: tenantAHeaders,
+      });
+      expect(listDatasetsResponse.status).toBe(200);
+      const listDatasetsBody = (await listDatasetsResponse.json()) as {
+        items: Array<{ id: string }>;
+      };
+      expect(listDatasetsBody.items.some((item) => item.id === dataset.id)).toBe(true);
+
+      const replaceCasesResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/cases`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...tenantAHeaders,
+          },
+          body: JSON.stringify({
+            items: [
+              {
+                caseId: "case-1",
+                input: "用户询问发票流程",
+                expectedOutput: "说明发票申请步骤",
+              },
+              {
+                caseId: "case-2",
+                input: "用户询问退款时效",
+                baselineOutput: "原方案说明 3 个工作日",
+                candidateInput: "候选方案说明 2 个工作日",
+              },
+            ],
+          }),
+        },
+      );
+      expect(replaceCasesResponse.status).toBe(200);
+      const replaceCasesBody = (await replaceCasesResponse.json()) as {
+        total: number;
+      };
+      expect(replaceCasesBody.total).toBe(2);
+
+      const listCasesResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/cases?limit=10`,
+        {
+          headers: tenantAHeaders,
+        },
+      );
+      expect(listCasesResponse.status).toBe(200);
+      const listCasesBody = (await listCasesResponse.json()) as {
+        items: Array<{ caseId: string }>;
+      };
+      expect(listCasesBody.items.some((item) => item.caseId === "case-1")).toBe(true);
+
+      const createRunResponse = await app.request("/api/v2/replay/runs", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          datasetId: dataset.id,
+          candidateLabel: "candidate-v2",
+          sampleLimit: 14,
+        }),
+      });
+      expect(createRunResponse.status).toBe(201);
+      const run = (await createRunResponse.json()) as {
+        id: string;
+        status: string;
+        totalCases: number;
+        datasetId: string;
+        baselineId?: string;
+      };
+      expect(run.status).toBe("pending");
+      expect(run.totalCases).toBe(2);
+      expect(run.datasetId).toBe(dataset.id);
+      expect(run.baselineId).toBe(dataset.id);
+
+      const createAliasRunResponse = await app.request("/api/v2/replay/runs", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          baselineId: dataset.id,
+          candidateLabel: "candidate-v2-legacy",
+          sampleLimit: 2,
+        }),
+      });
+      expect(createAliasRunResponse.status).toBe(201);
+      const aliasRun = (await createAliasRunResponse.json()) as {
+        id: string;
+        datasetId: string;
+        baselineId?: string;
+      };
+      expect(aliasRun.datasetId).toBe(dataset.id);
+      expect(aliasRun.baselineId).toBe(dataset.id);
+
+      await flushReplayJobExecutionQueueForTests();
+
+      const getRunResponse = await app.request(`/api/v2/replay/runs/${encodeURIComponent(run.id)}`, {
+        headers: tenantAHeaders,
+      });
+      expect(getRunResponse.status).toBe(200);
+      const getRunBody = (await getRunResponse.json()) as {
+        status: string;
+        processedCases: number;
+        totalCases: number;
+      };
+      expect(getRunBody.status).toBe("completed");
+      expect(getRunBody.processedCases).toBe(getRunBody.totalCases);
+
+      const diffResponse = await app.request(
+        `/api/v2/replay/runs/${encodeURIComponent(run.id)}/diffs?datasetId=${encodeURIComponent(
+          dataset.id,
+        )}&keyword=accuracy&limit=1`,
+        {
+          headers: tenantAHeaders,
+        },
+      );
+      expect(diffResponse.status).toBe(200);
+      const diffBody = (await diffResponse.json()) as {
+        runId: string;
+        jobId?: string;
+        total: number;
+        summary: {
+          totalCases: number;
+          executionSource?: string;
+        };
+        filters: {
+          datasetId: string;
+          baselineId?: string;
+          runId: string;
+          jobId?: string;
+          keyword: string | null;
+          limit: number | null;
+        };
+        diffs: Array<{ metric: string }>;
+      };
+      expect(diffBody.runId).toBe(run.id);
+      expect(diffBody.jobId).toBe(run.id);
+      expect(diffBody.total).toBe(1);
+      expect(diffBody.summary.totalCases).toBe(2);
+      expect(diffBody.summary.executionSource).toBe("dataset_cases");
+      expect(diffBody.filters).toEqual({
+        datasetId: dataset.id,
+        baselineId: dataset.id,
+        runId: run.id,
+        jobId: run.id,
+        keyword: "accuracy",
+        limit: 1,
+      });
+      expect(diffBody.diffs).toHaveLength(1);
+      expect(diffBody.diffs[0]?.metric).toBe("accuracy");
+
+      const diffAliasResponse = await app.request(
+        `/api/v2/replay/runs/${encodeURIComponent(run.id)}/diffs?baselineId=${encodeURIComponent(
+          dataset.id,
+        )}`,
+        {
+          headers: tenantAHeaders,
+        },
+      );
+      expect(diffAliasResponse.status).toBe(200);
+
+      const diffMismatchResponse = await app.request(
+        `/api/v2/replay/runs/${encodeURIComponent(run.id)}/diffs?datasetId=wrong-baseline`,
+        {
+          headers: tenantAHeaders,
+        },
+      );
+      expect(diffMismatchResponse.status).toBe(400);
+
+      const artifactsResponse = await app.request(
+        `/api/v2/replay/runs/${encodeURIComponent(run.id)}/artifacts`,
+        {
+          headers: tenantAHeaders,
+        },
+      );
+      expect(artifactsResponse.status).toBe(200);
+      const artifactsBody = (await artifactsResponse.json()) as {
+        runId: string;
+        jobId?: string;
+        datasetId: string;
+        total: number;
+        items: Array<{
+          type: string;
+          name?: string;
+          byteSize?: number;
+          downloadName?: string;
+          downloadUrl?: string;
+          inline?: Record<string, unknown>;
+        }>;
+      };
+      expect(artifactsBody.runId).toBe(run.id);
+      expect(artifactsBody.jobId).toBe(run.id);
+      expect(artifactsBody.datasetId).toBe(dataset.id);
+      expect(artifactsBody.total).toBe(3);
+      expect(artifactsBody.items.some((item) => item.type === "summary")).toBe(true);
+      expect(artifactsBody.items.some((item) => item.type === "diff")).toBe(true);
+      expect(artifactsBody.items.some((item) => item.type === "cases")).toBe(true);
+      expect(
+        artifactsBody.items.find((item) => item.type === "summary")?.inline?.["totalCases"]
+      ).toBe(2);
+      expect(
+        artifactsBody.items.every(
+          (item) =>
+            typeof item.name === "string" &&
+            typeof item.downloadName === "string" &&
+            typeof item.downloadUrl === "string" &&
+            typeof item.byteSize === "number" &&
+            item.byteSize >= 0,
+        ),
+      ).toBe(true);
+      const summaryDownloadResponse = await app.request(
+        `/api/v2/replay/runs/${encodeURIComponent(run.id)}/artifacts/summary/download`,
+        {
+          headers: tenantAHeaders,
+        },
+      );
+      expect(summaryDownloadResponse.status).toBe(200);
+      expect(summaryDownloadResponse.headers.get("content-type")).toContain("application/json");
+      expect(summaryDownloadResponse.headers.get("content-disposition")).toContain("summary.json");
+      const summaryDownloadBody = (await summaryDownloadResponse.json()) as {
+        totalCases?: number;
+        digest?: Record<string, unknown>;
+      };
+      expect(summaryDownloadBody.totalCases).toBe(2);
+      expect(summaryDownloadBody.digest?.["runId"]).toBe(run.id);
+
+      const invalidArtifactTypeResponse = await app.request(
+        `/api/v2/replay/runs/${encodeURIComponent(run.id)}/artifacts/unknown/download`,
+        {
+          headers: tenantAHeaders,
+        },
+      );
+      expect(invalidArtifactTypeResponse.status).toBe(400);
+
+      const listTenantBRunsResponse = await app.request("/api/v2/replay/runs", {
+        headers: tenantBHeaders,
+      });
+      expect(listTenantBRunsResponse.status).toBe(200);
+      const listTenantBRunsBody = (await listTenantBRunsResponse.json()) as {
+        items: Array<{ id: string }>;
+      };
+      expect(listTenantBRunsBody.items.some((item) => item.id === run.id)).toBe(false);
+    } finally {
+      resetReplayJobExecutionWorkerForTests();
+    }
+  });
+
+  test("api-v2 residency 路由：策略、区域映射、复制审批取消与租户隔离", async () => {
+    const nonce = createNonce("residency-v2-routes");
+    const auth = await getDefaultAuthContext();
+
+    const tenantAResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `ResidencyV2 Tenant A ${nonce}`,
+        slug: `residency-v2-a-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantAResult, [201]);
+    const tenantAId = extractEntityId(tenantAResult.payload);
+    if (!tenantAId) {
+      throw new Error("租户 A 创建失败，缺少 tenantId。");
+    }
+
+    const tenantBResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `ResidencyV2 Tenant B ${nonce}`,
+        slug: `residency-v2-b-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantBResult, [201]);
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error("租户 B 创建失败，缺少 tenantId。");
+    }
+
+    const tenantAHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      auth.accessToken,
+      auth.userId,
+    );
+    const tenantBHeaders = await issueTenantScopedAuthHeaders(
+      tenantBId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const upsertPolicyResponse = await app.request("/api/v2/residency/policies/current", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        mode: "active_active",
+        primaryRegion: "cn-hangzhou",
+        replicaRegions: ["cn-shanghai", "ap-southeast-1"],
+        allowCrossRegionTransfer: true,
+        requireTransferApproval: true,
+      }),
+    });
+    expect(upsertPolicyResponse.status).toBe(200);
+
+    const getPolicyResponse = await app.request("/api/v2/residency/policies/current", {
+      headers: tenantAHeaders,
+    });
+    expect(getPolicyResponse.status).toBe(200);
+    const getPolicyBody = (await getPolicyResponse.json()) as {
+      tenantId: string;
+      mode: string;
+      replicaRegions: string[];
+    };
+    expect(getPolicyBody.tenantId).toBe(tenantAId);
+    expect(getPolicyBody.mode).toBe("active_active");
+    expect(getPolicyBody.replicaRegions).toContain("cn-shanghai");
+
+    const mappingsResponse = await app.request("/api/v2/residency/region-mappings", {
+      headers: tenantAHeaders,
+    });
+    expect(mappingsResponse.status).toBe(200);
+    const mappingsBody = (await mappingsResponse.json()) as {
+      items: Array<{ regionId: string; role: string }>;
+    };
+    expect(
+      mappingsBody.items.some((item) => item.regionId === "cn-hangzhou" && item.role === "primary"),
+    ).toBe(true);
+    expect(
+      mappingsBody.items.some((item) => item.regionId === "cn-shanghai" && item.role === "replica"),
+    ).toBe(true);
+
+    const createReplicationResponse = await app.request("/api/v2/residency/replications", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...tenantAHeaders,
+      },
+      body: JSON.stringify({
+        sourceRegion: "cn-hangzhou",
+        targetRegion: "cn-shanghai",
+        reason: "v2 route integration",
+      }),
+    });
+    expect(createReplicationResponse.status).toBe(201);
+    const replication = (await createReplicationResponse.json()) as {
+      id: string;
+      tenantId: string;
+      status: string;
+    };
+    expect(replication.tenantId).toBe(tenantAId);
+    expect(replication.status).toBe("pending");
+
+    const approveReplicationResponse = await app.request(
+      `/api/v2/residency/replications/${encodeURIComponent(replication.id)}/approvals`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          reason: "approve v2",
+        }),
+      },
+    );
+    expect(approveReplicationResponse.status).toBe(200);
+    const approvedReplication = (await approveReplicationResponse.json()) as {
+      status: string;
+    };
+    expect(approvedReplication.status).toBe("running");
+
+    const cancelReplicationResponse = await app.request(
+      `/api/v2/residency/replications/${encodeURIComponent(replication.id)}/cancel`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          reason: "cancel v2",
+        }),
+      },
+    );
+    expect(cancelReplicationResponse.status).toBe(200);
+    const cancelledReplication = (await cancelReplicationResponse.json()) as {
+      status: string;
+    };
+    expect(cancelledReplication.status).toBe("cancelled");
+
+    const listTenantAResponse = await app.request("/api/v2/residency/replications", {
+      headers: tenantAHeaders,
+    });
+    expect(listTenantAResponse.status).toBe(200);
+    const listTenantABody = (await listTenantAResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(listTenantABody.items.some((item) => item.id === replication.id)).toBe(true);
+
+    const listTenantBResponse = await app.request("/api/v2/residency/replications", {
+      headers: tenantBHeaders,
+    });
+    expect(listTenantBResponse.status).toBe(200);
+    const listTenantBBody = (await listTenantBResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(listTenantBBody.items.some((item) => item.id === replication.id)).toBe(false);
+  });
+
+  test("api-v2 replay 支持从历史会话物化样本并产出真实执行摘要", async () => {
+    resetReplayJobExecutionWorkerForTests();
+    const nonce = createNonce("replay-v2-materialize");
+    const auth = await getDefaultAuthContext();
+
+    const tenantResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Replay Materialize Tenant ${nonce}`,
+        slug: `replay-materialize-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error("租户创建失败，缺少 tenantId。");
+    }
+
+    const headers = await issueTenantScopedAuthHeaders(
+      tenantId,
+      auth.accessToken,
+      auth.userId,
+    );
+    const sourceResult = await createIdentitySourceByAuth(
+      auth.accessToken,
+      {
+        tenantId,
+        name: `Replay Materialize Source ${nonce}`,
+        location: `/tmp/replay-materialize-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(sourceResult, [201]);
+    const sourceId = extractEntityId(sourceResult.payload);
+    if (!sourceId) {
+      throw new Error("来源创建失败，缺少 sourceId。");
+    }
+
+    const insertedA = await insertSessionForSearch(sourceId, {
+      provider: "codex",
+      tool: "Codex CLI",
+      model: "gpt-5-codex",
+      startedAt: "2026-03-04T08:00:00.000Z",
+      eventTexts: ["用户询问预算超额怎么办", "助手建议设置月度预算阈值与告警"],
+    });
+    const insertedB = await insertSessionForSearch(sourceId, {
+      provider: "codex",
+      tool: "Codex CLI",
+      model: "gpt-5-codex",
+      startedAt: "2026-03-05T08:00:00.000Z",
+      eventTexts: ["用户询问审计日志怎么导出", "助手建议在审计中心导出取证包"],
+    });
+
+    try {
+      const createDatasetResponse = await app.request("/api/v2/replay/datasets", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          name: `Replay Materialize Dataset ${nonce}`,
+          datasetRef: `replay-materialize-dataset-${nonce}`,
+          model: "gpt-5-codex",
+        }),
+      });
+      expect(createDatasetResponse.status).toBe(201);
+      const dataset = (await createDatasetResponse.json()) as { id: string };
+
+      const materializeResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/materialize`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({
+            sessionIds: [insertedA.id, insertedB.id],
+            sampleLimit: 10,
+          }),
+        },
+      );
+      expect(materializeResponse.status).toBe(200);
+      const materializeBody = (await materializeResponse.json()) as {
+        materialized: number;
+        skipped: number;
+        sourceSummary?: Record<string, number>;
+        items: Array<{ metadata: Record<string, unknown> }>;
+      };
+      expect(materializeBody.materialized).toBe(2);
+      expect(materializeBody.skipped).toBe(0);
+      expect(materializeBody.sourceSummary?.["session"]).toBe(2);
+      expect(materializeBody.items.every((item) => item.metadata["sourceType"] === "session")).toBe(true);
+
+      const createRunResponse = await app.request("/api/v2/replay/runs", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          datasetId: dataset.id,
+          candidateLabel: "candidate-materialized",
+          sampleLimit: 10,
+        }),
+      });
+      expect(createRunResponse.status).toBe(201);
+      const replayRun = (await createRunResponse.json()) as {
+        id: string;
+        totalCases: number;
+      };
+      expect(replayRun.totalCases).toBe(2);
+
+      await flushReplayJobExecutionQueueForTests();
+
+      const getRunResponse = await app.request(
+        `/api/v2/replay/runs/${encodeURIComponent(replayRun.id)}`,
+        {
+          headers,
+        },
+      );
+      expect(getRunResponse.status).toBe(200);
+      const getRunBody = (await getRunResponse.json()) as {
+        status: string;
+        summary: {
+          executionSource?: string;
+          sourceSummary?: Record<string, number>;
+          digest?: Record<string, unknown>;
+        };
+      };
+      expect(getRunBody.status).toBe("completed");
+      expect(getRunBody.summary.executionSource).toBe("session_materialized");
+      expect(getRunBody.summary.sourceSummary?.["session"]).toBe(2);
+      expect(getRunBody.summary.digest?.["runId"]).toBe(replayRun.id);
+
+      const diffResponse = await app.request(
+        `/api/v2/replay/runs/${encodeURIComponent(replayRun.id)}/diffs`,
+        {
+          headers,
+        },
+      );
+      expect(diffResponse.status).toBe(200);
+      const diffBody = (await diffResponse.json()) as {
+        summary: {
+          executionSource?: string;
+          digest?: Record<string, unknown>;
+        };
+      };
+      expect(diffBody.summary.executionSource).toBe("session_materialized");
+      expect(diffBody.summary.digest?.["executionSource"]).toBe("session_materialized");
+    } finally {
+      await insertedA.cleanup();
+      await insertedB.cleanup();
+      resetReplayJobExecutionWorkerForTests();
+    }
+  });
+
+  test("replay worker 失败流转：pending -> running -> failed", async () => {
+    resetReplayJobExecutionWorkerForTests();
+    setReplayJobExecutionHandlerForTests(async () => {
+      throw new Error("mock replay worker failure");
+    });
+
+    try {
+      const nonce = createNonce("replay-worker-failed");
+      const auth = await getDefaultAuthContext();
+      const tenantResult = await createTenantByAuth(
+        auth.accessToken,
+        {
+          name: `Replay Worker Tenant ${nonce}`,
+          slug: `replay-worker-${nonce}`,
+        },
+        auth.userId,
+      );
+      assertApiStatus(tenantResult, [201]);
+      const tenantId = extractEntityId(tenantResult.payload);
+      if (!tenantId) {
+        throw new Error("租户创建失败，缺少 tenantId。");
+      }
+
+      const headers = await issueTenantScopedAuthHeaders(
+        tenantId,
+        auth.accessToken,
+        auth.userId,
+      );
+
+      const createBaselineResponse = await app.request("/api/v1/replay/baselines", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          name: `Worker Failed Baseline ${nonce}`,
+          datasetId: "worker-failed-dataset",
+          model: "gpt-4.1",
+          sampleCount: 6,
+        }),
+      });
+      expect(createBaselineResponse.status).toBe(201);
+      const baseline = (await createBaselineResponse.json()) as { id: string };
+
+      const createJobResponse = await app.request("/api/v1/replay/jobs", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          baselineId: baseline.id,
+          candidateLabel: "failing-candidate",
+          sampleLimit: 6,
+        }),
+      });
+      expect(createJobResponse.status).toBe(201);
+      const replayJob = (await createJobResponse.json()) as {
+        id: string;
+        status: string;
+      };
+      expect(replayJob.status).toBe("pending");
+
+      await flushReplayJobExecutionQueueForTests();
+
+      const getJobResponse = await app.request(
+        `/api/v1/replay/jobs/${encodeURIComponent(replayJob.id)}`,
+        {
+          headers,
+        },
+      );
+      expect(getJobResponse.status).toBe(200);
+      const getJobBody = (await getJobResponse.json()) as {
+        id: string;
+        status: string;
+        error?: string;
+      };
+      expect(getJobBody.id).toBe(replayJob.id);
+      expect(getJobBody.status).toBe("failed");
+      expect(getJobBody.error).toContain("mock replay worker failure");
+
+      const failedListResponse = await app.request("/api/v1/replay/jobs?status=failed", {
+        headers,
+      });
+      expect(failedListResponse.status).toBe(200);
+      const failedListBody = (await failedListResponse.json()) as {
+        items: Array<{ id: string; status: string }>;
+      };
+      expect(
+        failedListBody.items.some(
+          (item) => item.id === replayJob.id && item.status === "failed",
+        ),
+      ).toBe(true);
+    } finally {
+      resetReplayJobExecutionWorkerForTests();
+    }
   });
 });

@@ -174,6 +174,7 @@ export type McpRiskLevel = "low" | "medium" | "high";
 export type McpToolDecision = "allow" | "deny" | "require_approval";
 export type McpApprovalStatus = "pending" | "approved" | "rejected";
 export type AuditLevel = "info" | "warning" | "error" | "critical";
+export type AlertOrchestrationDispatchMode = "rule" | "fallback";
 
 export interface BudgetThresholds {
   warning: number;
@@ -261,6 +262,7 @@ export interface AlertOrchestrationExecutionLog {
   severity?: AlertSeverity;
   sourceId?: string;
   channels: AlertOrchestrationChannel[];
+  dispatchMode: AlertOrchestrationDispatchMode;
   conflictRuleIds: string[];
   dedupeHit: boolean;
   suppressed: boolean;
@@ -277,6 +279,8 @@ export interface AlertOrchestrationExecutionListInput {
   sourceId?: string;
   dedupeHit?: boolean;
   suppressed?: boolean;
+  dispatchMode?: AlertOrchestrationDispatchMode;
+  hasConflict?: boolean;
   simulated?: boolean;
   from?: string;
   to?: string;
@@ -291,6 +295,7 @@ export interface AlertOrchestrationExecutionCreateInput {
   severity?: AlertSeverity;
   sourceId?: string;
   channels?: AlertOrchestrationChannel[];
+  dispatchMode?: AlertOrchestrationDispatchMode;
   conflictRuleIds?: string[];
   dedupeHit?: boolean;
   suppressed?: boolean;
@@ -377,6 +382,10 @@ export interface ReplicationJobListInput {
 }
 
 export interface ReplicationJobCancelInput {
+  reason?: string;
+}
+
+export interface ReplicationJobApproveInput {
   reason?: string;
 }
 
@@ -627,7 +636,12 @@ export type WebhookEventType =
   | "quality.scorecard.updated"
   | "replay.job.started"
   | "replay.job.completed"
-  | "replay.job.failed";
+  | "replay.job.failed"
+  | "replay.run.started"
+  | "replay.run.completed"
+  | "replay.run.regression_detected"
+  | "replay.run.failed"
+  | "replay.run.cancelled";
 
 export type WebhookEndpointStatus = "active" | "paused" | "disabled";
 
@@ -664,6 +678,51 @@ export interface WebhookEndpointUpdateInput {
   secret?: string;
 }
 
+export type WebhookReplayTaskStatus = "queued" | "running" | "completed" | "failed";
+
+export interface WebhookReplayFilter {
+  eventType?: WebhookEventType;
+  from?: string;
+  to?: string;
+  limit: number;
+}
+
+export interface WebhookReplayRequestInput {
+  eventType?: WebhookEventType;
+  from?: string;
+  to?: string;
+  limit?: number;
+  dryRun?: boolean;
+}
+
+export interface WebhookReplayTask {
+  id: string;
+  tenantId: string;
+  webhookId: string;
+  status: WebhookReplayTaskStatus;
+  dryRun: boolean;
+  filters: WebhookReplayFilter;
+  requestedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  error?: string;
+  result: Record<string, unknown>;
+}
+
+export interface WebhookReplayTaskListInput {
+  webhookId?: string;
+  status?: WebhookReplayTaskStatus;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface WebhookReplayTaskListResponse {
+  items: WebhookReplayTask[];
+  total: number;
+  nextCursor: string | null;
+  filters: WebhookReplayTaskListInput;
+}
+
 export type QualityMetric =
   | "accuracy"
   | "consistency"
@@ -671,11 +730,19 @@ export type QualityMetric =
   | "safety"
   | "latency";
 
+export interface QualityExternalSource {
+  provider: string;
+  repo?: string;
+  workflow?: string;
+  runId?: string;
+}
+
 export interface QualityEvent {
   id: string;
   tenantId: string;
   sessionId?: string;
   replayJobId?: string;
+  externalSource?: QualityExternalSource;
   metric: QualityMetric;
   score: number;
   sampleCount: number;
@@ -689,6 +756,7 @@ export interface QualityEventCreateInput {
   tenantId: string;
   sessionId?: string;
   replayJobId?: string;
+  externalSource?: QualityExternalSource;
   metric: QualityMetric;
   score: number;
   sampleCount: number;
@@ -730,7 +798,24 @@ export interface QualityScorecardUpsertInput {
   updatedAt: string;
 }
 
-export type ReplayJobStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+export type ReplayRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+export type ReplayJobStatus = ReplayRunStatus;
+
+export interface ReplayDataset {
+  id: string;
+  tenantId: string;
+  name: string;
+  // Compatibility alias for the dataset resource id.
+  datasetId: string;
+  datasetRef?: string;
+  model: string;
+  caseCount: number;
+  promptVersion?: string;
+  sampleCount: number;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface ReplayBaseline {
   id: string;
@@ -745,6 +830,17 @@ export interface ReplayBaseline {
   updatedAt: string;
 }
 
+export interface ReplayDatasetCreateInput {
+  tenantId: string;
+  name: string;
+  datasetRef: string;
+  datasetId?: string;
+  model: string;
+  promptVersion?: string;
+  sampleCount?: number;
+  metadata?: Record<string, unknown>;
+}
+
 export interface ReplayBaselineCreateInput {
   tenantId: string;
   name: string;
@@ -755,9 +851,90 @@ export interface ReplayBaselineCreateInput {
   metadata?: Record<string, unknown>;
 }
 
-export interface ReplayJobCreateInput {
+export interface ReplayDatasetCase {
+  datasetId: string;
+  caseId: string;
+  sortOrder: number;
+  input: string;
+  expectedOutput?: string;
+  baselineOutput?: string;
+  candidateInput?: string;
+  metadata: Record<string, unknown>;
+  checksum?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ReplayDatasetCaseWriteInput {
+  caseId?: string;
+  sortOrder?: number;
+  input: string;
+  expectedOutput?: string;
+  baselineOutput?: string;
+  candidateInput?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ReplayDatasetCasesReplaceInput {
   tenantId: string;
-  baselineId: string;
+  datasetId: string;
+  items: ReplayDatasetCaseWriteInput[];
+}
+
+export interface ReplayDatasetMaterializeFilters {
+  sourceId?: string;
+  keyword?: string;
+  clientType?: string;
+  tool?: string;
+  host?: string;
+  model?: string;
+  project?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface ReplayDatasetMaterializeInput {
+  tenantId: string;
+  datasetId: string;
+  sessionIds?: string[];
+  filters?: ReplayDatasetMaterializeFilters;
+  sampleLimit?: number;
+  sanitized?: boolean;
+  snapshotVersion?: string;
+}
+
+export interface ReplayDatasetMaterializeResponseFilters {
+  datasetId: string;
+  sessionIds?: string[];
+  filters?: ReplayDatasetMaterializeFilters;
+  sampleLimit?: number;
+  sanitized?: boolean;
+  snapshotVersion?: string;
+}
+
+export interface ReplayDatasetCasesResponse {
+  datasetId: string;
+  items: ReplayDatasetCase[];
+  total: number;
+}
+
+export interface ReplayDatasetMaterializeResponse extends ReplayDatasetCasesResponse {
+  sourceType: "session";
+  materialized: number;
+  skipped: number;
+  sourceSummary?: Record<string, number>;
+  filters: ReplayDatasetMaterializeResponseFilters;
+}
+
+export interface ReplayDatasetListResponse {
+  items: ReplayDataset[];
+  total: number;
+}
+
+export interface ReplayRunCreateInput {
+  tenantId: string;
+  datasetId: string;
+  baselineId?: string;
   candidateLabel: string;
   from?: string;
   to?: string;
@@ -765,7 +942,18 @@ export interface ReplayJobCreateInput {
   metadata?: Record<string, unknown>;
 }
 
-export interface ReplayJobDiffItem {
+export interface ReplayJobCreateInput {
+  tenantId: string;
+  baselineId: string;
+  datasetId?: string;
+  candidateLabel: string;
+  from?: string;
+  to?: string;
+  sampleLimit?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ReplayRunDiffItem {
   caseId: string;
   metric: QualityMetric;
   baselineScore: number;
@@ -774,25 +962,104 @@ export interface ReplayJobDiffItem {
   verdict: "improved" | "regressed" | "unchanged";
   detail?: string;
 }
+export type ReplayJobDiffItem = ReplayRunDiffItem;
 
-export interface ReplayJob {
+export interface ReplayRun {
   id: string;
   tenantId: string;
-  baselineId: string;
+  datasetId: string;
+  baselineId?: string;
   candidateLabel: string;
-  status: ReplayJobStatus;
+  status: ReplayRunStatus;
   totalCases: number;
   processedCases: number;
   improvedCases: number;
   regressedCases: number;
   unchangedCases: number;
-  diffs: ReplayJobDiffItem[];
+  diffs: ReplayRunDiffItem[];
   summary: Record<string, unknown>;
   error?: string;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
   finishedAt?: string;
+}
+export interface ReplayJob extends ReplayRun {
+  baselineId: string;
+}
+
+export interface ReplayRunListInput {
+  datasetId?: string;
+  baselineId?: string;
+  status?: ReplayRunStatus;
+  limit?: number;
+}
+
+export interface ReplayRunListResponse {
+  items: ReplayRun[];
+  total: number;
+}
+
+export interface ReplayRunDiffsFilter {
+  datasetId: string;
+  baselineId?: string;
+  runId?: string;
+  jobId?: string;
+  keyword: string | null;
+  limit: number | null;
+}
+
+export interface ReplayRunDiffsResponse {
+  runId: string;
+  jobId?: string;
+  datasetId: string;
+  diffs: ReplayRunDiffItem[];
+  total: number;
+  summary: Record<string, unknown>;
+  filters: ReplayRunDiffsFilter;
+}
+
+export interface ReplayRunArtifactItem {
+  type: ReplayArtifactType;
+  name?: string;
+  description?: string;
+  contentType: string;
+  downloadName?: string;
+  downloadUrl?: string;
+  byteSize?: number;
+  checksum?: string;
+  storageBackend?: ReplayArtifactStorageBackend;
+  storageKey?: string;
+  metadata: Record<string, unknown>;
+  createdAt?: string;
+  inline?: Record<string, unknown>;
+}
+
+export interface ReplayRunArtifactsResponse {
+  runId: string;
+  jobId?: string;
+  datasetId: string;
+  items: ReplayRunArtifactItem[];
+  total: number;
+}
+
+export type ReplayArtifactType = "summary" | "diff" | "cases";
+export type ReplayArtifactStorageBackend = "local" | "object" | "hybrid";
+
+export interface ReplayArtifact {
+  tenantId: string;
+  runId: string;
+  datasetId: string;
+  artifactType: ReplayArtifactType;
+  name: string;
+  contentType: string;
+  byteSize: number;
+  checksum?: string;
+  storageBackend?: ReplayArtifactStorageBackend;
+  storageKey?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CreateSourceInput {

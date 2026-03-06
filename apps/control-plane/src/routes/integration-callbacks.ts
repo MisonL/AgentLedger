@@ -1,9 +1,10 @@
 import { Hono } from "hono";
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { validateIntegrationAlertCallbackInput } from "../contracts";
 import type { AppendAuditLogInput } from "../data/repository";
 import { getControlPlaneRepository } from "../data/repository";
 import type { AppEnv } from "../types";
+import { computeIntegrationCallbackSignature } from "./integration-signature";
 
 export const integrationCallbackRoutes = new Hono<AppEnv>();
 const repository = getControlPlaneRepository();
@@ -131,15 +132,6 @@ function isCallbackTimestampWithinWindow(
 
 function toNonceReplayClaimId(nonce: string): string {
   return `${CALLBACK_NONCE_REPLAY_PREFIX}${nonce}`;
-}
-
-function computeIntegrationCallbackSignature(
-  secret: string,
-  timestamp: string,
-  nonce: string,
-  body: string
-): string {
-  return createHmac("sha256", secret).update(`${timestamp}\n${nonce}\n${body}`).digest("hex");
 }
 
 integrationCallbackRoutes.post("/integrations/callbacks/alerts", async (c) => {

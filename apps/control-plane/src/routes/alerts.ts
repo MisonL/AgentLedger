@@ -2,6 +2,7 @@ import { Hono, type Context } from "hono";
 import * as contracts from "../contracts";
 import {
   type AlertOrchestrationChannel,
+  type AlertOrchestrationDispatchMode,
   type AlertOrchestrationEventType,
   type AlertOrchestrationRule,
   type AlertSeverity,
@@ -21,6 +22,10 @@ const repository = getControlPlaneRepository();
 const ALERT_ORCHESTRATION_EVENT_TYPES = new Set<AlertOrchestrationEventType>([
   "alert",
   "weekly",
+]);
+const ALERT_ORCHESTRATION_DISPATCH_MODES = new Set<AlertOrchestrationDispatchMode>([
+  "rule",
+  "fallback",
 ]);
 const ALERT_SEVERITY_TYPES = new Set<AlertSeverity>(["warning", "critical"]);
 
@@ -44,6 +49,8 @@ type AlertOrchestrationExecutionListInput = {
   sourceId?: string;
   dedupeHit?: boolean;
   suppressed?: boolean;
+  dispatchMode?: AlertOrchestrationDispatchMode;
+  hasConflict?: boolean;
   simulated?: boolean;
   from?: string;
   to?: string;
@@ -291,6 +298,8 @@ function validateAlertOrchestrationExecutionListInputFallback(
   const sourceId = normalizeString(input.sourceId);
   const dedupeHit = toOptionalBoolean(input.dedupeHit);
   const suppressed = toOptionalBoolean(input.suppressed);
+  const dispatchMode = normalizeString(input.dispatchMode);
+  const hasConflict = toOptionalBoolean(input.hasConflict);
   const simulated = toOptionalBoolean(input.simulated);
   const from = normalizeString(input.from);
   const to = normalizeString(input.to);
@@ -319,6 +328,16 @@ function validateAlertOrchestrationExecutionListInputFallback(
   }
   if (suppressed === "invalid") {
     return { success: false, error: "suppressed 必须是 true/false 或 1/0。" };
+  }
+  if (
+    input.dispatchMode !== undefined &&
+    (!dispatchMode ||
+      !ALERT_ORCHESTRATION_DISPATCH_MODES.has(dispatchMode as AlertOrchestrationDispatchMode))
+  ) {
+    return { success: false, error: "dispatchMode 必须是 rule/fallback 之一。" };
+  }
+  if (hasConflict === "invalid") {
+    return { success: false, error: "hasConflict 必须是 true/false 或 1/0。" };
   }
   if (simulated === "invalid") {
     return { success: false, error: "simulated 必须是 true/false 或 1/0。" };
@@ -349,6 +368,8 @@ function validateAlertOrchestrationExecutionListInputFallback(
       sourceId,
       dedupeHit: typeof dedupeHit === "boolean" ? dedupeHit : undefined,
       suppressed: typeof suppressed === "boolean" ? suppressed : undefined,
+      dispatchMode: dispatchMode as AlertOrchestrationDispatchMode | undefined,
+      hasConflict: typeof hasConflict === "boolean" ? hasConflict : undefined,
       simulated: typeof simulated === "boolean" ? simulated : undefined,
       from,
       to,
