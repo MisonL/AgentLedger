@@ -2817,7 +2817,10 @@ export function validateWebhookEndpointCreateInput(
     return { success: false, error: "url 必须是合法的 http/https 地址。" };
   }
   if (events === undefined || events === "invalid" || events.length === 0) {
-    return { success: false, error: "events 必填且必须是非空数组。" };
+    return {
+      success: false,
+      error: "events 必填且必须是非空数组。推荐优先使用 replay.run.*；replay.job.* 仅兼容保留。",
+    };
   }
   if (events.length > WEBHOOK_EVENT_COUNT_MAX) {
     return {
@@ -2888,7 +2891,10 @@ export function validateWebhookEndpointUpdateInput(
   }
   if (input.events !== undefined) {
     if (events === undefined || events === "invalid" || events.length === 0) {
-      return { success: false, error: "events 必须是非空数组。" };
+      return {
+        success: false,
+        error: "events 必须是非空数组。推荐优先使用 replay.run.*；replay.job.* 仅兼容保留。",
+      };
     }
     if (events.length > WEBHOOK_EVENT_COUNT_MAX) {
       return {
@@ -2944,7 +2950,7 @@ export function validateWebhookReplayRequestInput(
     return {
       success: false,
       error:
-        "eventType 仅支持 api_key.created/api_key.revoked/quality.event.created/quality.scorecard.updated/replay.run.started/replay.run.completed/replay.run.regression_detected/replay.run.failed/replay.run.cancelled/replay.job.started/replay.job.completed/replay.job.failed。",
+        "eventType 仅支持 api_key.created/api_key.revoked/quality.event.created/quality.scorecard.updated/replay.run.started/replay.run.completed/replay.run.regression_detected/replay.run.failed/replay.run.cancelled/replay.job.started/replay.job.completed/replay.job.failed。推荐优先使用 replay.run.*；replay.job.* 仅兼容保留。",
     };
   }
   if (body.from !== undefined && !from) {

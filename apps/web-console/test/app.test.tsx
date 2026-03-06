@@ -3447,6 +3447,14 @@ describe("Web Console", () => {
 
     fireEvent.click(sectionScreen.getByRole("button", { name: "加载 Webhook 列表" }));
     expect(await sectionScreen.findByText("wh-ui-1")).toBeInTheDocument();
+    expect(byId<HTMLInputElement>("open-platform-webhook-events")).toHaveAttribute(
+      "placeholder",
+      "replay.run.started,replay.run.completed"
+    );
+    expect(byId<HTMLInputElement>("open-platform-webhook-replay-event-type")).toHaveAttribute(
+      "placeholder",
+      "例如：replay.run.completed"
+    );
 
     fireEvent.change(byId<HTMLInputElement>("open-platform-webhook-id"), {
       target: { value: "wh-ui-custom-2" },
@@ -3457,6 +3465,11 @@ describe("Web Console", () => {
     fireEvent.change(byId<HTMLInputElement>("open-platform-webhook-url"), {
       target: { value: "https://hooks.example.com/pipeline-alert" },
     });
+    fireEvent.change(byId<HTMLInputElement>("open-platform-webhook-events"), {
+      target: { value: "alert.open" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "保存 Webhook" }));
+    expect(await sectionScreen.findByText(/事件名不合法：alert\.open/)).toBeInTheDocument();
     fireEvent.change(byId<HTMLInputElement>("open-platform-webhook-events"), {
       target: { value: "replay.run.started,replay.run.completed" },
     });

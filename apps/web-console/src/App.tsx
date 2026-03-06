@@ -481,6 +481,7 @@ const OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS = [
   "replay.job.completed",
   "replay.job.failed",
 ] as const;
+const OPEN_PLATFORM_WEBHOOK_EVENT_OPTION_SET = new Set<string>(OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS);
 
 const OPEN_PLATFORM_REPLAY_JOB_STATUS_FILTER_OPTIONS: Array<
   { value: ""; label: string } | { value: OpenPlatformReplayJobStatus; label: string }
@@ -6840,9 +6841,10 @@ function GovernancePage() {
                 <input
                   id="open-platform-webhook-events"
                   type="text"
+                  list="open-platform-webhook-event-options"
                   value={webhookEventsInput}
                   onChange={(event) => setWebhookEventsInput(event.target.value)}
-                  placeholder="alert.open,alert.resolved"
+                  placeholder="replay.run.started,replay.run.completed"
                 />
               </label>
 
@@ -6864,8 +6866,10 @@ function GovernancePage() {
                   const normalizedWebhookId = webhookId.trim();
                   const normalizedName = webhookName.trim();
                   const normalizedUrl = webhookUrl.trim();
-                  const events = parseCommaSeparatedValues(webhookEventsInput).map((item) =>
-                    item.toLowerCase()
+                  const events = Array.from(
+                    new Set(
+                      parseCommaSeparatedValues(webhookEventsInput).map((item) => item.toLowerCase())
+                    )
                   );
                   if (!normalizedWebhookId) {
                     setWebhookFeedback(null);
@@ -6885,6 +6889,16 @@ function GovernancePage() {
                   if (events.length === 0) {
                     setWebhookFeedback(null);
                     setWebhookError("至少填写一个事件名。");
+                    return;
+                  }
+                  const invalidEvents = events.filter(
+                    (item) => !OPEN_PLATFORM_WEBHOOK_EVENT_OPTION_SET.has(item)
+                  );
+                  if (invalidEvents.length > 0) {
+                    setWebhookFeedback(null);
+                    setWebhookError(
+                      `事件名不合法：${invalidEvents.join(",")}。推荐优先使用 replay.run.*；可选值：${OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS.join(",")}`
+                    );
                     return;
                   }
                   setWebhookFeedback(null);
@@ -6919,7 +6933,7 @@ function GovernancePage() {
                   list="open-platform-webhook-event-options"
                   value={webhookReplayEventType}
                   onChange={(event) => setWebhookReplayEventType(event.target.value)}
-                  placeholder="例如：api_key.created"
+                  placeholder="例如：replay.run.completed"
                 />
               </label>
 
@@ -6982,13 +6996,11 @@ function GovernancePage() {
                   }
                   if (
                     normalizedEventType &&
-                    !OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS.includes(
-                      normalizedEventType as (typeof OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS)[number]
-                    )
+                    !OPEN_PLATFORM_WEBHOOK_EVENT_OPTION_SET.has(normalizedEventType)
                   ) {
                     setWebhookFeedback(null);
                     setWebhookError(
-                      `事件类型不合法：${normalizedEventType}。可选值：${OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS.join(",")}`
+                      `事件类型不合法：${normalizedEventType}。推荐优先使用 replay.run.*；可选值：${OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS.join(",")}`
                     );
                     return;
                   }
