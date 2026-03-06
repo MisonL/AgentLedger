@@ -164,13 +164,25 @@ export PULLER_JOB_RETRY_BASE_DELAY=5s
 
 ```bash
 bun run check:callback-stream-binding
+bun run test:e2e-integration-routing
 bun run test:callback-chain-targeted
 bun run test:e2e-governance-callback-chain
 ```
 
 关键变量：`INTEGRATION_CALLBACK_STREAM`、`INTEGRATION_CALLBACK_SUBJECT`（或 `INTEGRATION_CALLBACK_TOPIC`）、`INTEGRATION_CALLBACK_DURABLE`、`CONTROL_PLANE_BASE_URL`、`INTEGRATION_CALLBACK_PATH`、`INTEGRATION_CALLBACK_SECRET`。详细说明见 `docs/13-环境变量参考.md`。
 
-### 5.1 治理链真实 E2E（新增）
+### 5.1 Integration 真实消费分发 E2E（新增）
+
+```bash
+bun run test:e2e-integration-routing
+```
+
+说明：
+
+- 使用嵌入式 JetStream + 本地 HTTP 下游，验证 `NATS -> integration consumer -> 外部 channel/control-plane callback` 的真实消费分发链。
+- 当前覆盖 `alert orchestration override`、`fallback legacy routing`、`suppressed no-dispatch`、`weekly orchestration override`、`callback NATS forward`。
+
+### 5.2 治理链真实 E2E（新增）
 
 ```bash
 GOV_E2E_DATABASE_URL='postgres://agentledger:agentledger@127.0.0.1:55432/agentledger_governance_e2e?sslmode=disable' \

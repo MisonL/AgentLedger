@@ -117,6 +117,35 @@ func TestRouteChannelsFallbackToLegacyWhenRequested(t *testing.T) {
 	}
 }
 
+func TestRouteChannelsWeeklyUsesOrchestrationOverride(t *testing.T) {
+	t.Parallel()
+
+	dispatcher := &alertDispatcher{cfg: integrationConfig{
+		Channels:    []integrationChannel{channelWebhook, channelWeCom, channelEmail},
+		RoutingMode: routingModeBroadcast,
+	}}
+
+	got := dispatcher.routeChannels(eventTypeWeeklyReport, []byte(`{"report_id":"weekly-1","orchestration":{"channels":["email"],"fallback":false}}`))
+	want := []integrationChannel{channelEmail}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("weekly orchestration override mismatch: got %v want %v", got, want)
+	}
+}
+
+func TestRouteChannelsNoDispatchWhenOrchestrationEmptyWithoutFlags(t *testing.T) {
+	t.Parallel()
+
+	dispatcher := &alertDispatcher{cfg: integrationConfig{
+		Channels:    []integrationChannel{channelWebhook, channelWeCom},
+		RoutingMode: routingModeBroadcast,
+	}}
+
+	got := dispatcher.routeChannels(eventTypeAlert, []byte(`{"severity":"warning","orchestration":{"channels":[],"fallback":false}}`))
+	if len(got) != 0 {
+		t.Fatalf("empty orchestration without fallback/dedupe/suppressed should route to no channels, got %v", got)
+	}
+}
+
 func TestExtractSeverity(t *testing.T) {
 	t.Parallel()
 

@@ -65,6 +65,7 @@ bun run check:ts
 bun test apps/control-plane/test/repository.test.ts apps/control-plane/test/api.test.ts --timeout 120000
 cd apps/web-console && bun run test
 go test ./services/governance ./services/integration
+bun run test:e2e-integration-routing
 GOV_E2E_DATABASE_URL=... bun run test:e2e-governance-routing
 ```
 
@@ -81,6 +82,7 @@ Release 工作流补充：
 - `.github/workflows/release.yml` 的 `pre-release-gate` 已纳入 `bun run test:e2e-governance-routing`。
 - 发布仓库需要预先配置 `GOV_E2E_DATABASE_URL` secret；未配置时 tag 发布会在门禁阶段直接失败。
 - `test:e2e-governance-routing` 仅覆盖 `services/governance` 的真实 PG + 嵌入式 NATS 发布/落库路径；`services/integration` 的真实消费分发仍需单独回归。
+- `test:e2e-integration-routing` 现已提供 `services/integration` 的真实 JetStream consumer + HTTP 下游回归，用于验证 routing / callback 的实际消费分发链。
 
 ## 5. 兼容性说明
 
