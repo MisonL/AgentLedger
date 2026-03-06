@@ -67,11 +67,17 @@ jobs:
       - name: 支持矩阵一致性检查
         run: bun run check:support-matrix
 
-      - name: SDK 生成与校验门禁
-        run: bun run sdk:verify
+      - name: Puller P0 解析准确率门禁
+        run: bun run check:puller-p0-accuracy
 
-      - name: SDK 覆盖测试门禁
-        run: bun run sdk:test
+      - name: SDK 只读校验门禁
+        run: bun run sdk:check
+
+      - name: SDK 产物一致性门禁
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          bun run sdk:bundle
+          git diff --exit-code -- clients/sdk dist/sdk
 
       - name: 支持矩阵脚本测试
         run: bun run test:scripts
@@ -122,7 +128,7 @@ jobs:
 
   build-agent-cross:
     name: 客户端多架构构建
-    if: ${{ always() && needs.baseline.result != 'cancelled' }}
+    if: ${{ needs.baseline.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: baseline
