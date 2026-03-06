@@ -1,9 +1,11 @@
 #!/usr/bin/env bun
 
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { runSdkBundleCli } from "./sdk-bundle";
 import { runSdkGenerateCli } from "./sdk-generate";
 import { runSdkTestCli } from "./sdk-test";
 
@@ -79,6 +81,45 @@ function sha256Hex(content: Buffer): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
+async function directoryExists(directoryPath: string): Promise<boolean> {
+  try {
+    const info = await stat(directoryPath);
+    return info.isDirectory();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function prepareBundleCheckDir(inputDir: string, bundleOutputDir: string): Promise<{
+  outputDir: string;
+  cleanup?: () => Promise<void>;
+}> {
+  const absoluteBundleDir = path.resolve(repoRoot, bundleOutputDir);
+  if (await directoryExists(absoluteBundleDir)) {
+    return { outputDir: bundleOutputDir };
+  }
+
+  const tempOutputDir = await mkdtemp(path.join(tmpdir(), "agentledger-sdk-check-"));
+  const bundleExitCode = await runSdkBundleCli(["--input", inputDir, "--output", tempOutputDir]);
+  if (bundleExitCode !== 0) {
+    await rm(tempOutputDir, { recursive: true, force: true });
+    throw new Error(`为 sdk:check 准备临时 bundle 目录失败：${tempOutputDir}`);
+  }
+
+  console.log(
+    `SDK bundle 目录不存在：${bundleOutputDir}，已改用临时目录校验：${tempOutputDir}`
+  );
+  return {
+    outputDir: tempOutputDir,
+    cleanup: async () => {
+      await rm(tempOutputDir, { recursive: true, force: true });
+    },
+  };
+}
+
 async function verifySha256Sums(bundleDir: string): Promise<string[]> {
   const issues: string[] = [];
   const absoluteBundleDir = path.resolve(repoRoot, bundleDir);
@@ -151,27 +192,32 @@ export async function runSdkCheckCli(argv: string[]): Promise<number> {
     return clientsTestCode;
   }
 
-  const checkBundleArgs = ["--output", options.bundleOutputDir, "--check"];
-  if (options.inputPath) {
-    checkBundleArgs.unshift(options.inputPath);
-    checkBundleArgs.unshift("--input");
-  }
-  const checkBundleCode = await runSdkGenerateCli(checkBundleArgs);
-  if (checkBundleCode !== 0) {
-    return checkBundleCode;
-  }
-  const bundleTestCode = await runSdkTestCli(["--output", options.bundleOutputDir]);
-  if (bundleTestCode !== 0) {
-    return bundleTestCode;
-  }
-
-  const hashIssues = await verifySha256Sums(options.bundleOutputDir);
-  if (hashIssues.length > 0) {
-    console.error("SDK SHA256SUMS 校验失败：");
-    for (const issue of hashIssues) {
-      console.error(`- ${issue}`);
+  const preparedBundle = await prepareBundleCheckDir(options.outputDir, options.bundleOutputDir);
+  try {
+    const checkBundleArgs = ["--output", preparedBundle.outputDir, "--check"];
+    if (options.inputPath) {
+      checkBundleArgs.unshift(options.inputPath);
+      checkBundleArgs.unshift("--input");
     }
-    return 1;
+    const checkBundleCode = await runSdkGenerateCli(checkBundleArgs);
+    if (checkBundleCode !== 0) {
+      return checkBundleCode;
+    }
+    const bundleTestCode = await runSdkTestCli(["--output", preparedBundle.outputDir]);
+    if (bundleTestCode !== 0) {
+      return bundleTestCode;
+    }
+
+    const hashIssues = await verifySha256Sums(preparedBundle.outputDir);
+    if (hashIssues.length > 0) {
+      console.error("SDK SHA256SUMS 校验失败：");
+      for (const issue of hashIssues) {
+        console.error(`- ${issue}`);
+      }
+      return 1;
+    }
+  } finally {
+    await preparedBundle.cleanup?.();
   }
 
   console.log("SDK 只读校验通过：clients/sdk + dist/sdk + SHA256SUMS");
@@ -184,4 +230,3 @@ if (import.meta.main) {
     process.exit(exitCode);
   }
 }
-
