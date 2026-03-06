@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { clearAuthTokens, setAuthTokens } from "../src/api";
 import App from "../src/App";
 
-const GOVERNANCE_HEAVY_TEST_TIMEOUT_MS = 15_000;
+const GOVERNANCE_HEAVY_TEST_TIMEOUT_MS = 25_000;
 
 function toUrl(input: Parameters<typeof fetch>[0]): string {
   if (typeof input === "string") {
@@ -113,6 +113,13 @@ function mockGovernancePageFetch({
     const method = (init?.method ?? "GET").toUpperCase();
     const pathname = new URL(url, "http://localhost").pathname;
 
+    if (extraHandler) {
+      const extraResponse = await extraHandler(input, init, { url, method, pathname });
+      if (extraResponse) {
+        return extraResponse;
+      }
+    }
+
     if (pathname === "/api/v1/alerts" && method === "GET") {
       return mockJsonResponse({
         items: [],
@@ -137,25 +144,35 @@ function mockGovernancePageFetch({
       });
     }
 
-    if (pathname === "/api/v1/residency/regions" && method === "GET") {
+    if (pathname === "/api/v2/residency/region-mappings" && method === "GET") {
       return mockJsonResponse({
         items: [
           {
-            id: "cn-shanghai",
-            name: "华东 1",
+            regionId: "cn-shanghai",
+            regionName: "华东 1",
             active: true,
+            role: "primary",
+            writable: true,
+            metadata: {
+              description: "主地域",
+            },
           },
           {
-            id: "ap-southeast-1",
-            name: "新加坡",
+            regionId: "ap-southeast-1",
+            regionName: "新加坡",
             active: true,
+            role: "available",
+            writable: false,
+            metadata: {
+              description: "副本候选地域",
+            },
           },
         ],
         total: 2,
       });
     }
 
-    if (pathname === "/api/v1/residency/policy" && method === "GET") {
+    if (pathname === "/api/v2/residency/policies/current" && method === "GET") {
       if (residencyPolicyResponses.length > 0) {
         const response =
           residencyPolicyResponses[
@@ -167,7 +184,7 @@ function mockGovernancePageFetch({
       return mockJsonResponse(residencyPolicy);
     }
 
-    if (pathname === "/api/v1/residency/policy" && method === "PUT") {
+    if (pathname === "/api/v2/residency/policies/current" && method === "PUT") {
       const payload = JSON.parse(String(init?.body ?? "{}")) as {
         mode?: "single_region" | "active_active";
         primaryRegion?: string;
@@ -186,7 +203,7 @@ function mockGovernancePageFetch({
       });
     }
 
-    if (pathname === "/api/v1/residency/replication-jobs" && method === "GET") {
+    if (pathname === "/api/v2/residency/replications" && method === "GET") {
       return mockJsonResponse({
         items: [],
         total: 0,
@@ -251,13 +268,6 @@ function mockGovernancePageFetch({
           limit: 50,
         },
       });
-    }
-
-    if (extraHandler) {
-      const extraResponse = await extraHandler(input, init, { url, method, pathname });
-      if (extraResponse) {
-        return extraResponse;
-      }
     }
 
     throw new Error(`unexpected call: ${method} ${url}`);
@@ -1966,6 +1976,7 @@ describe("Web Console", () => {
       severity?: "warning" | "critical";
       sourceId?: string;
       channels: string[];
+      dispatchMode: "rule" | "fallback";
       conflictRuleIds: string[];
       dedupeHit: boolean;
       suppressed: boolean;
@@ -2108,11 +2119,15 @@ describe("Web Console", () => {
               severity: payload.severity,
               sourceId: payload.sourceId,
               channels: item.channels,
+              dispatchMode: "rule",
               conflictRuleIds: [],
               dedupeHit: payload.dedupeHit === true,
               suppressed: payload.suppressed === true,
               simulated: true,
-              metadata: {},
+              metadata: {
+                dispatchMode: "rule",
+                attempt: 2,
+              },
               createdAt: "2026-03-03T11:30:00.000Z",
             };
             orchestrationExecutions.unshift(execution);
@@ -2131,14 +2146,79 @@ describe("Web Console", () => {
             Object.fromEntries(parsedUrl.searchParams.entries())
           );
           const ruleId = parsedUrl.searchParams.get("ruleId");
-          const filtered = orchestrationExecutions.filter((item) =>
-            ruleId ? item.ruleId === ruleId : true
-          );
+          const eventType = parsedUrl.searchParams.get("eventType");
+          const severity = parsedUrl.searchParams.get("severity");
+          const sourceId = parsedUrl.searchParams.get("sourceId");
+          const dedupeHit = parsedUrl.searchParams.get("dedupeHit");
+          const suppressed = parsedUrl.searchParams.get("suppressed");
+          const dispatchMode = parsedUrl.searchParams.get("dispatchMode");
+          const hasConflict = parsedUrl.searchParams.get("hasConflict");
+          const simulated = parsedUrl.searchParams.get("simulated");
+          const from = parsedUrl.searchParams.get("from");
+          const to = parsedUrl.searchParams.get("to");
+          const filtered = orchestrationExecutions.filter((item) => {
+            if (ruleId && item.ruleId !== ruleId) {
+              return false;
+            }
+            if (eventType && item.eventType !== eventType) {
+              return false;
+            }
+            if (severity && item.severity !== severity) {
+              return false;
+            }
+            if (sourceId && item.sourceId !== sourceId) {
+              return false;
+            }
+            if (dedupeHit === "true" && item.dedupeHit !== true) {
+              return false;
+            }
+            if (dedupeHit === "false" && item.dedupeHit !== false) {
+              return false;
+            }
+            if (suppressed === "true" && item.suppressed !== true) {
+              return false;
+            }
+            if (suppressed === "false" && item.suppressed !== false) {
+              return false;
+            }
+            if (dispatchMode && item.dispatchMode !== dispatchMode) {
+              return false;
+            }
+            if (hasConflict === "true" && item.conflictRuleIds.length === 0) {
+              return false;
+            }
+            if (hasConflict === "false" && item.conflictRuleIds.length > 0) {
+              return false;
+            }
+            if (simulated === "true" && item.simulated !== true) {
+              return false;
+            }
+            if (simulated === "false" && item.simulated !== false) {
+              return false;
+            }
+            if (from && Date.parse(item.createdAt) < Date.parse(from)) {
+              return false;
+            }
+            if (to && Date.parse(item.createdAt) > Date.parse(to)) {
+              return false;
+            }
+            return true;
+          });
           return mockJsonResponse({
             items: filtered,
             total: filtered.length,
             filters: {
               ...(ruleId ? { ruleId } : {}),
+              ...(eventType ? { eventType } : {}),
+              ...(severity ? { severity } : {}),
+              ...(sourceId ? { sourceId } : {}),
+              ...(dedupeHit ? { dedupeHit: dedupeHit === "true" } : {}),
+              ...(suppressed ? { suppressed: suppressed === "true" } : {}),
+              ...(dispatchMode ? { dispatchMode } : {}),
+              ...(hasConflict ? { hasConflict: hasConflict === "true" } : {}),
+              ...(simulated ? { simulated: simulated === "true" } : {}),
+              ...(from ? { from } : {}),
+              ...(to ? { to } : {}),
             },
           });
         }
@@ -2261,6 +2341,9 @@ describe("Web Console", () => {
     fireEvent.change(byId<HTMLSelectElement>("orchestration-simulate-event-type"), {
       target: { value: "weekly" },
     });
+    fireEvent.change(byId<HTMLSelectElement>("orchestration-simulate-severity"), {
+      target: { value: "warning" },
+    });
     fireEvent.change(byId<HTMLInputElement>("orchestration-simulate-source-id"), {
       target: { value: " source-2 " },
     });
@@ -2273,9 +2356,26 @@ describe("Web Console", () => {
       expect.objectContaining({
         ruleId: "rule-ui-2",
         eventType: "weekly",
+        severity: "warning",
         sourceId: "source-2",
       })
     );
+    orchestrationExecutions.push({
+      id: "exec-ui-simulated",
+      tenantId: "default",
+      ruleId: "rule-ui-2",
+      eventType: "weekly",
+      severity: "warning",
+      sourceId: "source-2",
+      channels: ["webhook"],
+      dispatchMode: "fallback",
+      conflictRuleIds: ["rule-ui-1"],
+      dedupeHit: false,
+      suppressed: false,
+      simulated: true,
+      metadata: {},
+      createdAt: "2026-03-03T11:10:00.000Z",
+    });
 
     fireEvent.change(byId<HTMLInputElement>("orchestration-execution-rule-id-filter"), {
       target: { value: "rule-not-exist" },
@@ -2301,20 +2401,36 @@ describe("Web Console", () => {
     fireEvent.change(byId<HTMLSelectElement>("orchestration-execution-suppressed-filter"), {
       target: { value: "false" },
     });
+    fireEvent.change(byId<HTMLSelectElement>("orchestration-execution-dispatch-mode-filter"), {
+      target: { value: "rule" },
+    });
+    fireEvent.change(byId<HTMLSelectElement>("orchestration-execution-conflict-filter"), {
+      target: { value: "false" },
+    });
     fireEvent.change(byId<HTMLSelectElement>("orchestration-execution-simulated-filter"), {
       target: { value: "true" },
     });
     fireEvent.change(byId<HTMLInputElement>("orchestration-execution-from"), {
-      target: { value: "2026-03-03T11:00" },
+      target: { value: "2026-03-03T00:00" },
     });
     fireEvent.change(byId<HTMLInputElement>("orchestration-execution-to"), {
-      target: { value: "2026-03-03T12:00" },
+      target: { value: "2026-03-03T23:59" },
     });
     fireEvent.change(byId<HTMLInputElement>("orchestration-execution-limit"), {
       target: { value: "25" },
     });
     fireEvent.click(sectionScreen.getByRole("button", { name: "加载执行日志" }));
     expect(await sectionScreen.findByText("exec-ui-1")).toBeInTheDocument();
+    expect(sectionScreen.queryByText("exec-ui-simulated")).not.toBeInTheDocument();
+    const executionMetadataCell = await sectionScreen.findByText(
+      '{"dispatchMode":"rule","attempt":2}'
+    );
+    const executionRow = executionMetadataCell.closest("tr");
+    expect(executionRow).not.toBeNull();
+    const executionCells = within(executionRow as HTMLElement).getAllByRole("cell");
+    expect(executionCells[3]?.textContent).toBe("rule");
+    expect(executionCells[9]?.textContent).toBe("--");
+    expect(executionCells[11]?.textContent).toBe('{"dispatchMode":"rule","attempt":2}');
     const latestExecutionQuerySnapshot =
       orchestrationExecutionQuerySnapshots[orchestrationExecutionQuerySnapshots.length - 1];
     expect(latestExecutionQuerySnapshot).toEqual(
@@ -2325,9 +2441,11 @@ describe("Web Console", () => {
         sourceId: "source-2",
         dedupeHit: "false",
         suppressed: "false",
+        dispatchMode: "rule",
+        hasConflict: "false",
         simulated: "true",
-        from: "2026-03-03T11:00",
-        to: "2026-03-03T12:00",
+        from: "2026-03-03T00:00",
+        to: "2026-03-03T23:59",
         limit: "25",
       })
     );
@@ -2569,6 +2687,87 @@ describe("Web Console", () => {
         updatedAt: "2026-03-03T10:00:00.000Z",
       },
     ];
+    const replayDatasets: Array<{
+      id: string;
+      tenantId: string;
+      name: string;
+      datasetId: string;
+      model: string;
+      promptVersion?: string;
+      sampleCount: number;
+      metadata: Record<string, unknown>;
+      createdAt: string;
+      updatedAt: string;
+    }> = [
+      {
+        id: "baseline-ui-1",
+        tenantId: "default",
+        name: "baseline smoke",
+        datasetId: "dataset-1",
+        model: "gpt-5-codex",
+        promptVersion: "v1",
+        caseCount: 50,
+        sampleCount: 50,
+        metadata: {},
+        createdAt: "2026-03-03T12:10:00.000Z",
+        updatedAt: "2026-03-03T12:10:00.000Z",
+      },
+    ];
+    const replayDatasetCases = [
+      {
+        datasetId: "baseline-ui-1",
+        caseId: "case-1",
+        sortOrder: 0,
+        input: "Summarize the change",
+        expectedOutput: "A concise summary",
+        metadata: { priority: "p0" },
+        createdAt: "2026-03-03T12:12:00.000Z",
+        updatedAt: "2026-03-03T12:12:00.000Z",
+      },
+    ];
+    const replayRuns: Array<{
+      id: string;
+      runId?: string;
+      jobId?: string;
+      tenantId: string;
+      datasetId?: string;
+      baselineId: string;
+      candidateLabel: string;
+      status: "pending" | "running" | "completed" | "failed" | "cancelled";
+      totalCases: number;
+      processedCases: number;
+      improvedCases: number;
+      regressedCases: number;
+      unchangedCases: number;
+      diffs: unknown[];
+      summary: Record<string, unknown>;
+      createdAt: string;
+      updatedAt: string;
+      startedAt?: string;
+      finishedAt?: string;
+    }> = [
+      {
+        id: "job-ui-1",
+        runId: "job-ui-1",
+        jobId: "job-ui-1",
+        tenantId: "default",
+        datasetId: "baseline-ui-1",
+        baselineId: "baseline-ui-1",
+        candidateLabel: "candidate-v2",
+        status: "completed",
+        totalCases: 10,
+        processedCases: 10,
+        improvedCases: 6,
+        regressedCases: 2,
+        unchangedCases: 2,
+        diffs: [],
+        summary: {},
+        createdAt: "2026-03-03T12:20:00.000Z",
+        updatedAt: "2026-03-03T12:20:00.000Z",
+        startedAt: "2026-03-03T12:20:00.000Z",
+        finishedAt: "2026-03-03T12:22:00.000Z",
+      },
+    ];
 
     const fetchSpy = mockGovernancePageFetch({
       extraHandler: async (_input, init, { method, pathname, url }) => {
@@ -2584,7 +2783,7 @@ describe("Web Console", () => {
                 get: { tags: ["open-platform"] },
                 post: { tags: ["open-platform"] },
               },
-              "/api/v1/replay/jobs/{id}/diff": {
+              "/api/v2/replay/runs/{id}/diffs": {
                 get: { tags: ["replay"] },
               },
             },
@@ -2751,32 +2950,33 @@ describe("Web Console", () => {
           });
         }
 
-        if (pathname === "/api/v1/quality/metrics/daily" && method === "GET") {
+        if (pathname === "/api/v2/quality/metrics" && method === "GET") {
           return mockJsonResponse({
             items: [
               {
                 date: "2026-03-03",
                 metric: "accuracy",
-                avgScore: 0.92,
-                p50Score: 0.92,
-                p90Score: 0.92,
+                avgScore: 92,
                 totalEvents: 14,
+                passedEvents: 13,
+                failedEvents: 1,
+                passRate: 0.9286,
               },
             ],
             total: 1,
           });
         }
 
-        if (pathname === "/api/v1/quality/scorecards" && method === "GET") {
+        if (pathname === "/api/v2/quality/scorecards" && method === "GET") {
           return mockJsonResponse({
             items: [
               {
                 id: "accuracy",
                 tenantId: "default",
                 metric: "accuracy",
-                targetScore: 0.9,
-                warningScore: 0.8,
-                criticalScore: 0.7,
+                targetScore: 92,
+                warningScore: 85,
+                criticalScore: 75,
                 weight: 1,
                 enabled: true,
                 updatedByUserId: "user-1",
@@ -2787,58 +2987,180 @@ describe("Web Console", () => {
           });
         }
 
-        if (pathname === "/api/v1/replay/baselines" && method === "GET") {
+        if (pathname === "/api/v2/quality/reports/project-trends" && method === "GET") {
           return mockJsonResponse({
             items: [
               {
-                id: "baseline-ui-1",
-                tenantId: "default",
-                name: "baseline smoke",
-                datasetId: "dataset-1",
-                model: "gpt-5-codex",
-                promptVersion: "v1",
-                sampleCount: 50,
-                metadata: {},
-                createdAt: "2026-03-03T12:10:00.000Z",
-                updatedAt: "2026-03-03T12:10:00.000Z",
+                project: "agentledger/main",
+                metric: "accuracy",
+                totalEvents: 8,
+                passedEvents: 7,
+                failedEvents: 1,
+                passRate: 0.875,
+                avgScore: 92.4,
+                totalCost: 12.8,
+                totalTokens: 42000,
+                totalSessions: 11,
+                costPerQualityPoint: 0.1385,
               },
             ],
             total: 1,
+            summary: {
+              metric: "accuracy",
+              totalEvents: 8,
+              passedEvents: 7,
+              failedEvents: 1,
+              passRate: 0.875,
+              avgScore: 92.4,
+              totalCost: 12.8,
+              totalTokens: 42000,
+              totalSessions: 11,
+              from: "2026-03-03T00:00:00.000Z",
+              to: "2026-03-03T23:59:59.999Z",
+            },
+            filters: {
+              from: "2026-03-03",
+              to: "2026-03-03",
+              metric: "accuracy",
+              provider: null,
+              workflow: null,
+              includeUnknown: false,
+              limit: 20,
+            },
+          });
+        }
+
+        if (pathname === "/api/v2/replay/datasets" && method === "POST") {
+          const payload = JSON.parse(String(init?.body ?? "{}")) as {
+            name?: string;
+            datasetId?: string;
+            datasetRef?: string;
+            model?: string;
+            promptVersion?: string;
+            sampleCount?: number;
+          };
+          const created = {
+            id: `baseline-ui-${replayDatasets.length + 1}`,
+            tenantId: "default",
+            name: payload.name ?? "baseline-created",
+            datasetId:
+              payload.datasetRef ??
+              payload.datasetId ??
+              `dataset-${replayDatasets.length + 1}`,
+            model: payload.model ?? "gpt-5-codex",
+            promptVersion: payload.promptVersion,
+            caseCount: payload.sampleCount ?? 0,
+            sampleCount: payload.sampleCount ?? 0,
+            metadata: {},
+            createdAt: "2026-03-03T12:12:00.000Z",
+            updatedAt: "2026-03-03T12:12:00.000Z",
+          };
+          replayDatasets.unshift(created);
+          return mockJsonResponse(created, 201);
+        }
+
+        if (pathname === "/api/v2/replay/datasets" && method === "GET") {
+          return mockJsonResponse({
+            items: replayDatasets,
+            total: replayDatasets.length,
             filters: {},
           });
         }
 
-        if (pathname === "/api/v1/replay/jobs" && method === "GET") {
+        if (pathname === "/api/v2/replay/datasets/baseline-ui-1/cases" && method === "GET") {
           return mockJsonResponse({
-            items: [
-              {
-                id: "job-ui-1",
-                tenantId: "default",
-                baselineId: "baseline-ui-1",
-                candidateLabel: "candidate-v2",
-                status: "completed",
-                totalCases: 10,
-                processedCases: 10,
-                improvedCases: 6,
-                regressedCases: 2,
-                unchangedCases: 2,
-                diffs: [],
-                summary: {},
-                createdAt: "2026-03-03T12:20:00.000Z",
-                updatedAt: "2026-03-03T12:20:00.000Z",
-                startedAt: "2026-03-03T12:20:00.000Z",
-                finishedAt: "2026-03-03T12:22:00.000Z",
-              },
-            ],
-            total: 1,
+            datasetId: "baseline-ui-1",
+            items: replayDatasetCases,
+            total: replayDatasetCases.length,
+          });
+        }
+
+        if (pathname === "/api/v2/replay/datasets/baseline-ui-1/cases" && method === "POST") {
+          const payload = JSON.parse(String(init?.body ?? "{}")) as {
+            items?: Array<Record<string, unknown>>;
+          };
+          const nextCases = (payload.items ?? []).map((item, index) => ({
+            datasetId: "baseline-ui-1",
+            caseId:
+              typeof item.caseId === "string" && item.caseId.trim().length > 0
+                ? item.caseId.trim()
+                : `case-${index + 1}`,
+            sortOrder:
+              typeof item.sortOrder === "number" && Number.isInteger(item.sortOrder)
+                ? item.sortOrder
+                : index,
+            input: typeof item.input === "string" ? item.input : "",
+            expectedOutput:
+              typeof item.expectedOutput === "string" ? item.expectedOutput : undefined,
+            baselineOutput:
+              typeof item.baselineOutput === "string" ? item.baselineOutput : undefined,
+            candidateInput:
+              typeof item.candidateInput === "string" ? item.candidateInput : undefined,
+            metadata:
+              item.metadata && typeof item.metadata === "object" && !Array.isArray(item.metadata)
+                ? (item.metadata as Record<string, unknown>)
+                : {},
+            createdAt: "2026-03-03T12:12:00.000Z",
+            updatedAt: "2026-03-03T12:13:00.000Z",
+          }));
+          replayDatasetCases.splice(0, replayDatasetCases.length, ...nextCases);
+          return mockJsonResponse({
+            datasetId: "baseline-ui-1",
+            items: replayDatasetCases,
+            total: replayDatasetCases.length,
+          });
+        }
+
+        if (pathname === "/api/v2/replay/runs" && method === "POST") {
+          const payload = JSON.parse(String(init?.body ?? "{}")) as {
+            datasetId?: string;
+            baselineId?: string;
+            candidateLabel?: string;
+            sampleLimit?: number;
+          };
+          const created = {
+            id: `job-ui-${replayRuns.length + 1}`,
+            runId: `job-ui-${replayRuns.length + 1}`,
+            jobId: `job-ui-${replayRuns.length + 1}`,
+            tenantId: "default",
+            datasetId: payload.datasetId ?? payload.baselineId ?? "baseline-ui-1",
+            baselineId: payload.datasetId ?? payload.baselineId ?? "baseline-ui-1",
+            candidateLabel: payload.candidateLabel ?? "candidate-created",
+            status: "pending" as const,
+            totalCases: payload.sampleLimit ?? 20,
+            processedCases: 0,
+            improvedCases: 0,
+            regressedCases: 0,
+            unchangedCases: 0,
+            diffs: [],
+            summary: {},
+            createdAt: "2026-03-03T12:21:00.000Z",
+            updatedAt: "2026-03-03T12:21:00.000Z",
+          };
+          replayRuns.unshift(created);
+          return mockJsonResponse(created, 201);
+        }
+
+        if (pathname === "/api/v2/replay/runs" && method === "GET") {
+          const parsedUrl = new URL(url, "http://localhost");
+          const datasetId = parsedUrl.searchParams.get("datasetId");
+          const status = parsedUrl.searchParams.get("status");
+          const filteredRuns = replayRuns.filter((item) =>
+            (datasetId ? (item.datasetId ?? item.baselineId) === datasetId : true) &&
+            (status ? item.status === status : true)
+          );
+          return mockJsonResponse({
+            items: filteredRuns,
+            total: filteredRuns.length,
             filters: {},
           });
         }
 
-        if (pathname === "/api/v1/replay/jobs/job-ui-1/diff" && method === "GET") {
+        if (pathname === "/api/v2/replay/runs/job-ui-1/diffs" && method === "GET") {
           return mockJsonResponse({
+            runId: "job-ui-1",
             jobId: "job-ui-1",
-            baselineId: "baseline-ui-1",
+            datasetId: "baseline-ui-1",
             diffs: [
               {
                 caseId: "case-1",
@@ -2850,7 +3172,58 @@ describe("Web Console", () => {
                 detail: "answer quality improved",
               },
             ],
+            total: 1,
             summary: {},
+            filters: {
+              datasetId: "baseline-ui-1",
+              baselineId: "baseline-ui-1",
+              runId: "job-ui-1",
+              jobId: "job-ui-1",
+              keyword: null,
+              limit: 50,
+            },
+          });
+        }
+
+        if (pathname === "/api/v2/replay/runs/job-ui-1/artifacts" && method === "GET") {
+          return mockJsonResponse({
+            runId: "job-ui-1",
+            items: [
+              {
+                type: "summary",
+                name: "summary.json",
+                contentType: "application/json",
+                downloadName: "summary.json",
+                byteSize: 128,
+                createdAt: "2026-03-03T12:22:00.000Z",
+                inline: {
+                  totalCases: 10,
+                },
+              },
+              {
+                type: "diff",
+                name: "diff.json",
+                contentType: "application/json",
+                downloadName: "diff.json",
+                byteSize: 256,
+                createdAt: "2026-03-03T12:22:00.000Z",
+                inline: {
+                  items: [],
+                },
+              },
+              {
+                type: "cases",
+                name: "cases.json",
+                contentType: "application/json",
+                downloadName: "cases.json",
+                byteSize: 196,
+                createdAt: "2026-03-03T12:22:00.000Z",
+                inline: {
+                  items: replayDatasetCases,
+                },
+              },
+            ],
+            total: 3,
           });
         }
 
@@ -2911,7 +3284,7 @@ describe("Web Console", () => {
       target: { value: "https://hooks.example.com/pipeline-alert" },
     });
     fireEvent.change(byId<HTMLInputElement>("open-platform-webhook-events"), {
-      target: { value: "api_key.created" },
+      target: { value: "replay.run.started,replay.run.completed" },
     });
     fireEvent.click(sectionScreen.getByRole("button", { name: "保存 Webhook" }));
     expect(
@@ -2919,8 +3292,18 @@ describe("Web Console", () => {
         (content) => content.includes("Webhook") && content.includes("已保存")
       )
     ).toBeInTheDocument();
+    expect(
+      (section as HTMLElement).querySelector(
+        "#open-platform-webhook-event-options option[value='replay.run.started']"
+      )
+    ).not.toBeNull();
+    expect(
+      (section as HTMLElement).querySelector(
+        "#open-platform-webhook-event-options option[value='replay.run.cancelled']"
+      )
+    ).not.toBeNull();
     fireEvent.change(byId<HTMLInputElement>("open-platform-webhook-replay-event-type"), {
-      target: { value: "api_key.created" },
+      target: { value: "replay.run.cancelled" },
     });
     fireEvent.change(byId<HTMLInputElement>("open-platform-webhook-replay-limit"), {
       target: { value: "20" },
@@ -2941,16 +3324,72 @@ describe("Web Console", () => {
       target: { value: "accuracy" },
     });
     fireEvent.click(sectionScreen.getByRole("button", { name: "加载 Quality daily" }));
-    expect(await sectionScreen.findByText("accuracy")).toBeInTheDocument();
+    expect(await sectionScreen.findByRole("cell", { name: "accuracy" })).toBeInTheDocument();
+    fireEvent.change(byId<HTMLInputElement>("open-platform-quality-project-trends-from"), {
+      target: { value: "2026-03-03" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("open-platform-quality-project-trends-to"), {
+      target: { value: "2026-03-03" },
+    });
+    fireEvent.change(byId<HTMLSelectElement>("open-platform-quality-project-trends-metric"), {
+      target: { value: "accuracy" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载 Quality project-trends" }));
+    expect(await sectionScreen.findByText("agentledger/main")).toBeInTheDocument();
     fireEvent.change(byId<HTMLInputElement>("open-platform-quality-scorecard-team"), {
       target: { value: "accuracy" },
     });
     fireEvent.click(sectionScreen.getByRole("button", { name: "加载 Quality scorecards" }));
     expect(await sectionScreen.findByText("user-1")).toBeInTheDocument();
 
-    fireEvent.click(sectionScreen.getByRole("button", { name: "加载 Replay baselines" }));
+    fireEvent.change(byId<HTMLInputElement>("open-platform-replay-create-dataset-name"), {
+      target: { value: "baseline created" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("open-platform-replay-create-dataset-id"), {
+      target: { value: "dataset-created-1" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("open-platform-replay-create-dataset-model"), {
+      target: { value: "gpt-5-codex" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("open-platform-replay-create-dataset-prompt-version"), {
+      target: { value: "v2" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("open-platform-replay-create-dataset-sample-count"), {
+      target: { value: "20" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "创建回放数据集" }));
+    expect(await sectionScreen.findByText(/回放数据集 .* 已创建。/)).toBeInTheDocument();
+
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载回放数据集" }));
     expect(await sectionScreen.findByText("baseline-ui-1")).toBeInTheDocument();
-    fireEvent.click(sectionScreen.getByRole("button", { name: "加载 Replay jobs" }));
+    fireEvent.change(byId<HTMLInputElement>("open-platform-replay-dataset-cases-dataset-id"), {
+      target: { value: "baseline-ui-1" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载回放样本" }));
+    expect(await sectionScreen.findByText("Summarize the change")).toBeInTheDocument();
+    fireEvent.change(byId<HTMLTextAreaElement>("open-platform-replay-dataset-cases-editor"), {
+      target: {
+        value:
+          '[{"caseId":"case-1","sortOrder":0,"input":"Summarize the change","expectedOutput":"A concise summary","metadata":{"priority":"p0"}}]',
+      },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "保存回放样本" }));
+    expect(await sectionScreen.findByText("回放样本已保存，共 1 条。")).toBeInTheDocument();
+    fireEvent.change(byId<HTMLInputElement>("open-platform-replay-create-run-baseline-id"), {
+      target: { value: "baseline-ui-1" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("open-platform-replay-create-run-candidate-label"), {
+      target: { value: "candidate-created" },
+    });
+    fireEvent.change(byId<HTMLInputElement>("open-platform-replay-create-run-sample-limit"), {
+      target: { value: "12" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "创建回放运行" }));
+    expect(await sectionScreen.findByText(/回放运行 .* 已创建/)).toBeInTheDocument();
+    fireEvent.change(byId<HTMLInputElement>("open-platform-replay-jobs-baseline-id"), {
+      target: { value: "baseline-ui-1" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载回放运行" }));
     expect(await sectionScreen.findByText("job-ui-1")).toBeInTheDocument();
     fireEvent.change(byId<HTMLInputElement>("open-platform-replay-diff-baseline-id"), {
       target: { value: "baseline-ui-1" },
@@ -2958,8 +3397,13 @@ describe("Web Console", () => {
     fireEvent.change(byId<HTMLInputElement>("open-platform-replay-diff-job-id"), {
       target: { value: "job-ui-1" },
     });
-    fireEvent.click(sectionScreen.getByRole("button", { name: "加载 Replay diff" }));
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载回放差异" }));
     expect(await sectionScreen.findByText("case-1")).toBeInTheDocument();
+    fireEvent.change(byId<HTMLInputElement>("open-platform-replay-artifact-job-id"), {
+      target: { value: "job-ui-1" },
+    });
+    fireEvent.click(sectionScreen.getByRole("button", { name: "加载回放工件" }));
+    expect(await sectionScreen.findByText("summary.json")).toBeInTheDocument();
 
     expect(
       fetchSpy.mock.calls.some(([url]) => new URL(toUrl(url), "http://localhost").pathname === "/api/v1/openapi.json")
@@ -2983,8 +3427,19 @@ describe("Web Console", () => {
       fetchSpy.mock.calls.some(([url, init]) => {
         const requestInit = init as RequestInit | undefined;
         return (
+          new URL(toUrl(url), "http://localhost").pathname === "/api/v1/webhooks" &&
+          (requestInit?.method ?? "GET").toUpperCase() === "POST" &&
+          JSON.parse(String(requestInit?.body ?? "{}")).events?.includes("replay.run.started")
+        );
+      })
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url, init]) => {
+        const requestInit = init as RequestInit | undefined;
+        return (
           new URL(toUrl(url), "http://localhost").pathname === "/api/v1/webhooks/wh-ui-2/replay" &&
-          (requestInit?.method ?? "GET").toUpperCase() === "POST"
+          (requestInit?.method ?? "GET").toUpperCase() === "POST" &&
+          JSON.parse(String(requestInit?.body ?? "{}")).eventType === "replay.run.cancelled"
         );
       })
     ).toBe(true);
@@ -2999,7 +3454,35 @@ describe("Web Console", () => {
     ).toBe(true);
     expect(
       fetchSpy.mock.calls.some(([url]) =>
-        new URL(toUrl(url), "http://localhost").pathname.startsWith("/api/v1/replay/jobs")
+        new URL(toUrl(url), "http://localhost").pathname === "/api/v2/quality/reports/project-trends"
+      )
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url, init]) => {
+        const requestInit = init as RequestInit | undefined;
+        return (
+          new URL(toUrl(url), "http://localhost").pathname === "/api/v2/replay/datasets" &&
+          (requestInit?.method ?? "GET").toUpperCase() === "POST"
+        );
+      })
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url, init]) => {
+        const requestInit = init as RequestInit | undefined;
+        return (
+          new URL(toUrl(url), "http://localhost").pathname === "/api/v2/replay/runs" &&
+          (requestInit?.method ?? "GET").toUpperCase() === "POST"
+        );
+      })
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url]) =>
+        new URL(toUrl(url), "http://localhost").pathname === "/api/v2/replay/runs/job-ui-1/artifacts"
+      )
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url]) =>
+        new URL(toUrl(url), "http://localhost").pathname.startsWith("/api/v2/replay/runs")
       )
     ).toBe(true);
     },
@@ -3047,67 +3530,313 @@ describe("Web Console", () => {
       fetchSpy.mock.calls.some(([url, init]) => {
         const requestInit = init as RequestInit | undefined;
         return (
-          new URL(toUrl(url), "http://localhost").pathname === "/api/v1/residency/policy" &&
+          new URL(toUrl(url), "http://localhost").pathname === "/api/v2/residency/policies/current" &&
           (requestInit?.method ?? "GET").toUpperCase() === "PUT"
         );
       })
     ).toBe(false);
   });
 
-  test("治理页主权策略首次失败后恢复成功时会回填表单", async () => {
-    window.location.hash = "#/governance";
-    setAuthTokens({
-      accessToken: "access-token-governance-residency-retry",
-      refreshToken: "refresh-token-governance-residency-retry",
-      expiresIn: 1800,
-      tokenType: "Bearer",
-    });
+  test(
+    "治理页主权策略首次失败后恢复成功时会回填表单",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-residency-retry",
+        refreshToken: "refresh-token-governance-residency-retry",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
 
-    const fetchSpy = mockGovernancePageFetch({
-      residencyPolicyResponses: [
-        {
-          status: 503,
-          body: {
-            message: "temporary outage",
+      const fetchSpy = mockGovernancePageFetch({
+        residencyPolicyResponses: [
+          {
+            status: 503,
+            body: {
+              message: "temporary outage",
+            },
           },
-        },
-        {
-          status: 200,
-          body: {
-            tenantId: "default",
-            mode: "active_active",
-            primaryRegion: "cn-shanghai",
-            replicaRegions: ["ap-southeast-1"],
-            allowCrossRegionTransfer: true,
-            requireTransferApproval: true,
-            updatedAt: "2026-03-02T00:00:00.000Z",
+          {
+            status: 200,
+            body: {
+              tenantId: "default",
+              mode: "active_active",
+              primaryRegion: "cn-shanghai",
+              replicaRegions: ["ap-southeast-1"],
+              allowCrossRegionTransfer: true,
+              requireTransferApproval: true,
+              updatedAt: "2026-03-02T00:00:00.000Z",
+            },
           },
+        ],
+      });
+
+      render(<App />);
+
+      expect(await screen.findByRole("heading", { name: "治理中心" })).toBeInTheDocument();
+      await waitFor(
+        () => {
+          expect((screen.getByLabelText("模式") as HTMLSelectElement).value).toBe("active_active");
+          expect((screen.getByLabelText("主地域") as HTMLSelectElement).value).toBe("cn-shanghai");
+          expect((screen.getByLabelText("副本地域（逗号分隔）") as HTMLInputElement).value).toBe(
+            "ap-southeast-1"
+          );
         },
-      ],
-    });
+        { timeout: 8_000 }
+      );
 
-    render(<App />);
+      expect(
+        fetchSpy.mock.calls.filter(
+          ([url, init]) =>
+            new URL(toUrl(url), "http://localhost").pathname ===
+              "/api/v2/residency/policies/current" &&
+            ((init as RequestInit | undefined)?.method ?? "GET").toUpperCase() === "GET"
+        ).length
+      ).toBeGreaterThanOrEqual(2);
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS
+  );
 
-    expect(await screen.findByRole("heading", { name: "治理中心" })).toBeInTheDocument();
-    await waitFor(
-      () => {
-        expect((screen.getByLabelText("模式") as HTMLSelectElement).value).toBe("active_active");
-        expect((screen.getByLabelText("主地域") as HTMLSelectElement).value).toBe("cn-shanghai");
-        expect((screen.getByLabelText("副本地域（逗号分隔）") as HTMLInputElement).value).toBe(
-          "ap-southeast-1"
-        );
-      },
-      { timeout: 8_000 }
-    );
+  test(
+    "治理页支持审批复制任务并刷新状态",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-residency-approve",
+        refreshToken: "refresh-token-governance-residency-approve",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
 
-    expect(
-      fetchSpy.mock.calls.filter(
-        ([url, init]) =>
-          new URL(toUrl(url), "http://localhost").pathname === "/api/v1/residency/policy" &&
-          ((init as RequestInit | undefined)?.method ?? "GET").toUpperCase() === "GET"
-      ).length
-    ).toBeGreaterThanOrEqual(2);
-  });
+      let approved = false;
+      const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("审批通过");
+      const fetchSpy = mockGovernancePageFetch({
+        extraHandler: (_input, init, context) => {
+          if (context.pathname === "/api/v2/residency/replications" && context.method === "GET") {
+            return mockJsonResponse({
+              items: [
+                {
+                  id: "rep-job-approve-1",
+                  tenantId: "default",
+                  sourceRegion: "cn-shanghai",
+                  targetRegion: "ap-southeast-1",
+                  status: approved ? "running" : "pending",
+                  reason: approved ? "审批通过" : "待审批跨区复制",
+                  metadata: {},
+                  createdAt: "2026-03-03T10:00:00.000Z",
+                  updatedAt: "2026-03-03T10:05:00.000Z",
+                  startedAt: approved ? "2026-03-03T10:06:00.000Z" : null,
+                  finishedAt: null,
+                },
+              ],
+              total: 1,
+              filters: {
+                limit: 50,
+              },
+            });
+          }
+
+          if (
+            context.pathname === "/api/v2/residency/replications/rep-job-approve-1/approvals" &&
+            context.method === "POST"
+          ) {
+            expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+              reason: "审批通过",
+            });
+            approved = true;
+            return mockJsonResponse({
+              id: "rep-job-approve-1",
+              tenantId: "default",
+              sourceRegion: "cn-shanghai",
+              targetRegion: "ap-southeast-1",
+              status: "running",
+              reason: "审批通过",
+              metadata: {},
+              createdAt: "2026-03-03T10:00:00.000Z",
+              updatedAt: "2026-03-03T10:06:00.000Z",
+              startedAt: "2026-03-03T10:06:00.000Z",
+              finishedAt: null,
+            });
+          }
+
+          return undefined;
+        },
+      });
+
+      try {
+        render(<App />);
+
+        const section = (
+          await screen.findByRole("heading", { name: "数据主权与复制", level: 2 })
+        ).closest("section");
+        expect(section).not.toBeNull();
+        const sectionScreen = within(section as HTMLElement);
+
+        const replicationRow = (await sectionScreen.findByText("rep-job-approve-1")).closest("tr");
+        expect(replicationRow).not.toBeNull();
+        fireEvent.click(within(replicationRow as HTMLElement).getByRole("button", { name: "审批" }));
+
+        expect(
+          await sectionScreen.findByText("复制任务 rep-job-approve-1 已审批，当前状态 running。")
+        ).toBeInTheDocument();
+        await waitFor(() => {
+          const refreshedRow = sectionScreen.getByText("rep-job-approve-1").closest("tr");
+          expect(refreshedRow).not.toBeNull();
+          expect(within(refreshedRow as HTMLElement).getByText("running")).toBeInTheDocument();
+        });
+        expect(promptSpy).toHaveBeenCalledWith("审批原因（可选）", "");
+        expect(
+          fetchSpy.mock.calls.some(([url, init]) => {
+            const requestInit = init as RequestInit | undefined;
+            return (
+              new URL(toUrl(url), "http://localhost").pathname ===
+                "/api/v2/residency/replications/rep-job-approve-1/approvals" &&
+              (requestInit?.method ?? "GET").toUpperCase() === "POST"
+            );
+          })
+        ).toBe(true);
+      } finally {
+        promptSpy.mockRestore();
+      }
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "治理页开放平台支持下载 Replay artifact",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-replay-artifact-download",
+        refreshToken: "refresh-token-governance-replay-artifact-download",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const originalCreateObjectURL = URL.createObjectURL;
+      const originalRevokeObjectURL = URL.revokeObjectURL;
+      const createObjectURLSpy = vi.fn(() => "blob:mock-replay-artifact-download");
+      const revokeObjectURLSpy = vi.fn();
+      Object.defineProperty(URL, "createObjectURL", {
+        configurable: true,
+        writable: true,
+        value: createObjectURLSpy,
+      });
+      Object.defineProperty(URL, "revokeObjectURL", {
+        configurable: true,
+        writable: true,
+        value: revokeObjectURLSpy,
+      });
+      const anchorClickSpy = vi
+        .spyOn(HTMLAnchorElement.prototype, "click")
+        .mockImplementation(() => {});
+
+      const fetchSpy = mockGovernancePageFetch({
+        extraHandler: (_input, _init, context) => {
+          if (
+            context.pathname === "/api/v2/replay/runs/job-ui-download/artifacts" &&
+            context.method === "GET"
+          ) {
+            return mockJsonResponse({
+              runId: "job-ui-download",
+              items: [
+                {
+                  type: "summary",
+                  name: "summary.json",
+                  contentType: "application/json",
+                  downloadName: "summary.json",
+                  downloadUrl: "/api/v2/replay/runs/job-ui-download/artifacts/summary/download",
+                  byteSize: 18,
+                  createdAt: "2026-03-03T12:22:00.000Z",
+                  inline: {
+                    totalCases: 10,
+                  },
+                },
+              ],
+              total: 1,
+            });
+          }
+
+          if (
+            context.pathname === "/api/v2/replay/runs/job-ui-download/artifacts/summary/download" &&
+            context.method === "GET"
+          ) {
+            return {
+              ok: true,
+              status: 200,
+              headers: {
+                get: (name: string) => {
+                  const normalized = name.toLowerCase();
+                  if (normalized === "content-type") {
+                    return "application/json";
+                  }
+                  if (normalized === "content-disposition") {
+                    return 'attachment; filename="summary.json"';
+                  }
+                  return null;
+                },
+              },
+              blob: async () => new Blob(['{"totalCases":10}'], { type: "application/json" }),
+              json: async () => ({ totalCases: 10 }),
+              text: async () => '{"totalCases":10}',
+            } as Response;
+          }
+
+          return undefined;
+        },
+      });
+
+      try {
+        render(<App />);
+
+        const section = (
+          await screen.findByRole("heading", { name: "开放平台工作台", level: 2 })
+        ).closest("section");
+        expect(section).not.toBeNull();
+        const sectionScreen = within(section as HTMLElement);
+        const byId = <T extends HTMLElement>(id: string) => {
+          const element = (section as HTMLElement).querySelector(`#${id}`);
+          expect(element).not.toBeNull();
+          return element as T;
+        };
+
+        fireEvent.change(byId<HTMLInputElement>("open-platform-replay-artifact-job-id"), {
+          target: { value: "job-ui-download" },
+        });
+        fireEvent.click(sectionScreen.getByRole("button", { name: "加载回放工件" }));
+
+        const artifactRow = (await sectionScreen.findByText("summary.json")).closest("tr");
+        expect(artifactRow).not.toBeNull();
+        fireEvent.click(within(artifactRow as HTMLElement).getByRole("button", { name: "下载" }));
+
+        expect(
+          await sectionScreen.findByText("回放工件下载成功：summary.json")
+        ).toBeInTheDocument();
+        expect(
+          fetchSpy.mock.calls.some(([url]) =>
+            new URL(toUrl(url), "http://localhost").pathname ===
+            "/api/v2/replay/runs/job-ui-download/artifacts/summary/download"
+          )
+        ).toBe(true);
+        expect(createObjectURLSpy).toHaveBeenCalledTimes(1);
+        expect(revokeObjectURLSpy).toHaveBeenCalledTimes(1);
+        expect(anchorClickSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        anchorClickSpy.mockRestore();
+        Object.defineProperty(URL, "createObjectURL", {
+          configurable: true,
+          writable: true,
+          value: originalCreateObjectURL,
+        });
+        Object.defineProperty(URL, "revokeObjectURL", {
+          configurable: true,
+          writable: true,
+          value: originalRevokeObjectURL,
+        });
+      }
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS
+  );
 
   test(
     "治理页 Rule Hub 切换资产后会刷新发布/回滚/审批版本输入框",
@@ -3141,11 +3870,20 @@ describe("Web Console", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Rule Hub 规则资产", level: 2 })).toBeInTheDocument();
+    const ruleHubHeading = await screen.findByRole("heading", {
+      name: "Rule Hub 规则资产",
+      level: 2,
+    });
+    expect(ruleHubHeading).toBeInTheDocument();
+    const ruleHubSection = ruleHubHeading.closest("section");
+    if (!(ruleHubSection instanceof HTMLElement)) {
+      throw new Error("未找到 Rule Hub 所在 section。");
+    }
+    const ruleHubScreen = within(ruleHubSection);
 
-    const publishVersionInput = (await screen.findByLabelText("发布版本")) as HTMLInputElement;
-    const rollbackVersionInput = (await screen.findByLabelText("回滚版本")) as HTMLInputElement;
-    const approvalVersionInput = (await screen.findByLabelText("审批版本")) as HTMLInputElement;
+    const publishVersionInput = (await ruleHubScreen.findByLabelText("发布版本")) as HTMLInputElement;
+    const rollbackVersionInput = (await ruleHubScreen.findByLabelText("回滚版本")) as HTMLInputElement;
+    const approvalVersionInput = (await ruleHubScreen.findByLabelText("审批版本")) as HTMLInputElement;
 
     await waitFor(() => {
       expect(publishVersionInput.value).toBe("3");
@@ -3160,7 +3898,13 @@ describe("Web Console", () => {
     expect(rollbackVersionInput.value).toBe("1");
     expect(approvalVersionInput.value).toBe("1");
 
-    fireEvent.click(screen.getByRole("button", { name: "选中" }));
+    const betaRow = (await ruleHubScreen.findAllByRole("row")).find((row) =>
+      row.textContent?.includes("asset-beta")
+    );
+    if (!(betaRow instanceof HTMLElement)) {
+      throw new Error("未找到 asset-beta 行。");
+    }
+    fireEvent.click(within(betaRow).getByRole("button", { name: "选中" }));
 
     await waitFor(() => {
       expect(publishVersionInput.value).toBe("9");

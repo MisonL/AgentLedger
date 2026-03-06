@@ -1,13 +1,22 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   clearAuthTokens,
+  createOpenPlatformReplayDataset,
+  createOpenPlatformReplayRun,
   deleteOpenPlatformWebhook,
+  downloadOpenPlatformReplayArtifact,
   exportSessions,
   exportUsage,
   exchangeExternalAuthCode,
   fetchAlerts,
   fetchAuthProviders,
   fetchPricingCatalog,
+  fetchOpenPlatformQualityProjectTrends,
+  fetchOpenPlatformReplayArtifacts,
+  fetchOpenPlatformReplayDatasetCases,
+  fetchOpenPlatformReplayDatasets,
+  fetchOpenPlatformReplayDiffs,
+  fetchOpenPlatformReplayRuns,
   fetchSourceHealth,
   fetchSourceParseFailures,
   fetchSessionDetail,
@@ -22,6 +31,7 @@ import {
   getAccessToken,
   hasAccessToken,
   replayOpenPlatformWebhook,
+  replaceOpenPlatformReplayDatasetCases,
   revokeOpenPlatformApiKey,
   searchSessions,
   setAuthTokens,
@@ -345,10 +355,14 @@ describe("api mock fallback gate", () => {
     const firstRequest = fetchSources();
     const secondRequest = fetchSources();
 
-    await vi.waitFor(() => {
-      expect(expiredSourceCallCount).toBe(2);
-      expect(refreshCallCount).toBe(1);
-    });
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (expiredSourceCallCount === 2 && refreshCallCount === 1) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(expiredSourceCallCount).toBe(2);
+    expect(refreshCallCount).toBe(1);
 
     refreshDeferred.resolve(
       mockJsonResponse({
@@ -1053,7 +1067,7 @@ describe("api mock fallback gate", () => {
 
       if (url.endsWith("/api/v1/webhooks/wh-op-2/replay") && method === "POST") {
         expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
-          eventType: "api_key.created",
+          eventType: "replay.run.cancelled",
           limit: 20,
           dryRun: true,
         });
@@ -1063,7 +1077,7 @@ describe("api mock fallback gate", () => {
           status: "queued",
           dryRun: true,
           filters: {
-            eventType: "api_key.created",
+            eventType: "replay.run.cancelled",
             limit: 20,
           },
           requestedAt: "2026-03-03T12:30:00.000Z",
@@ -1082,7 +1096,7 @@ describe("api mock fallback gate", () => {
     await expect(deleteOpenPlatformWebhook("wh-op-1")).resolves.toBeUndefined();
     await expect(
       replayOpenPlatformWebhook("wh-op-2", {
-        eventType: "api_key.created",
+        eventType: "replay.run.cancelled",
         limit: 20,
         dryRun: true,
       })
@@ -1106,6 +1120,500 @@ describe("api mock fallback gate", () => {
     expect(
       fetchSpy.mock.calls.some(([url]) =>
         toUrl(url).endsWith("/api/v1/webhooks/wh-op-2/replay")
+      )
+    ).toBe(true);
+  });
+
+  test("open platform 支持 quality project-trends 与 replay v2 create/artifacts/download", async () => {
+    env.DEV = false;
+    setAuthTokens({
+      accessToken: "access-token-open-platform-v2",
+      refreshToken: "refresh-token-open-platform-v2",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = new URL(toUrl(input), "http://localhost");
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.pathname === "/api/v2/quality/reports/project-trends" && method === "GET") {
+        expect(url.searchParams.get("from")).toBe("2026-03-01");
+        expect(url.searchParams.get("to")).toBe("2026-03-03");
+        expect(url.searchParams.get("metric")).toBe("accuracy");
+        expect(url.searchParams.get("provider")).toBe("github");
+        expect(url.searchParams.get("workflow")).toBe("nightly");
+        expect(url.searchParams.get("includeUnknown")).toBe("true");
+        expect(url.searchParams.get("limit")).toBe("10");
+        return mockJsonResponse({
+          items: [
+            {
+              project: "agentledger/main",
+              metric: "accuracy",
+              totalEvents: 8,
+              passedEvents: 7,
+              failedEvents: 1,
+              passRate: 0.875,
+              avgScore: 92.4,
+              totalCost: 12.8,
+              totalTokens: 42000,
+              totalSessions: 11,
+              costPerQualityPoint: 0.1385,
+            },
+          ],
+          total: 1,
+          summary: {
+            metric: "accuracy",
+            totalEvents: 8,
+            passedEvents: 7,
+            failedEvents: 1,
+            passRate: 0.875,
+            avgScore: 92.4,
+            totalCost: 12.8,
+            totalTokens: 42000,
+            totalSessions: 11,
+            from: "2026-03-01T00:00:00.000Z",
+            to: "2026-03-03T23:59:59.999Z",
+          },
+          filters: {
+            from: "2026-03-01",
+            to: "2026-03-03",
+            metric: "accuracy",
+            provider: "github",
+            workflow: "nightly",
+            includeUnknown: true,
+            limit: 10,
+          },
+        });
+      }
+
+      if (url.pathname === "/api/v2/replay/datasets" && method === "POST") {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+          name: "baseline smoke",
+          datasetRef: "dataset-op-1",
+          model: "gpt-5-codex",
+          promptVersion: "v3",
+          sampleCount: 20,
+        });
+        return mockJsonResponse(
+          {
+            id: "baseline-op-1",
+            tenantId: "default",
+            name: "baseline smoke",
+            datasetId: "dataset-op-1",
+            model: "gpt-5-codex",
+            promptVersion: "v3",
+            caseCount: 20,
+            sampleCount: 20,
+            metadata: {},
+            createdAt: "2026-03-03T12:10:00.000Z",
+            updatedAt: "2026-03-03T12:10:00.000Z",
+          },
+          201
+        );
+      }
+
+      if (url.pathname === "/api/v2/replay/datasets" && method === "GET") {
+        return mockJsonResponse({
+          items: [
+            {
+              id: "baseline-op-1",
+              tenantId: "default",
+              name: "baseline smoke",
+              datasetId: "dataset-op-1",
+              model: "gpt-5-codex",
+              promptVersion: "v3",
+              caseCount: 20,
+              sampleCount: 20,
+              metadata: {},
+              createdAt: "2026-03-03T12:10:00.000Z",
+              updatedAt: "2026-03-03T12:10:00.000Z",
+            },
+          ],
+          total: 1,
+          filters: {},
+        });
+      }
+
+      if (url.pathname === "/api/v2/replay/datasets/baseline-op-1/cases" && method === "GET") {
+        return mockJsonResponse({
+          datasetId: "baseline-op-1",
+          items: [
+            {
+              datasetId: "baseline-op-1",
+              caseId: "case-1",
+              sortOrder: 0,
+              input: "What changed?",
+              expectedOutput: "A concise summary",
+              metadata: { priority: "p0" },
+              createdAt: "2026-03-03T12:12:00.000Z",
+              updatedAt: "2026-03-03T12:12:00.000Z",
+            },
+          ],
+          total: 1,
+        });
+      }
+
+      if (url.pathname === "/api/v2/replay/datasets/baseline-op-1/cases" && method === "POST") {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+          items: [
+            {
+              caseId: "case-1",
+              sortOrder: 0,
+              input: "What changed?",
+              expectedOutput: "A concise summary",
+              metadata: { priority: "p0" },
+            },
+          ],
+        });
+        return mockJsonResponse({
+          datasetId: "baseline-op-1",
+          items: [
+            {
+              datasetId: "baseline-op-1",
+              caseId: "case-1",
+              sortOrder: 0,
+              input: "What changed?",
+              expectedOutput: "A concise summary",
+              metadata: { priority: "p0" },
+              createdAt: "2026-03-03T12:12:00.000Z",
+              updatedAt: "2026-03-03T12:12:00.000Z",
+            },
+          ],
+          total: 1,
+        });
+      }
+
+      if (url.pathname === "/api/v2/replay/runs" && method === "POST") {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+          datasetId: "baseline-op-1",
+          candidateLabel: "candidate-v3",
+          sampleLimit: 20,
+        });
+        return mockJsonResponse(
+          {
+            id: "run-op-1",
+            runId: "run-op-1",
+            jobId: "run-op-1",
+            tenantId: "default",
+            datasetId: "baseline-op-1",
+            baselineId: "baseline-op-1",
+            candidateLabel: "candidate-v3",
+            status: "pending",
+            totalCases: 20,
+            processedCases: 0,
+            improvedCases: 0,
+            regressedCases: 0,
+            unchangedCases: 0,
+            summary: {},
+            diffs: [],
+            createdAt: "2026-03-03T12:20:00.000Z",
+            updatedAt: "2026-03-03T12:20:00.000Z",
+          },
+          201
+        );
+      }
+
+      if (url.pathname === "/api/v2/replay/runs" && method === "GET") {
+        expect(url.searchParams.get("status")).toBe("cancelled");
+        expect(url.searchParams.get("datasetId")).toBe("baseline-op-1");
+        expect(url.searchParams.get("baselineId")).toBeNull();
+        return mockJsonResponse({
+          items: [
+            {
+              id: "run-op-cancelled",
+              runId: "run-op-cancelled",
+              jobId: "run-op-cancelled",
+              tenantId: "default",
+              datasetId: "baseline-op-1",
+              baselineId: "baseline-op-1",
+              candidateLabel: "candidate-v3",
+              status: "cancelled",
+              totalCases: 10,
+              processedCases: 6,
+              improvedCases: 3,
+              regressedCases: 2,
+              unchangedCases: 1,
+              createdAt: "2026-03-03T12:30:00.000Z",
+              updatedAt: "2026-03-03T12:35:00.000Z",
+              finishedAt: "2026-03-03T12:35:00.000Z",
+            },
+          ],
+          total: 1,
+          filters: {
+            status: "cancelled",
+          },
+        });
+      }
+
+      if (url.pathname === "/api/v2/replay/runs/run-op-1/diffs" && method === "GET") {
+        expect(url.searchParams.get("datasetId")).toBe("baseline-op-1");
+        expect(url.searchParams.get("baselineId")).toBeNull();
+        expect(url.searchParams.get("keyword")).toBe("case-1");
+        expect(url.searchParams.get("limit")).toBe("10");
+        return mockJsonResponse({
+          runId: "run-op-1",
+          jobId: "run-op-1",
+          datasetId: "baseline-op-1",
+          diffs: [
+            {
+              caseId: "case-1",
+              metric: "accuracy",
+              baselineScore: 0.72,
+              candidateScore: 0.9,
+              delta: 0.18,
+              verdict: "improved",
+              detail: "answer quality improved",
+            },
+          ],
+          total: 1,
+          summary: {
+            totalCases: 20,
+          },
+          filters: {
+            datasetId: "baseline-op-1",
+            baselineId: "baseline-op-1",
+            runId: "run-op-1",
+            jobId: "run-op-1",
+            keyword: "case-1",
+            limit: 10,
+          },
+        });
+      }
+
+      if (url.pathname === "/api/v2/replay/runs/run-op-1/artifacts" && method === "GET") {
+        return mockJsonResponse({
+          runId: "run-op-1",
+          items: [
+            {
+              type: "summary",
+              name: "summary.json",
+              contentType: "application/json",
+              downloadName: "summary.json",
+              downloadUrl: "/api/v2/replay/runs/run-op-1/artifacts/summary/download",
+              byteSize: 128,
+              createdAt: "2026-03-03T12:25:00.000Z",
+              inline: { totalCases: 20 },
+            },
+            {
+              type: "diff",
+              name: "diff.json",
+              contentType: "application/json",
+              downloadName: "diff.json",
+              downloadUrl: "/api/v2/replay/runs/run-op-1/artifacts/diff/download",
+              byteSize: 256,
+              createdAt: "2026-03-03T12:25:00.000Z",
+              inline: { items: [] },
+            },
+            {
+              type: "cases",
+              name: "cases.json",
+              contentType: "application/json",
+              downloadName: "cases.json",
+              downloadUrl: "/api/v2/replay/runs/run-op-1/artifacts/cases/download",
+              byteSize: 320,
+              createdAt: "2026-03-03T12:25:00.000Z",
+              inline: { items: [{ caseId: "case-1" }] },
+            },
+          ],
+          total: 3,
+        });
+      }
+
+      if (url.pathname === "/api/v2/replay/runs/run-op-1/artifacts/summary/download" && method === "GET") {
+        return mockFileResponse('{"totalCases":20}', {
+          contentType: "application/json",
+          contentDisposition: 'attachment; filename="summary.json"',
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url.pathname}`);
+    });
+
+    await expect(
+      fetchOpenPlatformQualityProjectTrends({
+        from: "2026-03-01",
+        to: "2026-03-03",
+        metric: "accuracy",
+        provider: "github",
+        workflow: "nightly",
+        includeUnknown: true,
+        limit: 10,
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        total: 1,
+        items: [expect.objectContaining({ project: "agentledger/main", totalSessions: 11 })],
+        summary: expect.objectContaining({ totalTokens: 42000 }),
+      })
+    );
+
+    await expect(
+      fetchOpenPlatformReplayDatasets({
+        keyword: "baseline",
+        limit: 20,
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        total: 1,
+        items: [
+          expect.objectContaining({
+            id: "baseline-op-1",
+            datasetId: "baseline-op-1",
+            datasetRef: "dataset-op-1",
+            promptVersion: "v3",
+            sampleCount: 20,
+            caseCount: 20,
+          }),
+        ],
+      })
+    );
+
+    await expect(
+      createOpenPlatformReplayDataset({
+        name: "baseline smoke",
+        datasetRef: "dataset-op-1",
+        model: "gpt-5-codex",
+        promptVersion: "v3",
+        sampleCount: 20,
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: "baseline-op-1",
+        datasetId: "baseline-op-1",
+        datasetRef: "dataset-op-1",
+        promptVersion: "v3",
+        sampleCount: 20,
+      })
+    );
+
+    await expect(
+      createOpenPlatformReplayRun({
+        datasetId: "baseline-op-1",
+        candidateLabel: "candidate-v3",
+        sampleLimit: 20,
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: "run-op-1",
+        runId: "run-op-1",
+        jobId: "run-op-1",
+        datasetId: "baseline-op-1",
+        baselineId: "baseline-op-1",
+        status: "pending",
+        totalCases: 20,
+      })
+    );
+
+    await expect(
+      fetchOpenPlatformReplayDatasetCases("baseline-op-1")
+    ).resolves.toEqual(
+      expect.objectContaining({
+        datasetId: "baseline-op-1",
+        total: 1,
+        items: [expect.objectContaining({ caseId: "case-1", sortOrder: 0 })],
+      })
+    );
+
+    await expect(
+      replaceOpenPlatformReplayDatasetCases("baseline-op-1", {
+        items: [
+          {
+            caseId: "case-1",
+            sortOrder: 0,
+            input: "What changed?",
+            expectedOutput: "A concise summary",
+            metadata: { priority: "p0" },
+          },
+        ],
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        datasetId: "baseline-op-1",
+        total: 1,
+        items: [expect.objectContaining({ caseId: "case-1", expectedOutput: "A concise summary" })],
+      })
+    );
+
+    await expect(
+      fetchOpenPlatformReplayRuns({
+        baselineId: "baseline-op-1",
+        status: "cancelled",
+        limit: 20,
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        items: [
+          expect.objectContaining({
+            id: "run-op-cancelled",
+            runId: "run-op-cancelled",
+            jobId: "run-op-cancelled",
+            datasetId: "baseline-op-1",
+            baselineId: "baseline-op-1",
+            status: "cancelled",
+          }),
+        ],
+      })
+    );
+
+    await expect(
+      fetchOpenPlatformReplayDiffs({
+        baselineId: "baseline-op-1",
+        jobId: "run-op-1",
+        keyword: "case-1",
+        limit: 10,
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        total: 1,
+        items: [
+          expect.objectContaining({
+            caseId: "case-1",
+            datasetId: "baseline-op-1",
+            baselineId: "baseline-op-1",
+            runId: "run-op-1",
+            jobId: "run-op-1",
+            verdict: "improved",
+          }),
+        ],
+      })
+    );
+
+    await expect(fetchOpenPlatformReplayArtifacts("run-op-1")).resolves.toEqual(
+      expect.objectContaining({
+        runId: "run-op-1",
+        jobId: "run-op-1",
+        total: 3,
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            type: "summary",
+            byteSize: 128,
+            downloadUrl: "/api/v2/replay/runs/run-op-1/artifacts/summary/download",
+          }),
+          expect.objectContaining({
+            type: "cases",
+            byteSize: 320,
+            downloadUrl: "/api/v2/replay/runs/run-op-1/artifacts/cases/download",
+          }),
+        ]),
+      })
+    );
+
+    const replayArtifactFile = await downloadOpenPlatformReplayArtifact("run-op-1", "summary");
+    expect(replayArtifactFile.filename).toBe("summary.json");
+    expect(replayArtifactFile.contentType).toBe("application/json");
+    expect(replayArtifactFile.blob).toBeInstanceOf(Blob);
+    expect(replayArtifactFile.blob.size).toBeGreaterThan(0);
+
+    expect(
+      fetchSpy.mock.calls.some(([url]) =>
+        new URL(toUrl(url), "http://localhost").pathname === "/api/v2/quality/reports/project-trends"
+      )
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(([url]) =>
+        new URL(toUrl(url), "http://localhost").pathname ===
+        "/api/v2/replay/runs/run-op-1/artifacts/summary/download"
       )
     ).toBe(true);
   });

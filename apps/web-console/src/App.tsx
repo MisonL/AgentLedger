@@ -8,6 +8,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import {
+  approveReplicationJob,
   approveMcpApproval,
   ApiError,
   cancelReplicationJob,
@@ -19,6 +20,9 @@ import {
   createRuleAsset,
   createRuleAssetVersion,
   createSource,
+  createOpenPlatformReplayDataset,
+  createOpenPlatformReplayRun,
+  downloadOpenPlatformReplayArtifact,
   exportSessions,
   exportUsage,
   exchangeExternalAuthCode,
@@ -30,10 +34,14 @@ import {
   fetchOpenPlatformApiKeys,
   fetchOpenPlatformOpenApiSummary,
   fetchOpenPlatformQualityDaily,
+  fetchOpenPlatformQualityProjectTrends,
   fetchOpenPlatformQualityScorecards,
-  fetchOpenPlatformReplayBaselines,
-  fetchOpenPlatformReplayDiff,
-  fetchOpenPlatformReplayJobs,
+  fetchOpenPlatformReplayArtifacts,
+  fetchOpenPlatformReplayDatasetCases,
+  fetchOpenPlatformReplayDatasets,
+  fetchOpenPlatformReplayDiffs,
+  fetchOpenPlatformReplayRuns,
+  materializeOpenPlatformReplayDatasetCases,
   fetchOpenPlatformWebhooks,
   fetchReplicationJobs,
   fetchResidencyPolicy,
@@ -59,6 +67,7 @@ import {
   rejectMcpApproval,
   rollbackRuleAsset,
   revokeOpenPlatformApiKey,
+  replaceOpenPlatformReplayDatasetCases,
   searchSessions,
   setUnauthorizedHandler,
   testSourceConnection,
@@ -75,6 +84,7 @@ import {
 } from "./api";
 import type {
   AlertOrchestrationChannel,
+  AlertOrchestrationDispatchMode,
   AlertOrchestrationEventType,
   AlertOrchestrationExecutionListInput,
   AlertOrchestrationExecutionLog,
@@ -104,10 +114,16 @@ import type {
   OpenPlatformApiKeyStatus,
   OpenPlatformOpenApiSummary,
   OpenPlatformQualityDailyItem,
+  OpenPlatformQualityProjectTrendItem,
+  OpenPlatformQualityProjectTrendResponse,
+  OpenPlatformQualityDailyResponse,
   OpenPlatformQualityScorecard,
-  OpenPlatformReplayBaseline,
+  OpenPlatformReplayArtifact,
+  OpenPlatformReplayDataset,
+  OpenPlatformReplayDatasetCase,
   OpenPlatformReplayDiffItem,
-  OpenPlatformReplayJob,
+  OpenPlatformReplayDatasetMaterializeResponse,
+  OpenPlatformReplayRun,
   OpenPlatformReplayJobStatus,
   OpenPlatformWebhook,
   RegionDescriptor,
@@ -294,6 +310,18 @@ const ALERT_ORCHESTRATION_CHANNEL_OPTIONS: Array<{
   { value: "ticket", label: "ticket" },
 ];
 
+const ALERT_ORCHESTRATION_DISPATCH_MODE_OPTIONS: Array<{
+  value: "";
+  label: string;
+} | {
+  value: AlertOrchestrationDispatchMode;
+  label: string;
+}> = [
+  { value: "", label: "全部模式" },
+  { value: "rule", label: "rule" },
+  { value: "fallback", label: "fallback" },
+];
+
 const ALERT_ORCHESTRATION_ENABLED_FILTER_OPTIONS: Array<{
   value: "";
   label: string;
@@ -316,6 +344,18 @@ const BOOLEAN_FILTER_OPTIONS: Array<{
   { value: "", label: "全部" },
   { value: "true", label: "true" },
   { value: "false", label: "false" },
+];
+
+const CONFLICT_FILTER_OPTIONS: Array<{
+  value: "";
+  label: string;
+} | {
+  value: "true" | "false";
+  label: string;
+}> = [
+  { value: "", label: "全部冲突状态" },
+  { value: "true", label: "仅冲突" },
+  { value: "false", label: "仅无冲突" },
 ];
 
 const EXPORT_FORMAT_OPTIONS: Array<{ value: ExportFormat; label: string }> = [
@@ -431,16 +471,22 @@ const OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS = [
   "replay.job.started",
   "replay.job.completed",
   "replay.job.failed",
+  "replay.run.started",
+  "replay.run.completed",
+  "replay.run.regression_detected",
+  "replay.run.failed",
+  "replay.run.cancelled",
 ] as const;
 
 const OPEN_PLATFORM_REPLAY_JOB_STATUS_FILTER_OPTIONS: Array<
   { value: ""; label: string } | { value: OpenPlatformReplayJobStatus; label: string }
 > = [
   { value: "", label: "全部任务状态" },
-  { value: "queued", label: "queued" },
+  { value: "pending", label: "pending" },
   { value: "running", label: "running" },
-  { value: "succeeded", label: "succeeded" },
+  { value: "completed", label: "completed" },
   { value: "failed", label: "failed" },
+  { value: "cancelled", label: "cancelled" },
 ];
 
 function createEmptyPricingEntry(): PricingEntryFormState {
@@ -707,6 +753,25 @@ function formatSourceFreshness(item: SessionSourceFreshness): string {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "未知错误";
+}
+
+function formatCompactJson(value: Record<string, unknown> | undefined): string {
+  if (!value || Object.keys(value).length === 0) {
+    return "--";
+  }
+  const serialized = JSON.stringify(value);
+  if (!serialized) {
+    return "--";
+  }
+  return serialized.length > 120 ? `${serialized.slice(0, 117)}...` : serialized;
+}
+
+function formatPrettyJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return "";
+  }
 }
 
 function parseBooleanSelect(value: "" | "true" | "false"): boolean | undefined {
@@ -2485,6 +2550,10 @@ function GovernancePage() {
     useState<"" | "true" | "false">("");
   const [orchestrationExecutionSuppressedFilter, setOrchestrationExecutionSuppressedFilter] =
     useState<"" | "true" | "false">("");
+  const [orchestrationExecutionDispatchModeFilter, setOrchestrationExecutionDispatchModeFilter] =
+    useState<AlertOrchestrationDispatchMode | "">("");
+  const [orchestrationExecutionConflictFilter, setOrchestrationExecutionConflictFilter] =
+    useState<"" | "true" | "false">("");
   const [orchestrationExecutionSimulatedFilter, setOrchestrationExecutionSimulatedFilter] =
     useState<"" | "true" | "false">("");
   const [orchestrationExecutionFrom, setOrchestrationExecutionFrom] = useState("");
@@ -2587,10 +2656,30 @@ function GovernancePage() {
 
   const [qualityDailyDate, setQualityDailyDate] = useState("");
   const [qualityDailyMetric, setQualityDailyMetric] = useState("");
+  const [qualityDailyProvider, setQualityDailyProvider] = useState("");
+  const [qualityDailyRepo, setQualityDailyRepo] = useState("");
+  const [qualityDailyWorkflow, setQualityDailyWorkflow] = useState("");
+  const [qualityDailyRunId, setQualityDailyRunId] = useState("");
+  const [qualityDailyGroupBy, setQualityDailyGroupBy] = useState<
+    "" | "provider" | "repo" | "workflow" | "runId"
+  >("");
+  const [qualityProjectTrendsFrom, setQualityProjectTrendsFrom] = useState("");
+  const [qualityProjectTrendsTo, setQualityProjectTrendsTo] = useState("");
+  const [qualityProjectTrendsMetric, setQualityProjectTrendsMetric] = useState("");
+  const [qualityProjectTrendsProvider, setQualityProjectTrendsProvider] = useState("");
+  const [qualityProjectTrendsWorkflow, setQualityProjectTrendsWorkflow] = useState("");
+  const [qualityProjectTrendsIncludeUnknown, setQualityProjectTrendsIncludeUnknown] =
+    useState(false);
   const [qualityScorecardTeam, setQualityScorecardTeam] = useState("");
   const [qualityDailyPayload, setQualityDailyPayload] = useState<{
     items: OpenPlatformQualityDailyItem[];
     total: number;
+    groups?: NonNullable<OpenPlatformQualityDailyResponse["groups"]>;
+  } | null>(null);
+  const [qualityProjectTrendsPayload, setQualityProjectTrendsPayload] = useState<{
+    items: OpenPlatformQualityProjectTrendItem[];
+    total: number;
+    summary: OpenPlatformQualityProjectTrendResponse["summary"];
   } | null>(null);
   const [qualityScorecardPayload, setQualityScorecardPayload] = useState<{
     items: OpenPlatformQualityScorecard[];
@@ -2599,31 +2688,66 @@ function GovernancePage() {
   const [qualityFeedback, setQualityFeedback] = useState<string | null>(null);
   const [qualityError, setQualityError] = useState<string | null>(null);
   const [hasLoadedQualityDaily, setHasLoadedQualityDaily] = useState(false);
+  const [hasLoadedQualityProjectTrends, setHasLoadedQualityProjectTrends] = useState(false);
   const [hasLoadedQualityScorecards, setHasLoadedQualityScorecards] = useState(false);
 
-  const [replayBaselineKeyword, setReplayBaselineKeyword] = useState("");
-  const [replayJobsBaselineIdFilter, setReplayJobsBaselineIdFilter] = useState("");
-  const [replayJobsStatusFilter, setReplayJobsStatusFilter] = useState<OpenPlatformReplayJobStatus | "">("");
-  const [replayDiffBaselineId, setReplayDiffBaselineId] = useState("");
-  const [replayDiffJobId, setReplayDiffJobId] = useState("");
+  const [replayCreateDatasetName, setReplayCreateDatasetName] = useState("");
+  const [replayCreateDatasetRef, setReplayCreateDatasetRef] = useState("");
+  const [replayCreateDatasetModel, setReplayCreateDatasetModel] = useState("");
+  const [replayCreateDatasetPromptVersion, setReplayCreateDatasetPromptVersion] = useState("");
+  const [replayCreateDatasetSampleCount, setReplayCreateDatasetSampleCount] = useState("50");
+  const [replayDatasetKeyword, setReplayDatasetKeyword] = useState("");
+  const [replayCreateRunDatasetId, setReplayCreateRunDatasetId] = useState("");
+  const [replayCreateRunCandidateLabel, setReplayCreateRunCandidateLabel] = useState("");
+  const [replayCreateRunSampleLimit, setReplayCreateRunSampleLimit] = useState("50");
+  const [replayDatasetCasesDatasetId, setReplayDatasetCasesDatasetId] = useState("");
+  const [replayDatasetCasesEditor, setReplayDatasetCasesEditor] = useState("");
+  const [replayMaterializeSessionIds, setReplayMaterializeSessionIds] = useState("");
+  const [replayMaterializeKeyword, setReplayMaterializeKeyword] = useState("");
+  const [replayMaterializeTool, setReplayMaterializeTool] = useState("");
+  const [replayMaterializeModel, setReplayMaterializeModel] = useState("");
+  const [replayMaterializeFrom, setReplayMaterializeFrom] = useState("");
+  const [replayMaterializeTo, setReplayMaterializeTo] = useState("");
+  const [replayMaterializeSampleLimit, setReplayMaterializeSampleLimit] = useState("20");
+  const [replayMaterializeSanitized, setReplayMaterializeSanitized] = useState(true);
+  const [replayRunsDatasetIdFilter, setReplayRunsDatasetIdFilter] = useState("");
+  const [replayRunsStatusFilter, setReplayRunsStatusFilter] = useState<OpenPlatformReplayJobStatus | "">("");
+  const [replayDiffDatasetId, setReplayDiffDatasetId] = useState("");
+  const [replayDiffRunId, setReplayDiffRunId] = useState("");
   const [replayDiffKeyword, setReplayDiffKeyword] = useState("");
-  const [replayBaselinePayload, setReplayBaselinePayload] = useState<{
-    items: OpenPlatformReplayBaseline[];
+  const [replayArtifactRunId, setReplayArtifactRunId] = useState("");
+  const [replayDatasetPayload, setReplayDatasetPayload] = useState<{
+    items: OpenPlatformReplayDataset[];
     total: number;
   } | null>(null);
-  const [replayJobPayload, setReplayJobPayload] = useState<{
-    items: OpenPlatformReplayJob[];
+  const [replayDatasetCasesPayload, setReplayDatasetCasesPayload] = useState<{
+    datasetId: string;
+    items: OpenPlatformReplayDatasetCase[];
+    total: number;
+  } | null>(null);
+  const [replayRunPayload, setReplayRunPayload] = useState<{
+    items: OpenPlatformReplayRun[];
     total: number;
   } | null>(null);
   const [replayDiffPayload, setReplayDiffPayload] = useState<{
     items: OpenPlatformReplayDiffItem[];
     total: number;
+    summary?: Record<string, unknown>;
   } | null>(null);
+  const [replayArtifactPayload, setReplayArtifactPayload] = useState<{
+    runId: string;
+    items: OpenPlatformReplayArtifact[];
+    total: number;
+  } | null>(null);
+  const [replayMaterializePayload, setReplayMaterializePayload] =
+    useState<OpenPlatformReplayDatasetMaterializeResponse | null>(null);
   const [replayFeedback, setReplayFeedback] = useState<string | null>(null);
   const [replayError, setReplayError] = useState<string | null>(null);
-  const [hasLoadedReplayBaselines, setHasLoadedReplayBaselines] = useState(false);
+  const [hasLoadedReplayDatasets, setHasLoadedReplayDatasets] = useState(false);
+  const [hasLoadedReplayDatasetCases, setHasLoadedReplayDatasetCases] = useState(false);
   const [hasLoadedReplayJobs, setHasLoadedReplayJobs] = useState(false);
   const [hasLoadedReplayDiff, setHasLoadedReplayDiff] = useState(false);
+  const [hasLoadedReplayArtifacts, setHasLoadedReplayArtifacts] = useState(false);
 
   const [sessionExportFormat, setSessionExportFormat] = useState<ExportFormat>("csv");
   const [usageExportFormat, setUsageExportFormat] = useState<ExportFormat>("csv");
@@ -2684,6 +2808,12 @@ function GovernancePage() {
       ...(typeof parseBooleanSelect(orchestrationExecutionSuppressedFilter) === "boolean"
         ? { suppressed: parseBooleanSelect(orchestrationExecutionSuppressedFilter) }
         : {}),
+      ...(orchestrationExecutionDispatchModeFilter
+        ? { dispatchMode: orchestrationExecutionDispatchModeFilter }
+        : {}),
+      ...(typeof parseBooleanSelect(orchestrationExecutionConflictFilter) === "boolean"
+        ? { hasConflict: parseBooleanSelect(orchestrationExecutionConflictFilter) }
+        : {}),
       ...(typeof parseBooleanSelect(orchestrationExecutionSimulatedFilter) === "boolean"
         ? { simulated: parseBooleanSelect(orchestrationExecutionSimulatedFilter) }
         : {}),
@@ -2698,6 +2828,8 @@ function GovernancePage() {
         : {}),
     }),
     [
+      orchestrationExecutionConflictFilter,
+      orchestrationExecutionDispatchModeFilter,
       orchestrationExecutionDedupeHitFilter,
       orchestrationExecutionEventTypeFilter,
       orchestrationExecutionFrom,
@@ -2801,6 +2933,8 @@ function GovernancePage() {
     queryKey: ["residency", "policy"],
     queryFn: ({ signal }) => fetchResidencyPolicy(signal),
     staleTime: 20_000,
+    retry: 1,
+    retryDelay: 200,
   });
 
   const replicationJobsQuery = useQuery({
@@ -3080,6 +3214,20 @@ function GovernancePage() {
     onError: (error) => {
       setResidencyFeedback(null);
       setResidencyError(`创建复制任务失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const approveReplicationJobMutation = useMutation({
+    mutationFn: ({ jobId, reason }: { jobId: string; reason?: string }) =>
+      approveReplicationJob(jobId, reason ? { reason } : undefined),
+    onSuccess: async (job) => {
+      setResidencyError(null);
+      setResidencyFeedback(`复制任务 ${job.id} 已审批，当前状态 ${job.status}。`);
+      await queryClient.invalidateQueries({ queryKey: ["residency", "jobs"] });
+    },
+    onError: (error) => {
+      setResidencyFeedback(null);
+      setResidencyError(`审批复制任务失败：${toErrorMessage(error)}`);
     },
   });
 
@@ -3476,18 +3624,58 @@ function GovernancePage() {
   });
 
   const loadQualityDailyMutation = useMutation({
-    mutationFn: (input: { date?: string; metric?: string; limit: number }) =>
+    mutationFn: (input: {
+      date?: string;
+      metric?: string;
+      provider?: string;
+      repo?: string;
+      workflow?: string;
+      runId?: string;
+      groupBy?: "provider" | "repo" | "workflow" | "runId";
+      limit: number;
+    }) =>
       fetchOpenPlatformQualityDaily(input),
     onSuccess: (payload) => {
       setQualityError(null);
       setHasLoadedQualityDaily(true);
-      setQualityDailyPayload({ items: payload.items, total: payload.total });
+      setQualityDailyPayload({
+        items: payload.items,
+        total: payload.total,
+        groups: payload.groups,
+      });
       setQualityFeedback(`Quality daily 已加载，共 ${payload.total} 条。`);
     },
     onError: (error) => {
       setQualityFeedback(null);
       setHasLoadedQualityDaily(true);
       setQualityError(`Quality daily 加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadQualityProjectTrendsMutation = useMutation({
+    mutationFn: (input: {
+      from?: string;
+      to?: string;
+      metric?: string;
+      provider?: string;
+      workflow?: string;
+      includeUnknown?: boolean;
+      limit: number;
+    }) => fetchOpenPlatformQualityProjectTrends(input),
+    onSuccess: (payload) => {
+      setQualityError(null);
+      setHasLoadedQualityProjectTrends(true);
+      setQualityProjectTrendsPayload({
+        items: payload.items,
+        total: payload.total,
+        summary: payload.summary,
+      });
+      setQualityFeedback(`Quality project-trends 已加载，共 ${payload.total} 个项目。`);
+    },
+    onError: (error) => {
+      setQualityFeedback(null);
+      setHasLoadedQualityProjectTrends(true);
+      setQualityError(`Quality project-trends 加载失败：${toErrorMessage(error)}`);
     },
   });
 
@@ -3506,57 +3694,300 @@ function GovernancePage() {
     },
   });
 
-  const loadReplayBaselinesMutation = useMutation({
-    mutationFn: (input: { keyword?: string; limit: number }) => fetchOpenPlatformReplayBaselines(input),
+  const loadReplayDatasetsMutation = useMutation({
+    mutationFn: (input: { keyword?: string; limit: number }) => fetchOpenPlatformReplayDatasets(input),
     onSuccess: (payload) => {
       setReplayError(null);
-      setHasLoadedReplayBaselines(true);
-      setReplayBaselinePayload({ items: payload.items, total: payload.total });
-      setReplayFeedback(`Replay baseline 已加载，共 ${payload.total} 条。`);
+      setHasLoadedReplayDatasets(true);
+      setReplayDatasetPayload({ items: payload.items, total: payload.total });
+      setReplayFeedback(`回放数据集已加载，共 ${payload.total} 条。`);
     },
     onError: (error) => {
       setReplayFeedback(null);
-      setHasLoadedReplayBaselines(true);
-      setReplayError(`Replay baseline 加载失败：${toErrorMessage(error)}`);
+      setHasLoadedReplayDatasets(true);
+      setReplayError(`回放数据集加载失败：${toErrorMessage(error)}`);
     },
   });
 
-  const loadReplayJobsMutation = useMutation({
+  const createReplayDatasetMutation = useMutation({
     mutationFn: (input: {
-      baselineId?: string;
+      name: string;
+      datasetRef: string;
+      model: string;
+      promptVersion?: string;
+      sampleCount?: number;
+    }) => createOpenPlatformReplayDataset(input),
+    onSuccess: async (payload) => {
+      setReplayError(null);
+      setReplayCreateDatasetName("");
+      setReplayCreateDatasetRef("");
+      setReplayCreateDatasetModel("");
+      setReplayCreateDatasetPromptVersion("");
+      setReplayCreateDatasetSampleCount("50");
+      setReplayDatasetCasesDatasetId(payload.datasetId);
+      setReplayCreateRunDatasetId(payload.datasetId);
+      setReplayDiffDatasetId(payload.datasetId);
+      setReplayRunsDatasetIdFilter(payload.datasetId);
+      setReplayFeedback(`回放数据集 ${payload.datasetId} 已创建。`);
+      try {
+        const refreshed = await fetchOpenPlatformReplayDatasets({
+          keyword: replayDatasetKeyword.trim() || undefined,
+          limit: 50,
+        });
+        setHasLoadedReplayDatasets(true);
+        setReplayDatasetPayload({ items: refreshed.items, total: refreshed.total });
+      } catch (error) {
+        setReplayFeedback(
+          `回放数据集 ${payload.datasetId} 已创建，但列表刷新失败：${toErrorMessage(error)}`
+        );
+      }
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setReplayError(`创建回放数据集失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadReplayDatasetCasesMutation = useMutation({
+    mutationFn: (datasetId: string) => fetchOpenPlatformReplayDatasetCases(datasetId),
+    onSuccess: (payload) => {
+      setReplayError(null);
+      setHasLoadedReplayDatasetCases(true);
+      setReplayDatasetCasesDatasetId(payload.datasetId);
+      setReplayDatasetCasesPayload({
+        datasetId: payload.datasetId,
+        items: payload.items,
+        total: payload.total,
+      });
+      setReplayDatasetCasesEditor(
+        formatPrettyJson(
+          payload.items.map((item) => ({
+            caseId: item.caseId,
+            sortOrder: item.sortOrder,
+            input: item.input,
+            expectedOutput: item.expectedOutput,
+            baselineOutput: item.baselineOutput,
+            candidateInput: item.candidateInput,
+            metadata: item.metadata,
+          }))
+        )
+      );
+      setReplayFeedback(`回放样本已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setHasLoadedReplayDatasetCases(true);
+      setReplayError(`加载回放样本失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const saveReplayDatasetCasesMutation = useMutation({
+    mutationFn: ({
+      datasetId,
+      items,
+    }: {
+      datasetId: string;
+      items: Array<{
+        caseId?: string;
+        sortOrder?: number;
+        input: string;
+        expectedOutput?: string;
+        baselineOutput?: string;
+        candidateInput?: string;
+        metadata?: Record<string, unknown>;
+      }>;
+    }) => replaceOpenPlatformReplayDatasetCases(datasetId, { items }),
+    onSuccess: (payload) => {
+      setReplayError(null);
+      setHasLoadedReplayDatasetCases(true);
+      setReplayDatasetCasesDatasetId(payload.datasetId);
+      setReplayDatasetCasesPayload({
+        datasetId: payload.datasetId,
+        items: payload.items,
+        total: payload.total,
+      });
+      setReplayDatasetCasesEditor(
+        formatPrettyJson(
+          payload.items.map((item) => ({
+            caseId: item.caseId,
+            sortOrder: item.sortOrder,
+            input: item.input,
+            expectedOutput: item.expectedOutput,
+            baselineOutput: item.baselineOutput,
+            candidateInput: item.candidateInput,
+            metadata: item.metadata,
+          }))
+        )
+      );
+      setReplayFeedback(`回放样本已保存，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setReplayError(`保存回放样本失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const materializeReplayDatasetCasesMutation = useMutation({
+    mutationFn: ({
+      datasetId,
+      sessionIds,
+      filters,
+      sampleLimit,
+      sanitized,
+    }: {
+      datasetId: string;
+      sessionIds?: string[];
+      filters?: {
+        keyword?: string;
+        tool?: string;
+        model?: string;
+        from?: string;
+        to?: string;
+      };
+      sampleLimit?: number;
+      sanitized?: boolean;
+    }) =>
+      materializeOpenPlatformReplayDatasetCases(datasetId, {
+        sessionIds,
+        filters,
+        sampleLimit,
+        sanitized,
+      }),
+    onSuccess: (payload) => {
+      setReplayError(null);
+      setHasLoadedReplayDatasetCases(true);
+      setReplayMaterializePayload(payload);
+      setReplayDatasetCasesDatasetId(payload.datasetId);
+      setReplayDatasetCasesPayload({
+        datasetId: payload.datasetId,
+        items: payload.items,
+        total: payload.total,
+      });
+      setReplayDatasetCasesEditor(
+        formatPrettyJson(
+          payload.items.map((item) => ({
+            caseId: item.caseId,
+            sortOrder: item.sortOrder,
+            input: item.input,
+            expectedOutput: item.expectedOutput,
+            baselineOutput: item.baselineOutput,
+            candidateInput: item.candidateInput,
+            metadata: item.metadata,
+          }))
+        )
+      );
+      setReplayFeedback(
+        `已从历史会话物化 ${payload.materialized} 条样本，跳过 ${payload.skipped} 条。`
+      );
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setReplayError(`历史会话物化失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const createReplayRunMutation = useMutation({
+    mutationFn: (input: {
+      datasetId: string;
+      candidateLabel: string;
+      sampleLimit?: number;
+    }) => createOpenPlatformReplayRun(input),
+    onSuccess: async (payload) => {
+      setReplayError(null);
+      setReplayCreateRunCandidateLabel("");
+      setReplayCreateRunSampleLimit("50");
+      setReplayDiffRunId(payload.runId);
+      setReplayArtifactRunId(payload.runId);
+      setReplayFeedback(`回放运行 ${payload.runId} 已创建，当前状态 ${payload.status}。`);
+      try {
+        const refreshed = await fetchOpenPlatformReplayRuns({
+          datasetId: replayRunsDatasetIdFilter.trim() || undefined,
+          status: replayRunsStatusFilter || undefined,
+          limit: 50,
+        });
+        setHasLoadedReplayJobs(true);
+        setReplayRunPayload({ items: refreshed.items, total: refreshed.total });
+      } catch (error) {
+        setReplayFeedback(
+          `回放运行 ${payload.runId} 已创建，但运行列表刷新失败：${toErrorMessage(error)}`
+        );
+      }
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setReplayError(`创建回放运行失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadReplayRunsMutation = useMutation({
+    mutationFn: (input: {
+      datasetId?: string;
       status?: OpenPlatformReplayJobStatus;
       limit: number;
-    }) => fetchOpenPlatformReplayJobs(input),
+    }) => fetchOpenPlatformReplayRuns(input),
     onSuccess: (payload) => {
       setReplayError(null);
       setHasLoadedReplayJobs(true);
-      setReplayJobPayload({ items: payload.items, total: payload.total });
-      setReplayFeedback(`Replay jobs 已加载，共 ${payload.total} 条。`);
+      setReplayRunPayload({ items: payload.items, total: payload.total });
+      setReplayFeedback(`回放运行已加载，共 ${payload.total} 条。`);
     },
     onError: (error) => {
       setReplayFeedback(null);
       setHasLoadedReplayJobs(true);
-      setReplayError(`Replay jobs 加载失败：${toErrorMessage(error)}`);
+      setReplayError(`回放运行加载失败：${toErrorMessage(error)}`);
     },
   });
 
   const loadReplayDiffMutation = useMutation({
     mutationFn: (input: {
-      baselineId: string;
-      jobId: string;
+      datasetId?: string;
+      runId: string;
       keyword?: string;
       limit: number;
-    }) => fetchOpenPlatformReplayDiff(input),
+    }) => fetchOpenPlatformReplayDiffs(input),
     onSuccess: (payload) => {
       setReplayError(null);
       setHasLoadedReplayDiff(true);
-      setReplayDiffPayload({ items: payload.items, total: payload.total });
-      setReplayFeedback(`Replay diff 已加载，共 ${payload.total} 条。`);
+      setReplayDiffPayload({ items: payload.items, total: payload.total, summary: payload.summary });
+      setReplayFeedback(`回放差异已加载，共 ${payload.total} 条。`);
     },
     onError: (error) => {
       setReplayFeedback(null);
       setHasLoadedReplayDiff(true);
-      setReplayError(`Replay diff 加载失败：${toErrorMessage(error)}`);
+      setReplayError(`回放差异加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadReplayArtifactsMutation = useMutation({
+    mutationFn: (runId: string) => fetchOpenPlatformReplayArtifacts(runId),
+    onSuccess: (payload) => {
+      setReplayError(null);
+      setHasLoadedReplayArtifacts(true);
+      setReplayArtifactPayload({
+        runId: payload.runId,
+        items: payload.items,
+        total: payload.total,
+      });
+      setReplayFeedback(`回放工件已加载，共 ${payload.total} 个工件。`);
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setHasLoadedReplayArtifacts(true);
+      setReplayError(`回放工件加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const downloadReplayArtifactMutation = useMutation({
+    mutationFn: (input: { runId: string; artifactType: string; downloadName?: string }) =>
+      downloadOpenPlatformReplayArtifact(input.runId, input.artifactType, input.downloadName),
+    onSuccess: (file) => {
+      setReplayError(null);
+      setReplayFeedback(`回放工件下载成功：${file.filename}`);
+      triggerBrowserDownload(file);
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setReplayError(`回放工件下载失败：${toErrorMessage(error)}`);
     },
   });
 
@@ -3596,6 +4027,23 @@ function GovernancePage() {
   const orchestrationRuleItems = orchestrationRulesPayload?.items ?? [];
   const orchestrationExecutionItems = orchestrationExecutionsPayload?.items ?? [];
   const orchestrationSimulationExecutions = orchestrationSimulationResult?.executions ?? [];
+  const orchestrationExecutionSummary = useMemo(
+    () => ({
+      total: orchestrationExecutionItems.length,
+      ruleDispatches: orchestrationExecutionItems.filter((item) => item.dispatchMode === "rule")
+        .length,
+      fallbackDispatches: orchestrationExecutionItems.filter(
+        (item) => item.dispatchMode === "fallback"
+      ).length,
+      conflictExecutions: orchestrationExecutionItems.filter(
+        (item) => item.conflictRuleIds.length > 0
+      ).length,
+      dedupeHits: orchestrationExecutionItems.filter((item) => item.dedupeHit).length,
+      suppressedExecutions: orchestrationExecutionItems.filter((item) => item.suppressed).length,
+      simulatedExecutions: orchestrationExecutionItems.filter((item) => item.simulated).length,
+    }),
+    [orchestrationExecutionItems]
+  );
   const knownOrchestrationRuleIds = useMemo(
     () =>
       Array.from(
@@ -3654,19 +4102,53 @@ function GovernancePage() {
   const apiKeyItems: OpenPlatformApiKey[] = apiKeyPayload?.items ?? [];
   const webhookItems: OpenPlatformWebhook[] = webhookPayload?.items ?? [];
   const qualityDailyItems: OpenPlatformQualityDailyItem[] = qualityDailyPayload?.items ?? [];
+  const qualityDailyGroups = qualityDailyPayload?.groups ?? [];
+  const qualityProjectTrendItems: OpenPlatformQualityProjectTrendItem[] =
+    qualityProjectTrendsPayload?.items ?? [];
+  const qualityProjectTrendSummary = qualityProjectTrendsPayload?.summary ?? null;
   const qualityScorecardItems: OpenPlatformQualityScorecard[] = qualityScorecardPayload?.items ?? [];
-  const replayBaselineItems: OpenPlatformReplayBaseline[] = replayBaselinePayload?.items ?? [];
-  const replayJobItems: OpenPlatformReplayJob[] = replayJobPayload?.items ?? [];
+  const replayDatasetItems: OpenPlatformReplayDataset[] = replayDatasetPayload?.items ?? [];
+  const replayDatasetCaseItems: OpenPlatformReplayDatasetCase[] =
+    replayDatasetCasesPayload?.items ?? [];
+  const replayRunItems: OpenPlatformReplayRun[] = replayRunPayload?.items ?? [];
   const replayDiffItems: OpenPlatformReplayDiffItem[] = replayDiffPayload?.items ?? [];
-  const knownReplayBaselineIds = useMemo(
+  const replayArtifactItems: OpenPlatformReplayArtifact[] = replayArtifactPayload?.items ?? [];
+  const replaySelectedRunSummary = useMemo(() => {
+    const diffSummary = replayDiffPayload?.summary;
+    if (diffSummary && typeof diffSummary === "object" && !Array.isArray(diffSummary)) {
+      return diffSummary;
+    }
+    const activeRunId = replayDiffRunId.trim() || replayArtifactRunId.trim();
+    if (!activeRunId) {
+      return null;
+    }
+    const matched = replayRunItems.find((item) => item.runId === activeRunId);
+    return matched?.summary ?? null;
+  }, [replayArtifactRunId, replayDiffPayload?.summary, replayDiffRunId, replayRunItems]);
+  const replaySelectedRunDigest =
+    replaySelectedRunSummary &&
+    typeof replaySelectedRunSummary.digest === "object" &&
+    replaySelectedRunSummary.digest !== null &&
+    !Array.isArray(replaySelectedRunSummary.digest)
+      ? (replaySelectedRunSummary.digest as Record<string, unknown>)
+      : null;
+  const knownReplayDatasetIds = useMemo(
     () =>
       Array.from(
         new Set([
-          ...replayBaselineItems.map((item) => item.id),
-          ...replayJobItems.map((item) => item.baselineId),
+          ...replayDatasetItems.map((item) => item.datasetId),
+          ...replayDatasetCaseItems.map((item) => item.datasetId),
+          ...replayRunItems.map((item) => item.datasetId),
         ])
       ).sort((left, right) => left.localeCompare(right)),
-    [replayBaselineItems, replayJobItems]
+    [replayDatasetItems, replayDatasetCaseItems, replayRunItems]
+  );
+  const knownReplayRunIds = useMemo(
+    () =>
+      Array.from(new Set(replayRunItems.map((item) => item.runId))).sort((left, right) =>
+        left.localeCompare(right)
+      ),
+    [replayRunItems]
   );
 
   return (
@@ -4439,6 +4921,42 @@ function GovernancePage() {
             </select>
           </label>
 
+          <label className="inline-field" htmlFor="orchestration-execution-dispatch-mode-filter">
+            mode
+            <select
+              id="orchestration-execution-dispatch-mode-filter"
+              value={orchestrationExecutionDispatchModeFilter}
+              onChange={(event) =>
+                setOrchestrationExecutionDispatchModeFilter(
+                  event.target.value as AlertOrchestrationDispatchMode | ""
+                )
+              }
+            >
+              {ALERT_ORCHESTRATION_DISPATCH_MODE_OPTIONS.map((option) => (
+                <option key={`dispatch-mode-${option.label}`} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-field" htmlFor="orchestration-execution-conflict-filter">
+            conflict
+            <select
+              id="orchestration-execution-conflict-filter"
+              value={orchestrationExecutionConflictFilter}
+              onChange={(event) =>
+                setOrchestrationExecutionConflictFilter(event.target.value as "" | "true" | "false")
+              }
+            >
+              {CONFLICT_FILTER_OPTIONS.map((option) => (
+                <option key={`conflict-${option.label}`} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <label className="inline-field" htmlFor="orchestration-execution-simulated-filter">
             simulated
             <select
@@ -4519,6 +5037,38 @@ function GovernancePage() {
 
         {orchestrationFeedback ? <p className="feedback success">{orchestrationFeedback}</p> : null}
         {orchestrationError ? <p className="feedback error">{orchestrationError}</p> : null}
+        {hasLoadedOrchestrationExecutions ? (
+          <section className="analytics-kpi-grid" aria-label="执行日志当前结果统计">
+            <article className="analytics-kpi-card">
+              <h3>当前结果</h3>
+              <strong>{orchestrationExecutionSummary.total}</strong>
+            </article>
+            <article className="analytics-kpi-card">
+              <h3>rule</h3>
+              <strong>{orchestrationExecutionSummary.ruleDispatches}</strong>
+            </article>
+            <article className="analytics-kpi-card">
+              <h3>fallback</h3>
+              <strong>{orchestrationExecutionSummary.fallbackDispatches}</strong>
+            </article>
+            <article className="analytics-kpi-card">
+              <h3>冲突</h3>
+              <strong>{orchestrationExecutionSummary.conflictExecutions}</strong>
+            </article>
+            <article className="analytics-kpi-card">
+              <h3>dedupe</h3>
+              <strong>{orchestrationExecutionSummary.dedupeHits}</strong>
+            </article>
+            <article className="analytics-kpi-card">
+              <h3>suppressed</h3>
+              <strong>{orchestrationExecutionSummary.suppressedExecutions}</strong>
+            </article>
+            <article className="analytics-kpi-card">
+              <h3>simulated</h3>
+              <strong>{orchestrationExecutionSummary.simulatedExecutions}</strong>
+            </article>
+          </section>
+        ) : null}
 
         <div className="table-wrapper">
           <table className="session-table">
@@ -4629,6 +5179,43 @@ function GovernancePage() {
               <table className="session-table">
                 <thead>
                   <tr>
+                    <th>groupBy</th>
+                    <th>value</th>
+                    <th>totalEvents</th>
+                    <th>passedEvents</th>
+                    <th>failedEvents</th>
+                    <th>passRate</th>
+                    <th>avgScore</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {qualityDailyGroups.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={7}>
+                        暂无 externalSource 分组数据。
+                      </td>
+                    </tr>
+                  ) : (
+                    qualityDailyGroups.map((item) => (
+                      <tr key={`${item.groupBy}:${item.value}`}>
+                        <td>{item.groupBy}</td>
+                        <td>{item.value}</td>
+                        <td>{item.totalEvents}</td>
+                        <td>{item.passedEvents}</td>
+                        <td>{item.failedEvents}</td>
+                        <td>{item.passRate.toFixed(4)}</td>
+                        <td>{item.avgScore.toFixed(2)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
                     <th>命中规则 ID</th>
                     <th>名称</th>
                     <th>eventType</th>
@@ -4706,6 +5293,7 @@ function GovernancePage() {
                 <th>ID</th>
                 <th>ruleId</th>
                 <th>eventType</th>
+                <th>mode</th>
                 <th>severity</th>
                 <th>sourceId</th>
                 <th>dedupeHit</th>
@@ -4713,13 +5301,14 @@ function GovernancePage() {
                 <th>simulated</th>
                 <th>conflicts</th>
                 <th>channels</th>
+                <th>metadata</th>
                 <th>创建时间</th>
               </tr>
             </thead>
             <tbody>
               {orchestrationExecutionItems.length === 0 ? (
                 <tr>
-                  <td className="table-empty-cell" colSpan={11}>
+                  <td className="table-empty-cell" colSpan={13}>
                     {hasLoadedOrchestrationExecutions
                       ? "无匹配执行日志。"
                       : "尚未加载执行日志，请点击“加载执行日志”。"}
@@ -4731,6 +5320,7 @@ function GovernancePage() {
                     <td>{item.id}</td>
                     <td>{item.ruleId}</td>
                     <td>{item.eventType}</td>
+                    <td>{item.dispatchMode}</td>
                     <td>{item.severity ?? "--"}</td>
                     <td>{item.sourceId ?? "--"}</td>
                     <td>{item.dedupeHit ? "true" : "false"}</td>
@@ -4738,6 +5328,7 @@ function GovernancePage() {
                     <td>{item.simulated ? "true" : "false"}</td>
                     <td>{item.conflictRuleIds.length > 0 ? item.conflictRuleIds.join(",") : "--"}</td>
                     <td>{item.channels.join(",")}</td>
+                    <td>{formatCompactJson(item.metadata)}</td>
                     <td>{formatDateTime(item.createdAt)}</td>
                   </tr>
                 ))
@@ -4995,7 +5586,11 @@ function GovernancePage() {
                 </tr>
               ) : (
                 replicationItems.map((job) => {
+                  const canApprove = job.status === "pending";
                   const canCancel = job.status === "pending" || job.status === "running";
+                  const isApproving =
+                    approveReplicationJobMutation.isPending &&
+                    approveReplicationJobMutation.variables?.jobId === job.id;
                   const isCancelling =
                     cancelReplicationJobMutation.isPending &&
                     cancelReplicationJobMutation.variables?.jobId === job.id;
@@ -5008,26 +5603,49 @@ function GovernancePage() {
                       <td>{formatDateTime(job.createdAt)}</td>
                       <td>{job.reason ?? "--"}</td>
                       <td>
-                        {canCancel ? (
-                          <button
-                            type="button"
-                            className="table-action"
-                            disabled={isCancelling}
-                            onClick={() => {
-                              const reason =
-                                typeof window !== "undefined"
-                                  ? window.prompt("取消原因（可选）", "") ?? ""
-                                  : "";
-                              cancelReplicationJobMutation.mutate({
-                                jobId: job.id,
-                                reason: reason.trim() || undefined,
-                              });
-                            }}
-                          >
-                            {isCancelling ? "取消中..." : "取消"}
-                          </button>
+                        {canApprove || canCancel ? (
+                          <>
+                            {canApprove ? (
+                              <button
+                                type="button"
+                                className="table-action"
+                                disabled={isApproving}
+                                onClick={() => {
+                                  const reason =
+                                    typeof window !== "undefined"
+                                      ? window.prompt("审批原因（可选）", "") ?? ""
+                                      : "";
+                                  approveReplicationJobMutation.mutate({
+                                    jobId: job.id,
+                                    reason: reason.trim() || undefined,
+                                  });
+                                }}
+                              >
+                                {isApproving ? "审批中..." : "审批"}
+                              </button>
+                            ) : null}
+                            {canCancel ? (
+                              <button
+                                type="button"
+                                className="table-action"
+                                disabled={isCancelling}
+                                onClick={() => {
+                                  const reason =
+                                    typeof window !== "undefined"
+                                      ? window.prompt("取消原因（可选）", "") ?? ""
+                                      : "";
+                                  cancelReplicationJobMutation.mutate({
+                                    jobId: job.id,
+                                    reason: reason.trim() || undefined,
+                                  });
+                                }}
+                              >
+                                {isCancelling ? "取消中..." : "取消"}
+                              </button>
+                            ) : null}
+                          </>
                         ) : (
-                          <span className="tiny-feedback tiny-feedback-success">不可取消</span>
+                          <span className="tiny-feedback tiny-feedback-success">不可操作</span>
                         )}
                       </td>
                     </tr>
@@ -6490,8 +7108,8 @@ function GovernancePage() {
           </article>
 
           <article className="open-platform-card">
-            <h3>Quality（daily/scorecards）</h3>
-            <p>按日期查看 daily 指标，并按团队查询 scorecards。</p>
+            <h3>Quality（daily/project-trends/scorecards）</h3>
+            <p>按日查看质量指标，并拉通项目级质量、成本、tokens、sessions 趋势。</p>
             <div className="filters-row governance-inline-grid">
               <label className="inline-field" htmlFor="open-platform-quality-daily-date">
                 日期（Quality daily）
@@ -6518,6 +7136,69 @@ function GovernancePage() {
                 </select>
               </label>
 
+              <label className="inline-field" htmlFor="open-platform-quality-daily-provider">
+                provider
+                <input
+                  id="open-platform-quality-daily-provider"
+                  type="text"
+                  value={qualityDailyProvider}
+                  onChange={(event) => setQualityDailyProvider(event.target.value)}
+                  placeholder="可选，例如：github"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-quality-daily-repo">
+                repo
+                <input
+                  id="open-platform-quality-daily-repo"
+                  type="text"
+                  value={qualityDailyRepo}
+                  onChange={(event) => setQualityDailyRepo(event.target.value)}
+                  placeholder="可选，例如：agentledger/main"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-quality-daily-workflow">
+                workflow
+                <input
+                  id="open-platform-quality-daily-workflow"
+                  type="text"
+                  value={qualityDailyWorkflow}
+                  onChange={(event) => setQualityDailyWorkflow(event.target.value)}
+                  placeholder="可选"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-quality-daily-run-id">
+                runId
+                <input
+                  id="open-platform-quality-daily-run-id"
+                  type="text"
+                  value={qualityDailyRunId}
+                  onChange={(event) => setQualityDailyRunId(event.target.value)}
+                  placeholder="可选"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-quality-daily-group-by">
+                groupBy
+                <select
+                  id="open-platform-quality-daily-group-by"
+                  value={qualityDailyGroupBy}
+                  onChange={(event) =>
+                    setQualityDailyGroupBy(
+                      (event.target.value as "" | "provider" | "repo" | "workflow" | "runId")
+                    )
+                  }
+                >
+                  <option value="">不分组</option>
+                  <option value="provider">provider</option>
+                  <option value="repo">repo</option>
+                  <option value="workflow">workflow</option>
+                  <option value="runId">runId</option>
+                </select>
+              </label>
+
               <button
                 type="button"
                 className="submit-button"
@@ -6533,11 +7214,125 @@ function GovernancePage() {
                   loadQualityDailyMutation.mutate({
                     date: qualityDailyDate.trim() || undefined,
                     metric: qualityDailyMetric.trim() || undefined,
+                    provider: qualityDailyProvider.trim() || undefined,
+                    repo: qualityDailyRepo.trim() || undefined,
+                    workflow: qualityDailyWorkflow.trim() || undefined,
+                    runId: qualityDailyRunId.trim() || undefined,
+                    groupBy: qualityDailyGroupBy || undefined,
                     limit: 50,
                   });
                 }}
               >
                 {loadQualityDailyMutation.isPending ? "查询中..." : "加载 Quality daily"}
+              </button>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="open-platform-quality-project-trends-from">
+                开始日期（project-trends）
+                <input
+                  id="open-platform-quality-project-trends-from"
+                  type="date"
+                  value={qualityProjectTrendsFrom}
+                  onChange={(event) => setQualityProjectTrendsFrom(event.target.value)}
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-quality-project-trends-to">
+                结束日期（project-trends）
+                <input
+                  id="open-platform-quality-project-trends-to"
+                  type="date"
+                  value={qualityProjectTrendsTo}
+                  onChange={(event) => setQualityProjectTrendsTo(event.target.value)}
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-quality-project-trends-metric">
+                指标（project-trends）
+                <select
+                  id="open-platform-quality-project-trends-metric"
+                  value={qualityProjectTrendsMetric}
+                  onChange={(event) => setQualityProjectTrendsMetric(event.target.value)}
+                >
+                  {OPEN_PLATFORM_QUALITY_METRIC_OPTIONS.map((option) => (
+                    <option key={`project-trend-${option.label}`} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-quality-project-trends-provider">
+                provider
+                <input
+                  id="open-platform-quality-project-trends-provider"
+                  type="text"
+                  value={qualityProjectTrendsProvider}
+                  onChange={(event) => setQualityProjectTrendsProvider(event.target.value)}
+                  placeholder="可选"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-quality-project-trends-workflow">
+                workflow
+                <input
+                  id="open-platform-quality-project-trends-workflow"
+                  type="text"
+                  value={qualityProjectTrendsWorkflow}
+                  onChange={(event) => setQualityProjectTrendsWorkflow(event.target.value)}
+                  placeholder="可选"
+                />
+              </label>
+
+              <label className="checkbox-field" htmlFor="open-platform-quality-project-trends-include-unknown">
+                <input
+                  id="open-platform-quality-project-trends-include-unknown"
+                  type="checkbox"
+                  checked={qualityProjectTrendsIncludeUnknown}
+                  onChange={(event) => setQualityProjectTrendsIncludeUnknown(event.target.checked)}
+                />
+                包含 unknown 项目
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadQualityProjectTrendsMutation.isPending}
+                onClick={() => {
+                  const from = qualityProjectTrendsFrom.trim();
+                  const to = qualityProjectTrendsTo.trim();
+                  if (from && Number.isNaN(Date.parse(from))) {
+                    setQualityFeedback(null);
+                    setQualityError("Quality project-trends 开始日期格式不合法。");
+                    return;
+                  }
+                  if (to && Number.isNaN(Date.parse(to))) {
+                    setQualityFeedback(null);
+                    setQualityError("Quality project-trends 结束日期格式不合法。");
+                    return;
+                  }
+                  if (from && to && Date.parse(from) > Date.parse(to)) {
+                    setQualityFeedback(null);
+                    setQualityError("Quality project-trends 时间范围非法：开始日期不能晚于结束日期。");
+                    return;
+                  }
+                  setQualityFeedback(null);
+                  setQualityError(null);
+                  loadQualityProjectTrendsMutation.mutate({
+                    from: from || undefined,
+                    to: to || undefined,
+                    metric: qualityProjectTrendsMetric.trim() || undefined,
+                    provider: qualityProjectTrendsProvider.trim() || undefined,
+                    workflow: qualityProjectTrendsWorkflow.trim() || undefined,
+                    includeUnknown: qualityProjectTrendsIncludeUnknown,
+                    limit: 20,
+                  });
+                }}
+              >
+                {loadQualityProjectTrendsMutation.isPending
+                  ? "查询中..."
+                  : "加载 Quality project-trends"}
               </button>
             </div>
 
@@ -6614,6 +7409,98 @@ function GovernancePage() {
               <table className="session-table">
                 <thead>
                   <tr>
+                    <th>project-trends summary</th>
+                    <th>metric</th>
+                    <th>events</th>
+                    <th>passRate</th>
+                    <th>avgScore</th>
+                    <th>cost</th>
+                    <th>tokens</th>
+                    <th>sessions</th>
+                    <th>window</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {!qualityProjectTrendSummary ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={9}>
+                        {hasLoadedQualityProjectTrends
+                          ? "无 project-trends 汇总。"
+                          : "尚未加载 project-trends。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr>
+                      <td>summary</td>
+                      <td>{qualityProjectTrendSummary.metric}</td>
+                      <td>{qualityProjectTrendSummary.totalEvents}</td>
+                      <td>{qualityProjectTrendSummary.passRate.toFixed(4)}</td>
+                      <td>{qualityProjectTrendSummary.avgScore.toFixed(2)}</td>
+                      <td>{qualityProjectTrendSummary.totalCost.toFixed(4)}</td>
+                      <td>{qualityProjectTrendSummary.totalTokens}</td>
+                      <td>{qualityProjectTrendSummary.totalSessions}</td>
+                      <td>
+                        {qualityProjectTrendSummary.from
+                          ? formatDateTime(qualityProjectTrendSummary.from)
+                          : "--"}
+                        {" ~ "}
+                        {qualityProjectTrendSummary.to
+                          ? formatDateTime(qualityProjectTrendSummary.to)
+                          : "--"}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>project</th>
+                    <th>metric</th>
+                    <th>events</th>
+                    <th>passRate</th>
+                    <th>avgScore</th>
+                    <th>cost</th>
+                    <th>tokens</th>
+                    <th>sessions</th>
+                    <th>cost/quality</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {qualityProjectTrendItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={9}>
+                        {hasLoadedQualityProjectTrends
+                          ? "无匹配 project-trends 数据。"
+                          : "尚未加载 project-trends 数据。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    qualityProjectTrendItems.map((item) => (
+                      <tr key={`${item.project}:${item.metric}`}>
+                        <td>{item.project}</td>
+                        <td>{item.metric}</td>
+                        <td>{item.totalEvents}</td>
+                        <td>{item.passRate.toFixed(4)}</td>
+                        <td>{item.avgScore.toFixed(2)}</td>
+                        <td>{item.totalCost.toFixed(4)}</td>
+                        <td>{item.totalTokens}</td>
+                        <td>{item.totalSessions}</td>
+                        <td>{item.costPerQualityPoint.toFixed(4)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
                     <th>ID</th>
                     <th>metric</th>
                     <th>updatedBy</th>
@@ -6649,63 +7536,536 @@ function GovernancePage() {
           </article>
 
           <article className="open-platform-card">
-            <h3>Replay（baseline/jobs/diff）</h3>
-            <p>回放基线、任务进度与差异结果查询。</p>
+            <h3>Replay（datasets/cases/runs/diff/artifacts）</h3>
+            <p>发起回放数据集与运行，维护样本集，查看差异结果并拉取 summary/diff/cases 工件。</p>
             <datalist id="open-platform-replay-baseline-options">
-              {knownReplayBaselineIds.map((baselineId) => (
-                <option key={baselineId} value={baselineId} />
+              {knownReplayDatasetIds.map((datasetId) => (
+                <option key={datasetId} value={datasetId} />
+              ))}
+            </datalist>
+            <datalist id="open-platform-replay-run-options">
+              {knownReplayRunIds.map((runId) => (
+                <option key={runId} value={runId} />
               ))}
             </datalist>
 
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field governance-wide-field" htmlFor="open-platform-replay-baseline-keyword">
-                关键字（baseline）
+              <label className="inline-field" htmlFor="open-platform-replay-create-dataset-name">
+                dataset 名称
                 <input
-                  id="open-platform-replay-baseline-keyword"
+                  id="open-platform-replay-create-dataset-name"
                   type="text"
-                  value={replayBaselineKeyword}
-                  onChange={(event) => setReplayBaselineKeyword(event.target.value)}
-                  placeholder="按 baseline 名称检索"
+                  value={replayCreateDatasetName}
+                  onChange={(event) => setReplayCreateDatasetName(event.target.value)}
+                  placeholder="必填"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-replay-create-dataset-id">
+                datasetRef
+                <input
+                  id="open-platform-replay-create-dataset-id"
+                  type="text"
+                  value={replayCreateDatasetRef}
+                  onChange={(event) => setReplayCreateDatasetRef(event.target.value)}
+                  placeholder="必填"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-replay-create-dataset-model">
+                model
+                <input
+                  id="open-platform-replay-create-dataset-model"
+                  type="text"
+                  value={replayCreateDatasetModel}
+                  onChange={(event) => setReplayCreateDatasetModel(event.target.value)}
+                  placeholder="必填"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-replay-create-dataset-prompt-version">
+                promptVersion
+                <input
+                  id="open-platform-replay-create-dataset-prompt-version"
+                  type="text"
+                  value={replayCreateDatasetPromptVersion}
+                  onChange={(event) => setReplayCreateDatasetPromptVersion(event.target.value)}
+                  placeholder="可选"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-replay-create-dataset-sample-count">
+                sampleCount
+                <input
+                  id="open-platform-replay-create-dataset-sample-count"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={replayCreateDatasetSampleCount}
+                  onChange={(event) => setReplayCreateDatasetSampleCount(event.target.value)}
                 />
               </label>
 
               <button
                 type="button"
                 className="submit-button"
-                disabled={loadReplayBaselinesMutation.isPending}
+                disabled={createReplayDatasetMutation.isPending}
+                onClick={() => {
+                  const name = replayCreateDatasetName.trim();
+                  const datasetRef = replayCreateDatasetRef.trim();
+                  const model = replayCreateDatasetModel.trim();
+                  const sampleCount = parseOptionalNonNegativeInteger(
+                    replayCreateDatasetSampleCount
+                  );
+                  if (!name || !datasetRef || !model) {
+                    setReplayFeedback(null);
+                    setReplayError("创建回放数据集前请填写 name、datasetRef、model。");
+                    return;
+                  }
+                  if (
+                    replayCreateDatasetSampleCount.trim().length > 0 &&
+                    sampleCount === undefined
+                  ) {
+                    setReplayFeedback(null);
+                    setReplayError("回放数据集的 sampleCount 必须是大于等于 0 的整数。");
+                    return;
+                  }
+                  setReplayFeedback(null);
+                  setReplayError(null);
+                  createReplayDatasetMutation.mutate({
+                    name,
+                    datasetRef,
+                    model,
+                    promptVersion: replayCreateDatasetPromptVersion.trim() || undefined,
+                    sampleCount,
+                  });
+                }}
+              >
+                {createReplayDatasetMutation.isPending ? "创建中..." : "创建回放数据集"}
+              </button>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field governance-wide-field" htmlFor="open-platform-replay-baseline-keyword">
+                关键字（dataset）
+                <input
+                  id="open-platform-replay-baseline-keyword"
+                  type="text"
+                  value={replayDatasetKeyword}
+                  onChange={(event) => setReplayDatasetKeyword(event.target.value)}
+                  placeholder="按 dataset 名称检索"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadReplayDatasetsMutation.isPending}
                 onClick={() => {
                   setReplayFeedback(null);
                   setReplayError(null);
-                  loadReplayBaselinesMutation.mutate({
-                    keyword: replayBaselineKeyword.trim() || undefined,
+                  loadReplayDatasetsMutation.mutate({
+                    keyword: replayDatasetKeyword.trim() || undefined,
                     limit: 50,
                   });
                 }}
               >
-                {loadReplayBaselinesMutation.isPending ? "查询中..." : "加载 Replay baselines"}
+                {loadReplayDatasetsMutation.isPending ? "查询中..." : "加载回放数据集"}
+              </button>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="open-platform-replay-dataset-cases-dataset-id">
+                datasetId（cases）
+                <input
+                  id="open-platform-replay-dataset-cases-dataset-id"
+                  type="text"
+                  list="open-platform-replay-baseline-options"
+                  value={replayDatasetCasesDatasetId}
+                  onChange={(event) => setReplayDatasetCasesDatasetId(event.target.value)}
+                  placeholder="必填"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadReplayDatasetCasesMutation.isPending}
+                onClick={() => {
+                  const datasetId = replayDatasetCasesDatasetId.trim();
+                  if (!datasetId) {
+                    setReplayFeedback(null);
+                    setReplayError("回放样本的 datasetId 不能为空。");
+                    return;
+                  }
+                  setReplayFeedback(null);
+                  setReplayError(null);
+                  loadReplayDatasetCasesMutation.mutate(datasetId);
+                }}
+              >
+                {loadReplayDatasetCasesMutation.isPending ? "查询中..." : "加载回放样本"}
+              </button>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={saveReplayDatasetCasesMutation.isPending}
+                onClick={() => {
+                  const datasetId = replayDatasetCasesDatasetId.trim();
+                  if (!datasetId) {
+                    setReplayFeedback(null);
+                    setReplayError("保存回放样本前请先填写 datasetId。");
+                    return;
+                  }
+                  let parsed: unknown;
+                  try {
+                    parsed = JSON.parse(replayDatasetCasesEditor);
+                  } catch {
+                    setReplayFeedback(null);
+                    setReplayError("回放样本编辑器内容必须是合法 JSON。");
+                    return;
+                  }
+                  const rawItems =
+                    Array.isArray(parsed)
+                      ? parsed
+                      : parsed && typeof parsed === "object" && Array.isArray((parsed as { items?: unknown }).items)
+                        ? (parsed as { items: unknown[] }).items
+                        : null;
+                  if (!rawItems) {
+                    setReplayFeedback(null);
+                    setReplayError("回放样本必须是数组，或包含 items 数组的对象。");
+                    return;
+                  }
+                  const normalizedItems: Array<{
+                    caseId?: string;
+                    sortOrder?: number;
+                    input: string;
+                    expectedOutput?: string;
+                    baselineOutput?: string;
+                    candidateInput?: string;
+                    metadata?: Record<string, unknown>;
+                  }> = [];
+                  for (const item of rawItems) {
+                    if (!item || typeof item !== "object") {
+                      setReplayFeedback(null);
+                      setReplayError("回放样本数组中的每一项都必须是对象。");
+                      return;
+                    }
+                    const record = item as Record<string, unknown>;
+                    const input = typeof record.input === "string" ? record.input.trim() : "";
+                    if (!input) {
+                      setReplayFeedback(null);
+                      setReplayError("每条回放样本都必须包含非空 input。");
+                      return;
+                    }
+                    normalizedItems.push({
+                      caseId:
+                        typeof record.caseId === "string" && record.caseId.trim().length > 0
+                          ? record.caseId.trim()
+                          : undefined,
+                      sortOrder:
+                        typeof record.sortOrder === "number" && Number.isInteger(record.sortOrder)
+                          ? record.sortOrder
+                          : undefined,
+                      input,
+                      expectedOutput:
+                        typeof record.expectedOutput === "string" && record.expectedOutput.trim().length > 0
+                          ? record.expectedOutput.trim()
+                          : undefined,
+                      baselineOutput:
+                        typeof record.baselineOutput === "string" && record.baselineOutput.trim().length > 0
+                          ? record.baselineOutput.trim()
+                          : undefined,
+                      candidateInput:
+                        typeof record.candidateInput === "string" && record.candidateInput.trim().length > 0
+                          ? record.candidateInput.trim()
+                          : undefined,
+                      metadata:
+                        record.metadata && typeof record.metadata === "object" && !Array.isArray(record.metadata)
+                          ? (record.metadata as Record<string, unknown>)
+                          : undefined,
+                    });
+                  }
+                  setReplayFeedback(null);
+                  setReplayError(null);
+                  saveReplayDatasetCasesMutation.mutate({
+                    datasetId,
+                    items: normalizedItems,
+                  });
+                }}
+              >
+                {saveReplayDatasetCasesMutation.isPending ? "保存中..." : "保存回放样本"}
+              </button>
+            </div>
+
+            <label className="inline-field governance-wide-field" htmlFor="open-platform-replay-dataset-cases-editor">
+              样本编辑器（JSON）
+              <textarea
+                id="open-platform-replay-dataset-cases-editor"
+                value={replayDatasetCasesEditor}
+                onChange={(event) => setReplayDatasetCasesEditor(event.target.value)}
+                placeholder='[{"caseId":"case-1","sortOrder":0,"input":"示例问题","expectedOutput":"示例答案"}]'
+                rows={10}
+              />
+            </label>
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field governance-wide-field" htmlFor="open-platform-replay-materialize-session-ids">
+                sessionIds（可选，逗号分隔）
+                <input
+                  id="open-platform-replay-materialize-session-ids"
+                  type="text"
+                  value={replayMaterializeSessionIds}
+                  onChange={(event) => setReplayMaterializeSessionIds(event.target.value)}
+                  placeholder="优先按指定 sessionId 物化"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-replay-materialize-keyword">
+                keyword
+                <input
+                  id="open-platform-replay-materialize-keyword"
+                  type="text"
+                  value={replayMaterializeKeyword}
+                  onChange={(event) => setReplayMaterializeKeyword(event.target.value)}
+                  placeholder="按会话关键词过滤"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-replay-materialize-tool">
+                tool
+                <input
+                  id="open-platform-replay-materialize-tool"
+                  type="text"
+                  value={replayMaterializeTool}
+                  onChange={(event) => setReplayMaterializeTool(event.target.value)}
+                  placeholder="如 Codex CLI"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-replay-materialize-model">
+                model
+                <input
+                  id="open-platform-replay-materialize-model"
+                  type="text"
+                  value={replayMaterializeModel}
+                  onChange={(event) => setReplayMaterializeModel(event.target.value)}
+                  placeholder="如 gpt-5-codex"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-replay-materialize-from">
+                from
+                <input
+                  id="open-platform-replay-materialize-from"
+                  type="datetime-local"
+                  value={replayMaterializeFrom}
+                  onChange={(event) => setReplayMaterializeFrom(event.target.value)}
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-replay-materialize-to">
+                to
+                <input
+                  id="open-platform-replay-materialize-to"
+                  type="datetime-local"
+                  value={replayMaterializeTo}
+                  onChange={(event) => setReplayMaterializeTo(event.target.value)}
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-replay-materialize-sample-limit">
+                sampleLimit（materialize）
+                <input
+                  id="open-platform-replay-materialize-sample-limit"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={replayMaterializeSampleLimit}
+                  onChange={(event) => setReplayMaterializeSampleLimit(event.target.value)}
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-replay-materialize-sanitized">
+                sanitized
+                <select
+                  id="open-platform-replay-materialize-sanitized"
+                  value={replayMaterializeSanitized ? "true" : "false"}
+                  onChange={(event) => setReplayMaterializeSanitized(event.target.value === "true")}
+                >
+                  <option value="true">true</option>
+                  <option value="false">false</option>
+                </select>
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={materializeReplayDatasetCasesMutation.isPending}
+                onClick={() => {
+                  const datasetId = replayDatasetCasesDatasetId.trim();
+                  const sampleLimit = Number(replayMaterializeSampleLimit);
+                  if (!datasetId) {
+                    setReplayFeedback(null);
+                    setReplayError("历史会话物化前请先填写 datasetId。");
+                    return;
+                  }
+                  if (
+                    replayMaterializeSampleLimit.trim().length > 0 &&
+                    (!Number.isInteger(sampleLimit) || sampleLimit <= 0)
+                  ) {
+                    setReplayFeedback(null);
+                    setReplayError("materialize 的 sampleLimit 必须是正整数。");
+                    return;
+                  }
+                  const sessionIds = replayMaterializeSessionIds
+                    .split(",")
+                    .map((item) => item.trim())
+                    .filter(Boolean);
+                  const filters = {
+                    keyword: replayMaterializeKeyword.trim() || undefined,
+                    tool: replayMaterializeTool.trim() || undefined,
+                    model: replayMaterializeModel.trim() || undefined,
+                    from: replayMaterializeFrom ? new Date(replayMaterializeFrom).toISOString() : undefined,
+                    to: replayMaterializeTo ? new Date(replayMaterializeTo).toISOString() : undefined,
+                  };
+                  if (
+                    sessionIds.length === 0 &&
+                    !filters.keyword &&
+                    !filters.tool &&
+                    !filters.model &&
+                    !filters.from &&
+                    !filters.to
+                  ) {
+                    setReplayFeedback(null);
+                    setReplayError("请提供 sessionIds，或至少一个会话筛选条件。");
+                    return;
+                  }
+                  setReplayFeedback(null);
+                  setReplayError(null);
+                  materializeReplayDatasetCasesMutation.mutate({
+                    datasetId,
+                    sessionIds: sessionIds.length > 0 ? sessionIds : undefined,
+                    filters,
+                    sampleLimit:
+                      replayMaterializeSampleLimit.trim().length > 0 ? sampleLimit : undefined,
+                    sanitized: replayMaterializeSanitized,
+                  });
+                }}
+              >
+                {materializeReplayDatasetCasesMutation.isPending ? "物化中..." : "从历史会话物化样本"}
+              </button>
+            </div>
+
+            {replayMaterializePayload ? (
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <tbody>
+                    <tr>
+                      <th>最近物化</th>
+                      <td>
+                        {replayMaterializePayload.sourceType} / materialized {replayMaterializePayload.materialized} /
+                        skipped {replayMaterializePayload.skipped}
+                      </td>
+                      <th>来源分布</th>
+                      <td>{formatCompactJson(replayMaterializePayload.sourceSummary)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="open-platform-replay-create-run-baseline-id">
+                datasetId（create run）
+                <input
+                  id="open-platform-replay-create-run-baseline-id"
+                  type="text"
+                  list="open-platform-replay-baseline-options"
+                  value={replayCreateRunDatasetId}
+                  onChange={(event) => setReplayCreateRunDatasetId(event.target.value)}
+                  placeholder="必填"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-replay-create-run-candidate-label">
+                candidateLabel
+                <input
+                  id="open-platform-replay-create-run-candidate-label"
+                  type="text"
+                  value={replayCreateRunCandidateLabel}
+                  onChange={(event) => setReplayCreateRunCandidateLabel(event.target.value)}
+                  placeholder="必填"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="open-platform-replay-create-run-sample-limit">
+                sampleLimit
+                <input
+                  id="open-platform-replay-create-run-sample-limit"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={replayCreateRunSampleLimit}
+                  onChange={(event) => setReplayCreateRunSampleLimit(event.target.value)}
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={createReplayRunMutation.isPending}
+                onClick={() => {
+                  const datasetId = replayCreateRunDatasetId.trim();
+                  const candidateLabel = replayCreateRunCandidateLabel.trim();
+                  const sampleLimit = Number(replayCreateRunSampleLimit);
+                  if (!datasetId || !candidateLabel) {
+                    setReplayFeedback(null);
+                    setReplayError("创建回放运行前请填写 datasetId 与 candidateLabel。");
+                    return;
+                  }
+                  if (
+                    replayCreateRunSampleLimit.trim().length > 0 &&
+                    (!Number.isInteger(sampleLimit) || sampleLimit <= 0)
+                  ) {
+                    setReplayFeedback(null);
+                    setReplayError("回放运行的 sampleLimit 必须是正整数。");
+                    return;
+                  }
+                  setReplayFeedback(null);
+                  setReplayError(null);
+                  createReplayRunMutation.mutate({
+                    datasetId,
+                    candidateLabel,
+                    sampleLimit:
+                      replayCreateRunSampleLimit.trim().length > 0 ? sampleLimit : undefined,
+                  });
+                }}
+              >
+                {createReplayRunMutation.isPending ? "创建中..." : "创建回放运行"}
               </button>
             </div>
 
             <div className="filters-row governance-inline-grid">
               <label className="inline-field" htmlFor="open-platform-replay-jobs-baseline-id">
-                baselineId（jobs）
+                datasetId（runs）
                 <input
                   id="open-platform-replay-jobs-baseline-id"
                   type="text"
                   list="open-platform-replay-baseline-options"
-                  value={replayJobsBaselineIdFilter}
-                  onChange={(event) => setReplayJobsBaselineIdFilter(event.target.value)}
+                  value={replayRunsDatasetIdFilter}
+                  onChange={(event) => setReplayRunsDatasetIdFilter(event.target.value)}
                   placeholder="可选"
                 />
               </label>
 
               <label className="inline-field" htmlFor="open-platform-replay-jobs-status">
-                状态（jobs）
+                状态（runs）
                 <select
                   id="open-platform-replay-jobs-status"
-                  value={replayJobsStatusFilter}
+                  value={replayRunsStatusFilter}
                   onChange={(event) =>
-                    setReplayJobsStatusFilter(event.target.value as OpenPlatformReplayJobStatus | "")
+                    setReplayRunsStatusFilter(event.target.value as OpenPlatformReplayJobStatus | "")
                   }
                 >
                   {OPEN_PLATFORM_REPLAY_JOB_STATUS_FILTER_OPTIONS.map((option) => (
@@ -6719,41 +8079,42 @@ function GovernancePage() {
               <button
                 type="button"
                 className="submit-button"
-                disabled={loadReplayJobsMutation.isPending}
+                disabled={loadReplayRunsMutation.isPending}
                 onClick={() => {
                   setReplayFeedback(null);
                   setReplayError(null);
-                  loadReplayJobsMutation.mutate({
-                    baselineId: replayJobsBaselineIdFilter.trim() || undefined,
-                    status: replayJobsStatusFilter || undefined,
+                  loadReplayRunsMutation.mutate({
+                    datasetId: replayRunsDatasetIdFilter.trim() || undefined,
+                    status: replayRunsStatusFilter || undefined,
                     limit: 50,
                   });
                 }}
               >
-                {loadReplayJobsMutation.isPending ? "查询中..." : "加载 Replay jobs"}
+                {loadReplayRunsMutation.isPending ? "查询中..." : "加载回放运行"}
               </button>
             </div>
 
             <div className="filters-row governance-inline-grid">
               <label className="inline-field" htmlFor="open-platform-replay-diff-baseline-id">
-                baselineId（diff）
+                datasetId（diff，可选校验）
                 <input
                   id="open-platform-replay-diff-baseline-id"
                   type="text"
                   list="open-platform-replay-baseline-options"
-                  value={replayDiffBaselineId}
-                  onChange={(event) => setReplayDiffBaselineId(event.target.value)}
-                  placeholder="必填"
+                  value={replayDiffDatasetId}
+                  onChange={(event) => setReplayDiffDatasetId(event.target.value)}
+                  placeholder="可选"
                 />
               </label>
 
               <label className="inline-field" htmlFor="open-platform-replay-diff-job-id">
-                jobId（diff）
+                runId（diff）
                 <input
                   id="open-platform-replay-diff-job-id"
                   type="text"
-                  value={replayDiffJobId}
-                  onChange={(event) => setReplayDiffJobId(event.target.value)}
+                  list="open-platform-replay-run-options"
+                  value={replayDiffRunId}
+                  onChange={(event) => setReplayDiffRunId(event.target.value)}
                   placeholder="必填"
                 />
               </label>
@@ -6774,34 +8135,94 @@ function GovernancePage() {
                 className="submit-button"
                 disabled={loadReplayDiffMutation.isPending}
                 onClick={() => {
-                  const baselineId = replayDiffBaselineId.trim();
-                  const jobId = replayDiffJobId.trim();
-                  if (!baselineId) {
+                  const datasetId = replayDiffDatasetId.trim();
+                  const runId = replayDiffRunId.trim();
+                  if (!runId) {
                     setReplayFeedback(null);
-                    setReplayError("Replay diff 的 baselineId 不能为空。");
-                    return;
-                  }
-                  if (!jobId) {
-                    setReplayFeedback(null);
-                    setReplayError("Replay diff 的 jobId 不能为空。");
+                    setReplayError("回放差异的 runId 不能为空。");
                     return;
                   }
                   setReplayFeedback(null);
                   setReplayError(null);
                   loadReplayDiffMutation.mutate({
-                    baselineId,
-                    jobId,
+                    datasetId: datasetId || undefined,
+                    runId,
                     keyword: replayDiffKeyword.trim() || undefined,
                     limit: 50,
                   });
                 }}
               >
-                {loadReplayDiffMutation.isPending ? "查询中..." : "加载 Replay diff"}
+                {loadReplayDiffMutation.isPending ? "查询中..." : "加载回放差异"}
+              </button>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="open-platform-replay-artifact-job-id">
+                runId（artifacts）
+                <input
+                  id="open-platform-replay-artifact-job-id"
+                  type="text"
+                  list="open-platform-replay-run-options"
+                  value={replayArtifactRunId}
+                  onChange={(event) => setReplayArtifactRunId(event.target.value)}
+                  placeholder="必填"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadReplayArtifactsMutation.isPending}
+                onClick={() => {
+                  const runId = replayArtifactRunId.trim();
+                  if (!runId) {
+                    setReplayFeedback(null);
+                    setReplayError("回放工件的 runId 不能为空。");
+                    return;
+                  }
+                  setReplayFeedback(null);
+                  setReplayError(null);
+                  loadReplayArtifactsMutation.mutate(runId);
+                }}
+              >
+                {loadReplayArtifactsMutation.isPending ? "查询中..." : "加载回放工件"}
               </button>
             </div>
 
             {replayFeedback ? <p className="feedback success">{replayFeedback}</p> : null}
             {replayError ? <p className="feedback error">{replayError}</p> : null}
+
+            {replaySelectedRunSummary ? (
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <tbody>
+                    <tr>
+                      <th>运行摘要</th>
+                      <td>
+                        total {String(replaySelectedRunSummary.totalCases ?? "--")} / processed{" "}
+                        {String(replaySelectedRunSummary.processedCases ?? "--")} / improved{" "}
+                        {String(replaySelectedRunSummary.improvedCases ?? "--")} / regressed{" "}
+                        {String(replaySelectedRunSummary.regressedCases ?? "--")}
+                      </td>
+                      <th>执行来源</th>
+                      <td>{String(replaySelectedRunSummary.executionSource ?? "--")}</td>
+                    </tr>
+                    <tr>
+                      <th>样本来源</th>
+                      <td>{formatCompactJson(
+                        replaySelectedRunSummary.sourceSummary &&
+                          typeof replaySelectedRunSummary.sourceSummary === "object" &&
+                          !Array.isArray(replaySelectedRunSummary.sourceSummary)
+                          ? (replaySelectedRunSummary.sourceSummary as Record<string, unknown>)
+                          : undefined
+                      )}</td>
+                      <th>digest</th>
+                      <td>{formatCompactJson(replaySelectedRunDigest ?? undefined)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
 
             <div className="table-wrapper">
               <table className="session-table">
@@ -6811,26 +8232,77 @@ function GovernancePage() {
                     <th>name</th>
                     <th>model</th>
                     <th>dataset</th>
+                    <th>来源</th>
                     <th>updatedAt</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {replayBaselineItems.length === 0 ? (
+                  {replayDatasetItems.length === 0 ? (
                     <tr>
-                      <td className="table-empty-cell" colSpan={5}>
-                        {hasLoadedReplayBaselines
-                          ? "无匹配 baseline。"
-                          : "尚未加载 baseline。"}
+                      <td className="table-empty-cell" colSpan={6}>
+                        {hasLoadedReplayDatasets
+                          ? "无匹配 dataset。"
+                          : "尚未加载 dataset。"}
                       </td>
                     </tr>
                   ) : (
-                    replayBaselineItems.map((item) => (
-                      <tr key={item.id}>
-                        <td>{item.id}</td>
+                    replayDatasetItems.map((item) => (
+                      <tr key={item.datasetId}>
+                        <td>{item.datasetId}</td>
                         <td>{item.name}</td>
                         <td>{item.model}</td>
-                        <td>{item.dataset}</td>
-                        <td>{formatDateTime(item.updatedAt)}</td>
+                        <td>{item.datasetRef ?? item.datasetId}</td>
+                        <td>{formatCompactJson(item.metadata)}</td>
+                        <td>
+                          <div className="governance-action-row">
+                            <span>{formatDateTime(item.updatedAt)}</span>
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() => {
+                                setReplayDatasetCasesDatasetId(item.datasetId);
+                                setReplayCreateRunDatasetId(item.datasetId);
+                                setReplayRunsDatasetIdFilter(item.datasetId);
+                                setReplayDiffDatasetId(item.datasetId);
+                              }}
+                            >
+                              使用此数据集
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>datasetId</th>
+                    <th>caseId</th>
+                    <th>sortOrder</th>
+                    <th>input</th>
+                    <th>metadata</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {replayDatasetCaseItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={5}>
+                        {hasLoadedReplayDatasetCases ? "无匹配样本。" : "尚未加载样本。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    replayDatasetCaseItems.map((item) => (
+                      <tr key={`${item.datasetId}:${item.caseId}`}>
+                        <td>{item.datasetId}</td>
+                        <td>{item.caseId}</td>
+                        <td>{item.sortOrder}</td>
+                        <td>{item.input}</td>
+                        <td>{formatCompactJson(item.metadata)}</td>
                       </tr>
                     ))
                   )}
@@ -6843,31 +8315,76 @@ function GovernancePage() {
                 <thead>
                   <tr>
                     <th>ID</th>
-                    <th>baselineId</th>
+                    <th>datasetId</th>
                     <th>status</th>
                     <th>cases</th>
                     <th>createdAt</th>
-                    <th>finishedAt</th>
+                    <th>操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {replayJobItems.length === 0 ? (
+                  {replayRunItems.length === 0 ? (
                     <tr>
                       <td className="table-empty-cell" colSpan={6}>
-                        {hasLoadedReplayJobs ? "无匹配 jobs。" : "尚未加载 jobs。"}
+                        {hasLoadedReplayJobs ? "无匹配 runs。" : "尚未加载 runs。"}
                       </td>
                     </tr>
                   ) : (
-                    replayJobItems.map((item) => (
-                      <tr key={item.id}>
-                        <td>{item.id}</td>
-                        <td>{item.baselineId}</td>
+                    replayRunItems.map((item) => (
+                      <tr key={item.runId}>
+                        <td>{item.runId}</td>
+                        <td>{item.datasetId}</td>
                         <td>{item.status}</td>
                         <td>
                           {item.passedCases}/{item.totalCases}（failed: {item.failedCases}）
                         </td>
                         <td>{formatDateTime(item.createdAt)}</td>
-                        <td>{item.finishedAt ? formatDateTime(item.finishedAt) : "--"}</td>
+                        <td>
+                          <div className="governance-action-row">
+                            <span>{item.finishedAt ? formatDateTime(item.finishedAt) : "--"}</span>
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() => {
+                                setReplayDiffDatasetId(item.datasetId);
+                                setReplayDiffRunId(item.runId);
+                                setReplayArtifactRunId(item.runId);
+                              }}
+                            >
+                              载入
+                            </button>
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() => {
+                                setReplayFeedback(null);
+                                setReplayError(null);
+                                setReplayDiffDatasetId(item.datasetId);
+                                setReplayDiffRunId(item.runId);
+                                loadReplayDiffMutation.mutate({
+                                  datasetId: item.datasetId,
+                                  runId: item.runId,
+                                  keyword: replayDiffKeyword.trim() || undefined,
+                                  limit: 50,
+                                });
+                              }}
+                            >
+                              查 diff
+                            </button>
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() => {
+                                setReplayFeedback(null);
+                                setReplayError(null);
+                                setReplayArtifactRunId(item.runId);
+                                loadReplayArtifactsMutation.mutate(item.runId);
+                              }}
+                            >
+                              查工件
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))
                   )}
@@ -6901,6 +8418,64 @@ function GovernancePage() {
                         <td>{item.summary}</td>
                         <td>{item.verdict}</td>
                         <td>{item.deltaScore.toFixed(3)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>type</th>
+                    <th>name</th>
+                    <th>contentType</th>
+                    <th>byteSize</th>
+                    <th>createdAt</th>
+                    <th>preview</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {replayArtifactItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={7}>
+                        {hasLoadedReplayArtifacts ? "无匹配 artifacts。" : "尚未加载 artifacts。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    replayArtifactItems.map((item) => (
+                      <tr key={`${replayArtifactPayload?.runId ?? "run"}:${item.type}`}>
+                        <td>{item.type}</td>
+                        <td>{item.name ?? item.downloadName ?? "--"}</td>
+                        <td>{item.contentType}</td>
+                        <td>{typeof item.byteSize === "number" ? item.byteSize : "--"}</td>
+                        <td>{item.createdAt ? formatDateTime(item.createdAt) : "--"}</td>
+                        <td>{formatCompactJson(item.inline)}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="table-action"
+                            disabled={downloadReplayArtifactMutation.isPending}
+                            onClick={() => {
+                              const runId = replayArtifactPayload?.runId?.trim();
+                              if (!runId) {
+                                setReplayFeedback(null);
+                                setReplayError("下载回放工件前请先加载工件列表。");
+                                return;
+                              }
+                              downloadReplayArtifactMutation.mutate({
+                                runId,
+                                artifactType: item.type,
+                                downloadName: item.downloadName ?? item.name,
+                              });
+                            }}
+                          >
+                            {downloadReplayArtifactMutation.isPending ? "下载中..." : "下载"}
+                          </button>
+                        </td>
                       </tr>
                     ))
                   )}

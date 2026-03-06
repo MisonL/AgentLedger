@@ -1,6 +1,7 @@
 export type MetricKey = "tokens" | "cost" | "sessions";
 export type SourceType = "local" | "ssh" | "sync-cache";
 export type SourceAccessMode = "realtime" | "sync" | "hybrid" | (string & {});
+export type AlertOrchestrationDispatchMode = "rule" | "fallback";
 
 export interface SourceSyncPayload {
   enabled?: boolean;
@@ -277,6 +278,7 @@ export interface AlertOrchestrationExecutionLog {
   severity?: AlertSeverity;
   sourceId?: string;
   channels: AlertOrchestrationChannel[];
+  dispatchMode: AlertOrchestrationDispatchMode;
   conflictRuleIds: string[];
   dedupeHit: boolean;
   suppressed: boolean;
@@ -293,6 +295,8 @@ export interface AlertOrchestrationExecutionListInput {
   sourceId?: string;
   dedupeHit?: boolean;
   suppressed?: boolean;
+  dispatchMode?: AlertOrchestrationDispatchMode;
+  hasConflict?: boolean;
   simulated?: boolean;
   from?: string;
   to?: string;
@@ -391,6 +395,10 @@ export interface ReplicationJobCreateInput {
 }
 
 export interface ReplicationJobCancelInput {
+  reason?: string;
+}
+
+export interface ReplicationJobApproveInput {
   reason?: string;
 }
 
@@ -606,7 +614,13 @@ export interface McpEvaluateResult {
 }
 
 export type OpenPlatformApiKeyStatus = "active" | "disabled";
-export type OpenPlatformReplayJobStatus = "queued" | "running" | "succeeded" | "failed";
+export type OpenPlatformReplayRunStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+export type OpenPlatformReplayJobStatus = OpenPlatformReplayRunStatus;
 export type OpenPlatformQualityDailyStatus = "pass" | "warn" | "fail";
 export type OpenPlatformReplayDiffVerdict = "improved" | "regressed" | "unchanged";
 
@@ -712,7 +726,14 @@ export interface OpenPlatformWebhookReplayResult {
 
 export interface OpenPlatformQualityDailyQueryInput {
   date?: string;
+  from?: string;
+  to?: string;
   metric?: string;
+  provider?: string;
+  repo?: string;
+  workflow?: string;
+  runId?: string;
+  groupBy?: "provider" | "repo" | "workflow" | "runId";
   limit?: number;
 }
 
@@ -728,6 +749,15 @@ export interface OpenPlatformQualityDailyItem {
 export interface OpenPlatformQualityDailyResponse {
   items: OpenPlatformQualityDailyItem[];
   total: number;
+  groups?: Array<{
+    groupBy: "provider" | "repo" | "workflow" | "runId";
+    value: string;
+    totalEvents: number;
+    passedEvents: number;
+    failedEvents: number;
+    passRate: number;
+    avgScore: number;
+  }>;
   filters: OpenPlatformQualityDailyQueryInput;
 }
 
@@ -752,61 +782,231 @@ export interface OpenPlatformQualityScorecardListResponse {
   filters: OpenPlatformQualityScorecardListInput;
 }
 
-export interface OpenPlatformReplayBaseline {
+export interface OpenPlatformQualityProjectTrendQueryInput {
+  from?: string;
+  to?: string;
+  metric?: string;
+  provider?: string;
+  workflow?: string;
+  includeUnknown?: boolean;
+  limit?: number;
+}
+
+export interface OpenPlatformQualityProjectTrendItem {
+  project: string;
+  metric: string;
+  totalEvents: number;
+  passedEvents: number;
+  failedEvents: number;
+  passRate: number;
+  avgScore: number;
+  totalCost: number;
+  totalTokens: number;
+  totalSessions: number;
+  costPerQualityPoint: number;
+}
+
+export interface OpenPlatformQualityProjectTrendSummary {
+  metric: string;
+  totalEvents: number;
+  passedEvents: number;
+  failedEvents: number;
+  passRate: number;
+  avgScore: number;
+  totalCost: number;
+  totalTokens: number;
+  totalSessions: number;
+  from?: string;
+  to?: string;
+}
+
+export interface OpenPlatformQualityProjectTrendResponse {
+  items: OpenPlatformQualityProjectTrendItem[];
+  total: number;
+  summary: OpenPlatformQualityProjectTrendSummary;
+  filters: Omit<OpenPlatformQualityProjectTrendQueryInput, "provider" | "workflow"> & {
+    metric?: string;
+    provider?: string | null;
+    workflow?: string | null;
+    includeUnknown?: boolean;
+  };
+}
+
+export interface OpenPlatformReplayDataset {
   id: string;
   name: string;
   model: string;
-  dataset: string;
+  datasetId: string;
+  datasetRef?: string;
+  promptVersion?: string;
+  sampleCount?: number;
+  caseCount?: number;
   description?: string;
+  metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
+export type OpenPlatformReplayBaseline = OpenPlatformReplayDataset;
 
-export interface OpenPlatformReplayBaselineListInput {
+export interface OpenPlatformReplayDatasetListInput {
   keyword?: string;
   limit?: number;
 }
+export type OpenPlatformReplayBaselineListInput = OpenPlatformReplayDatasetListInput;
 
-export interface OpenPlatformReplayBaselineListResponse {
-  items: OpenPlatformReplayBaseline[];
+export interface OpenPlatformReplayDatasetListResponse {
+  items: OpenPlatformReplayDataset[];
   total: number;
-  filters: OpenPlatformReplayBaselineListInput;
+  filters: OpenPlatformReplayDatasetListInput;
+}
+export type OpenPlatformReplayBaselineListResponse = OpenPlatformReplayDatasetListResponse;
+
+export interface OpenPlatformReplayDatasetCreateInput {
+  name: string;
+  datasetId?: string;
+  datasetRef?: string;
+  model: string;
+  promptVersion?: string;
+  sampleCount?: number;
+  metadata?: Record<string, unknown>;
+}
+export type OpenPlatformReplayBaselineCreateInput = OpenPlatformReplayDatasetCreateInput;
+
+export interface OpenPlatformReplayDatasetCase {
+  datasetId: string;
+  caseId: string;
+  sortOrder: number;
+  input: string;
+  expectedOutput?: string;
+  baselineOutput?: string;
+  candidateInput?: string;
+  metadata: Record<string, unknown>;
+  checksum?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
-export interface OpenPlatformReplayJob {
+export interface OpenPlatformReplayDatasetCaseWriteInput {
+  caseId?: string;
+  sortOrder?: number;
+  input: string;
+  expectedOutput?: string;
+  baselineOutput?: string;
+  candidateInput?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface OpenPlatformReplayDatasetCaseListResponse {
+  datasetId: string;
+  items: OpenPlatformReplayDatasetCase[];
+  total: number;
+}
+
+export interface OpenPlatformReplayDatasetCaseReplaceInput {
+  items: OpenPlatformReplayDatasetCaseWriteInput[];
+}
+
+export interface OpenPlatformReplayDatasetMaterializeFilters {
+  sourceId?: string;
+  keyword?: string;
+  clientType?: string;
+  tool?: string;
+  host?: string;
+  model?: string;
+  project?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface OpenPlatformReplayDatasetMaterializeInput {
+  sessionIds?: string[];
+  filters?: OpenPlatformReplayDatasetMaterializeFilters;
+  sampleLimit?: number;
+  sanitized?: boolean;
+  snapshotVersion?: string;
+}
+
+export interface OpenPlatformReplayDatasetMaterializeResponse {
+  datasetId: string;
+  sourceType: "session";
+  materialized: number;
+  skipped: number;
+  sourceSummary?: Record<string, number>;
+  items: OpenPlatformReplayDatasetCase[];
+  total: number;
+  filters: {
+    datasetId: string;
+    sessionIds?: string[];
+    filters?: OpenPlatformReplayDatasetMaterializeFilters;
+    sampleLimit?: number;
+    sanitized?: boolean;
+    snapshotVersion?: string;
+  };
+}
+
+export interface OpenPlatformReplayRun {
   id: string;
-  baselineId: string;
-  status: OpenPlatformReplayJobStatus;
+  runId: string;
+  jobId?: string;
+  datasetId: string;
+  baselineId?: string;
+  candidateLabel: string;
+  status: OpenPlatformReplayRunStatus;
   totalCases: number;
+  processedCases: number;
+  improvedCases: number;
+  regressedCases: number;
+  unchangedCases: number;
   passedCases: number;
   failedCases: number;
+  summary?: Record<string, unknown>;
   createdAt: string;
+  updatedAt?: string;
   finishedAt?: string;
 }
+export type OpenPlatformReplayJob = OpenPlatformReplayRun;
 
-export interface OpenPlatformReplayJobListInput {
+export interface OpenPlatformReplayRunListInput {
+  datasetId?: string;
   baselineId?: string;
-  status?: OpenPlatformReplayJobStatus;
+  status?: OpenPlatformReplayRunStatus;
   limit?: number;
 }
+export type OpenPlatformReplayJobListInput = OpenPlatformReplayRunListInput;
 
-export interface OpenPlatformReplayJobListResponse {
-  items: OpenPlatformReplayJob[];
+export interface OpenPlatformReplayRunListResponse {
+  items: OpenPlatformReplayRun[];
   total: number;
-  filters: OpenPlatformReplayJobListInput;
+  filters: OpenPlatformReplayRunListInput;
 }
+export type OpenPlatformReplayJobListResponse = OpenPlatformReplayRunListResponse;
+
+export interface OpenPlatformReplayRunCreateInput {
+  datasetId?: string;
+  baselineId?: string;
+  candidateLabel: string;
+  from?: string;
+  to?: string;
+  sampleLimit?: number;
+  metadata?: Record<string, unknown>;
+}
+export type OpenPlatformReplayJobCreateInput = OpenPlatformReplayRunCreateInput;
 
 export interface OpenPlatformReplayDiffQueryInput {
-  baselineId: string;
-  jobId: string;
+  datasetId?: string;
+  baselineId?: string;
+  runId?: string;
+  jobId?: string;
   keyword?: string;
   limit?: number;
 }
 
 export interface OpenPlatformReplayDiffItem {
   id: string;
-  baselineId: string;
-  jobId: string;
+  datasetId: string;
+  baselineId?: string;
+  runId: string;
+  jobId?: string;
   caseId: string;
   summary: string;
   verdict: OpenPlatformReplayDiffVerdict;
@@ -816,7 +1016,27 @@ export interface OpenPlatformReplayDiffItem {
 export interface OpenPlatformReplayDiffResponse {
   items: OpenPlatformReplayDiffItem[];
   total: number;
+  summary?: Record<string, unknown>;
   filters: OpenPlatformReplayDiffQueryInput;
+}
+
+export interface OpenPlatformReplayArtifact {
+  type: string;
+  contentType: string;
+  name?: string;
+  description?: string;
+  byteSize?: number;
+  downloadName?: string;
+  downloadUrl?: string;
+  createdAt?: string;
+  inline?: Record<string, unknown>;
+}
+
+export interface OpenPlatformReplayArtifactListResponse {
+  runId: string;
+  jobId?: string;
+  items: OpenPlatformReplayArtifact[];
+  total: number;
 }
 
 export interface SessionEvent {

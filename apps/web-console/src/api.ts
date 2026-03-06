@@ -4,6 +4,7 @@ import type {
   AlertListResponse,
   AlertMutableStatus,
   AlertOrchestrationChannel,
+  AlertOrchestrationDispatchMode,
   AlertOrchestrationEventType,
   AlertOrchestrationExecutionListInput,
   AlertOrchestrationExecutionListResponse,
@@ -53,9 +54,24 @@ import type {
   OpenPlatformQualityDailyQueryInput,
   OpenPlatformQualityDailyResponse,
   OpenPlatformQualityDailyStatus,
+  OpenPlatformQualityProjectTrendItem,
+  OpenPlatformQualityProjectTrendQueryInput,
+  OpenPlatformQualityProjectTrendResponse,
+  OpenPlatformQualityProjectTrendSummary,
   OpenPlatformQualityScorecard,
   OpenPlatformQualityScorecardListInput,
   OpenPlatformQualityScorecardListResponse,
+  OpenPlatformReplayArtifact,
+  OpenPlatformReplayArtifactListResponse,
+  OpenPlatformReplayDataset,
+  OpenPlatformReplayDatasetCase,
+  OpenPlatformReplayDatasetCaseListResponse,
+  OpenPlatformReplayDatasetMaterializeInput,
+  OpenPlatformReplayDatasetMaterializeResponse,
+  OpenPlatformReplayDatasetCaseReplaceInput,
+  OpenPlatformReplayDatasetCreateInput,
+  OpenPlatformReplayDatasetListInput,
+  OpenPlatformReplayDatasetListResponse,
   OpenPlatformReplayBaseline,
   OpenPlatformReplayBaselineListInput,
   OpenPlatformReplayBaselineListResponse,
@@ -67,6 +83,11 @@ import type {
   OpenPlatformReplayJobListInput,
   OpenPlatformReplayJobListResponse,
   OpenPlatformReplayJobStatus,
+  OpenPlatformReplayRun,
+  OpenPlatformReplayRunCreateInput,
+  OpenPlatformReplayRunListInput,
+  OpenPlatformReplayRunListResponse,
+  OpenPlatformReplayRunStatus,
   OpenPlatformWebhook,
   OpenPlatformWebhookListInput,
   OpenPlatformWebhookListResponse,
@@ -78,6 +99,7 @@ import type {
   PricingCatalogEntry,
   PricingCatalogUpsertInput,
   RegionDescriptor,
+  ReplicationJobApproveInput,
   ReplicationJobCancelInput,
   ReplicationJobCreateInput,
   ReplicationJobListInput,
@@ -148,6 +170,7 @@ const ALERT_SEVERITIES = ["warning", "critical"] as const;
 const ALERT_STATUSES = ["open", "acknowledged", "resolved"] as const;
 const ALERT_MUTABLE_STATUSES = ["acknowledged", "resolved"] as const;
 const ALERT_ORCHESTRATION_EVENT_TYPES = ["alert", "weekly"] as const;
+const ALERT_ORCHESTRATION_DISPATCH_MODES = ["rule", "fallback"] as const;
 const ALERT_ORCHESTRATION_CHANNELS = [
   "webhook",
   "wecom",
@@ -194,10 +217,11 @@ const OPEN_PLATFORM_QUALITY_DAILY_STATUSES: OpenPlatformQualityDailyStatus[] = [
   "fail",
 ];
 const OPEN_PLATFORM_REPLAY_JOB_STATUSES: OpenPlatformReplayJobStatus[] = [
-  "queued",
+  "pending",
   "running",
-  "succeeded",
+  "completed",
   "failed",
+  "cancelled",
 ];
 const OPEN_PLATFORM_REPLAY_DIFF_VERDICTS: OpenPlatformReplayDiffVerdict[] = [
   "improved",
@@ -1067,12 +1091,24 @@ function isOpenPlatformQualityDailyQueryInput(
   if (!isRecord(value)) {
     return false;
   }
-  const dateOk = value.date === undefined || isISODateString(value.date);
+  const dateOk = value.date === undefined || typeof value.date === "string";
+  const fromOk = value.from === undefined || isISODateString(value.from);
+  const toOk = value.to === undefined || isISODateString(value.to);
   const metricOk = value.metric === undefined || typeof value.metric === "string";
+  const providerOk = value.provider === undefined || typeof value.provider === "string";
+  const repoOk = value.repo === undefined || typeof value.repo === "string";
+  const workflowOk = value.workflow === undefined || typeof value.workflow === "string";
+  const runIdOk = value.runId === undefined || typeof value.runId === "string";
+  const groupByOk =
+    value.groupBy === undefined ||
+    value.groupBy === "provider" ||
+    value.groupBy === "repo" ||
+    value.groupBy === "workflow" ||
+    value.groupBy === "runId";
   const limitOk =
     value.limit === undefined ||
     (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
-  return dateOk && metricOk && limitOk;
+  return dateOk && fromOk && toOk && metricOk && providerOk && repoOk && workflowOk && runIdOk && groupByOk && limitOk;
 }
 
 function isOpenPlatformQualityDailyItem(value: unknown): value is OpenPlatformQualityDailyItem {
@@ -1093,6 +1129,31 @@ function isOpenPlatformQualityDailyItem(value: unknown): value is OpenPlatformQu
   );
 }
 
+function isOpenPlatformQualityDailyGroup(
+  value: unknown
+): value is NonNullable<OpenPlatformQualityDailyResponse["groups"]>[number] {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    (value.groupBy === "provider" ||
+      value.groupBy === "repo" ||
+      value.groupBy === "workflow" ||
+      value.groupBy === "runId") &&
+    typeof value.value === "string" &&
+    typeof value.totalEvents === "number" &&
+    Number.isFinite(value.totalEvents) &&
+    typeof value.passedEvents === "number" &&
+    Number.isFinite(value.passedEvents) &&
+    typeof value.failedEvents === "number" &&
+    Number.isFinite(value.failedEvents) &&
+    typeof value.passRate === "number" &&
+    Number.isFinite(value.passRate) &&
+    typeof value.avgScore === "number" &&
+    Number.isFinite(value.avgScore)
+  );
+}
+
 function isOpenPlatformQualityDailyResponse(
   value: unknown
 ): value is OpenPlatformQualityDailyResponse {
@@ -1105,6 +1166,9 @@ function isOpenPlatformQualityDailyResponse(
     typeof value.total === "number" &&
     Number.isInteger(value.total) &&
     value.total >= 0 &&
+    (value.groups === undefined ||
+      (Array.isArray(value.groups) &&
+        value.groups.every((item) => isOpenPlatformQualityDailyGroup(item)))) &&
     isOpenPlatformQualityDailyQueryInput(value.filters)
   );
 }
@@ -1155,17 +1219,148 @@ function isOpenPlatformQualityScorecardListResponse(
   );
 }
 
+function isOpenPlatformQualityProjectTrendQueryInput(
+  value: unknown
+): value is OpenPlatformQualityProjectTrendQueryInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const fromOk = value.from === undefined || typeof value.from === "string";
+  const toOk = value.to === undefined || typeof value.to === "string";
+  const metricOk = value.metric === undefined || typeof value.metric === "string";
+  const providerOk =
+    value.provider === undefined || value.provider === null || typeof value.provider === "string";
+  const workflowOk =
+    value.workflow === undefined || value.workflow === null || typeof value.workflow === "string";
+  const includeUnknownOk =
+    value.includeUnknown === undefined || typeof value.includeUnknown === "boolean";
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
+  return fromOk && toOk && metricOk && providerOk && workflowOk && includeUnknownOk && limitOk;
+}
+
+function isOpenPlatformQualityProjectTrendItem(
+  value: unknown
+): value is OpenPlatformQualityProjectTrendItem {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.project === "string" &&
+    typeof value.metric === "string" &&
+    typeof value.totalEvents === "number" &&
+    Number.isInteger(value.totalEvents) &&
+    value.totalEvents >= 0 &&
+    typeof value.passedEvents === "number" &&
+    Number.isInteger(value.passedEvents) &&
+    value.passedEvents >= 0 &&
+    typeof value.failedEvents === "number" &&
+    Number.isInteger(value.failedEvents) &&
+    value.failedEvents >= 0 &&
+    typeof value.passRate === "number" &&
+    Number.isFinite(value.passRate) &&
+    typeof value.avgScore === "number" &&
+    Number.isFinite(value.avgScore) &&
+    typeof value.totalCost === "number" &&
+    Number.isFinite(value.totalCost) &&
+    typeof value.totalTokens === "number" &&
+    Number.isInteger(value.totalTokens) &&
+    value.totalTokens >= 0 &&
+    typeof value.totalSessions === "number" &&
+    Number.isInteger(value.totalSessions) &&
+    value.totalSessions >= 0 &&
+    typeof value.costPerQualityPoint === "number" &&
+    Number.isFinite(value.costPerQualityPoint)
+  );
+}
+
+function isOpenPlatformQualityProjectTrendSummary(
+  value: unknown
+): value is OpenPlatformQualityProjectTrendSummary {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const fromOk = value.from === undefined || value.from === null || isISODateString(value.from);
+  const toOk = value.to === undefined || value.to === null || isISODateString(value.to);
+  return (
+    typeof value.metric === "string" &&
+    typeof value.totalEvents === "number" &&
+    Number.isInteger(value.totalEvents) &&
+    value.totalEvents >= 0 &&
+    typeof value.passedEvents === "number" &&
+    Number.isInteger(value.passedEvents) &&
+    value.passedEvents >= 0 &&
+    typeof value.failedEvents === "number" &&
+    Number.isInteger(value.failedEvents) &&
+    value.failedEvents >= 0 &&
+    typeof value.passRate === "number" &&
+    Number.isFinite(value.passRate) &&
+    typeof value.avgScore === "number" &&
+    Number.isFinite(value.avgScore) &&
+    typeof value.totalCost === "number" &&
+    Number.isFinite(value.totalCost) &&
+    typeof value.totalTokens === "number" &&
+    Number.isInteger(value.totalTokens) &&
+    value.totalTokens >= 0 &&
+    typeof value.totalSessions === "number" &&
+    Number.isInteger(value.totalSessions) &&
+    value.totalSessions >= 0 &&
+    fromOk &&
+    toOk
+  );
+}
+
+function isOpenPlatformQualityProjectTrendResponse(
+  value: unknown
+): value is OpenPlatformQualityProjectTrendResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isOpenPlatformQualityProjectTrendItem(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isOpenPlatformQualityProjectTrendSummary(value.summary) &&
+    isOpenPlatformQualityProjectTrendQueryInput(value.filters)
+  );
+}
+
 function isOpenPlatformReplayBaseline(value: unknown): value is OpenPlatformReplayBaseline {
   if (!isRecord(value)) {
     return false;
   }
   const descriptionOk =
     value.description === undefined || value.description === null || typeof value.description === "string";
+  const datasetRefOk =
+    value.datasetRef === undefined || value.datasetRef === null || typeof value.datasetRef === "string";
+  const promptVersionOk =
+    value.promptVersion === undefined ||
+    value.promptVersion === null ||
+    typeof value.promptVersion === "string";
+  const sampleCountOk =
+    value.sampleCount === undefined ||
+    value.sampleCount === null ||
+    (typeof value.sampleCount === "number" &&
+      Number.isInteger(value.sampleCount) &&
+      value.sampleCount >= 0);
+  const caseCountOk =
+    value.caseCount === undefined ||
+    value.caseCount === null ||
+    (typeof value.caseCount === "number" &&
+      Number.isInteger(value.caseCount) &&
+      value.caseCount >= 0);
   return (
     typeof value.id === "string" &&
     typeof value.name === "string" &&
     typeof value.model === "string" &&
-    typeof value.dataset === "string" &&
+    typeof value.datasetId === "string" &&
+    datasetRefOk &&
+    promptVersionOk &&
+    sampleCountOk &&
+    caseCountOk &&
     descriptionOk &&
     isISODateString(value.createdAt) &&
     isISODateString(value.updatedAt)
@@ -1205,15 +1400,38 @@ function isOpenPlatformReplayJob(value: unknown): value is OpenPlatformReplayJob
   if (!isRecord(value)) {
     return false;
   }
+  const baselineIdOk =
+    value.baselineId === undefined || value.baselineId === null || typeof value.baselineId === "string";
+  const jobIdOk = value.jobId === undefined || value.jobId === null || typeof value.jobId === "string";
   const finishedAtOk =
     value.finishedAt === undefined || value.finishedAt === null || isISODateString(value.finishedAt);
+  const updatedAtOk =
+    value.updatedAt === undefined || value.updatedAt === null || isISODateString(value.updatedAt);
+  const summaryOk =
+    value.summary === undefined || value.summary === null || isRecord(value.summary);
   return (
     typeof value.id === "string" &&
-    typeof value.baselineId === "string" &&
+    typeof value.runId === "string" &&
+    jobIdOk &&
+    typeof value.datasetId === "string" &&
+    baselineIdOk &&
+    typeof value.candidateLabel === "string" &&
     isOpenPlatformReplayJobStatus(value.status) &&
     typeof value.totalCases === "number" &&
     Number.isInteger(value.totalCases) &&
     value.totalCases >= 0 &&
+    typeof value.processedCases === "number" &&
+    Number.isInteger(value.processedCases) &&
+    value.processedCases >= 0 &&
+    typeof value.improvedCases === "number" &&
+    Number.isInteger(value.improvedCases) &&
+    value.improvedCases >= 0 &&
+    typeof value.regressedCases === "number" &&
+    Number.isInteger(value.regressedCases) &&
+    value.regressedCases >= 0 &&
+    typeof value.unchangedCases === "number" &&
+    Number.isInteger(value.unchangedCases) &&
+    value.unchangedCases >= 0 &&
     typeof value.passedCases === "number" &&
     Number.isInteger(value.passedCases) &&
     value.passedCases >= 0 &&
@@ -1221,7 +1439,11 @@ function isOpenPlatformReplayJob(value: unknown): value is OpenPlatformReplayJob
     Number.isInteger(value.failedCases) &&
     value.failedCases >= 0 &&
     value.passedCases + value.failedCases <= value.totalCases &&
+    value.processedCases <= value.totalCases &&
+    value.improvedCases + value.regressedCases + value.unchangedCases <= value.processedCases &&
+    summaryOk &&
     isISODateString(value.createdAt) &&
+    updatedAtOk &&
     finishedAtOk
   );
 }
@@ -1230,12 +1452,13 @@ function isOpenPlatformReplayJobListInput(value: unknown): value is OpenPlatform
   if (!isRecord(value)) {
     return false;
   }
+  const datasetIdOk = value.datasetId === undefined || typeof value.datasetId === "string";
   const baselineIdOk = value.baselineId === undefined || typeof value.baselineId === "string";
   const statusOk = value.status === undefined || isOpenPlatformReplayJobStatus(value.status);
   const limitOk =
     value.limit === undefined ||
     (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
-  return baselineIdOk && statusOk && limitOk;
+  return datasetIdOk && baselineIdOk && statusOk && limitOk;
 }
 
 function isOpenPlatformReplayJobListResponse(
@@ -1260,23 +1483,31 @@ function isOpenPlatformReplayDiffQueryInput(
   if (!isRecord(value)) {
     return false;
   }
-  const baselineIdOk = typeof value.baselineId === "string";
-  const jobIdOk = typeof value.jobId === "string";
+  const datasetIdOk = value.datasetId === undefined || typeof value.datasetId === "string";
+  const baselineIdOk = value.baselineId === undefined || typeof value.baselineId === "string";
+  const runIdOk = value.runId === undefined || typeof value.runId === "string";
+  const jobIdOk = value.jobId === undefined || typeof value.jobId === "string";
+  const hasRunIdentifier = typeof value.runId === "string" || typeof value.jobId === "string";
   const keywordOk = value.keyword === undefined || typeof value.keyword === "string";
   const limitOk =
     value.limit === undefined ||
     (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1);
-  return baselineIdOk && jobIdOk && keywordOk && limitOk;
+  return datasetIdOk && baselineIdOk && runIdOk && jobIdOk && hasRunIdentifier && keywordOk && limitOk;
 }
 
 function isOpenPlatformReplayDiffItem(value: unknown): value is OpenPlatformReplayDiffItem {
   if (!isRecord(value)) {
     return false;
   }
+  const baselineIdOk =
+    value.baselineId === undefined || value.baselineId === null || typeof value.baselineId === "string";
+  const jobIdOk = value.jobId === undefined || value.jobId === null || typeof value.jobId === "string";
   return (
     typeof value.id === "string" &&
-    typeof value.baselineId === "string" &&
-    typeof value.jobId === "string" &&
+    typeof value.datasetId === "string" &&
+    baselineIdOk &&
+    typeof value.runId === "string" &&
+    jobIdOk &&
     typeof value.caseId === "string" &&
     typeof value.summary === "string" &&
     isOpenPlatformReplayDiffVerdict(value.verdict) &&
@@ -1289,13 +1520,159 @@ function isOpenPlatformReplayDiffResponse(value: unknown): value is OpenPlatform
   if (!isRecord(value)) {
     return false;
   }
+  const summaryOk = value.summary === undefined || value.summary === null || isRecord(value.summary);
   return (
     Array.isArray(value.items) &&
     value.items.every((item) => isOpenPlatformReplayDiffItem(item)) &&
     typeof value.total === "number" &&
     Number.isInteger(value.total) &&
     value.total >= 0 &&
+    summaryOk &&
     isOpenPlatformReplayDiffQueryInput(value.filters)
+  );
+}
+
+function isOpenPlatformReplayDatasetCase(value: unknown): value is OpenPlatformReplayDatasetCase {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const expectedOutputOk =
+    value.expectedOutput === undefined ||
+    value.expectedOutput === null ||
+    typeof value.expectedOutput === "string";
+  const baselineOutputOk =
+    value.baselineOutput === undefined ||
+    value.baselineOutput === null ||
+    typeof value.baselineOutput === "string";
+  const candidateInputOk =
+    value.candidateInput === undefined ||
+    value.candidateInput === null ||
+    typeof value.candidateInput === "string";
+  const checksumOk =
+    value.checksum === undefined || value.checksum === null || typeof value.checksum === "string";
+  const createdAtOk =
+    value.createdAt === undefined || value.createdAt === null || isISODateString(value.createdAt);
+  const updatedAtOk =
+    value.updatedAt === undefined || value.updatedAt === null || isISODateString(value.updatedAt);
+  return (
+    typeof value.datasetId === "string" &&
+    typeof value.caseId === "string" &&
+    typeof value.sortOrder === "number" &&
+    Number.isInteger(value.sortOrder) &&
+    value.sortOrder >= 0 &&
+    typeof value.input === "string" &&
+    value.input.length > 0 &&
+    expectedOutputOk &&
+    baselineOutputOk &&
+    candidateInputOk &&
+    isRecord(value.metadata) &&
+    checksumOk &&
+    createdAtOk &&
+    updatedAtOk
+  );
+}
+
+function isOpenPlatformReplayDatasetCaseListResponse(
+  value: unknown
+): value is OpenPlatformReplayDatasetCaseListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.datasetId === "string" &&
+    Array.isArray(value.items) &&
+    value.items.every((item) => isOpenPlatformReplayDatasetCase(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0
+  );
+}
+
+function isOpenPlatformReplayDatasetMaterializeResponse(
+  value: unknown
+): value is OpenPlatformReplayDatasetMaterializeResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const sourceTypeOk = value.sourceType === "session";
+  const materializedOk =
+    typeof value.materialized === "number" &&
+    Number.isInteger(value.materialized) &&
+    value.materialized >= 0;
+  const skippedOk =
+    typeof value.skipped === "number" &&
+    Number.isInteger(value.skipped) &&
+    value.skipped >= 0;
+  const filtersOk = isRecord(value.filters);
+  return (
+    typeof value.datasetId === "string" &&
+    sourceTypeOk &&
+    materializedOk &&
+    skippedOk &&
+    Array.isArray(value.items) &&
+    value.items.every((item) => isOpenPlatformReplayDatasetCase(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    filtersOk
+  );
+}
+
+function isOpenPlatformReplayArtifact(value: unknown): value is OpenPlatformReplayArtifact {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const nameOk = value.name === undefined || value.name === null || typeof value.name === "string";
+  const descriptionOk =
+    value.description === undefined ||
+    value.description === null ||
+    typeof value.description === "string";
+  const byteSizeOk =
+    value.byteSize === undefined ||
+    value.byteSize === null ||
+    (typeof value.byteSize === "number" && Number.isInteger(value.byteSize) && value.byteSize >= 0);
+  const downloadNameOk =
+    value.downloadName === undefined ||
+    value.downloadName === null ||
+    typeof value.downloadName === "string";
+  const downloadUrlOk =
+    value.downloadUrl === undefined ||
+    value.downloadUrl === null ||
+    typeof value.downloadUrl === "string";
+  const createdAtOk =
+    value.createdAt === undefined || value.createdAt === null || isISODateString(value.createdAt);
+  const inlineOk =
+    value.inline === undefined ||
+    value.inline === null ||
+    isRecord(value.inline);
+  return (
+    typeof value.type === "string" &&
+    typeof value.contentType === "string" &&
+    nameOk &&
+    descriptionOk &&
+    byteSizeOk &&
+    downloadNameOk &&
+    downloadUrlOk &&
+    createdAtOk &&
+    inlineOk
+  );
+}
+
+function isOpenPlatformReplayArtifactListResponse(
+  value: unknown
+): value is OpenPlatformReplayArtifactListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const jobIdOk = value.jobId === undefined || value.jobId === null || typeof value.jobId === "string";
+  return (
+    typeof value.runId === "string" &&
+    jobIdOk &&
+    Array.isArray(value.items) &&
+    value.items.every((item) => isOpenPlatformReplayArtifact(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0
   );
 }
 
@@ -1491,6 +1868,15 @@ function isAlertOrchestrationChannel(value: unknown): value is AlertOrchestratio
   );
 }
 
+function isAlertOrchestrationDispatchMode(
+  value: unknown
+): value is AlertOrchestrationDispatchMode {
+  return (
+    typeof value === "string" &&
+    ALERT_ORCHESTRATION_DISPATCH_MODES.includes(value as AlertOrchestrationDispatchMode)
+  );
+}
+
 function isExportFormat(value: unknown): value is ExportFormat {
   return typeof value === "string" && EXPORT_FORMATS.includes(value as ExportFormat);
 }
@@ -1663,6 +2049,7 @@ function isAlertOrchestrationExecutionLog(
     sourceIdOk &&
     Array.isArray(value.channels) &&
     value.channels.every((channel) => isAlertOrchestrationChannel(channel)) &&
+    isAlertOrchestrationDispatchMode(value.dispatchMode) &&
     Array.isArray(value.conflictRuleIds) &&
     value.conflictRuleIds.every((ruleId) => typeof ruleId === "string") &&
     typeof value.dedupeHit === "boolean" &&
@@ -1686,6 +2073,9 @@ function isAlertOrchestrationExecutionListInput(
   const sourceIdOk = value.sourceId === undefined || typeof value.sourceId === "string";
   const dedupeHitOk = value.dedupeHit === undefined || typeof value.dedupeHit === "boolean";
   const suppressedOk = value.suppressed === undefined || typeof value.suppressed === "boolean";
+  const dispatchModeOk =
+    value.dispatchMode === undefined || isAlertOrchestrationDispatchMode(value.dispatchMode);
+  const hasConflictOk = value.hasConflict === undefined || typeof value.hasConflict === "boolean";
   const simulatedOk = value.simulated === undefined || typeof value.simulated === "boolean";
   const fromOk = value.from === undefined || isISODateString(value.from);
   const toOk = value.to === undefined || isISODateString(value.to);
@@ -1700,6 +2090,8 @@ function isAlertOrchestrationExecutionListInput(
     sourceIdOk &&
     dedupeHitOk &&
     suppressedOk &&
+    dispatchModeOk &&
+    hasConflictOk &&
     simulatedOk &&
     fromOk &&
     toOk &&
@@ -1924,6 +2316,12 @@ function buildAlertOrchestrationExecutionListQuery(
   if (typeof input.suppressed === "boolean") {
     params.set("suppressed", String(input.suppressed));
   }
+  if (input.dispatchMode) {
+    params.set("dispatchMode", input.dispatchMode);
+  }
+  if (typeof input.hasConflict === "boolean") {
+    params.set("hasConflict", String(input.hasConflict));
+  }
   if (typeof input.simulated === "boolean") {
     params.set("simulated", String(input.simulated));
   }
@@ -2110,13 +2508,43 @@ function buildOpenPlatformQualityDailyQuery(input?: OpenPlatformQualityDailyQuer
     return "";
   }
   const params = new URLSearchParams();
-  if (typeof input.date === "string" && input.date.trim().length > 0) {
-    const normalized = input.date.trim();
+  const date = typeof input.date === "string" ? input.date.trim() : "";
+  const from = typeof input.from === "string" ? input.from.trim() : "";
+  const to = typeof input.to === "string" ? input.to.trim() : "";
+  if (date) {
+    const normalized = date;
     params.set("from", `${normalized}T00:00:00.000Z`);
     params.set("to", `${normalized}T23:59:59.999Z`);
+  } else {
+    if (from) {
+      params.set("from", from);
+    }
+    if (to) {
+      params.set("to", to);
+    }
   }
   if (typeof input.metric === "string" && input.metric.trim().length > 0) {
     params.set("metric", input.metric.trim());
+  }
+  if (typeof input.provider === "string" && input.provider.trim().length > 0) {
+    params.set("provider", input.provider.trim());
+  }
+  if (typeof input.repo === "string" && input.repo.trim().length > 0) {
+    params.set("repo", input.repo.trim());
+  }
+  if (typeof input.workflow === "string" && input.workflow.trim().length > 0) {
+    params.set("workflow", input.workflow.trim());
+  }
+  if (typeof input.runId === "string" && input.runId.trim().length > 0) {
+    params.set("runId", input.runId.trim());
+  }
+  if (
+    input.groupBy === "provider" ||
+    input.groupBy === "repo" ||
+    input.groupBy === "workflow" ||
+    input.groupBy === "runId"
+  ) {
+    params.set("groupBy", input.groupBy);
   }
   if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit >= 1) {
     params.set("limit", String(input.limit));
@@ -2134,6 +2562,38 @@ function buildOpenPlatformQualityScorecardListQuery(
   const params = new URLSearchParams();
   if (typeof input.team === "string" && input.team.trim().length > 0) {
     params.set("metric", input.team.trim());
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit >= 1) {
+    params.set("limit", String(input.limit));
+  }
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function buildOpenPlatformQualityProjectTrendQuery(
+  input?: OpenPlatformQualityProjectTrendQueryInput
+): string {
+  if (!input) {
+    return "";
+  }
+  const params = new URLSearchParams();
+  if (typeof input.from === "string" && input.from.trim().length > 0) {
+    params.set("from", input.from.trim());
+  }
+  if (typeof input.to === "string" && input.to.trim().length > 0) {
+    params.set("to", input.to.trim());
+  }
+  if (typeof input.metric === "string" && input.metric.trim().length > 0) {
+    params.set("metric", input.metric.trim());
+  }
+  if (typeof input.provider === "string" && input.provider.trim().length > 0) {
+    params.set("provider", input.provider.trim());
+  }
+  if (typeof input.workflow === "string" && input.workflow.trim().length > 0) {
+    params.set("workflow", input.workflow.trim());
+  }
+  if (typeof input.includeUnknown === "boolean") {
+    params.set("includeUnknown", input.includeUnknown ? "true" : "false");
   }
   if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit >= 1) {
     params.set("limit", String(input.limit));
@@ -2164,17 +2624,17 @@ function buildOpenPlatformReplayJobListQuery(input?: OpenPlatformReplayJobListIn
     return "";
   }
   const params = new URLSearchParams();
-  if (typeof input.baselineId === "string" && input.baselineId.trim().length > 0) {
-    params.set("baselineId", input.baselineId.trim());
+  const datasetId =
+    typeof input.datasetId === "string" && input.datasetId.trim().length > 0
+      ? input.datasetId.trim()
+      : typeof input.baselineId === "string" && input.baselineId.trim().length > 0
+        ? input.baselineId.trim()
+        : "";
+  if (datasetId) {
+    params.set("datasetId", datasetId);
   }
   if (input.status) {
-    const status =
-      input.status === "queued"
-        ? "pending"
-        : input.status === "succeeded"
-          ? "completed"
-          : input.status;
-    params.set("status", status);
+    params.set("status", input.status);
   }
   if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit >= 1) {
     params.set("limit", String(input.limit));
@@ -2185,7 +2645,21 @@ function buildOpenPlatformReplayJobListQuery(input?: OpenPlatformReplayJobListIn
 
 function buildOpenPlatformReplayDiffQuery(input: OpenPlatformReplayDiffQueryInput): string {
   const params = new URLSearchParams();
-  params.set("baselineId", input.baselineId);
+  const datasetId =
+    typeof input.datasetId === "string" && input.datasetId.trim().length > 0
+      ? input.datasetId.trim()
+      : typeof input.baselineId === "string" && input.baselineId.trim().length > 0
+        ? input.baselineId.trim()
+        : "";
+  if (datasetId) {
+    params.set("datasetId", datasetId);
+  }
+  if (typeof input.keyword === "string" && input.keyword.trim().length > 0) {
+    params.set("keyword", input.keyword.trim());
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit >= 1) {
+    params.set("limit", String(input.limit));
+  }
   return params.toString().length > 0 ? `?${params.toString()}` : "";
 }
 
@@ -3384,18 +3858,58 @@ export async function testSourceConnection(
 export async function fetchResidencyRegions(
   signal?: AbortSignal
 ): Promise<ResidencyRegionListResponse> {
-  const result = await requestJson<unknown>("/api/v1/residency/regions", undefined, signal);
-  if (!isResidencyRegionListResponse(result)) {
-    throw new Error("residency.regions 返回结构不合法");
+  const result = await requestJson<unknown>(
+    "/api/v2/residency/region-mappings",
+    undefined,
+    signal
+  );
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    throw new Error("residency.region-mappings 返回结构不合法");
   }
-  return result;
+  const items: RegionDescriptor[] = result.items
+    .map((item) => {
+      if (!isRecord(item)) {
+        return null;
+      }
+      const metadata = isRecord(item.metadata) ? item.metadata : undefined;
+      const id = asString(item.id) ?? asString(item.regionId);
+      const name = asString(item.name) ?? asString(item.regionName) ?? id;
+      if (!id || !name) {
+        return null;
+      }
+      const active = typeof item.active === "boolean" ? item.active : true;
+      const description =
+        asString(item.description) ?? (metadata ? asString(metadata.description) : undefined);
+      return {
+        id,
+        name,
+        active,
+        ...(description ? { description } : {}),
+      } satisfies RegionDescriptor;
+    })
+    .filter((item): item is RegionDescriptor => Boolean(item));
+  const payload: ResidencyRegionListResponse = {
+    items,
+    total:
+      typeof result.total === "number" && Number.isInteger(result.total)
+        ? result.total
+        : items.length,
+  };
+  if (!isResidencyRegionListResponse(payload)) {
+    throw new Error("residency.region-mappings 解析后结构不合法");
+  }
+  return payload;
 }
 
 export async function fetchResidencyPolicy(
   signal?: AbortSignal
 ): Promise<TenantResidencyPolicy | null> {
   try {
-    const result = await requestJson<unknown>("/api/v1/residency/policy", undefined, signal);
+    const result = await requestJson<unknown>(
+      "/api/v2/residency/policies/current",
+      undefined,
+      signal
+    );
     if (!isTenantResidencyPolicy(result)) {
       throw new Error("residency.policy 返回结构不合法");
     }
@@ -3415,7 +3929,7 @@ export async function upsertResidencyPolicy(
   signal?: AbortSignal
 ): Promise<TenantResidencyPolicy> {
   const result = await requestJson<unknown>(
-    "/api/v1/residency/policy",
+    "/api/v2/residency/policies/current",
     {
       method: "PUT",
       body: JSON.stringify(input),
@@ -3433,12 +3947,12 @@ export async function fetchReplicationJobs(
   signal?: AbortSignal
 ): Promise<ReplicationJobListResponse> {
   const result = await requestJson<unknown>(
-    `/api/v1/residency/replication-jobs${buildReplicationJobListQuery(input)}`,
+    `/api/v2/residency/replications${buildReplicationJobListQuery(input)}`,
     undefined,
     signal
   );
   if (!isReplicationJobListResponse(result)) {
-    throw new Error("residency.replication-jobs 返回结构不合法");
+    throw new Error("residency.replications 返回结构不合法");
   }
   return result;
 }
@@ -3448,7 +3962,7 @@ export async function createReplicationJob(
   signal?: AbortSignal
 ): Promise<ReplicationJob> {
   const result = await requestJson<unknown>(
-    "/api/v1/residency/replication-jobs",
+    "/api/v2/residency/replications",
     {
       method: "POST",
       body: JSON.stringify(input),
@@ -3456,7 +3970,7 @@ export async function createReplicationJob(
     signal
   );
   if (!isReplicationJob(result)) {
-    throw new Error("residency.replication-jobs.create 返回结构不合法");
+    throw new Error("residency.replications.create 返回结构不合法");
   }
   return result;
 }
@@ -3471,7 +3985,7 @@ export async function cancelReplicationJob(
     throw new Error("jobId 不能为空。");
   }
   const result = await requestJson<unknown>(
-    `/api/v1/residency/replication-jobs/${encodeURIComponent(normalizedJobId)}/cancel`,
+    `/api/v2/residency/replications/${encodeURIComponent(normalizedJobId)}/cancel`,
     {
       method: "POST",
       body: JSON.stringify(input ?? {}),
@@ -3479,7 +3993,30 @@ export async function cancelReplicationJob(
     signal
   );
   if (!isReplicationJob(result)) {
-    throw new Error("residency.replication-jobs.cancel 返回结构不合法");
+    throw new Error("residency.replications.cancel 返回结构不合法");
+  }
+  return result;
+}
+
+export async function approveReplicationJob(
+  jobId: string,
+  input?: ReplicationJobApproveInput,
+  signal?: AbortSignal
+): Promise<ReplicationJob> {
+  const normalizedJobId = jobId.trim();
+  if (!normalizedJobId) {
+    throw new Error("jobId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v2/residency/replications/${encodeURIComponent(normalizedJobId)}/approvals`,
+    {
+      method: "POST",
+      body: JSON.stringify(input ?? {}),
+    },
+    signal
+  );
+  if (!isReplicationJob(result)) {
+    throw new Error("residency.replications.approve 返回结构不合法");
   }
   return result;
 }
@@ -3886,20 +4423,175 @@ function mapOpenPlatformWebhook(value: unknown): OpenPlatformWebhook | null {
   };
 }
 
-function mapReplayStatus(value: unknown): OpenPlatformReplayJobStatus | null {
-  if (value === "pending") {
-    return "queued";
-  }
-  if (value === "running") {
-    return "running";
-  }
-  if (value === "completed") {
-    return "succeeded";
-  }
-  if (value === "failed" || value === "cancelled") {
-    return "failed";
+function mapReplayStatus(value: unknown): OpenPlatformReplayRunStatus | null {
+  if (
+    value === "pending" ||
+    value === "running" ||
+    value === "completed" ||
+    value === "failed" ||
+    value === "cancelled"
+  ) {
+    return value;
   }
   return null;
+}
+
+function mapOpenPlatformReplayJob(value: unknown): OpenPlatformReplayJob | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const runId = asString(value.runId) ?? asString(value.id) ?? asString(value.jobId);
+  const jobId = asString(value.jobId) ?? runId;
+  const datasetId = asString(value.datasetId) ?? asString(value.baselineId);
+  const baselineId = asString(value.baselineId) ?? datasetId;
+  const candidateLabel = asString(value.candidateLabel);
+  const status = mapReplayStatus(value.status);
+  const totalCases = asFiniteNumber(value.totalCases);
+  const processedCases = asFiniteNumber(value.processedCases);
+  const improvedCases = asFiniteNumber(value.improvedCases);
+  const regressedCases = asFiniteNumber(value.regressedCases);
+  const unchangedCases = asFiniteNumber(value.unchangedCases);
+  const createdAt = asIsoDateString(value.createdAt);
+  const updatedAt = asIsoDateString(value.updatedAt) ?? undefined;
+  const summary = isRecord(value.summary) ? value.summary : undefined;
+  if (
+    !runId ||
+    !datasetId ||
+    !candidateLabel ||
+    !status ||
+    totalCases === null ||
+    processedCases === null ||
+    improvedCases === null ||
+    regressedCases === null ||
+    unchangedCases === null ||
+    !createdAt
+  ) {
+    return null;
+  }
+  const passedCases = Math.max(0, Math.round(processedCases - regressedCases));
+  const failedCases = Math.max(0, Math.round(regressedCases));
+  const finishedAt = asIsoDateString(value.finishedAt) ?? undefined;
+  return {
+    id: asString(value.id) ?? runId,
+    runId,
+    ...(jobId ? { jobId } : {}),
+    datasetId,
+    ...(baselineId ? { baselineId } : {}),
+    candidateLabel,
+    status,
+    totalCases: Math.max(0, Math.round(totalCases)),
+    processedCases: Math.max(0, Math.round(processedCases)),
+    improvedCases: Math.max(0, Math.round(improvedCases)),
+    regressedCases: Math.max(0, Math.round(regressedCases)),
+    unchangedCases: Math.max(0, Math.round(unchangedCases)),
+    passedCases,
+    failedCases,
+    ...(summary ? { summary } : {}),
+    createdAt,
+    ...(updatedAt ? { updatedAt } : {}),
+    ...(finishedAt ? { finishedAt } : {}),
+  };
+}
+
+function mapOpenPlatformReplayBaseline(value: unknown): OpenPlatformReplayBaseline | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const id = asString(value.id);
+  const name = asString(value.name);
+  const model = asString(value.model);
+  const rawDatasetId = asString(value.datasetId);
+  const datasetId = id ?? rawDatasetId;
+  const datasetRef =
+    asString(value.datasetRef) ?? (rawDatasetId && rawDatasetId !== datasetId ? rawDatasetId : undefined);
+  const promptVersion = asString(value.promptVersion) ?? undefined;
+  const sampleCount = asFiniteNumber(value.sampleCount);
+  const caseCount = asFiniteNumber(value.caseCount) ?? sampleCount;
+  const createdAt = asIsoDateString(value.createdAt);
+  const updatedAt = asIsoDateString(value.updatedAt);
+  if (!datasetId || !name || !model || !createdAt || !updatedAt) {
+    return null;
+  }
+  const description = asString(value.description) ?? undefined;
+  return {
+    id: datasetId,
+    name,
+    model,
+    datasetId,
+    ...(datasetRef ? { datasetRef } : {}),
+    ...(promptVersion ? { promptVersion } : {}),
+    ...(sampleCount !== null ? { sampleCount: Math.max(0, Math.round(sampleCount)) } : {}),
+    ...(caseCount !== null ? { caseCount: Math.max(0, Math.round(caseCount)) } : {}),
+    ...(description ? { description } : {}),
+    ...(isRecord(value.metadata) ? { metadata: value.metadata } : {}),
+    createdAt,
+    updatedAt,
+  };
+}
+
+function mapOpenPlatformReplayDatasetCase(value: unknown): OpenPlatformReplayDatasetCase | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const datasetId = asString(value.datasetId);
+  const caseId = asString(value.caseId);
+  const sortOrder = asFiniteNumber(value.sortOrder);
+  const input = asString(value.input);
+  if (!datasetId || !caseId || sortOrder === null || !input) {
+    return null;
+  }
+  return {
+    datasetId,
+    caseId,
+    sortOrder: Math.max(0, Math.round(sortOrder)),
+    input,
+    expectedOutput: asString(value.expectedOutput) ?? undefined,
+    baselineOutput: asString(value.baselineOutput) ?? undefined,
+    candidateInput: asString(value.candidateInput) ?? undefined,
+    metadata: isRecord(value.metadata) ? value.metadata : {},
+    checksum: asString(value.checksum) ?? undefined,
+    createdAt: asIsoDateString(value.createdAt) ?? undefined,
+    updatedAt: asIsoDateString(value.updatedAt) ?? undefined,
+  };
+}
+
+function mapOpenPlatformReplayArtifact(value: unknown): OpenPlatformReplayArtifact | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const type = asString(value.type);
+  const contentType = asString(value.contentType);
+  if (!type || !contentType) {
+    return null;
+  }
+  return {
+    type,
+    contentType,
+    name: asString(value.name) ?? undefined,
+    description: asString(value.description) ?? undefined,
+    byteSize:
+      typeof value.byteSize === "number" && Number.isInteger(value.byteSize) && value.byteSize >= 0
+        ? value.byteSize
+        : undefined,
+    downloadName: asString(value.downloadName) ?? undefined,
+    downloadUrl: asString(value.downloadUrl) ?? undefined,
+    createdAt: asIsoDateString(value.createdAt) ?? undefined,
+    inline: isRecord(value.inline) ? value.inline : undefined,
+  };
+}
+
+function normalizeReplaySourceSummary(value: unknown): Record<string, number> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const normalized: Record<string, number> = {};
+  for (const [key, rawValue] of Object.entries(value)) {
+    if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) {
+      continue;
+    }
+    normalized[key] = Math.max(0, Math.round(rawValue));
+  }
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
 export async function fetchOpenPlatformOpenApiSummary(
@@ -4189,7 +4881,7 @@ export async function fetchOpenPlatformQualityDaily(
   signal?: AbortSignal
 ): Promise<OpenPlatformQualityDailyResponse> {
   const result = await requestJson<unknown>(
-    `/api/v1/quality/metrics/daily${buildOpenPlatformQualityDailyQuery(input)}`,
+    `/api/v2/quality/metrics${buildOpenPlatformQualityDailyQuery(input)}`,
     undefined,
     signal
   );
@@ -4207,23 +4899,81 @@ export async function fetchOpenPlatformQualityDaily(
       if (!date || !metric || avgScore === null) {
         return null;
       }
-      const normalizedScore = Math.max(0, Math.min(avgScore, 1));
+      const normalizedScore = Math.max(0, Math.min(avgScore, 100));
       return {
         date,
         metric,
         value: normalizedScore,
-        target: 0.8,
+        target: 80,
         score: normalizedScore,
-        status: normalizedScore >= 0.9 ? "pass" : normalizedScore >= 0.75 ? "warn" : "fail",
+        status: normalizedScore >= 90 ? "pass" : normalizedScore >= 75 ? "warn" : "fail",
       } satisfies OpenPlatformQualityDailyItem;
     })
     .filter((item): item is OpenPlatformQualityDailyItem => Boolean(item));
+  const groups =
+    Array.isArray(result.groups) &&
+    result.groups.length > 0
+      ? result.groups
+          .map((group) => {
+            if (!isRecord(group)) {
+              return null;
+            }
+            const groupByRaw = asString(group.groupBy);
+            if (
+              groupByRaw !== "provider" &&
+              groupByRaw !== "repo" &&
+              groupByRaw !== "workflow" &&
+              groupByRaw !== "runId"
+            ) {
+              return null;
+            }
+            const value = asString(group.value);
+            const totalEvents = asFiniteNumber(group.totalEvents);
+            const passedEvents = asFiniteNumber(group.passedEvents);
+            const failedEvents = asFiniteNumber(group.failedEvents);
+            const passRate = asFiniteNumber(group.passRate);
+            const avgScore = asFiniteNumber(group.avgScore);
+            if (
+              !value ||
+              totalEvents === null ||
+              passedEvents === null ||
+              failedEvents === null ||
+              passRate === null ||
+              avgScore === null
+            ) {
+              return null;
+            }
+            return {
+              groupBy: groupByRaw,
+              value,
+              totalEvents,
+              passedEvents,
+              failedEvents,
+              passRate,
+              avgScore: Math.max(0, Math.min(avgScore, 100)),
+            } satisfies NonNullable<OpenPlatformQualityDailyResponse["groups"]>[number];
+          })
+          .filter(
+            (
+              item
+            ): item is NonNullable<OpenPlatformQualityDailyResponse["groups"]>[number] =>
+              Boolean(item)
+          )
+      : undefined;
   const payload: OpenPlatformQualityDailyResponse = {
     items,
     total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
+    ...(groups ? { groups } : {}),
     filters: {
       date: input?.date,
+      from: input?.from,
+      to: input?.to,
       metric: input?.metric,
+      provider: input?.provider,
+      repo: input?.repo,
+      workflow: input?.workflow,
+      runId: input?.runId,
+      groupBy: input?.groupBy,
       limit: input?.limit,
     },
   };
@@ -4238,7 +4988,7 @@ export async function fetchOpenPlatformQualityScorecards(
   signal?: AbortSignal
 ): Promise<OpenPlatformQualityScorecardListResponse> {
   const result = await requestJson<unknown>(
-    `/api/v1/quality/scorecards${buildOpenPlatformQualityScorecardListQuery(input)}`,
+    `/api/v2/quality/scorecards${buildOpenPlatformQualityScorecardListQuery(input)}`,
     undefined,
     signal
   );
@@ -4266,7 +5016,7 @@ export async function fetchOpenPlatformQualityScorecards(
         id,
         team: metric,
         owner: asString(item.updatedByUserId) ?? "--",
-        overallScore: Number((targetScore * 100).toFixed(2)),
+        overallScore: Number(targetScore.toFixed(2)),
         publishedAt: updatedAt,
         highlights,
       } satisfies OpenPlatformQualityScorecard;
@@ -4287,46 +5037,131 @@ export async function fetchOpenPlatformQualityScorecards(
   return payload;
 }
 
-export async function fetchOpenPlatformReplayBaselines(
-  input?: OpenPlatformReplayBaselineListInput,
+export async function fetchOpenPlatformQualityProjectTrends(
+  input?: OpenPlatformQualityProjectTrendQueryInput,
   signal?: AbortSignal
-): Promise<OpenPlatformReplayBaselineListResponse> {
+): Promise<OpenPlatformQualityProjectTrendResponse> {
   const result = await requestJson<unknown>(
-    `/api/v1/replay/baselines${buildOpenPlatformReplayBaselineListQuery(input)}`,
+    `/api/v2/quality/reports/project-trends${buildOpenPlatformQualityProjectTrendQuery(input)}`,
     undefined,
     signal
   );
-  if (!isRecord(result) || !Array.isArray(result.items)) {
-    throw new Error("replay.baselines 返回结构不合法");
+  if (
+    !isRecord(result) ||
+    !Array.isArray(result.items) ||
+    !isRecord(result.summary) ||
+    !isRecord(result.filters)
+  ) {
+    throw new Error("quality.project-trends 返回结构不合法");
   }
-  const items: OpenPlatformReplayBaseline[] = result.items
+  const items: OpenPlatformQualityProjectTrendItem[] = result.items
     .map((item) => {
       if (!isRecord(item)) {
         return null;
       }
-      const id = asString(item.id);
-      const name = asString(item.name);
-      const model = asString(item.model);
-      const datasetId = asString(item.datasetId);
-      const createdAt = asIsoDateString(item.createdAt);
-      const updatedAt = asIsoDateString(item.updatedAt);
-      if (!id || !name || !model || !datasetId || !createdAt || !updatedAt) {
+      const project = asString(item.project);
+      const metric = asString(item.metric);
+      const totalEvents = asFiniteNumber(item.totalEvents);
+      const passedEvents = asFiniteNumber(item.passedEvents);
+      const failedEvents = asFiniteNumber(item.failedEvents);
+      const passRate = asFiniteNumber(item.passRate);
+      const avgScore = asFiniteNumber(item.avgScore);
+      const totalCost = asFiniteNumber(item.totalCost);
+      const totalTokens = asFiniteNumber(item.totalTokens);
+      const totalSessions = asFiniteNumber(item.totalSessions);
+      const costPerQualityPoint = asFiniteNumber(item.costPerQualityPoint);
+      if (
+        !project ||
+        !metric ||
+        totalEvents === null ||
+        passedEvents === null ||
+        failedEvents === null ||
+        passRate === null ||
+        avgScore === null ||
+        totalCost === null ||
+        totalTokens === null ||
+        totalSessions === null ||
+        costPerQualityPoint === null
+      ) {
         return null;
       }
-      const description = asString(item.promptVersion) ?? undefined;
-      const baseline: OpenPlatformReplayBaseline = {
-        id,
-        name,
-        model,
-        dataset: datasetId,
-        ...(description ? { description } : {}),
-        createdAt,
-        updatedAt,
-      };
-      return baseline;
+      return {
+        project,
+        metric,
+        totalEvents: Math.max(0, Math.round(totalEvents)),
+        passedEvents: Math.max(0, Math.round(passedEvents)),
+        failedEvents: Math.max(0, Math.round(failedEvents)),
+        passRate,
+        avgScore,
+        totalCost,
+        totalTokens: Math.max(0, Math.round(totalTokens)),
+        totalSessions: Math.max(0, Math.round(totalSessions)),
+        costPerQualityPoint,
+      } satisfies OpenPlatformQualityProjectTrendItem;
     })
-    .filter((item): item is OpenPlatformReplayBaseline => Boolean(item));
-  const payload: OpenPlatformReplayBaselineListResponse = {
+    .filter((item): item is OpenPlatformQualityProjectTrendItem => Boolean(item));
+  const summary: OpenPlatformQualityProjectTrendSummary = {
+    metric: asString(result.summary.metric) ?? input?.metric ?? "all",
+    totalEvents: Math.max(0, Math.round(asFiniteNumber(result.summary.totalEvents) ?? 0)),
+    passedEvents: Math.max(0, Math.round(asFiniteNumber(result.summary.passedEvents) ?? 0)),
+    failedEvents: Math.max(0, Math.round(asFiniteNumber(result.summary.failedEvents) ?? 0)),
+    passRate: asFiniteNumber(result.summary.passRate) ?? 0,
+    avgScore: asFiniteNumber(result.summary.avgScore) ?? 0,
+    totalCost: asFiniteNumber(result.summary.totalCost) ?? 0,
+    totalTokens: Math.max(0, Math.round(asFiniteNumber(result.summary.totalTokens) ?? 0)),
+    totalSessions: Math.max(0, Math.round(asFiniteNumber(result.summary.totalSessions) ?? 0)),
+    from: asIsoDateString(result.summary.from) ?? undefined,
+    to: asIsoDateString(result.summary.to) ?? undefined,
+  };
+  const filters: OpenPlatformQualityProjectTrendResponse["filters"] = {
+    from: asString(result.filters.from) ?? input?.from,
+    to: asString(result.filters.to) ?? input?.to,
+    metric: asString(result.filters.metric) ?? input?.metric,
+    provider:
+      result.filters.provider === null
+        ? null
+        : asString(result.filters.provider) ?? input?.provider,
+    workflow:
+      result.filters.workflow === null
+        ? null
+        : asString(result.filters.workflow) ?? input?.workflow,
+    includeUnknown:
+      typeof result.filters.includeUnknown === "boolean"
+        ? result.filters.includeUnknown
+        : input?.includeUnknown,
+    limit:
+      typeof result.filters.limit === "number" && Number.isInteger(result.filters.limit)
+        ? result.filters.limit
+        : input?.limit,
+  };
+  const payload: OpenPlatformQualityProjectTrendResponse = {
+    items,
+    total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
+    summary,
+    filters,
+  };
+  if (!isOpenPlatformQualityProjectTrendResponse(payload)) {
+    throw new Error("quality.project-trends 解析后结构不合法");
+  }
+  return payload;
+}
+
+export async function fetchOpenPlatformReplayDatasets(
+  input?: OpenPlatformReplayDatasetListInput,
+  signal?: AbortSignal
+): Promise<OpenPlatformReplayDatasetListResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/datasets${buildOpenPlatformReplayBaselineListQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    throw new Error("replay.datasets 返回结构不合法");
+  }
+  const items: OpenPlatformReplayDataset[] = result.items
+    .map((item) => mapOpenPlatformReplayBaseline(item))
+    .filter((item): item is OpenPlatformReplayDataset => Boolean(item));
+  const payload: OpenPlatformReplayDatasetListResponse = {
     items,
     total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
     filters: {
@@ -4335,67 +5170,206 @@ export async function fetchOpenPlatformReplayBaselines(
     },
   };
   if (!isOpenPlatformReplayBaselineListResponse(payload)) {
-    throw new Error("replay.baselines 解析后结构不合法");
+    throw new Error("replay.datasets 解析后结构不合法");
   }
   return payload;
 }
 
-export async function fetchOpenPlatformReplayJobs(
-  input?: OpenPlatformReplayJobListInput,
+export const fetchOpenPlatformReplayBaselines = fetchOpenPlatformReplayDatasets;
+
+export async function createOpenPlatformReplayDataset(
+  input: OpenPlatformReplayDatasetCreateInput,
   signal?: AbortSignal
-): Promise<OpenPlatformReplayJobListResponse> {
+): Promise<OpenPlatformReplayDataset> {
+  const datasetRef = input.datasetRef?.trim() ?? input.datasetId?.trim();
+  if (!datasetRef) {
+    throw new Error("datasetRef 不能为空。");
+  }
+  const { datasetId: _legacyDatasetId, datasetRef: _inputDatasetRef, ...rest } = input;
   const result = await requestJson<unknown>(
-    `/api/v1/replay/jobs${buildOpenPlatformReplayJobListQuery(input)}`,
+    "/api/v2/replay/datasets",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...rest,
+        datasetRef,
+      }),
+    },
+    signal
+  );
+  const mapped = mapOpenPlatformReplayBaseline(result);
+  if (!mapped) {
+    throw new Error("replay.datasets.create 返回结构不合法");
+  }
+  return mapped;
+}
+
+export async function fetchOpenPlatformReplayDatasetCases(
+  datasetId: string,
+  signal?: AbortSignal
+): Promise<OpenPlatformReplayDatasetCaseListResponse> {
+  const normalizedDatasetId = datasetId.trim();
+  if (!normalizedDatasetId) {
+    throw new Error("datasetId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/datasets/${encodeURIComponent(normalizedDatasetId)}/cases`,
     undefined,
     signal
   );
   if (!isRecord(result) || !Array.isArray(result.items)) {
-    throw new Error("replay.jobs 返回结构不合法");
+    throw new Error("replay.dataset-cases 返回结构不合法");
   }
-  const items: OpenPlatformReplayJob[] = result.items
-    .map((item) => {
-      if (!isRecord(item)) {
-        return null;
-      }
-      const id = asString(item.id);
-      const baselineId = asString(item.baselineId);
-      const status = mapReplayStatus(item.status);
-      const totalCases = asFiniteNumber(item.totalCases);
-      const processedCases = asFiniteNumber(item.processedCases);
-      const regressedCases = asFiniteNumber(item.regressedCases);
-      const createdAt = asIsoDateString(item.createdAt);
-      if (
-        !id ||
-        !baselineId ||
-        !status ||
-        totalCases === null ||
-        processedCases === null ||
-        regressedCases === null ||
-        !createdAt
-      ) {
-        return null;
-      }
-      const passedCases = Math.max(0, Math.round(processedCases - regressedCases));
-      const failedCases = Math.max(0, Math.round(regressedCases));
-      const finishedAt = asIsoDateString(item.finishedAt) ?? undefined;
-      const job: OpenPlatformReplayJob = {
-        id,
-        baselineId,
-        status,
-        totalCases: Math.max(0, Math.round(totalCases)),
-        passedCases,
-        failedCases,
-        createdAt,
-        ...(finishedAt ? { finishedAt } : {}),
-      };
-      return job;
-    })
-    .filter((item): item is OpenPlatformReplayJob => Boolean(item));
-  const payload: OpenPlatformReplayJobListResponse = {
+  const items: OpenPlatformReplayDatasetCase[] = result.items
+    .map((item) => mapOpenPlatformReplayDatasetCase(item))
+    .filter((item): item is OpenPlatformReplayDatasetCase => Boolean(item));
+  const payload: OpenPlatformReplayDatasetCaseListResponse = {
+    datasetId: asString(result.datasetId) ?? normalizedDatasetId,
+    items,
+    total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
+  };
+  if (!isOpenPlatformReplayDatasetCaseListResponse(payload)) {
+    throw new Error("replay.dataset-cases 解析后结构不合法");
+  }
+  return payload;
+}
+
+export async function replaceOpenPlatformReplayDatasetCases(
+  datasetId: string,
+  input: OpenPlatformReplayDatasetCaseReplaceInput,
+  signal?: AbortSignal
+): Promise<OpenPlatformReplayDatasetCaseListResponse> {
+  const normalizedDatasetId = datasetId.trim();
+  if (!normalizedDatasetId) {
+    throw new Error("datasetId 不能为空。");
+  }
+  if (!Array.isArray(input.items)) {
+    throw new Error("items 必须为数组。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/datasets/${encodeURIComponent(normalizedDatasetId)}/cases`,
+    {
+      method: "POST",
+      body: JSON.stringify({ items: input.items }),
+    },
+    signal
+  );
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    throw new Error("replay.dataset-cases.replace 返回结构不合法");
+  }
+  const items: OpenPlatformReplayDatasetCase[] = result.items
+    .map((item) => mapOpenPlatformReplayDatasetCase(item))
+    .filter((item): item is OpenPlatformReplayDatasetCase => Boolean(item));
+  const payload: OpenPlatformReplayDatasetCaseListResponse = {
+    datasetId: asString(result.datasetId) ?? normalizedDatasetId,
+    items,
+    total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
+  };
+  if (!isOpenPlatformReplayDatasetCaseListResponse(payload)) {
+    throw new Error("replay.dataset-cases.replace 解析后结构不合法");
+  }
+  return payload;
+}
+
+export async function materializeOpenPlatformReplayDatasetCases(
+  datasetId: string,
+  input: OpenPlatformReplayDatasetMaterializeInput,
+  signal?: AbortSignal
+): Promise<OpenPlatformReplayDatasetMaterializeResponse> {
+  const normalizedDatasetId = datasetId.trim();
+  if (!normalizedDatasetId) {
+    throw new Error("datasetId 不能为空。");
+  }
+  const sessionIds = input.sessionIds?.map((item) => item.trim()).filter(Boolean);
+  const filters =
+    input.filters && typeof input.filters === "object"
+      ? Object.fromEntries(
+          Object.entries(input.filters).filter(([, value]) => typeof value === "string" && value.trim().length > 0)
+        )
+      : undefined;
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/datasets/${encodeURIComponent(normalizedDatasetId)}/materialize`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...(sessionIds && sessionIds.length > 0 ? { sessionIds } : {}),
+        ...(filters && Object.keys(filters).length > 0 ? { filters } : {}),
+        ...(typeof input.sampleLimit === "number" ? { sampleLimit: input.sampleLimit } : {}),
+        ...(typeof input.sanitized === "boolean" ? { sanitized: input.sanitized } : {}),
+        ...(typeof input.snapshotVersion === "string" && input.snapshotVersion.trim().length > 0
+          ? { snapshotVersion: input.snapshotVersion.trim() }
+          : {}),
+      }),
+    },
+    signal
+  );
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    throw new Error("replay.dataset-cases.materialize 返回结构不合法");
+  }
+  const items: OpenPlatformReplayDatasetCase[] = result.items
+    .map((item) => mapOpenPlatformReplayDatasetCase(item))
+    .filter((item): item is OpenPlatformReplayDatasetCase => Boolean(item));
+  const payload: OpenPlatformReplayDatasetMaterializeResponse = {
+    datasetId: asString(result.datasetId) ?? normalizedDatasetId,
+    sourceType: "session",
+    materialized:
+      typeof result.materialized === "number" && Number.isInteger(result.materialized)
+        ? result.materialized
+        : items.length,
+    skipped:
+      typeof result.skipped === "number" && Number.isInteger(result.skipped) ? result.skipped : 0,
+    ...(normalizeReplaySourceSummary(result.sourceSummary)
+      ? { sourceSummary: normalizeReplaySourceSummary(result.sourceSummary) }
+      : {}),
     items,
     total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
     filters: {
-      baselineId: input?.baselineId,
+      datasetId: normalizedDatasetId,
+      ...(isRecord(result.filters)
+        ? {
+            sessionIds: Array.isArray(result.filters.sessionIds)
+              ? result.filters.sessionIds.filter((item): item is string => typeof item === "string")
+              : undefined,
+            filters: isRecord(result.filters.filters) ? result.filters.filters : undefined,
+            sampleLimit:
+              typeof result.filters.sampleLimit === "number" ? result.filters.sampleLimit : input.sampleLimit,
+            sanitized:
+              typeof result.filters.sanitized === "boolean" ? result.filters.sanitized : input.sanitized,
+            snapshotVersion:
+              typeof result.filters.snapshotVersion === "string"
+                ? result.filters.snapshotVersion
+                : input.snapshotVersion,
+          }
+        : {}),
+    },
+  };
+  if (!isOpenPlatformReplayDatasetMaterializeResponse(payload)) {
+    throw new Error("replay.dataset-cases.materialize 解析后结构不合法");
+  }
+  return payload;
+}
+
+export async function fetchOpenPlatformReplayRuns(
+  input?: OpenPlatformReplayRunListInput,
+  signal?: AbortSignal
+): Promise<OpenPlatformReplayRunListResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/runs${buildOpenPlatformReplayJobListQuery(input)}`,
+    undefined,
+    signal
+  );
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    throw new Error("replay.runs 返回结构不合法");
+  }
+  const items: OpenPlatformReplayRun[] = result.items
+    .map((item) => mapOpenPlatformReplayJob(item))
+    .filter((item): item is OpenPlatformReplayRun => Boolean(item));
+  const payload: OpenPlatformReplayRunListResponse = {
+    items,
+    total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
+    filters: {
+      datasetId: input?.datasetId ?? input?.baselineId,
+      baselineId: input?.baselineId ?? input?.datasetId,
       status: input?.status,
       limit: input?.limit,
     },
@@ -4406,23 +5380,49 @@ export async function fetchOpenPlatformReplayJobs(
   return payload;
 }
 
-export async function fetchOpenPlatformReplayDiff(
+export const fetchOpenPlatformReplayJobs = fetchOpenPlatformReplayRuns;
+
+export async function createOpenPlatformReplayRun(
+  input: OpenPlatformReplayRunCreateInput,
+  signal?: AbortSignal
+): Promise<OpenPlatformReplayRun> {
+  const datasetId = input.datasetId?.trim() ?? input.baselineId?.trim();
+  if (!datasetId) {
+    throw new Error("datasetId 不能为空。");
+  }
+  const { baselineId: _legacyBaselineId, datasetId: _inputDatasetId, ...rest } = input;
+  const result = await requestJson<unknown>(
+    "/api/v2/replay/runs",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...rest,
+        datasetId,
+      }),
+    },
+    signal
+  );
+  const mapped = mapOpenPlatformReplayJob(result);
+  if (!mapped) {
+    throw new Error("replay.runs.create 返回结构不合法");
+  }
+  return mapped;
+}
+
+export async function fetchOpenPlatformReplayDiffs(
   input: OpenPlatformReplayDiffQueryInput,
   signal?: AbortSignal
 ): Promise<OpenPlatformReplayDiffResponse> {
-  const baselineId = input.baselineId.trim();
-  const jobId = input.jobId.trim();
-  if (!baselineId) {
-    throw new Error("baselineId 不能为空。");
-  }
-  if (!jobId) {
-    throw new Error("jobId 不能为空。");
+  const datasetId = input.datasetId?.trim() ?? input.baselineId?.trim();
+  const requestedRunId = input.runId?.trim() ?? input.jobId?.trim();
+  if (!requestedRunId) {
+    throw new Error("runId 不能为空。");
   }
   const result = await requestJson<unknown>(
-    `/api/v1/replay/jobs/${encodeURIComponent(jobId)}/diff${buildOpenPlatformReplayDiffQuery({
+    `/api/v2/replay/runs/${encodeURIComponent(requestedRunId)}/diffs${buildOpenPlatformReplayDiffQuery({
       ...input,
-      baselineId,
-      jobId,
+      datasetId,
+      runId: requestedRunId,
     })}`,
     undefined,
     signal
@@ -4430,8 +5430,8 @@ export async function fetchOpenPlatformReplayDiff(
   if (!isRecord(result) || !Array.isArray(result.diffs)) {
     throw new Error("replay.diff 返回结构不合法");
   }
-  const items: OpenPlatformReplayDiffItem[] = result.diffs
-    .map((item) => {
+  const items = result.diffs
+    .map<OpenPlatformReplayDiffItem | null>((item) => {
       if (!isRecord(item)) {
         return null;
       }
@@ -4441,10 +5441,15 @@ export async function fetchOpenPlatformReplayDiff(
       if (!caseId || !verdict || delta === null) {
         return null;
       }
+      const responseDatasetId =
+        datasetId ?? asString(result.datasetId) ?? asString(result.baselineId) ?? "unknown";
+      const runId = asString(result.runId) ?? asString(result.jobId) ?? requestedRunId;
       return {
-        id: `${jobId}:${caseId}`,
-        baselineId,
-        jobId,
+        id: `${runId}:${caseId}`,
+        datasetId: responseDatasetId,
+        baselineId: responseDatasetId,
+        runId,
+        jobId: runId,
         caseId,
         summary: asString(item.detail) ?? `${asString(item.metric) ?? "metric"} delta`,
         verdict:
@@ -4454,13 +5459,16 @@ export async function fetchOpenPlatformReplayDiff(
         deltaScore: delta,
       } satisfies OpenPlatformReplayDiffItem;
     })
-    .filter((item): item is OpenPlatformReplayDiffItem => Boolean(item));
+    .filter((item): item is OpenPlatformReplayDiffItem => item !== null);
   const payload: OpenPlatformReplayDiffResponse = {
     items,
-    total: items.length,
+    total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
+    ...(isRecord(result.summary) ? { summary: result.summary } : {}),
     filters: {
-      baselineId,
-      jobId,
+      datasetId: datasetId ?? asString(result.datasetId) ?? asString(result.baselineId) ?? undefined,
+      baselineId: datasetId ?? asString(result.datasetId) ?? asString(result.baselineId) ?? undefined,
+      runId: asString(result.runId) ?? asString(result.jobId) ?? requestedRunId,
+      jobId: asString(result.jobId) ?? asString(result.runId) ?? requestedRunId,
       keyword: input.keyword,
       limit: input.limit,
     },
@@ -4469,4 +5477,62 @@ export async function fetchOpenPlatformReplayDiff(
     throw new Error("replay.diff 解析后结构不合法");
   }
   return payload;
+}
+
+export const fetchOpenPlatformReplayDiff = fetchOpenPlatformReplayDiffs;
+
+export async function fetchOpenPlatformReplayArtifacts(
+  runId: string,
+  signal?: AbortSignal
+): Promise<OpenPlatformReplayArtifactListResponse> {
+  const normalizedRunId = runId.trim();
+  if (!normalizedRunId) {
+    throw new Error("runId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/runs/${encodeURIComponent(normalizedRunId)}/artifacts`,
+    undefined,
+    signal
+  );
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    throw new Error("replay.artifacts 返回结构不合法");
+  }
+  const items = result.items
+    .map((item) => mapOpenPlatformReplayArtifact(item))
+    .filter((item): item is OpenPlatformReplayArtifact => Boolean(item));
+  const responseRunId = asString(result.runId) ?? asString(result.jobId) ?? normalizedRunId;
+  const payload: OpenPlatformReplayArtifactListResponse = {
+    runId: responseRunId,
+    jobId: asString(result.jobId) ?? responseRunId,
+    items,
+    total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
+  };
+  if (!isOpenPlatformReplayArtifactListResponse(payload)) {
+    throw new Error("replay.artifacts 解析后结构不合法");
+  }
+  return payload;
+}
+
+export async function downloadOpenPlatformReplayArtifact(
+  runId: string,
+  artifactType: string,
+  downloadName?: string,
+  signal?: AbortSignal
+): Promise<DownloadFile> {
+  const normalizedRunId = runId.trim();
+  if (!normalizedRunId) {
+    throw new Error("runId 不能为空。");
+  }
+  const normalizedArtifactType = artifactType.trim();
+  if (!normalizedArtifactType) {
+    throw new Error("artifactType 不能为空。");
+  }
+  return requestBlob(
+    `/api/v2/replay/runs/${encodeURIComponent(normalizedRunId)}/artifacts/${encodeURIComponent(
+      normalizedArtifactType
+    )}/download`,
+    downloadName?.trim() || `${normalizedArtifactType}.json`,
+    undefined,
+    signal
+  );
 }
