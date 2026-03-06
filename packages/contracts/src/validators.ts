@@ -259,14 +259,14 @@ const WEBHOOK_EVENT_TYPE_SET = new Set<WebhookEventType>([
   "api_key.revoked",
   "quality.event.created",
   "quality.scorecard.updated",
-  "replay.job.started",
-  "replay.job.completed",
-  "replay.job.failed",
   "replay.run.started",
   "replay.run.completed",
   "replay.run.regression_detected",
   "replay.run.failed",
   "replay.run.cancelled",
+  "replay.job.started",
+  "replay.job.completed",
+  "replay.job.failed",
 ]);
 const WEBHOOK_ENDPOINT_STATUS_SET = new Set<WebhookEndpointStatus>([
   "active",
@@ -2944,7 +2944,7 @@ export function validateWebhookReplayRequestInput(
     return {
       success: false,
       error:
-        "eventType 仅支持 api_key.created/api_key.revoked/quality.event.created/quality.scorecard.updated/replay.job.started/replay.job.completed/replay.job.failed/replay.run.started/replay.run.completed/replay.run.regression_detected/replay.run.failed/replay.run.cancelled。",
+        "eventType 仅支持 api_key.created/api_key.revoked/quality.event.created/quality.scorecard.updated/replay.run.started/replay.run.completed/replay.run.regression_detected/replay.run.failed/replay.run.cancelled/replay.job.started/replay.job.completed/replay.job.failed。",
     };
   }
   if (body.from !== undefined && !from) {

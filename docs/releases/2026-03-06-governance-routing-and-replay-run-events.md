@@ -1,7 +1,7 @@
 # AgentLedger 发布说明：治理路由闭环与 Replay Run 事件
 
 - 日期：2026-03-06
-- 状态：发布候选说明
+- 状态：发布说明（门禁已固化）
 - 适用范围：`services/governance`、`services/integration`、`apps/control-plane`、`apps/web-console`
 
 ## 1. 版本概览
@@ -18,6 +18,7 @@
 - Webhook 订阅与回放请求已统一支持 `replay.run.*` 运行级事件。
 - `replay.job.started/completed/failed` 继续保留为兼容事件，不强制现有接入方立即迁移。
 - OpenAPI 示例、控制台事件选项与 contracts 已同步到同一口径。
+- 所有主示例现已统一为 `replay.run.*` 优先；`replay.job.*` 仅作为兼容项继续保留。
 
 推荐迁移策略：
 
@@ -64,7 +65,7 @@ bun run check:ts
 bun test apps/control-plane/test/repository.test.ts apps/control-plane/test/api.test.ts --timeout 120000
 cd apps/web-console && bun run test
 go test ./services/governance ./services/integration
-AGENTLEDGER_E2E=1 GOV_E2E_DATABASE_URL=... go test ./services/governance -run '^TestGovernanceE2E' -count=1 -v
+GOV_E2E_DATABASE_URL=... bun run test:e2e-governance-routing
 ```
 
 其中真实治理链 E2E 会覆盖：
@@ -74,6 +75,11 @@ AGENTLEDGER_E2E=1 GOV_E2E_DATABASE_URL=... go test ./services/governance -run '^
 - `suppressed`
 - `fail-open`
 - `weekly`
+
+Release 工作流补充：
+
+- `.github/workflows/release.yml` 的 `pre-release-gate` 已纳入 `bun run test:e2e-governance-routing`。
+- 发布仓库需要预先配置 `GOV_E2E_DATABASE_URL` secret；未配置时 tag 发布会在门禁阶段直接失败。
 
 ## 5. 兼容性说明
 

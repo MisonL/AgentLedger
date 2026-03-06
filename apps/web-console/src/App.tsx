@@ -472,14 +472,14 @@ const OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS = [
   "api_key.revoked",
   "quality.event.created",
   "quality.scorecard.updated",
-  "replay.job.started",
-  "replay.job.completed",
-  "replay.job.failed",
   "replay.run.started",
   "replay.run.completed",
   "replay.run.regression_detected",
   "replay.run.failed",
   "replay.run.cancelled",
+  "replay.job.started",
+  "replay.job.completed",
+  "replay.job.failed",
 ] as const;
 
 const OPEN_PLATFORM_REPLAY_JOB_STATUS_FILTER_OPTIONS: Array<
