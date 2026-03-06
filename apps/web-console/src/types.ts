@@ -18,6 +18,7 @@ export interface Source {
   name: string;
   type: SourceType;
   location: string;
+  sourceRegion?: string;
   enabled: boolean;
   accessMode?: SourceAccessMode;
   sync?: SourceSync;
@@ -35,11 +36,47 @@ export interface CreateSourceInput {
   name: string;
   type: SourceType;
   location: string;
+  sourceRegion?: string;
   enabled?: boolean;
   accessMode?: SourceAccessMode;
   sync?: SourceSync;
   syncCron?: string;
   syncRetentionDays?: number;
+}
+
+export interface UpdateSourceInput {
+  name?: string;
+  location?: string;
+  sourceRegion?: string;
+  enabled?: boolean;
+  accessMode?: SourceAccessMode;
+  syncCron?: string;
+  syncRetentionDays?: number;
+}
+
+export interface SourceMissingRegionListResponse {
+  items: Source[];
+  total: number;
+}
+
+export type SourceRegionBackfillItemStatus = "updated" | "would_update" | "skipped";
+
+export interface SourceRegionBackfillResultItem {
+  sourceId: string;
+  name: string;
+  status: SourceRegionBackfillItemStatus;
+  appliedRegion?: string;
+  reason?: string;
+}
+
+export interface SourceRegionBackfillResult {
+  tenantId: string;
+  dryRun: boolean;
+  primaryRegion: string;
+  totalMissing: number;
+  updated: number;
+  skipped: number;
+  items: SourceRegionBackfillResultItem[];
 }
 
 export interface SourceHealth {

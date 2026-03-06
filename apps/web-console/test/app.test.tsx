@@ -326,6 +326,7 @@ describe("Web Console", () => {
         name: "devbox-shanghai",
         type: "local",
         location: "cn-shanghai",
+        sourceRegion: "cn-shanghai",
         enabled: true,
         createdAt: "2026-03-01T10:00:00.000Z",
       },
@@ -384,6 +385,7 @@ describe("Web Console", () => {
           name: string;
           type: "local" | "ssh" | "sync-cache";
           location: string;
+          sourceRegion?: string;
           enabled?: boolean;
         };
 
@@ -392,6 +394,7 @@ describe("Web Console", () => {
           name: payload.name,
           type: payload.type,
           location: payload.location,
+          sourceRegion: payload.sourceRegion,
           enabled: payload.enabled ?? true,
           createdAt: "2026-03-02T10:00:00.000Z",
         });
@@ -417,10 +420,12 @@ describe("Web Console", () => {
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "build-node-02" } });
     fireEvent.change(screen.getByLabelText("类型"), { target: { value: "ssh" } });
     fireEvent.change(screen.getByLabelText("位置"), { target: { value: "10.0.0.12" } });
+    fireEvent.change(screen.getByLabelText("Region"), { target: { value: "ap-southeast-1" } });
     fireEvent.click(screen.getByRole("button", { name: "新增 Source" }));
 
     expect(await screen.findByText("新增成功，列表已刷新。")).toBeInTheDocument();
     expect(await screen.findByText("build-node-02")).toBeInTheDocument();
+    expect(await screen.findByText("ap-southeast-1")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(fetchSpy).toHaveBeenCalledWith(
@@ -428,6 +433,175 @@ describe("Web Console", () => {
         expect.objectContaining({ method: "POST" })
       );
     });
+    const postCall = fetchSpy.mock.calls.find(
+      ([url, init]) =>
+        toUrl(url).endsWith("/api/v1/sources") &&
+        (init as RequestInit | undefined)?.method === "POST"
+    );
+    expect(postCall).toBeTruthy();
+    expect(JSON.parse(String((postCall?.[1] as RequestInit | undefined)?.body ?? "{}"))).toMatchObject({
+      sourceRegion: "ap-southeast-1",
+    });
+  });
+
+  test("Sources 页面支持缺失 region 过滤、编辑补录与按主区域回填", async () => {
+    setAuthTokens({
+      accessToken: "access-token-test-source-region-actions",
+      refreshToken: "refresh-token-test-source-region-actions",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const sources = [
+      {
+        id: "source-missing-1",
+        name: "missing-region-source",
+        type: "local",
+        location: "/workspace/missing-region",
+        enabled: true,
+        createdAt: "2026-03-02T10:00:00.000Z",
+      },
+      {
+        id: "source-ready-1",
+        name: "ready-region-source",
+        type: "ssh",
+        location: "10.0.0.20",
+        sourceRegion: "cn-shanghai",
+        enabled: true,
+        createdAt: "2026-03-02T11:00:00.000Z",
+      },
+    ];
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/sources") && method === "GET") {
+        return mockJsonResponse({
+          items: sources,
+          total: sources.length,
+        });
+      }
+
+      if (url.endsWith("/api/v1/sources/source-missing-1/health") && method === "GET") {
+        return mockJsonResponse({
+          sourceId: "source-missing-1",
+          accessMode: "realtime",
+          lastSuccessAt: null,
+          lastFailureAt: null,
+          failureCount: 0,
+          avgLatencyMs: null,
+          freshnessMinutes: null,
+        });
+      }
+
+      if (url.includes("/api/v1/sources/source-missing-1/parse-failures") && method === "GET") {
+        return mockJsonResponse({
+          items: [],
+          total: 0,
+          filters: {
+            limit: 5,
+          },
+        });
+      }
+
+      if (url.endsWith("/api/v1/sources/source-ready-1/health") && method === "GET") {
+        return mockJsonResponse({
+          sourceId: "source-ready-1",
+          accessMode: "hybrid",
+          lastSuccessAt: "2026-03-02T12:00:00.000Z",
+          lastFailureAt: null,
+          failureCount: 0,
+          avgLatencyMs: 90,
+          freshnessMinutes: 2,
+        });
+      }
+
+      if (url.includes("/api/v1/sources/source-ready-1/parse-failures") && method === "GET") {
+        return mockJsonResponse({
+          items: [],
+          total: 0,
+          filters: {
+            limit: 5,
+          },
+        });
+      }
+
+      if (url.endsWith("/api/v1/sources/source-missing-1") && method === "PATCH") {
+        const payload = JSON.parse(String(init?.body ?? "{}")) as {
+          sourceRegion?: string;
+        };
+        sources[0] = {
+          ...sources[0],
+          sourceRegion: payload.sourceRegion,
+        };
+        return mockJsonResponse(sources[0]);
+      }
+
+      if (url.endsWith("/api/v1/sources/source-region/backfill") && method === "POST") {
+        const payload = JSON.parse(String(init?.body ?? "{}")) as {
+          sourceIds?: string[];
+        };
+        const targetIds = payload.sourceIds ?? sources.filter((item) => !item.sourceRegion).map((item) => item.id);
+        for (const source of sources) {
+          if (targetIds.includes(source.id) && !source.sourceRegion) {
+            source.sourceRegion = "cn-shanghai";
+          }
+        }
+        return mockJsonResponse({
+          tenantId: "default",
+          dryRun: false,
+          primaryRegion: "cn-shanghai",
+          totalMissing: targetIds.length,
+          updated: targetIds.length,
+          skipped: 0,
+          items: targetIds.map((sourceId) => ({
+            sourceId,
+            name: sourceId,
+            status: "updated",
+            appliedRegion: "cn-shanghai",
+          })),
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Sources" }));
+    expect(await screen.findByRole("heading", { name: "Sources 管理", level: 1 })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("仅看缺失 Region"));
+    expect(await screen.findByText("missing-region-source")).toBeInTheDocument();
+    expect(screen.queryByText("ready-region-source")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    fireEvent.change(screen.getByLabelText("Region"), { target: { value: "cn-hangzhou" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存 Source" }));
+
+    expect(await screen.findByText("Source missing-region-source 已更新。")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("仅看缺失 Region"));
+    expect(await screen.findByText("cn-hangzhou")).toBeInTheDocument();
+
+    sources[0] = {
+      ...sources[0],
+      sourceRegion: undefined,
+    };
+
+    fireEvent.click(screen.getByLabelText("仅看缺失 Region"));
+    fireEvent.click(screen.getByLabelText("仅看缺失 Region"));
+    expect(await screen.findByText("ready-region-source")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "按主区域批量回填" }));
+    expect(await screen.findByText("已按主区域回填 1 个 Source（cn-shanghai）。")).toBeInTheDocument();
+
+    const backfillCall = fetchSpy.mock.calls.find(
+      ([url, init]) =>
+        toUrl(url).endsWith("/api/v1/sources/source-region/backfill") &&
+        (init as RequestInit | undefined)?.method === "POST"
+    );
+    expect(backfillCall).toBeTruthy();
   });
 
   test("Sources 状态区块展示 loading 与 empty 态", async () => {

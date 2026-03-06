@@ -124,9 +124,11 @@ import type {
   SourceAccessMode,
   SourceConnectionTestResponse,
   SourceHealth,
+  SourceMissingRegionListResponse,
   SourceParseFailure,
   SourceParseFailureListResponse,
   SourceParseFailureQueryInput,
+  SourceRegionBackfillResult,
   Source,
   SourceListResponse,
   SourceType,
@@ -136,6 +138,7 @@ import type {
   SessionSearchInput,
   SessionSearchResponse,
   SessionSourceFreshness,
+  UpdateSourceInput,
   UsageExportDimension,
   UsageExportQueryInput,
   UsageAggregateFilters,
@@ -363,6 +366,10 @@ function isSource(value: unknown): value is Source {
   const source = value as Partial<Source>;
   const hasCompatibleAccessMode =
     source.accessMode === undefined || isSourceAccessMode(source.accessMode);
+  const hasCompatibleSourceRegion =
+    source.sourceRegion === undefined ||
+    source.sourceRegion === null ||
+    typeof source.sourceRegion === "string";
   const hasCompatibleSync = source.sync === undefined || isSourceSync(source.sync);
   const hasCompatibleSyncCron =
     source.syncCron === undefined || source.syncCron === null || typeof source.syncCron === "string";
@@ -380,10 +387,47 @@ function isSource(value: unknown): value is Source {
     typeof source.enabled === "boolean" &&
     typeof source.createdAt === "string" &&
     isSourceType(source.type) &&
+    hasCompatibleSourceRegion &&
     hasCompatibleAccessMode &&
     hasCompatibleSync &&
     hasCompatibleSyncCron &&
     hasCompatibleSyncRetentionDays
+  );
+}
+
+function isSourceMissingRegionListResponse(value: unknown): value is SourceMissingRegionListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isSource(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0
+  );
+}
+
+function isSourceRegionBackfillResult(value: unknown): value is SourceRegionBackfillResult {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.tenantId === "string" &&
+    typeof value.dryRun === "boolean" &&
+    typeof value.primaryRegion === "string" &&
+    typeof value.totalMissing === "number" &&
+    Number.isInteger(value.totalMissing) &&
+    value.totalMissing >= 0 &&
+    typeof value.updated === "number" &&
+    Number.isInteger(value.updated) &&
+    value.updated >= 0 &&
+    typeof value.skipped === "number" &&
+    Number.isInteger(value.skipped) &&
+    value.skipped >= 0 &&
+    Array.isArray(value.items)
   );
 }
 
@@ -3396,6 +3440,16 @@ export async function fetchSources(signal?: AbortSignal): Promise<SourceListResp
   };
 }
 
+export async function fetchSourcesMissingRegion(
+  signal?: AbortSignal
+): Promise<SourceMissingRegionListResponse> {
+  const result = await requestJson<unknown>("/api/v1/sources/missing-region", undefined, signal);
+  if (!isSourceMissingRegionListResponse(result)) {
+    throw new Error("sources.missing-region 返回结构不合法");
+  }
+  return result;
+}
+
 export async function fetchSourceHealth(
   sourceId: string,
   signal?: AbortSignal
@@ -3467,6 +3521,62 @@ export async function createSource(
   }
 
   throw new Error("sources.create 返回结构不合法");
+}
+
+export async function updateSource(
+  sourceId: string,
+  input: UpdateSourceInput,
+  signal?: AbortSignal
+): Promise<Source> {
+  const normalizedSourceId = sourceId.trim();
+  if (!normalizedSourceId) {
+    throw new Error("sourceId 不能为空。");
+  }
+
+  const result = await requestJson<unknown>(
+    `/api/v1/sources/${encodeURIComponent(normalizedSourceId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+
+  if (!isSource(result)) {
+    throw new Error("sources.update 返回结构不合法");
+  }
+  return result;
+}
+
+export async function backfillSourceRegions(
+  input: {
+    dryRun?: boolean;
+    sourceIds?: string[];
+  } = {},
+  signal?: AbortSignal
+): Promise<SourceRegionBackfillResult> {
+  const payload = {
+    ...(input.dryRun !== undefined ? { dryRun: input.dryRun } : {}),
+    ...(Array.isArray(input.sourceIds) && input.sourceIds.length > 0
+      ? {
+          sourceIds: input.sourceIds
+            .map((item) => item.trim())
+            .filter((item) => item.length > 0),
+        }
+      : {}),
+  };
+  const result = await requestJson<unknown>(
+    "/api/v1/sources/source-region/backfill",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    signal
+  );
+  if (!isSourceRegionBackfillResult(result)) {
+    throw new Error("sources.source-region.backfill 返回结构不合法");
+  }
+  return result;
 }
 
 export async function fetchAlerts(

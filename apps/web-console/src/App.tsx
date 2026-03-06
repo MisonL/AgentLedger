@@ -12,6 +12,7 @@ import {
   approveMcpApproval,
   ApiError,
   cancelReplicationJob,
+  backfillSourceRegions,
   fetchAlertOrchestrationExecutions,
   fetchAlertOrchestrationRules,
   createMcpApproval,
@@ -80,6 +81,7 @@ import {
   upsertAlertOrchestrationRule,
   upsertResidencyPolicy,
   updateAlertStatus,
+  updateSource,
   upsertPricingCatalog,
 } from "./api";
 import type {
@@ -229,6 +231,7 @@ interface SourceFormState {
   name: string;
   type: SourceType;
   location: string;
+  sourceRegion: string;
   enabled: boolean;
 }
 
@@ -236,6 +239,7 @@ const INITIAL_SOURCE_FORM: SourceFormState = {
   name: "",
   type: "local",
   location: "",
+  sourceRegion: "",
   enabled: true,
 };
 
@@ -8586,7 +8590,10 @@ function GovernancePage() {
 function SourcesPage() {
   const [sourceForm, setSourceForm] = useState<SourceFormState>(INITIAL_SOURCE_FORM);
   const [sourceFormError, setSourceFormError] = useState<string | null>(null);
+  const [sourceFeedback, setSourceFeedback] = useState<string | null>(null);
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
+  const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
+  const [showMissingRegionOnly, setShowMissingRegionOnly] = useState(false);
   const [connectionResults, setConnectionResults] = useState<
     Record<string, { success: boolean; message: string }>
   >({});
@@ -8603,6 +8610,41 @@ function SourcesPage() {
     onSuccess: async () => {
       setSourceForm(INITIAL_SOURCE_FORM);
       setSourceFormError(null);
+      setSourceFeedback("新增成功，列表已刷新。");
+      await queryClient.invalidateQueries({ queryKey: ["sources"] });
+    },
+  });
+
+  const updateSourceMutation = useMutation({
+    mutationFn: ({
+      sourceId,
+      input,
+    }: {
+      sourceId: string;
+      input: {
+        name: string;
+        location: string;
+        sourceRegion?: string;
+        enabled: boolean;
+      };
+    }) => updateSource(sourceId, input),
+    onSuccess: async (source) => {
+      setEditingSourceId(null);
+      setSourceForm(INITIAL_SOURCE_FORM);
+      setSourceFormError(null);
+      setSourceFeedback(`Source ${source.name} 已更新。`);
+      await queryClient.invalidateQueries({ queryKey: ["sources"] });
+    },
+  });
+
+  const sourceRegionBackfillMutation = useMutation({
+    mutationFn: (input: { sourceIds?: string[] }) => backfillSourceRegions(input),
+    onSuccess: async (result) => {
+      setSourceFeedback(
+        result.updated > 0
+          ? `已按主区域回填 ${result.updated} 个 Source（${result.primaryRegion}）。`
+          : "当前没有可回填的缺失 sourceRegion。"
+      );
       await queryClient.invalidateQueries({ queryKey: ["sources"] });
     },
   });
@@ -8630,17 +8672,26 @@ function SourcesPage() {
   });
 
   const sourceItems = sourcesQuery.data?.items ?? [];
+  const missingRegionCount = sourceItems.filter((item) => !item.sourceRegion?.trim()).length;
+  const displayedSourceItems = showMissingRegionOnly
+    ? sourceItems.filter((item) => !item.sourceRegion?.trim())
+    : sourceItems;
   const selectedSource = sourceItems.find((item) => item.id === selectedSourceId) ?? null;
 
   useEffect(() => {
-    if (sourceItems.length === 0) {
-      setSelectedSourceId(null);
+    if (displayedSourceItems.length === 0) {
+      if (sourceItems.length === 0) {
+        setSelectedSourceId(null);
+      }
       return;
     }
-    if (!selectedSourceId || !sourceItems.some((item) => item.id === selectedSourceId)) {
-      setSelectedSourceId(sourceItems[0].id);
+    if (
+      !selectedSourceId ||
+      !displayedSourceItems.some((item) => item.id === selectedSourceId)
+    ) {
+      setSelectedSourceId(displayedSourceItems[0]?.id ?? null);
     }
-  }, [selectedSourceId, sourceItems]);
+  }, [displayedSourceItems, selectedSourceId, sourceItems.length]);
 
   const sourceHealthQuery = useQuery({
     queryKey: ["source-health", selectedSourceId],
@@ -8663,22 +8714,72 @@ function SourcesPage() {
     ? getSourceHealthStatus(sourceHealthQuery.data)
     : null;
   const sourceParseFailureItems = parseFailureQuery.data?.items ?? [];
+  const isSubmittingSource =
+    createSourceMutation.isPending || updateSourceMutation.isPending;
+
+  function resetSourceFormState() {
+    setEditingSourceId(null);
+    setSourceForm(INITIAL_SOURCE_FORM);
+    setSourceFormError(null);
+  }
+
+  function beginEditSource(source: {
+    id: string;
+    name: string;
+    type: SourceType;
+    location: string;
+    sourceRegion?: string;
+    enabled: boolean;
+  }) {
+    setEditingSourceId(source.id);
+    setSelectedSourceId(source.id);
+    setSourceForm({
+      name: source.name,
+      type: source.type,
+      location: source.location,
+      sourceRegion: source.sourceRegion ?? "",
+      enabled: source.enabled,
+    });
+    setSourceFormError(null);
+    setSourceFeedback(null);
+  }
+
+  function handleBackfill(sourceIds?: string[]) {
+    setSourceFeedback(null);
+    sourceRegionBackfillMutation.mutate({ sourceIds });
+  }
 
   function handleSourceSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const name = sourceForm.name.trim();
     const location = sourceForm.location.trim();
+    const sourceRegion = sourceForm.sourceRegion.trim();
     if (!name || !location) {
       setSourceFormError("名称和位置不能为空。");
       return;
     }
 
     setSourceFormError(null);
+    setSourceFeedback(null);
+    if (editingSourceId) {
+      updateSourceMutation.mutate({
+        sourceId: editingSourceId,
+        input: {
+          name,
+          location,
+          sourceRegion: sourceRegion || undefined,
+          enabled: sourceForm.enabled,
+        },
+      });
+      return;
+    }
+
     createSourceMutation.mutate({
       name,
       type: sourceForm.type,
       location,
+      sourceRegion: sourceRegion || undefined,
       enabled: sourceForm.enabled,
     });
   }
@@ -8692,6 +8793,34 @@ function SourcesPage() {
 
       <div className="source-layout">
         <div className="source-list-block">
+          <div className="filters-row">
+            <label className="checkbox-field" htmlFor="source-filter-missing-region">
+              <input
+                id="source-filter-missing-region"
+                type="checkbox"
+                checked={showMissingRegionOnly}
+                onChange={(event) => setShowMissingRegionOnly(event.target.checked)}
+              />
+              仅看缺失 Region
+            </label>
+            <span className="tiny-feedback">缺失 region：{missingRegionCount}</span>
+            <button
+              type="button"
+              className="table-action"
+              disabled={missingRegionCount === 0 || sourceRegionBackfillMutation.isPending}
+              onClick={() => handleBackfill()}
+            >
+              {sourceRegionBackfillMutation.isPending ? "回填中..." : "按主区域批量回填"}
+            </button>
+          </div>
+
+          {sourceFeedback ? <p className="feedback success">{sourceFeedback}</p> : null}
+          {sourceRegionBackfillMutation.isError ? (
+            <p className="feedback error">
+              回填失败：{toErrorMessage(sourceRegionBackfillMutation.error)}
+            </p>
+          ) : null}
+
           <h3>来源列表</h3>
           {sourcesQuery.isLoading ? <p className="feedback info">Sources 加载中...</p> : null}
           {sourcesQuery.isFetching && !sourcesQuery.isLoading ? (
@@ -8701,11 +8830,21 @@ function SourcesPage() {
             <p className="feedback error">Sources 加载失败：{toErrorMessage(sourcesQuery.error)}</p>
           ) : null}
 
-          {!sourcesQuery.isLoading && !sourcesQuery.isError && sourceItems.length === 0 ? (
+          {!sourcesQuery.isLoading &&
+          !sourcesQuery.isError &&
+          displayedSourceItems.length === 0 &&
+          sourceItems.length === 0 ? (
             <p className="feedback empty">暂无 Source，请先新增。</p>
           ) : null}
 
-          {!sourcesQuery.isError && sourceItems.length > 0 ? (
+          {!sourcesQuery.isLoading &&
+          !sourcesQuery.isError &&
+          displayedSourceItems.length === 0 &&
+          sourceItems.length > 0 ? (
+            <p className="feedback empty">当前筛选下暂无缺失 region 的 Source。</p>
+          ) : null}
+
+          {!sourcesQuery.isError && displayedSourceItems.length > 0 ? (
             <div className="source-table-wrapper">
               <table className="source-table">
                 <thead>
@@ -8713,24 +8852,29 @@ function SourcesPage() {
                     <th>名称</th>
                     <th>类型</th>
                     <th>位置</th>
+                    <th>Region</th>
                     <th>状态</th>
                     <th>创建时间</th>
                     <th>操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sourceItems.map((source) => {
+                  {displayedSourceItems.map((source) => {
                     const latestResult = connectionResults[source.id];
                     const isSelected = source.id === selectedSourceId;
                     const isTesting =
                       testConnectionMutation.isPending &&
                       testConnectionMutation.variables === source.id;
+                    const isBackfilling =
+                      sourceRegionBackfillMutation.isPending &&
+                      sourceRegionBackfillMutation.variables?.sourceIds?.[0] === source.id;
 
                     return (
                       <tr key={source.id} className={isSelected ? "is-selected-row" : ""}>
                         <td>{source.name}</td>
                         <td>{source.type}</td>
                         <td>{source.location}</td>
+                        <td>{source.sourceRegion?.trim() || "未设置"}</td>
                         <td>{source.enabled ? "启用" : "停用"}</td>
                         <td>{formatDateTime(source.createdAt)}</td>
                         <td>
@@ -8746,11 +8890,28 @@ function SourcesPage() {
                             <button
                               type="button"
                               className="table-action"
+                              onClick={() => beginEditSource(source)}
+                            >
+                              编辑
+                            </button>
+                            <button
+                              type="button"
+                              className="table-action"
                               disabled={isTesting}
                               onClick={() => testConnectionMutation.mutate(source.id)}
                             >
                               {isTesting ? "测试中..." : "测试连接"}
                             </button>
+                            {!source.sourceRegion?.trim() ? (
+                              <button
+                                type="button"
+                                className="table-action"
+                                disabled={isBackfilling}
+                                onClick={() => handleBackfill([source.id])}
+                              >
+                                {isBackfilling ? "回填中..." : "按主区域回填"}
+                              </button>
+                            ) : null}
                           </div>
                           {latestResult ? (
                             <p
@@ -8879,7 +9040,7 @@ function SourcesPage() {
         </div>
 
         <form className="source-form" onSubmit={handleSourceSubmit}>
-          <h3>新增 Source</h3>
+          <h3>{editingSourceId ? "编辑 Source" : "新增 Source"}</h3>
           <label htmlFor="source-name">名称</label>
           <input
             id="source-name"
@@ -8898,6 +9059,7 @@ function SourcesPage() {
           <select
             id="source-type"
             value={sourceForm.type}
+            disabled={Boolean(editingSourceId)}
             onChange={(event) =>
               setSourceForm((prev) => ({
                 ...prev,
@@ -8926,6 +9088,20 @@ function SourcesPage() {
             }
           />
 
+          <label htmlFor="source-region">Region</label>
+          <input
+            id="source-region"
+            type="text"
+            placeholder="例如：cn-shanghai"
+            value={sourceForm.sourceRegion}
+            onChange={(event) =>
+              setSourceForm((prev) => ({
+                ...prev,
+                sourceRegion: event.target.value,
+              }))
+            }
+          />
+
           <label className="checkbox-field" htmlFor="source-enabled">
             <input
               id="source-enabled"
@@ -8941,16 +9117,32 @@ function SourcesPage() {
             启用该 Source
           </label>
 
-          <button type="submit" className="submit-button" disabled={createSourceMutation.isPending}>
-            {createSourceMutation.isPending ? "提交中..." : "新增 Source"}
-          </button>
+          <div className="source-action-row">
+            <button type="submit" className="submit-button" disabled={isSubmittingSource}>
+              {isSubmittingSource
+                ? "提交中..."
+                : editingSourceId
+                  ? "保存 Source"
+                  : "新增 Source"}
+            </button>
+            {editingSourceId ? (
+              <button
+                type="button"
+                className="table-action"
+                onClick={resetSourceFormState}
+                disabled={isSubmittingSource}
+              >
+                取消编辑
+              </button>
+            ) : null}
+          </div>
 
           {sourceFormError ? <p className="feedback error">{sourceFormError}</p> : null}
-          {createSourceMutation.isError ? (
+          {!editingSourceId && createSourceMutation.isError ? (
             <p className="feedback error">新增失败：{toErrorMessage(createSourceMutation.error)}</p>
           ) : null}
-          {createSourceMutation.isSuccess ? (
-            <p className="feedback success">新增成功，列表已刷新。</p>
+          {editingSourceId && updateSourceMutation.isError ? (
+            <p className="feedback error">更新失败：{toErrorMessage(updateSourceMutation.error)}</p>
           ) : null}
         </form>
       </div>

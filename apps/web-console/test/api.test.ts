@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+  backfillSourceRegions,
   clearAuthTokens,
   createOpenPlatformReplayDataset,
   createOpenPlatformReplayRun,
@@ -37,6 +38,7 @@ import {
   setAuthTokens,
   setUnauthorizedHandler,
   testSourceConnection,
+  updateSource,
   updateAlertStatus,
   upsertPricingCatalog,
 } from "../src/api";
@@ -240,6 +242,107 @@ describe("api mock fallback gate", () => {
     const [, init] = fetchSpy.mock.calls[0] ?? [];
     const headers = new Headers((init as RequestInit | undefined)?.headers);
     expect(headers.get("authorization")).toBe("Bearer access-token-001");
+  });
+
+  test("fetchSources 会保留 sourceRegion 字段", async () => {
+    env.DEV = false;
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockJsonResponse({
+        items: [
+          {
+            id: "source-region-1",
+            name: "source-region-1",
+            type: "local",
+            location: "/workspace/source-region-1",
+            sourceRegion: "cn-shanghai",
+            enabled: true,
+            createdAt: "2026-03-06T00:00:00.000Z",
+          },
+        ],
+        total: 1,
+      })
+    );
+
+    await expect(fetchSources()).resolves.toEqual({
+      items: [
+        {
+          id: "source-region-1",
+          name: "source-region-1",
+          type: "local",
+          location: "/workspace/source-region-1",
+          sourceRegion: "cn-shanghai",
+          enabled: true,
+          createdAt: "2026-03-06T00:00:00.000Z",
+        },
+      ],
+      total: 1,
+    });
+  });
+
+  test("updateSource 与 backfillSourceRegions 走正确接口", async () => {
+    env.DEV = false;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/sources/source-1") && method === "PATCH") {
+        return mockJsonResponse({
+          id: "source-1",
+          name: "source-1",
+          type: "local",
+          location: "/workspace/source-1",
+          sourceRegion: "cn-hangzhou",
+          enabled: true,
+          createdAt: "2026-03-06T00:00:00.000Z",
+        });
+      }
+
+      if (url.endsWith("/api/v1/sources/source-region/backfill") && method === "POST") {
+        return mockJsonResponse({
+          tenantId: "default",
+          dryRun: true,
+          primaryRegion: "cn-shanghai",
+          totalMissing: 1,
+          updated: 0,
+          skipped: 0,
+          items: [
+            {
+              sourceId: "source-1",
+              name: "source-1",
+              status: "would_update",
+              appliedRegion: "cn-shanghai",
+            },
+          ],
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    await expect(updateSource("source-1", { sourceRegion: "cn-hangzhou" })).resolves.toMatchObject({
+      sourceRegion: "cn-hangzhou",
+    });
+    await expect(
+      backfillSourceRegions({ dryRun: true, sourceIds: ["source-1"] })
+    ).resolves.toMatchObject({
+      dryRun: true,
+      primaryRegion: "cn-shanghai",
+    });
+
+    expect(
+      fetchSpy.mock.calls.some(
+        ([url, init]) =>
+          toUrl(url).endsWith("/api/v1/sources/source-1") &&
+          (init as RequestInit | undefined)?.method === "PATCH"
+      )
+    ).toBe(true);
+    expect(
+      fetchSpy.mock.calls.some(
+        ([url, init]) =>
+          toUrl(url).endsWith("/api/v1/sources/source-region/backfill") &&
+          (init as RequestInit | undefined)?.method === "POST"
+      )
+    ).toBe(true);
   });
 
   test("请求返回 401 时会先 refresh 再重放原请求", async () => {
