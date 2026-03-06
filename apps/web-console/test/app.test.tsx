@@ -3325,6 +3325,7 @@ describe("Web Console", () => {
     });
     fireEvent.click(sectionScreen.getByRole("button", { name: "加载 Quality daily" }));
     expect(await sectionScreen.findByRole("cell", { name: "accuracy" })).toBeInTheDocument();
+    expect(await screen.findByText("暂无 externalSource 分组数据。")).toBeInTheDocument();
     fireEvent.change(byId<HTMLInputElement>("open-platform-quality-project-trends-from"), {
       target: { value: "2026-03-03" },
     });

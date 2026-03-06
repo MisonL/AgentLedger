@@ -5179,43 +5179,6 @@ function GovernancePage() {
               <table className="session-table">
                 <thead>
                   <tr>
-                    <th>groupBy</th>
-                    <th>value</th>
-                    <th>totalEvents</th>
-                    <th>passedEvents</th>
-                    <th>failedEvents</th>
-                    <th>passRate</th>
-                    <th>avgScore</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {qualityDailyGroups.length === 0 ? (
-                    <tr>
-                      <td className="table-empty-cell" colSpan={7}>
-                        暂无 externalSource 分组数据。
-                      </td>
-                    </tr>
-                  ) : (
-                    qualityDailyGroups.map((item) => (
-                      <tr key={`${item.groupBy}:${item.value}`}>
-                        <td>{item.groupBy}</td>
-                        <td>{item.value}</td>
-                        <td>{item.totalEvents}</td>
-                        <td>{item.passedEvents}</td>
-                        <td>{item.failedEvents}</td>
-                        <td>{item.passRate.toFixed(4)}</td>
-                        <td>{item.avgScore.toFixed(2)}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="table-wrapper">
-              <table className="session-table">
-                <thead>
-                  <tr>
                     <th>命中规则 ID</th>
                     <th>名称</th>
                     <th>eventType</th>
@@ -5285,6 +5248,43 @@ function GovernancePage() {
             </div>
           </div>
         ) : null}
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>groupBy</th>
+                <th>value</th>
+                <th>totalEvents</th>
+                <th>passedEvents</th>
+                <th>failedEvents</th>
+                <th>passRate</th>
+                <th>avgScore</th>
+              </tr>
+            </thead>
+            <tbody>
+              {qualityDailyGroups.length === 0 ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={7}>
+                    暂无 externalSource 分组数据。
+                  </td>
+                </tr>
+              ) : (
+                qualityDailyGroups.map((item) => (
+                  <tr key={`${item.groupBy}:${item.value}`}>
+                    <td>{item.groupBy}</td>
+                    <td>{item.value}</td>
+                    <td>{item.totalEvents}</td>
+                    <td>{item.passedEvents}</td>
+                    <td>{item.failedEvents}</td>
+                    <td>{item.passRate.toFixed(4)}</td>
+                    <td>{item.avgScore.toFixed(2)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
 
         <div className="table-wrapper">
           <table className="session-table">
