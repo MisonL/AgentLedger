@@ -33,3 +33,7 @@ bin/
 .env
 .env.*
 !.env.example
+
+# Local replay artifact outputs
+/data/
+/apps/control-plane/data/

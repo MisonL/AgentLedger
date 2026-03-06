@@ -1,6 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   validateAuthLoginInput,
   validateAuthLogoutInput,
@@ -50,6 +53,21 @@ import {
   verifyRefreshToken,
 } from "../src/security/tokens";
 import { verifyEvidenceBundle } from "../src/security/evidence-bundle";
+
+const replayArtifactTestRoot = await mkdtemp(
+  join(tmpdir(), "agentledger-control-plane-replay-artifacts-")
+);
+const originalReplayStorageLocalRoot = Bun.env.REPLAY_STORAGE_LOCAL_ROOT;
+Bun.env.REPLAY_STORAGE_LOCAL_ROOT = replayArtifactTestRoot;
+
+afterAll(async () => {
+  if (originalReplayStorageLocalRoot === undefined) {
+    delete Bun.env.REPLAY_STORAGE_LOCAL_ROOT;
+  } else {
+    Bun.env.REPLAY_STORAGE_LOCAL_ROOT = originalReplayStorageLocalRoot;
+  }
+  await rm(replayArtifactTestRoot, { recursive: true, force: true });
+});
 
 describe("Control Plane API", () => {
   const app = createApp();

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, rename, unlink } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ReplayArtifact, ReplayArtifactStorageBackend } from "../data/repository";
 
 type ReplayArtifactStorageMode = ReplayArtifactStorageBackend;
@@ -24,6 +25,13 @@ export type StoredReplayArtifact = {
   checksum: string;
   metadata: Record<string, unknown>;
 };
+
+const replayArtifactStoreRepoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+const replayArtifactStoreDefaultLocalRoot = join(
+  replayArtifactStoreRepoRoot,
+  "data",
+  "replay-artifacts"
+);
 
 function firstNonEmptyString(...values: unknown[]): string | undefined {
   for (const value of values) {
@@ -49,12 +57,22 @@ function parseMode(value: string | undefined): ReplayArtifactStorageMode {
   }
 }
 
+export function resolveReplayArtifactLocalRoot(input?: {
+  cwd?: string;
+  envLocalRoot?: string;
+}): string {
+  const cwd = input?.cwd ?? process.cwd();
+  const envLocalRoot = firstNonEmptyString(input?.envLocalRoot, Bun.env.REPLAY_STORAGE_LOCAL_ROOT);
+  if (envLocalRoot) {
+    return resolve(cwd, envLocalRoot);
+  }
+  return replayArtifactStoreDefaultLocalRoot;
+}
+
 function getConfig(): ReplayArtifactStoreConfig {
   return {
     mode: parseMode(Bun.env.REPLAY_STORAGE_MODE),
-    localRoot: resolve(
-      firstNonEmptyString(Bun.env.REPLAY_STORAGE_LOCAL_ROOT) ?? join(process.cwd(), "data", "replay-artifacts")
-    ),
+    localRoot: resolveReplayArtifactLocalRoot(),
     objectPrefix: (firstNonEmptyString(Bun.env.REPLAY_STORAGE_OBJECT_PREFIX) ?? "replay-artifacts").replace(
       /^\/+|\/+$/g,
       ""
