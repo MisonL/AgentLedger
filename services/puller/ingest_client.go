@@ -69,6 +69,9 @@ func firstSourceMetadataString(source sourceRecord, keys ...string) string {
 }
 
 func resolveSourceResidencyRegion(source sourceRecord) string {
+	if normalized := normalizeRegionCode(source.SourceRegion); normalized != "" {
+		return normalized
+	}
 	return normalizeRegionCode(
 		firstSourceMetadataString(
 			source,
@@ -158,11 +161,8 @@ func (s *pullerService) pushEvents(ctx context.Context, source sourceRecord, job
 	residencyMode := "disabled"
 	if targetRegion != "" {
 		residencyMode = "enforce"
-		if sourceRegion != "" && sourceRegion != targetRegion {
+		if sourceRegion == "" || sourceRegion != targetRegion {
 			return buildResidencyPolicyViolationError(source, sourceRegion, targetRegion)
-		}
-		if sourceRegion == "" {
-			residencyDecision = "allow_unknown_source_region"
 		}
 	}
 

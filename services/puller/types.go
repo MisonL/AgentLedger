@@ -41,16 +41,17 @@ type syncJob struct {
 }
 
 type sourceRecord struct {
-	ID          string
-	Name        string
-	Type        string
-	Location    string
-	Enabled     bool
-	Provider    string
-	Hostname    string
-	TenantID    string
-	WorkspaceID string
-	Metadata    map[string]any
+	ID           string
+	Name         string
+	Type         string
+	Location     string
+	SourceRegion string
+	Enabled      bool
+	Provider     string
+	Hostname     string
+	TenantID     string
+	WorkspaceID  string
+	Metadata     map[string]any
 }
 
 type scheduledSource struct {

@@ -86,7 +86,19 @@ func ensurePullerSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`CREATE INDEX IF NOT EXISTS idx_sync_jobs_source_trigger_created_at
 		 ON sync_jobs (source_id, "trigger", created_at DESC)`,
 		`ALTER TABLE sources
-		   ADD COLUMN IF NOT EXISTS sync_cron TEXT`,
+		   ADD COLUMN IF NOT EXISTS sync_cron TEXT,
+		   ADD COLUMN IF NOT EXISTS source_region TEXT`,
+		`UPDATE sources
+		 SET source_region = COALESCE(
+		       NULLIF(source_region, ''),
+		       NULLIF((COALESCE(metadata, '{}'::jsonb)->>'source_region'), ''),
+		       NULLIF((COALESCE(metadata, '{}'::jsonb)->>'sourceRegion'), ''),
+		       NULLIF((COALESCE(metadata, '{}'::jsonb)->>'residency_region'), ''),
+		       NULLIF((COALESCE(metadata, '{}'::jsonb)->>'residencyRegion'), ''),
+		       NULLIF((COALESCE(metadata, '{}'::jsonb)->>'region'), '')
+		     )
+		 WHERE source_region IS NULL
+		    OR source_region = ''`,
 		`CREATE TABLE IF NOT EXISTS source_watermarks (
 		   source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
 		   provider TEXT NOT NULL DEFAULT 'unknown',
@@ -234,6 +246,7 @@ SELECT
   COALESCE(name, ''),
   COALESCE(type, 'local'),
   COALESCE(location, ''),
+  COALESCE(source_region, ''),
   COALESCE(enabled, TRUE),
   COALESCE(provider, ''),
   COALESCE(hostname, ''),
@@ -252,6 +265,7 @@ LIMIT 1
 		&source.Name,
 		&source.Type,
 		&source.Location,
+		&source.SourceRegion,
 		&source.Enabled,
 		&source.Provider,
 		&source.Hostname,

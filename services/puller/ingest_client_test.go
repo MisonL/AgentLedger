@@ -167,6 +167,29 @@ func TestPostIngestBatch_InvalidJSONResponse(t *testing.T) {
 	}
 }
 
+func TestResolveSourceResidencyRegion_PrefersExplicitField(t *testing.T) {
+	t.Parallel()
+
+	got := resolveSourceResidencyRegion(sourceRecord{
+		SourceRegion: "cn_shanghai",
+		Metadata: map[string]any{
+			"region": "cn-hangzhou",
+		},
+	})
+	if got != "cn-shanghai" {
+		t.Fatalf("resolveSourceResidencyRegion() = %q, want cn-shanghai", got)
+	}
+
+	fallback := resolveSourceResidencyRegion(sourceRecord{
+		Metadata: map[string]any{
+			"sourceRegion": "ap_southeast_1",
+		},
+	})
+	if fallback != "ap-southeast-1" {
+		t.Fatalf("resolveSourceResidencyRegion() fallback = %q, want ap-southeast-1", fallback)
+	}
+}
+
 func TestPushEvents_BuildsValidBatch(t *testing.T) {
 	t.Parallel()
 
@@ -259,6 +282,52 @@ func TestPushEvents_ResidencyPolicyViolation(t *testing.T) {
 	}
 }
 
+func TestPushEvents_MissingSourceRegionRejected(t *testing.T) {
+	t.Parallel()
+
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"accepted":1,"rejected":0}`))
+	}))
+	defer server.Close()
+
+	svc := &pullerService{
+		httpClient: newHTTPClient(),
+		runtime: pullerRuntimeConfig{
+			IngestEndpoint:        server.URL,
+			IngestTimeout:         mustDuration("2s"),
+			AgentID:               "puller",
+			ResidencyTargetRegion: "cn-shanghai",
+		},
+		hostname: "local-test",
+	}
+
+	err := svc.pushEvents(
+		rctx(),
+		sourceRecord{
+			ID:       "source-1",
+			Type:     "ssh",
+			Metadata: map[string]any{},
+		},
+		syncJob{ID: "job-1"},
+		[]ingest.RawEvent{{
+			SessionID: "s-1",
+			EventType: "message",
+		}},
+	)
+	if err == nil {
+		t.Fatalf("pushEvents() expected residency error, got nil")
+	}
+	if !errors.Is(err, errResidencyPolicyViolation) {
+		t.Fatalf("pushEvents() error = %v, want errResidencyPolicyViolation", err)
+	}
+	if requestCount != 0 {
+		t.Fatalf("requestCount = %d, want 0", requestCount)
+	}
+}
+
 func TestPushEvents_EnrichesGovernanceMetadata(t *testing.T) {
 	t.Parallel()
 
@@ -307,10 +376,11 @@ func TestPushEvents_EnrichesGovernanceMetadata(t *testing.T) {
 	err := svc.pushEvents(
 		rctx(),
 		sourceRecord{
-			ID:   "source-1",
-			Type: "ssh",
+			ID:           "source-1",
+			Type:         "ssh",
+			SourceRegion: "cn-shanghai",
 			Metadata: map[string]any{
-				"region":             "cn-shanghai",
+				"region":             "cn-hangzhou",
 				"rule_asset_id":      "asset-1",
 				"rule_asset_version": "2",
 				"rule_id":            "rule-1",
