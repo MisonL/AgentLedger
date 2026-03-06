@@ -80,6 +80,7 @@ Release 工作流补充：
 
 - `.github/workflows/release.yml` 的 `pre-release-gate` 已纳入 `bun run test:e2e-governance-routing`。
 - 发布仓库需要预先配置 `GOV_E2E_DATABASE_URL` secret；未配置时 tag 发布会在门禁阶段直接失败。
+- `test:e2e-governance-routing` 仅覆盖 `services/governance` 的真实 PG + 嵌入式 NATS 发布/落库路径；`services/integration` 的真实消费分发仍需单独回归。
 
 ## 5. 兼容性说明
 

@@ -182,6 +182,7 @@ bun run test:e2e-governance-routing
 - 只需要真实 PostgreSQL；NATS 由测试内部以嵌入式 JetStream 拉起。
 - 重点覆盖 `fallback / dedupe / suppressed / fail-open / weekly` 五类治理分发场景。
 - `scripts/check-governance-e2e.sh` 会强制校验 `GOV_E2E_DATABASE_URL`，并固定用 `AGENTLEDGER_E2E=1` 执行真实治理链 E2E。
+- 该 E2E 仅验证 `services/governance` 在真实 PostgreSQL + 嵌入式 JetStream 上的发布与落库行为；`services/integration` 的真实消费分发仍需单独回归。
 
 ### 6. 审计取证包导出与校验（新增）
 
@@ -198,7 +199,7 @@ bun run evidence:verify -- --file ./evidence-bundle.v1.json --signing-key <your-
 ### 7. SDK 一键构建（新增）
 
 ```bash
-# SDK 只读门禁（CI 默认）：校验 + 覆盖测试 + SHA256 一致性
+# SDK 只读一致性校验：校验 + 覆盖测试 + SHA256 一致性
 bun run sdk:check
 
 # 需要单独定位时可拆分执行
