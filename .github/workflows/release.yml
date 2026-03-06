@@ -62,6 +62,9 @@ jobs:
           GOV_E2E_DATABASE_URL: ${{ secrets.GOV_E2E_DATABASE_URL }}
         run: bun run test:e2e-governance-routing
 
+      - name: Integration routing 真实 E2E
+        run: bun run test:e2e-integration-routing
+
   build-and-publish:
     name: 发布客户端构建产物
     needs: pre-release-gate
