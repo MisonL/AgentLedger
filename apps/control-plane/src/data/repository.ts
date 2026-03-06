@@ -69,6 +69,9 @@ import type {
   SourceAccessMode,
   SourceBindingMethod,
   SourceHealth,
+  SourceRegionBackfillInput,
+  SourceRegionBackfillResult,
+  SourceRegionBackfillResultItem,
   SSHConfig,
   SourceWatermark,
   SourceType,
@@ -76,6 +79,7 @@ import type {
   SyncJobStatus,
   TenantResidencyPolicy,
   TenantResidencyPolicyUpsertInput,
+  UpdateSourceInput,
   UsageDailyItem,
   UsageCostMode,
   UsageModelItem,
@@ -1513,7 +1517,88 @@ function mapSSHConfigFromRow(
   };
 }
 
-function mapSourceRow(row: DbRow): Source {
+function resolveSourceRegionFromRow(
+  rowData: DbRow,
+  metadata: DbRow | null | undefined,
+  allowMetadataFallback = true
+): string | undefined {
+  if (!allowMetadataFallback) {
+    return firstNonEmptyString(rowData.source_region, rowData.sourceRegion) ?? undefined;
+  }
+
+  return (
+    firstNonEmptyString(
+      rowData.source_region,
+      rowData.sourceRegion,
+      metadata?.source_region,
+      metadata?.sourceRegion,
+      metadata?.residency_region,
+      metadata?.residencyRegion,
+      metadata?.region
+    ) ?? undefined
+  );
+}
+
+function buildSourceMetadataPatch(input: {
+  name?: string;
+  type?: SourceType;
+  location?: string;
+  sourceRegion?: string;
+  sshConfig?: SSHConfig;
+  accessMode?: SourceAccessMode;
+  syncCron?: string;
+  syncRetentionDays?: number;
+  enabled?: boolean;
+}): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+
+  if (input.name !== undefined) {
+    patch.name = input.name;
+  }
+  if (input.type !== undefined) {
+    patch.type = input.type;
+    patch.source_type = input.type;
+  }
+  if (input.location !== undefined) {
+    patch.location = input.location;
+  }
+  if (input.sourceRegion !== undefined) {
+    patch.source_region = input.sourceRegion;
+    patch.sourceRegion = input.sourceRegion;
+  }
+  if (input.sshConfig !== undefined) {
+    patch.ssh_host = input.sshConfig.host;
+    patch.ssh_port = input.sshConfig.port;
+    patch.ssh_user = input.sshConfig.user;
+    patch.ssh_auth_type = input.sshConfig.authType;
+    patch.ssh_key_path = input.sshConfig.keyPath;
+    patch.ssh_known_hosts_path = input.sshConfig.knownHostsPath;
+  }
+  if (input.accessMode !== undefined) {
+    patch.access_mode = input.accessMode;
+    patch.accessMode = input.accessMode;
+  }
+  if (input.syncCron !== undefined) {
+    patch.sync_cron = input.syncCron;
+    patch.syncCron = input.syncCron;
+  }
+  if (input.syncRetentionDays !== undefined) {
+    patch.sync_retention_days = input.syncRetentionDays;
+    patch.syncRetentionDays = input.syncRetentionDays;
+  }
+  if (input.enabled !== undefined) {
+    patch.enabled = input.enabled;
+  }
+
+  return patch;
+}
+
+function mapSourceRow(
+  row: DbRow,
+  options?: {
+    allowMetadataRegionFallback?: boolean;
+  }
+): Source {
   const rowData = toDbRow(row.row_data) ?? row;
   const metadata = toDbRow(rowData.metadata);
 
@@ -1550,6 +1635,11 @@ function mapSourceRow(row: DbRow): Source {
     location:
       firstNonEmptyString(rowData.location, metadata?.location, rowData.hostname, rowData.workspace_id) ??
       "",
+    sourceRegion: resolveSourceRegionFromRow(
+      rowData,
+      metadata,
+      options?.allowMetadataRegionFallback ?? true
+    ),
     sshConfig: mapSSHConfigFromRow(rowData, metadata),
     accessMode,
     syncCron,
@@ -3927,15 +4017,55 @@ class ControlPlaneRepository {
          ORDER BY created_at DESC`,
         [normalizedTenantId]
       );
-      return result.rows.map(mapSourceRow);
+      return result.rows.map((row) => mapSourceRow(row));
     } catch (error) {
       this.disableDb(error, "查询 sources 失败");
       return this.listSourcesFromMemory(normalizedTenantId);
     }
   }
 
+  async listSourcesMissingRegion(
+    tenantId: string,
+    sourceIds?: string[]
+  ): Promise<Source[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedSourceIds =
+      Array.isArray(sourceIds) && sourceIds.length > 0
+        ? Array.from(
+            new Set(sourceIds.map((item) => firstNonEmptyString(item)).filter(Boolean) as string[])
+          )
+        : [];
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listSourcesMissingRegionFromMemory(normalizedTenantId, normalizedSourceIds);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      let sourceFilterSql = "";
+      if (normalizedSourceIds.length > 0) {
+        params.push(normalizedSourceIds);
+        sourceFilterSql = ` AND id = ANY($${params.length}::text[])`;
+      }
+      const result = await pool.query(
+        `SELECT id, created_at, to_jsonb(sources.*) AS row_data
+         FROM sources
+         WHERE tenant_id = $1
+           AND COALESCE(source_region, '') = ''
+           ${sourceFilterSql}
+         ORDER BY created_at DESC`,
+        params
+      );
+      return result.rows.map((row) => mapSourceRow(row, { allowMetadataRegionFallback: false }));
+    } catch (error) {
+      this.disableDb(error, "查询缺失 source_region 的 sources 失败");
+      return this.listSourcesMissingRegionFromMemory(normalizedTenantId, normalizedSourceIds);
+    }
+  }
+
   async createSource(tenantId: string, input: CreateSourceInput): Promise<Source> {
     const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const sourceRegion = firstNonEmptyString(input.sourceRegion) ?? undefined;
     const syncCron = firstNonEmptyString(input.syncCron) ?? undefined;
     const syncRetentionDays = toOptionalNonNegativeInteger(input.syncRetentionDays);
     const source: Source = {
@@ -3943,6 +4073,7 @@ class ControlPlaneRepository {
       name: input.name,
       type: input.type,
       location: input.location,
+      sourceRegion,
       sshConfig: input.sshConfig,
       accessMode: toSourceAccessMode(input.accessMode),
       syncCron,
@@ -3963,6 +4094,8 @@ class ControlPlaneRepository {
         name: source.name,
         type: source.type,
         location: source.location,
+        source_region: source.sourceRegion,
+        sourceRegion: source.sourceRegion,
         ssh_host: source.sshConfig?.host,
         ssh_port: source.sshConfig?.port,
         ssh_user: source.sshConfig?.user,
@@ -3979,11 +4112,11 @@ class ControlPlaneRepository {
       await pool.query(
         `INSERT INTO sources (
            id, provider, source_type, hostname, agent_id, tenant_id, workspace_id, metadata,
-           name, type, location, access_mode, sync_cron, sync_retention_days, enabled, created_at, updated_at
+           name, type, location, source_region, access_mode, sync_cron, sync_retention_days, enabled, created_at, updated_at
          )
          VALUES (
            $1, $2, $3, $4, $5, $6, $7, $8::jsonb,
-           $9, $10, $11, $12, $13, $14, $15, $16::timestamptz, $16::timestamptz
+           $9, $10, $11, $12, $13, $14, $15, $16, $17::timestamptz, $17::timestamptz
          )`,
         [
           source.id,
@@ -3997,6 +4130,7 @@ class ControlPlaneRepository {
           source.name,
           source.type,
           source.location,
+          source.sourceRegion ?? null,
           source.accessMode,
           source.syncCron ?? null,
           source.syncRetentionDays ?? null,
@@ -4008,6 +4142,215 @@ class ControlPlaneRepository {
     } catch (error) {
       this.disableDb(error, "写入 sources 失败");
       return this.saveSourceToMemory(source, normalizedTenantId);
+    }
+  }
+
+  async updateSource(
+    tenantId: string,
+    sourceId: string,
+    input: UpdateSourceInput
+  ): Promise<Source | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedName = input.name !== undefined ? firstNonEmptyString(input.name) ?? "" : undefined;
+    const normalizedLocation =
+      input.location !== undefined ? firstNonEmptyString(input.location) ?? "" : undefined;
+    const normalizedSourceRegion =
+      input.sourceRegion !== undefined ? firstNonEmptyString(input.sourceRegion) ?? "" : undefined;
+    const normalizedAccessMode =
+      input.accessMode !== undefined ? toSourceAccessMode(input.accessMode) : undefined;
+    const normalizedSyncCron =
+      input.syncCron !== undefined ? firstNonEmptyString(input.syncCron) ?? "" : undefined;
+    const normalizedSyncRetentionDays =
+      input.syncRetentionDays !== undefined
+        ? toOptionalNonNegativeInteger(input.syncRetentionDays) ?? 0
+        : undefined;
+    const now = new Date().toISOString();
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.updateSourceInMemory(normalizedTenantId, sourceId, {
+        ...input,
+        name: normalizedName,
+        location: normalizedLocation,
+        sourceRegion: normalizedSourceRegion,
+        accessMode: normalizedAccessMode,
+        syncCron: normalizedSyncCron,
+        syncRetentionDays: normalizedSyncRetentionDays,
+      });
+    }
+
+    try {
+      const assignments: string[] = [];
+      const params: unknown[] = [sourceId, normalizedTenantId];
+      const metadataPatch = buildSourceMetadataPatch({
+        name: normalizedName,
+        location: normalizedLocation,
+        sourceRegion: normalizedSourceRegion,
+        sshConfig: input.sshConfig,
+        accessMode: normalizedAccessMode,
+        syncCron: normalizedSyncCron,
+        syncRetentionDays: normalizedSyncRetentionDays,
+        enabled: input.enabled,
+      });
+
+      if (normalizedName !== undefined) {
+        params.push(normalizedName);
+        assignments.push(`name = $${params.length}`);
+      }
+      if (normalizedLocation !== undefined) {
+        params.push(normalizedLocation);
+        assignments.push(`location = $${params.length}`);
+        params.push(input.sshConfig?.host ?? normalizedLocation);
+        assignments.push(`hostname = $${params.length}`);
+      } else if (input.sshConfig !== undefined) {
+        params.push(input.sshConfig.host);
+        assignments.push(`hostname = $${params.length}`);
+      }
+      if (normalizedSourceRegion !== undefined) {
+        params.push(normalizedSourceRegion);
+        assignments.push(`source_region = $${params.length}`);
+      }
+      if (normalizedAccessMode !== undefined) {
+        params.push(normalizedAccessMode);
+        assignments.push(`access_mode = $${params.length}`);
+      }
+      if (normalizedSyncCron !== undefined) {
+        params.push(normalizedSyncCron);
+        assignments.push(`sync_cron = $${params.length}`);
+      }
+      if (normalizedSyncRetentionDays !== undefined) {
+        params.push(normalizedSyncRetentionDays);
+        assignments.push(`sync_retention_days = $${params.length}`);
+      }
+      if (input.enabled !== undefined) {
+        params.push(input.enabled);
+        assignments.push(`enabled = $${params.length}`);
+      }
+      if (Object.keys(metadataPatch).length > 0) {
+        params.push(JSON.stringify(metadataPatch));
+        assignments.push(`metadata = COALESCE(metadata, '{}'::jsonb) || $${params.length}::jsonb`);
+      }
+
+      params.push(now);
+      assignments.push(`updated_at = $${params.length}::timestamptz`);
+
+      const result = await pool.query(
+        `UPDATE sources
+         SET ${assignments.join(", ")}
+         WHERE id = $1
+           AND tenant_id = $2
+         RETURNING id, created_at, to_jsonb(sources.*) AS row_data`,
+        params
+      );
+      const row = result.rows[0];
+      return row ? mapSourceRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "更新 sources 失败");
+      return this.updateSourceInMemory(normalizedTenantId, sourceId, {
+        ...input,
+        name: normalizedName,
+        location: normalizedLocation,
+        sourceRegion: normalizedSourceRegion,
+        accessMode: normalizedAccessMode,
+        syncCron: normalizedSyncCron,
+        syncRetentionDays: normalizedSyncRetentionDays,
+      });
+    }
+  }
+
+  async backfillSourceRegionsFromTenantPrimaryRegion(
+    tenantId: string,
+    input: SourceRegionBackfillInput = {}
+  ): Promise<SourceRegionBackfillResult | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const primaryRegion = firstNonEmptyString(
+      (await this.getTenantResidencyPolicy(normalizedTenantId))?.primaryRegion
+    );
+    if (!primaryRegion) {
+      return null;
+    }
+
+    const normalizedSourceIds =
+      Array.isArray(input.sourceIds) && input.sourceIds.length > 0
+        ? Array.from(
+            new Set(input.sourceIds.map((item) => firstNonEmptyString(item)).filter(Boolean) as string[])
+          )
+        : [];
+    const candidates = await this.listSourcesMissingRegion(normalizedTenantId, normalizedSourceIds);
+    if (input.dryRun === true) {
+      return {
+        tenantId: normalizedTenantId,
+        dryRun: true,
+        primaryRegion,
+        totalMissing: candidates.length,
+        updated: 0,
+        skipped: 0,
+        items: candidates.map(
+          (item): SourceRegionBackfillResultItem => ({
+            sourceId: item.id,
+            name: item.name,
+            status: "would_update",
+            appliedRegion: primaryRegion,
+          })
+        ),
+      };
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.backfillSourceRegionsFromTenantPrimaryRegionInMemory(
+        normalizedTenantId,
+        primaryRegion,
+        normalizedSourceIds
+      );
+    }
+
+    try {
+      const candidateIds = candidates.map((item) => item.id);
+      if (candidateIds.length > 0) {
+        await pool.query(
+          `UPDATE sources
+           SET source_region = $1,
+               metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb,
+               updated_at = $3::timestamptz
+           WHERE tenant_id = $4
+             AND COALESCE(source_region, '') = ''
+             AND id = ANY($5::text[])`,
+          [
+            primaryRegion,
+            JSON.stringify({
+              source_region: primaryRegion,
+              sourceRegion: primaryRegion,
+            }),
+            new Date().toISOString(),
+            normalizedTenantId,
+            candidateIds,
+          ]
+        );
+      }
+
+      return {
+        tenantId: normalizedTenantId,
+        dryRun: false,
+        primaryRegion,
+        totalMissing: candidates.length,
+        updated: candidates.length,
+        skipped: 0,
+        items: candidates.map(
+          (item): SourceRegionBackfillResultItem => ({
+            sourceId: item.id,
+            name: item.name,
+            status: "updated",
+            appliedRegion: primaryRegion,
+          })
+        ),
+      };
+    } catch (error) {
+      this.disableDb(error, "按租户主区域回填 source_region 失败");
+      return this.backfillSourceRegionsFromTenantPrimaryRegionInMemory(
+        normalizedTenantId,
+        primaryRegion,
+        normalizedSourceIds
+      );
     }
   }
 
@@ -13412,6 +13755,7 @@ class ControlPlaneRepository {
          name TEXT,
          type TEXT,
          location TEXT,
+         source_region TEXT,
          access_mode TEXT NOT NULL DEFAULT 'realtime',
          sync_cron TEXT,
          sync_retention_days INTEGER,
@@ -13452,6 +13796,7 @@ class ControlPlaneRepository {
          ADD COLUMN IF NOT EXISTS name TEXT,
          ADD COLUMN IF NOT EXISTS type TEXT,
          ADD COLUMN IF NOT EXISTS location TEXT,
+         ADD COLUMN IF NOT EXISTS source_region TEXT,
          ADD COLUMN IF NOT EXISTS access_mode TEXT NOT NULL DEFAULT 'realtime',
          ADD COLUMN IF NOT EXISTS sync_cron TEXT,
          ADD COLUMN IF NOT EXISTS sync_retention_days INTEGER,
@@ -13475,6 +13820,14 @@ class ControlPlaneRepository {
            name = COALESCE(NULLIF(name, ''), NULLIF(agent_id, ''), NULLIF(hostname, ''), id),
            type = COALESCE(NULLIF(type, ''), NULLIF(source_type, ''), 'local'),
            location = COALESCE(NULLIF(location, ''), NULLIF(hostname, ''), NULLIF(workspace_id, ''), ''),
+           source_region = COALESCE(
+             NULLIF(source_region, ''),
+             NULLIF((COALESCE(metadata, '{}'::jsonb)->>'source_region'), ''),
+             NULLIF((COALESCE(metadata, '{}'::jsonb)->>'sourceRegion'), ''),
+             NULLIF((COALESCE(metadata, '{}'::jsonb)->>'residency_region'), ''),
+             NULLIF((COALESCE(metadata, '{}'::jsonb)->>'residencyRegion'), ''),
+             NULLIF((COALESCE(metadata, '{}'::jsonb)->>'region'), '')
+           ),
            access_mode = CASE
              WHEN access_mode IN ('realtime', 'sync', 'hybrid') THEN access_mode
              WHEN COALESCE(
@@ -13527,6 +13880,8 @@ class ControlPlaneRepository {
           OR type IS NULL
           OR type = ''
           OR location IS NULL
+          OR source_region IS NULL
+          OR source_region = ''
           OR access_mode IS NULL
           OR access_mode NOT IN ('realtime', 'sync', 'hybrid')
           OR sync_cron = ''
@@ -18951,10 +19306,104 @@ class ControlPlaneRepository {
       .map((source) => ({ ...source }));
   }
 
+  private listSourcesMissingRegionFromMemory(tenantId: string, sourceIds: string[] = []): Source[] {
+    const sourceIdSet = sourceIds.length > 0 ? new Set(sourceIds) : null;
+    return this.memorySources
+      .filter((source) => {
+        if (this.resolveSourceTenantIdFromMemory(source) !== tenantId) {
+          return false;
+        }
+        if (sourceIdSet && !sourceIdSet.has(source.id)) {
+          return false;
+        }
+        return !firstNonEmptyString(source.sourceRegion);
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((source) => ({ ...source }));
+  }
+
   private saveSourceToMemory(source: Source, tenantId: string): Source {
     this.memorySources.unshift({ ...source });
     this.memorySourceTenantById.set(source.id, tenantId);
     return { ...source };
+  }
+
+  private updateSourceInMemory(
+    tenantId: string,
+    sourceId: string,
+    input: UpdateSourceInput
+  ): Source | null {
+    const index = this.memorySources.findIndex(
+      (source) => source.id === sourceId && this.resolveSourceTenantIdFromMemory(source) === tenantId
+    );
+    if (index < 0) {
+      return null;
+    }
+
+    const current = this.memorySources[index];
+    if (!current) {
+      return null;
+    }
+
+    const next: Source = {
+      ...current,
+      name: input.name !== undefined ? input.name : current.name,
+      location: input.location !== undefined ? input.location : current.location,
+      sourceRegion:
+        input.sourceRegion !== undefined ? input.sourceRegion : current.sourceRegion,
+      sshConfig: input.sshConfig !== undefined ? input.sshConfig : current.sshConfig,
+      accessMode:
+        input.accessMode !== undefined ? toSourceAccessMode(input.accessMode) : current.accessMode,
+      syncCron: input.syncCron !== undefined ? input.syncCron : current.syncCron,
+      syncRetentionDays:
+        input.syncRetentionDays !== undefined
+          ? toOptionalNonNegativeInteger(input.syncRetentionDays)
+          : current.syncRetentionDays,
+      enabled: input.enabled !== undefined ? input.enabled : current.enabled,
+    };
+    this.memorySources[index] = next;
+    return { ...next };
+  }
+
+  private backfillSourceRegionsFromTenantPrimaryRegionInMemory(
+    tenantId: string,
+    primaryRegion: string,
+    sourceIds: string[] = []
+  ): SourceRegionBackfillResult {
+    const candidates = this.listSourcesMissingRegionFromMemory(tenantId, sourceIds);
+    const items: SourceRegionBackfillResultItem[] = [];
+    for (const source of candidates) {
+      const index = this.memorySources.findIndex(
+        (item) => item.id === source.id && this.resolveSourceTenantIdFromMemory(item) === tenantId
+      );
+      if (index < 0) {
+        continue;
+      }
+      const current = this.memorySources[index];
+      if (!current) {
+        continue;
+      }
+      this.memorySources[index] = {
+        ...current,
+        sourceRegion: primaryRegion,
+      };
+      items.push({
+        sourceId: source.id,
+        name: source.name,
+        status: "updated",
+        appliedRegion: primaryRegion,
+      });
+    }
+
+    return {
+      tenantId,
+      dryRun: false,
+      primaryRegion,
+      totalMissing: candidates.length,
+      updated: items.length,
+      skipped: Math.max(0, candidates.length - items.length),
+      items,
+    };
   }
 
   private listSyncJobsFromMemory(tenantId: string, sourceId: string, limit: number): SyncJob[] {

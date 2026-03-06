@@ -2,8 +2,18 @@ import { Hono, type Context } from "hono";
 import { access, constants as fsConstants } from "node:fs/promises";
 import { Socket } from "node:net";
 import { isAbsolute } from "node:path";
-import type { CreateSourceInput, Source, SourceAccessMode, SourceHealth, SyncJob } from "../contracts";
-import { validateCreateSourceInput } from "../contracts";
+import type {
+  CreateSourceInput,
+  Source,
+  SourceAccessMode,
+  SourceHealth,
+  SyncJob,
+} from "../contracts";
+import {
+  validateCreateSourceInput,
+  validateSourceRegionBackfillInput,
+  validateUpdateSourceInput,
+} from "../contracts";
 import type { AppendAuditLogInput, SourceParseFailureQueryInput } from "../data/repository";
 import { getControlPlaneRepository } from "../data/repository";
 import { authMiddleware } from "../middleware/auth";
@@ -14,6 +24,8 @@ const repository = getControlPlaneRepository();
 const SOURCE_SYNC_JOB_ACTION = "control_plane.source_sync_job_created";
 const SOURCE_SYNC_JOB_CANCEL_ACTION = "control_plane.source_sync_job_cancel_requested";
 const SOURCE_CONNECTION_TESTED_ACTION = "control_plane.source_connection_tested";
+const SOURCE_UPDATED_ACTION = "control_plane.source_updated";
+const SOURCE_REGION_BACKFILL_ACTION = "control_plane.source_region_backfill_executed";
 const DEFAULT_SYNC_JOB_LIMIT = 20;
 const MAX_SYNC_JOB_LIMIT = 200;
 const DEFAULT_PARSE_FAILURE_LIMIT = 50;
@@ -467,6 +479,7 @@ function buildEphemeralSourceForTest(sourceId: string, input: CreateSourceInput)
     name: input.name,
     type: input.type,
     location: input.location,
+    sourceRegion: input.sourceRegion,
     sshConfig: input.sshConfig,
     accessMode: input.accessMode ?? "realtime",
     syncCron: input.syncCron,
@@ -532,6 +545,19 @@ sourceRoutes.get("/sources", async (c) => {
   });
 });
 
+sourceRoutes.get("/sources/missing-region", async (c) => {
+  const auth = await requireAuthContext(c);
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const items = await repository.listSourcesMissingRegion(auth.tenantId);
+  return c.json({
+    items,
+    total: items.length,
+  });
+});
+
 sourceRoutes.post("/sources", async (c) => {
   const auth = await requireAuthContext(c);
   if (auth instanceof Response) {
@@ -570,6 +596,124 @@ sourceRoutes.post("/sources", async (c) => {
 
   return c.json(source, 201);
 });
+
+async function handleUpdateSource(c: Context<AppEnv>) {
+  const auth = await requireAuthContext(c);
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const sourceId = c.req.param("id")?.trim();
+  if (!sourceId) {
+    return c.json({ message: "sourceId 必须为非空字符串。" }, 400);
+  }
+
+  const body = await c.req.json().catch(() => undefined);
+  const result = validateUpdateSourceInput(body);
+  if (!result.success) {
+    return c.json({ message: result.error }, 400);
+  }
+
+  const current = await findSourceById(auth.tenantId, sourceId);
+  if (!current) {
+    return c.json({ message: `未找到数据源 ${sourceId}。` }, 404);
+  }
+
+  const mergedCandidate: CreateSourceInput = {
+    name: result.data.name ?? current.name,
+    type: current.type,
+    location: result.data.location ?? current.location,
+    sourceRegion: result.data.sourceRegion ?? current.sourceRegion,
+    sshConfig: result.data.sshConfig ?? current.sshConfig,
+    accessMode: result.data.accessMode ?? current.accessMode,
+    syncCron: result.data.syncCron ?? current.syncCron,
+    syncRetentionDays: result.data.syncRetentionDays ?? current.syncRetentionDays,
+    enabled: result.data.enabled ?? current.enabled,
+  };
+  const mergedValidation = validateCreateSourceInput(mergedCandidate);
+  if (!mergedValidation.success) {
+    return c.json({ message: mergedValidation.error }, 400);
+  }
+
+  const source = await repository.updateSource(auth.tenantId, sourceId, result.data);
+  if (!source) {
+    return c.json({ message: `未找到数据源 ${sourceId}。` }, 404);
+  }
+
+  const requestId = c.get("requestId");
+  await appendAuditLogSafely({
+    tenantId: auth.tenantId,
+    eventId: `cp:${requestId}:${source.id}:update`,
+    action: SOURCE_UPDATED_ACTION,
+    level: "info",
+    detail: `Updated source ${source.id}.`,
+    metadata: {
+      requestId,
+      resourceId: source.id,
+      name: source.name,
+      location: source.location,
+      sourceRegion: source.sourceRegion,
+      accessMode: source.accessMode,
+      enabled: source.enabled,
+    },
+  });
+
+  return c.json(source);
+}
+
+sourceRoutes.put("/sources/:id", handleUpdateSource);
+sourceRoutes.patch("/sources/:id", handleUpdateSource);
+
+async function handleBackfillSourceRegion(c: Context<AppEnv>) {
+  const auth = await requireAuthContext(c);
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const body = await c.req.json().catch(() => undefined);
+  const result = validateSourceRegionBackfillInput(body);
+  if (!result.success) {
+    return c.json({ message: result.error }, 400);
+  }
+
+  const backfillResult = await repository.backfillSourceRegionsFromTenantPrimaryRegion(
+    auth.tenantId,
+    result.data
+  );
+  if (!backfillResult) {
+    return c.json(
+      {
+        message: "当前租户未配置主区域，无法自动回填 sourceRegion。",
+      },
+      409
+    );
+  }
+
+  const requestId = c.get("requestId");
+  await appendAuditLogSafely({
+    tenantId: auth.tenantId,
+    eventId: `cp:${requestId}:source-region-backfill`,
+    action: SOURCE_REGION_BACKFILL_ACTION,
+    level: "info",
+    detail: backfillResult.dryRun
+      ? "Previewed source region backfill by tenant primary region."
+      : "Backfilled source region by tenant primary region.",
+    metadata: {
+      requestId,
+      primaryRegion: backfillResult.primaryRegion,
+      dryRun: backfillResult.dryRun,
+      totalMissing: backfillResult.totalMissing,
+      updated: backfillResult.updated,
+      skipped: backfillResult.skipped,
+      sourceIds: backfillResult.items.map((item) => item.sourceId),
+    },
+  });
+
+  return c.json(backfillResult);
+}
+
+sourceRoutes.post("/sources/backfill-region", handleBackfillSourceRegion);
+sourceRoutes.post("/sources/source-region/backfill", handleBackfillSourceRegion);
 
 sourceRoutes.delete("/sources/:id", async (c) => {
   const auth = await requireAuthContext(c);

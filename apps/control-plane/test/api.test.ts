@@ -137,6 +137,23 @@ describe("Control Plane API", () => {
       createdAt: string;
       updatedAt: string;
     } | null>;
+    upsertTenantResidencyPolicy?: (tenantId: string, input: {
+      tenantId: string;
+      mode: "single_region" | "active_active";
+      primaryRegion: string;
+      replicaRegions: string[];
+      allowCrossRegionTransfer: boolean;
+      requireTransferApproval: boolean;
+      updatedAt: string;
+    }) => Promise<{
+      tenantId: string;
+      mode: "single_region" | "active_active";
+      primaryRegion: string;
+      replicaRegions: string[];
+      allowCrossRegionTransfer: boolean;
+      requireTransferApproval: boolean;
+      updatedAt: string;
+    }>;
     createAuthSession?: (input: {
       userId: string;
       tenantId?: string;
@@ -6348,6 +6365,262 @@ describe("Control Plane API", () => {
     expect(targetAudit).toBeDefined();
   });
 
+  test("POST /api/v1/sources 支持写入并读回 sourceRegion", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const nonce = createNonce("source-region-create");
+
+    const createResponse = await app.request("/api/v1/sources", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        name: `区域数据源-${nonce}`,
+        type: "local",
+        location: `~/.codex/sessions/source-region-${nonce}`,
+        sourceRegion: "cn-shanghai",
+      }),
+    });
+    const created = (await createResponse.json()) as Source & {
+      sourceRegion?: string;
+    };
+
+    expect(createResponse.status).toBe(201);
+    expect(created.sourceRegion).toBe("cn-shanghai");
+
+    const listResponse = await app.request("/api/v1/sources", {
+      headers: authHeaders,
+    });
+    const listed = (await listResponse.json()) as SourceListResponse & {
+      items: Array<Source & { sourceRegion?: string }>;
+    };
+    expect(listResponse.status).toBe(200);
+    expect(
+      listed.items.some(
+        (item) => item.id === created.id && item.sourceRegion === "cn-shanghai"
+      )
+    ).toBe(true);
+  });
+
+  test("PATCH /api/v1/sources/:id 支持更新 sourceRegion 并写入 source_updated 审计", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const nonce = createNonce("source-region-update");
+
+    const createResponse = await app.request("/api/v1/sources", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        name: `待更新区域数据源-${nonce}`,
+        type: "local",
+        location: `~/.codex/sessions/source-region-update-${nonce}`,
+      }),
+    });
+    const created = (await createResponse.json()) as Source;
+    expect(createResponse.status).toBe(201);
+
+    const updateResponse = await app.request(`/api/v1/sources/${created.id}`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        sourceRegion: "cn-hangzhou",
+      }),
+    });
+    const updated = (await updateResponse.json()) as Source & {
+      sourceRegion?: string;
+    };
+    expect(updateResponse.status).toBe(200);
+    expect(updated.sourceRegion).toBe("cn-hangzhou");
+
+    const audits = await queryAuditByAction("control_plane.source_updated", created.id);
+    const targetAudit = audits.items.find(
+      (item) =>
+        item.action === "control_plane.source_updated" &&
+        item.metadata.resourceId === created.id &&
+        item.metadata.sourceRegion === "cn-hangzhou"
+    );
+    expect(targetAudit).toBeDefined();
+  });
+
+  test("GET /api/v1/sources/missing-region 与 POST /api/v1/sources/source-region/backfill 支持 dryRun + apply", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const nonce = createNonce("source-region-backfill");
+
+    if (typeof repository.upsertTenantResidencyPolicy !== "function") {
+      throw new Error("repository.upsertTenantResidencyPolicy 不可用，无法验证 sourceRegion backfill。");
+    }
+
+    await repository.upsertTenantResidencyPolicy(tenantId, {
+      tenantId,
+      mode: "single_region",
+      primaryRegion: "cn-shanghai",
+      replicaRegions: [],
+      allowCrossRegionTransfer: false,
+      requireTransferApproval: false,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const missingResponse = await app.request("/api/v1/sources", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        name: `缺失区域数据源-${nonce}`,
+        type: "local",
+        location: `~/.codex/sessions/source-missing-region-${nonce}`,
+      }),
+    });
+    const missingSource = (await missingResponse.json()) as Source;
+    expect(missingResponse.status).toBe(201);
+
+    const presetResponse = await app.request("/api/v1/sources", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        name: `已有区域数据源-${nonce}`,
+        type: "local",
+        location: `~/.codex/sessions/source-present-region-${nonce}`,
+        sourceRegion: "ap-southeast-1",
+      }),
+    });
+    const presetSource = (await presetResponse.json()) as Source;
+    expect(presetResponse.status).toBe(201);
+
+    const missingListResponse = await app.request("/api/v1/sources/missing-region", {
+      headers: authHeaders,
+    });
+    const missingList = (await missingListResponse.json()) as SourceListResponse;
+    expect(missingListResponse.status).toBe(200);
+    expect(missingList.items.some((item) => item.id === missingSource.id)).toBe(true);
+    expect(missingList.items.some((item) => item.id === presetSource.id)).toBe(false);
+
+    const dryRunResponse = await app.request("/api/v1/sources/source-region/backfill", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        dryRun: true,
+        sourceIds: [missingSource.id],
+      }),
+    });
+    const dryRunBody = (await dryRunResponse.json()) as {
+      dryRun: boolean;
+      updated: number;
+      items: Array<{ sourceId: string; status: string; appliedRegion?: string }>;
+    };
+    expect(dryRunResponse.status).toBe(200);
+    expect(dryRunBody.dryRun).toBe(true);
+    expect(dryRunBody.updated).toBe(0);
+    expect(dryRunBody.items).toHaveLength(1);
+    expect(dryRunBody.items[0]).toMatchObject({
+      sourceId: missingSource.id,
+      status: "would_update",
+      appliedRegion: "cn-shanghai",
+    });
+
+    const afterDryRunListResponse = await app.request("/api/v1/sources/missing-region", {
+      headers: authHeaders,
+    });
+    const afterDryRunList = (await afterDryRunListResponse.json()) as SourceListResponse;
+    expect(afterDryRunList.items.some((item) => item.id === missingSource.id)).toBe(true);
+
+    const applyResponse = await app.request("/api/v1/sources/source-region/backfill", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        sourceIds: [missingSource.id],
+      }),
+    });
+    const applyBody = (await applyResponse.json()) as {
+      dryRun: boolean;
+      updated: number;
+      primaryRegion: string;
+    };
+    expect(applyResponse.status).toBe(200);
+    expect(applyBody.dryRun).toBe(false);
+    expect(applyBody.updated).toBe(1);
+    expect(applyBody.primaryRegion).toBe("cn-shanghai");
+
+    const listResponse = await app.request("/api/v1/sources", {
+      headers: authHeaders,
+    });
+    const listed = (await listResponse.json()) as SourceListResponse & {
+      items: Array<Source & { sourceRegion?: string }>;
+    };
+    const updatedSource = listed.items.find((item) => item.id === missingSource.id);
+    expect(updatedSource?.sourceRegion).toBe("cn-shanghai");
+
+    const backfillAudits = await queryAuditByAction(
+      "control_plane.source_region_backfill_executed",
+      missingSource.id
+    );
+    const targetAudit = backfillAudits.items.find(
+      (item) =>
+        item.action === "control_plane.source_region_backfill_executed" &&
+        Array.isArray(item.metadata.sourceIds) &&
+        item.metadata.sourceIds.includes(missingSource.id)
+    );
+    expect(targetAudit).toBeDefined();
+  });
+
+  test("POST /api/v1/sources/source-region/backfill 在未配置主区域时返回 409", async () => {
+    const nonce = createNonce("source-region-backfill-no-policy");
+    const owner = await registerAndLoginUser(`${nonce}-owner`);
+    if (!owner.userId) {
+      throw new Error("无法解析用户身份，无法执行无主区域回填测试。");
+    }
+
+    const tenantResult = await createTenantByAuth(
+      owner.accessToken,
+      {
+        name: `无主区域租户-${nonce}`,
+        slug: `source-backfill-no-policy-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error("租户创建响应缺少 tenantId。");
+    }
+    const authHeaders = await issueTenantScopedAuthHeaders(
+      tenantId,
+      owner.accessToken,
+      owner.userId,
+    );
+
+    const response = await app.request("/api/v1/sources/source-region/backfill", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({ dryRun: true }),
+    });
+    const body = (await response.json()) as {
+      message: string;
+    };
+    expect(response.status).toBe(409);
+    expect(body.message).toContain("主区域");
+  });
+
   test("DELETE /api/v1/sources/:id 删除不存在的数据源返回 404", async () => {
     const authHeaders = await resolveAuthHeaders();
     const sourceId = `source-not-exists-${Date.now().toString(36)}`;
@@ -11340,6 +11613,7 @@ describe("Control Plane API", () => {
           name: `备份源-${nonce}`,
           type: "local",
           location: `~/.codex/sessions/${nonce}`,
+          sourceRegion: "cn-shanghai",
           accessMode: "sync",
           syncCron: "0 */6 * * *",
           syncRetentionDays: 14,
@@ -11400,7 +11674,7 @@ describe("Control Plane API", () => {
       schemaVersion: string;
       tenantId: string;
       exportedAt: string;
-      sources: Array<{ name: string; location: string }>;
+      sources: Array<{ name: string; location: string; sourceRegion?: string }>;
       budgets: Array<{ scope: string; tokenLimit: number; costLimit: number }>;
       pricingCatalog?: {
         note?: string;
@@ -11413,7 +11687,9 @@ describe("Control Plane API", () => {
     expect(payload.tenantId).toBe(tenantId);
     expect(typeof payload.exportedAt).toBe("string");
     expect(
-      payload.sources.some((item) => item.location.includes(nonce))
+      payload.sources.some(
+        (item) => item.location.includes(nonce) && item.sourceRegion === "cn-shanghai"
+      )
     ).toBe(true);
     expect(
       payload.budgets.some(
@@ -11460,6 +11736,17 @@ describe("Control Plane API", () => {
           name: `恢复源-${nonce}`,
           type: "local" as const,
           location: `~/.codex/sessions/${nonce}`,
+          sourceRegion: "cn-shanghai",
+          accessMode: "hybrid" as const,
+          syncCron: "*/20 * * * *",
+          syncRetentionDays: 21,
+          enabled: true,
+        },
+        {
+          name: `恢复源异区域-${nonce}`,
+          type: "local" as const,
+          location: `~/.codex/sessions/${nonce}`,
+          sourceRegion: "ap-southeast-1",
           accessMode: "hybrid" as const,
           syncCron: "*/20 * * * *",
           syncRetentionDays: 21,
@@ -11520,7 +11807,7 @@ describe("Control Plane API", () => {
     expect(dryRunResponse.status).toBe(200);
     expect(dryRunBody.tenantId).toBe(tenantId);
     expect(dryRunBody.dryRun).toBe(true);
-    expect(dryRunBody.summary.sources.created).toBe(1);
+    expect(dryRunBody.summary.sources.created).toBe(2);
     expect(dryRunBody.summary.budgets.upserted).toBe(1);
     expect(dryRunBody.summary.pricingCatalog.restored).toBe(true);
     expect(Array.isArray(dryRunBody.warnings)).toBe(true);
@@ -11556,7 +11843,7 @@ describe("Control Plane API", () => {
     expect(applyResponse.status).toBe(200);
     expect(applyBody.tenantId).toBe(tenantId);
     expect(applyBody.dryRun).toBe(false);
-    expect(applyBody.summary.sources.created).toBe(1);
+    expect(applyBody.summary.sources.created).toBe(2);
     expect(applyBody.summary.budgets.upserted).toBe(1);
     expect(applyBody.summary.pricingCatalog.restored).toBe(true);
 
@@ -11564,9 +11851,21 @@ describe("Control Plane API", () => {
       headers: authHeaders,
     });
     const sourceListAfterApplyBody =
-      (await sourceListAfterApply.json()) as SourceListResponse;
+      (await sourceListAfterApply.json()) as SourceListResponse & {
+        items: Array<Source & { sourceRegion?: string }>;
+      };
     expect(
-      sourceListAfterApplyBody.items.some((item) => item.location.includes(nonce))
+      sourceListAfterApplyBody.items.filter((item) => item.location.includes(nonce)).length
+    ).toBe(2);
+    expect(
+      sourceListAfterApplyBody.items.some(
+        (item) => item.location.includes(nonce) && item.sourceRegion === "cn-shanghai"
+      )
+    ).toBe(true);
+    expect(
+      sourceListAfterApplyBody.items.some(
+        (item) => item.location.includes(nonce) && item.sourceRegion === "ap-southeast-1"
+      )
     ).toBe(true);
 
     const restoreAudits = await queryAuditByAction(

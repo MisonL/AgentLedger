@@ -53,6 +53,7 @@ function buildSourceSignature(
     SystemConfigBackupSource,
     | "type"
     | "location"
+    | "sourceRegion"
     | "accessMode"
     | "syncCron"
     | "syncRetentionDays"
@@ -64,6 +65,7 @@ function buildSourceSignature(
   return [
     normalizeSourceSignaturePart(source.type),
     normalizeSourceSignaturePart(source.location),
+    normalizeSourceSignaturePart(source.sourceRegion),
     normalizeSourceSignaturePart(source.accessMode),
     normalizeSourceSignaturePart(source.syncCron),
     normalizeSourceSignaturePart(source.syncRetentionDays),
@@ -87,6 +89,7 @@ function toSystemConfigBackupSource(
     name: source.name,
     type: source.type,
     location: source.location,
+    sourceRegion: source.sourceRegion,
     sshConfig: source.sshConfig,
     accessMode: source.accessMode,
     syncCron: source.syncCron,

@@ -102,6 +102,11 @@ import type {
   SourceBindingListInput,
   SourceBindingListResponse,
   SourceBindingMethod,
+  SourceMissingRegionListResponse,
+  SourceRegionBackfillInput,
+  SourceRegionBackfillItemStatus,
+  SourceRegionBackfillResult,
+  SourceRegionBackfillResultItem,
   TenantResidencyPolicyUpsertInput,
   SystemConfigBackupPayload,
   SystemConfigBackupSource,
@@ -130,6 +135,7 @@ import type {
   ReplayJobStatus,
   ReplayRunCreateInput,
   ReplayRunStatus,
+  UpdateSourceInput,
   UsageDailyItem,
   UsageExportDimension,
   UsageExportQueryInput,
@@ -780,6 +786,8 @@ export function isSource(value: unknown): value is Source {
   if (!isRecord(value)) {
     return false;
   }
+  const sourceRegionOk =
+    value.sourceRegion === undefined || value.sourceRegion === null || isString(value.sourceRegion);
   const syncCronOk =
     value.syncCron === undefined || value.syncCron === null || isString(value.syncCron);
   const syncRetentionDaysOk =
@@ -796,6 +804,7 @@ export function isSource(value: unknown): value is Source {
     isString(value.name) &&
     isSourceType(value.type) &&
     isString(value.location) &&
+    sourceRegionOk &&
     isSourceAccessMode(value.accessMode) &&
     syncCronOk &&
     syncRetentionDaysOk &&
@@ -887,6 +896,76 @@ export function isSourceParseFailureListResponse(
     Number.isInteger(value.total) &&
     value.total >= 0 &&
     filtersOk
+  );
+}
+
+export function isSourceMissingRegionListResponse(
+  value: unknown
+): value is SourceMissingRegionListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isSource(item)) &&
+    isNumber(value.total) &&
+    Number.isInteger(value.total) &&
+    value.total >= 0
+  );
+}
+
+export function isSourceRegionBackfillItemStatus(
+  value: unknown
+): value is SourceRegionBackfillItemStatus {
+  return value === "updated" || value === "would_update" || value === "skipped";
+}
+
+export function isSourceRegionBackfillResultItem(
+  value: unknown
+): value is SourceRegionBackfillResultItem {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const appliedRegionOk =
+    value.appliedRegion === undefined ||
+    value.appliedRegion === null ||
+    isString(value.appliedRegion);
+  const reasonOk =
+    value.reason === undefined || value.reason === null || isString(value.reason);
+
+  return (
+    isString(value.sourceId) &&
+    isString(value.name) &&
+    isSourceRegionBackfillItemStatus(value.status) &&
+    appliedRegionOk &&
+    reasonOk
+  );
+}
+
+export function isSourceRegionBackfillResult(
+  value: unknown
+): value is SourceRegionBackfillResult {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isString(value.tenantId) &&
+    typeof value.dryRun === "boolean" &&
+    isString(value.primaryRegion) &&
+    isNumber(value.totalMissing) &&
+    Number.isInteger(value.totalMissing) &&
+    value.totalMissing >= 0 &&
+    isNumber(value.updated) &&
+    Number.isInteger(value.updated) &&
+    value.updated >= 0 &&
+    isNumber(value.skipped) &&
+    Number.isInteger(value.skipped) &&
+    value.skipped >= 0 &&
+    Array.isArray(value.items) &&
+    value.items.every((item) => isSourceRegionBackfillResultItem(item))
   );
 }
 
@@ -1645,6 +1724,7 @@ export function validateCreateSourceInput(input: unknown): ValidationResult<Crea
 
   const name = normalizeString(input.name);
   const location = normalizeString(input.location);
+  const sourceRegion = normalizeString(input.sourceRegion);
   const accessMode = normalizeString(input.accessMode) ?? "realtime";
   const syncCron = normalizeString(input.syncCron);
   const syncRetentionDays = toOptionalInteger(input.syncRetentionDays);
@@ -1658,6 +1738,9 @@ export function validateCreateSourceInput(input: unknown): ValidationResult<Crea
   }
   if (!location) {
     return { success: false, error: "location 必填且必须为非空字符串。" };
+  }
+  if (input.sourceRegion !== undefined && !sourceRegion) {
+    return { success: false, error: "sourceRegion 必须为非空字符串。" };
   }
   if (input.type === "local" && !matchesLocalWhitelist(location)) {
     return {
@@ -1702,11 +1785,130 @@ export function validateCreateSourceInput(input: unknown): ValidationResult<Crea
       name,
       type: input.type,
       location,
+      sourceRegion,
       sshConfig: sshConfig === "invalid" ? undefined : sshConfig,
       accessMode,
       syncCron,
       syncRetentionDays,
       enabled: input.enabled,
+    },
+  };
+}
+
+export function validateUpdateSourceInput(input: unknown): ValidationResult<UpdateSourceInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const name = normalizeString(input.name);
+  const location = normalizeString(input.location);
+  const sourceRegion = normalizeString(input.sourceRegion);
+  const accessMode = normalizeString(input.accessMode);
+  const syncCron = normalizeString(input.syncCron);
+  const syncRetentionDays = toOptionalInteger(input.syncRetentionDays);
+  const sshConfig = normalizeSSHConfig(input.sshConfig);
+
+  if (input.name !== undefined && !name) {
+    return { success: false, error: "name 必须为非空字符串。" };
+  }
+  if (input.location !== undefined && !location) {
+    return { success: false, error: "location 必须为非空字符串。" };
+  }
+  if (input.sourceRegion !== undefined && !sourceRegion) {
+    return { success: false, error: "sourceRegion 必须为非空字符串。" };
+  }
+  if (input.accessMode !== undefined && !accessMode) {
+    return { success: false, error: "accessMode 必须是 realtime/sync/hybrid 之一。" };
+  }
+  if (accessMode !== undefined && !isSourceAccessMode(accessMode)) {
+    return { success: false, error: "accessMode 必须是 realtime/sync/hybrid 之一。" };
+  }
+  if (input.syncCron !== undefined && !syncCron) {
+    return { success: false, error: "syncCron 必须为非空字符串。" };
+  }
+  if (
+    input.syncRetentionDays !== undefined &&
+    (syncRetentionDays === undefined ||
+      !Number.isInteger(syncRetentionDays) ||
+      syncRetentionDays < 0)
+  ) {
+    return { success: false, error: "syncRetentionDays 必须是大于等于 0 的整数。" };
+  }
+  if (input.enabled !== undefined && typeof input.enabled !== "boolean") {
+    return { success: false, error: "enabled 必须为布尔值。" };
+  }
+  if (input.sshConfig !== undefined && sshConfig === "invalid") {
+    return {
+      success: false,
+      error:
+        "sshConfig 非法：必须包含 host/user/authType/port；authType=key 时 keyPath 必填。",
+    };
+  }
+  if (
+    input.name === undefined &&
+    input.location === undefined &&
+    input.sourceRegion === undefined &&
+    input.accessMode === undefined &&
+    input.syncCron === undefined &&
+    input.syncRetentionDays === undefined &&
+    input.enabled === undefined &&
+    input.sshConfig === undefined
+  ) {
+    return { success: false, error: "至少需要提供一个可更新字段。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      name,
+      location,
+      sourceRegion,
+      sshConfig: sshConfig === "invalid" ? undefined : sshConfig,
+      accessMode: accessMode as SourceAccessMode | undefined,
+      syncCron,
+      syncRetentionDays,
+      enabled: input.enabled,
+    },
+  };
+}
+
+export function validateSourceRegionBackfillInput(
+  input: unknown
+): ValidationResult<SourceRegionBackfillInput> {
+  if (input === undefined || input === null) {
+    return { success: true, data: {} };
+  }
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  if (input.dryRun !== undefined && typeof input.dryRun !== "boolean") {
+    return { success: false, error: "dryRun 必须为布尔值。" };
+  }
+  if (input.sourceIds !== undefined && !Array.isArray(input.sourceIds)) {
+    return { success: false, error: "sourceIds 必须是字符串数组。" };
+  }
+
+  const sourceIds: string[] = [];
+  if (Array.isArray(input.sourceIds)) {
+    const seen = new Set<string>();
+    for (const value of input.sourceIds) {
+      const normalized = normalizeString(value);
+      if (!normalized) {
+        return { success: false, error: "sourceIds 必须全部为非空字符串。" };
+      }
+      if (!seen.has(normalized)) {
+        seen.add(normalized);
+        sourceIds.push(normalized);
+      }
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      dryRun: input.dryRun,
+      sourceIds: sourceIds.length > 0 ? sourceIds : undefined,
     },
   };
 }
@@ -5049,6 +5251,7 @@ function validateSystemConfigBackupSource(
       name: sourceResult.data.name,
       type: sourceResult.data.type,
       location: sourceResult.data.location,
+      sourceRegion: sourceResult.data.sourceRegion,
       sshConfig: sourceResult.data.sshConfig,
       accessMode: sourceResult.data.accessMode ?? "realtime",
       syncCron: sourceResult.data.syncCron,
