@@ -18,6 +18,8 @@
     "check:ts": "bash ./scripts/ts-check.sh",
     "check:text-normalization": "bash ./scripts/check-text-normalization.sh",
     "check:support-matrix": "bun run ./scripts/check-support-matrix.ts",
+    "report:puller-p0-accuracy": "bun run ./scripts/puller-p0-accuracy.ts",
+    "check:puller-p0-accuracy": "bash ./scripts/check-puller-p0-accuracy.sh",
     "sdk:generate": "bun run ./scripts/sdk-generate.ts",
     "sdk:check": "bun run ./scripts/sdk-check.ts",
     "sdk:verify": "bun run ./scripts/sdk-verify.ts",

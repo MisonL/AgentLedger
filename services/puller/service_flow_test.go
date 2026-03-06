@@ -318,6 +318,99 @@ func TestExecuteLocalSourceJob_LocalFetchErrorMapped(t *testing.T) {
 	}
 }
 
+func TestExecuteJob_LocalSource_ResidencyViolationMappedToDedicatedCode(t *testing.T) {
+	var (
+		gotStatus string
+		gotCode   string
+	)
+
+	svc := &pullerService{
+		log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		httpClient: newHTTPClient(),
+		runtime: pullerRuntimeConfig{
+			JobTimeout:            time.Second,
+			IngestTimeout:         time.Second,
+			IngestEndpoint:        "http://127.0.0.1:18081/v1/ingest",
+			AgentID:               "puller-test",
+			ResidencyTargetRegion: "cn-shanghai",
+		},
+		hostname: "local-host",
+		connectors: newConnectorRegistry(serviceTestConnector{
+			outputs: map[string]parserOutput{
+				parserKeyJSONL: {
+					ParserKey: parserKeyJSONL,
+					MaxLine:   1,
+					Events: []rawEventWithLine{
+						{
+							LineNo: 1,
+							Event: ingest.RawEvent{
+								SessionID: "session-1",
+								EventType: "message",
+							},
+						},
+					},
+				},
+				parserKeyNative: {
+					ParserKey: parserKeyNative,
+					MaxLine:   1,
+				},
+			},
+		}),
+		deps: &pullerServiceDeps{
+			isCancelRequested: func(context.Context, string) (bool, error) {
+				return false, nil
+			},
+			loadSource: func(context.Context, string) (sourceRecord, error) {
+				return sourceRecord{
+					ID:       "source-local-residency",
+					Type:     "local",
+					Location: "/tmp/chat.log",
+					Enabled:  true,
+					Metadata: map[string]any{
+						"region": "cn-hangzhou",
+					},
+				}, nil
+			},
+			fetchLocalSourceContents: func(context.Context, sourceRecord) ([]sourceContent, error) {
+				return []sourceContent{
+					{
+						SourcePath: "/tmp/chat.log",
+						HostKey:    "local:/tmp/chat.log",
+						Content:    []byte("hello\n"),
+					},
+				}, nil
+			},
+			getWatermark: func(context.Context, string, string, string) (int64, error) {
+				return 0, nil
+			},
+			upsertWatermark: func(context.Context, string, string, string, int64) error {
+				return nil
+			},
+			insertParseFailures: func(context.Context, string, string, []parseFailure) error {
+				return nil
+			},
+			finishJobStatus: func(ctx context.Context, job syncJob, status, errorCode, errorDetail string) error {
+				gotStatus = status
+				gotCode = errorCode
+				return nil
+			},
+		},
+	}
+
+	err := svc.executeJob(context.Background(), syncJob{
+		ID:       "job-local-residency",
+		SourceID: "source-local-residency",
+		Attempt:  1,
+		Mode:     "realtime",
+	})
+	if err == nil || !errors.Is(err, errResidencyPolicyViolation) {
+		t.Fatalf("executeJob(local residency) error = %v, want errResidencyPolicyViolation", err)
+	}
+	if gotStatus != "failed" || gotCode != errCodeResidencyPolicyViolation {
+		t.Fatalf("finishJobStatus = (%q, %q), want (failed, %q)", gotStatus, gotCode, errCodeResidencyPolicyViolation)
+	}
+}
+
 func TestExecuteJob_SSHSource_MultiFileSuccess(t *testing.T) {
 	var (
 		finishStatus      string

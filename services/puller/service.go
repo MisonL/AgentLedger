@@ -15,18 +15,19 @@ import (
 )
 
 const (
-	errCodeCancelled             = "cancel_requested"
-	errCodeSourceNotFound        = "source_not_found"
-	errCodeSourceDisabled        = "source_disabled"
-	errCodeSourceTypeUnsupported = "source_type_unsupported"
-	errCodeSSHLocationInvalid    = "ssh_location_invalid"
-	errCodeSSHPullFailed         = "ssh_pull_failed"
-	errCodeLocalLocationInvalid  = "local_location_invalid"
-	errCodeReadLocalFailed       = "read_local_failed"
-	errCodeReadRemoteFailed      = "read_remote_failed"
-	errCodeParseFailed           = "parse_failed"
-	errCodeIngestFailed          = "ingest_failed"
-	errCodeWatermarkFailed       = "watermark_failed"
+	errCodeCancelled                = "cancel_requested"
+	errCodeSourceNotFound           = "source_not_found"
+	errCodeSourceDisabled           = "source_disabled"
+	errCodeSourceTypeUnsupported    = "source_type_unsupported"
+	errCodeSSHLocationInvalid       = "ssh_location_invalid"
+	errCodeSSHPullFailed            = "ssh_pull_failed"
+	errCodeLocalLocationInvalid     = "local_location_invalid"
+	errCodeReadLocalFailed          = "read_local_failed"
+	errCodeReadRemoteFailed         = "read_remote_failed"
+	errCodeParseFailed              = "parse_failed"
+	errCodeIngestFailed             = "ingest_failed"
+	errCodeWatermarkFailed          = "watermark_failed"
+	errCodeResidencyPolicyViolation = "residency_policy_violation"
 )
 
 type pullerService struct {
@@ -293,6 +294,9 @@ func (s *pullerService) executeSSHSourceJob(jobCtx context.Context, job syncJob,
 				if errors.Is(jobCtx.Err(), context.Canceled) || errors.Is(jobCtx.Err(), context.DeadlineExceeded) {
 					return s.cancelJob(job, "job cancelled while pushing remote ingestion")
 				}
+				if errors.Is(err, errResidencyPolicyViolation) {
+					return s.failJob(job, errCodeResidencyPolicyViolation, err)
+				}
 				return s.failJob(job, errCodeIngestFailed, err)
 			}
 			totalEvents += len(events)
@@ -395,6 +399,9 @@ func (s *pullerService) executeLocalSourceJob(jobCtx context.Context, job syncJo
 			if err := s.pushEvents(jobCtx, source, job, events); err != nil {
 				if errors.Is(jobCtx.Err(), context.Canceled) || errors.Is(jobCtx.Err(), context.DeadlineExceeded) {
 					return s.cancelJob(job, "job cancelled while pushing local ingestion")
+				}
+				if errors.Is(err, errResidencyPolicyViolation) {
+					return s.failJob(job, errCodeResidencyPolicyViolation, err)
 				}
 				return s.failJob(job, errCodeIngestFailed, err)
 			}

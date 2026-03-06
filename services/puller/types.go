@@ -17,16 +17,17 @@ const (
 var errJobCancelled = errors.New("sync job cancelled")
 
 type pullerRuntimeConfig struct {
-	PollInterval      time.Duration
-	JobTimeout        time.Duration
-	JobMaxRetries     int
-	JobRetryBaseDelay time.Duration
-	SSHTimeout        time.Duration
-	IngestTimeout     time.Duration
-	IngestEndpoint    string
-	IngestBearer      string
-	AgentID           string
-	InternalToken     string
+	PollInterval          time.Duration
+	JobTimeout            time.Duration
+	JobMaxRetries         int
+	JobRetryBaseDelay     time.Duration
+	SSHTimeout            time.Duration
+	IngestTimeout         time.Duration
+	IngestEndpoint        string
+	IngestBearer          string
+	AgentID               string
+	InternalToken         string
+	ResidencyTargetRegion string
 }
 
 type syncJob struct {
@@ -49,6 +50,7 @@ type sourceRecord struct {
 	Hostname    string
 	TenantID    string
 	WorkspaceID string
+	Metadata    map[string]any
 }
 
 type scheduledSource struct {

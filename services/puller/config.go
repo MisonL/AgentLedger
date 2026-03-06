@@ -10,16 +10,17 @@ import (
 
 func loadPullerRuntimeConfig() (pullerRuntimeConfig, error) {
 	cfg := pullerRuntimeConfig{
-		PollInterval:      5 * time.Second,
-		JobTimeout:        3 * time.Minute,
-		JobMaxRetries:     3,
-		JobRetryBaseDelay: 5 * time.Second,
-		SSHTimeout:        60 * time.Second,
-		IngestTimeout:     20 * time.Second,
-		IngestEndpoint:    defaultIngestEndpoint,
-		IngestBearer:      strings.TrimSpace(os.Getenv("PULLER_INGEST_BEARER_TOKEN")),
-		AgentID:           strings.TrimSpace(os.Getenv("PULLER_AGENT_ID")),
-		InternalToken:     strings.TrimSpace(os.Getenv("PULLER_INTERNAL_TOKEN")),
+		PollInterval:          5 * time.Second,
+		JobTimeout:            3 * time.Minute,
+		JobMaxRetries:         3,
+		JobRetryBaseDelay:     5 * time.Second,
+		SSHTimeout:            60 * time.Second,
+		IngestTimeout:         20 * time.Second,
+		IngestEndpoint:        defaultIngestEndpoint,
+		IngestBearer:          strings.TrimSpace(os.Getenv("PULLER_INGEST_BEARER_TOKEN")),
+		AgentID:               strings.TrimSpace(os.Getenv("PULLER_AGENT_ID")),
+		InternalToken:         strings.TrimSpace(os.Getenv("PULLER_INTERNAL_TOKEN")),
+		ResidencyTargetRegion: strings.ToLower(strings.TrimSpace(os.Getenv("PULLER_RESIDENCY_TARGET_REGION"))),
 	}
 
 	if cfg.AgentID == "" {

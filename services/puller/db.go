@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -237,13 +238,15 @@ SELECT
   COALESCE(provider, ''),
   COALESCE(hostname, ''),
   COALESCE(tenant_id, ''),
-  COALESCE(workspace_id, '')
+  COALESCE(workspace_id, ''),
+  COALESCE(metadata, '{}'::jsonb)
 FROM sources
 WHERE id = $1
 LIMIT 1
 `, sourceID)
 
 	var source sourceRecord
+	var metadataRaw []byte
 	if err := row.Scan(
 		&source.ID,
 		&source.Name,
@@ -254,11 +257,18 @@ LIMIT 1
 		&source.Hostname,
 		&source.TenantID,
 		&source.WorkspaceID,
+		&metadataRaw,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return sourceRecord{}, fmt.Errorf("source not found")
 		}
 		return sourceRecord{}, fmt.Errorf("query source failed: %w", err)
+	}
+	source.Metadata = map[string]any{}
+	if len(metadataRaw) > 0 {
+		if err := json.Unmarshal(metadataRaw, &source.Metadata); err != nil {
+			source.Metadata = map[string]any{}
+		}
 	}
 
 	return source, nil

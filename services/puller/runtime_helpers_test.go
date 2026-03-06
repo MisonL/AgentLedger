@@ -21,6 +21,7 @@ func TestLoadPullerRuntimeConfig_DefaultsAndOverrides(t *testing.T) {
 	t.Setenv("PULLER_INGEST_BEARER_TOKEN", " bearer-token ")
 	t.Setenv("PULLER_AGENT_ID", "")
 	t.Setenv("PULLER_INTERNAL_TOKEN", " internal-token ")
+	t.Setenv("PULLER_RESIDENCY_TARGET_REGION", "")
 
 	cfg, err := loadPullerRuntimeConfig()
 	if err != nil {
@@ -44,6 +45,9 @@ func TestLoadPullerRuntimeConfig_DefaultsAndOverrides(t *testing.T) {
 	if cfg.InternalToken != "internal-token" {
 		t.Fatalf("InternalToken = %q, want internal-token", cfg.InternalToken)
 	}
+	if cfg.ResidencyTargetRegion != "" {
+		t.Fatalf("ResidencyTargetRegion = %q, want empty", cfg.ResidencyTargetRegion)
+	}
 
 	t.Setenv("PULLER_AGENT_ID", "agent-custom")
 	t.Setenv("PULLER_POLL_INTERVAL", "3s")
@@ -53,6 +57,7 @@ func TestLoadPullerRuntimeConfig_DefaultsAndOverrides(t *testing.T) {
 	t.Setenv("PULLER_SSH_TIMEOUT", "11s")
 	t.Setenv("PULLER_INGEST_TIMEOUT", "9s")
 	t.Setenv("PULLER_INGEST_ENDPOINT", "http://127.0.0.1:18081/v1/ingest")
+	t.Setenv("PULLER_RESIDENCY_TARGET_REGION", "CN-Shanghai")
 
 	cfg, err = loadPullerRuntimeConfig()
 	if err != nil {
@@ -72,6 +77,9 @@ func TestLoadPullerRuntimeConfig_DefaultsAndOverrides(t *testing.T) {
 	}
 	if cfg.IngestEndpoint != "http://127.0.0.1:18081/v1/ingest" {
 		t.Fatalf("IngestEndpoint = %q, want override", cfg.IngestEndpoint)
+	}
+	if cfg.ResidencyTargetRegion != "cn-shanghai" {
+		t.Fatalf("ResidencyTargetRegion = %q, want cn-shanghai", cfg.ResidencyTargetRegion)
 	}
 }
 

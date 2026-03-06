@@ -1,0 +1,508 @@
+{
+  "cases": [
+    {
+      "id": "codex-jsonl-basic",
+      "client": "OpenAI Codex CLI",
+      "source": {
+        "id": "source-codex-jsonl",
+        "name": "codex-local",
+        "provider": "codex"
+      },
+      "sourcePath": "/Users/dev/.codex/sessions/main.jsonl",
+      "lines": [
+        "{\"session_id\":\"codex-s-001\",\"event_type\":\"message\",\"role\":\"assistant\",\"text\":\"codex reply\",\"model\":\"gpt-5-codex\",\"occurred_at\":\"2026-03-01T00:00:01Z\",\"usage\":{\"input_tokens\":11,\"output_tokens\":22},\"cost_usd\":0.01}"
+      ],
+      "expected": {
+        "connector": "codex",
+        "parserKey": "jsonl",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "assistant",
+        "text": "codex reply",
+        "model": "gpt-5-codex",
+        "occurredAt": "2026-03-01T00:00:01Z",
+        "sessionId": "codex-s-001",
+        "inputTokens": 11,
+        "outputTokens": 22,
+        "costUsd": 0.01
+      }
+    },
+    {
+      "id": "codex-native-basic",
+      "client": "OpenAI Codex CLI",
+      "source": {
+        "id": "source-codex-native",
+        "name": "codex-local",
+        "provider": "codex"
+      },
+      "sourcePath": "/Users/dev/.codex/sessions/native.log",
+      "lines": [
+        "2026-03-01T00:00:02Z user: codex native prompt"
+      ],
+      "expected": {
+        "connector": "codex",
+        "parserKey": "native",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "user",
+        "text": "codex native prompt",
+        "model": "",
+        "occurredAt": "2026-03-01T00:00:02Z",
+        "sessionIdNonEmpty": true,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "costUsdNil": true
+      }
+    },
+    {
+      "id": "claude-jsonl-nested",
+      "client": "Claude Code",
+      "source": {
+        "id": "source-claude-jsonl",
+        "name": "claude-project",
+        "provider": "claude"
+      },
+      "sourcePath": "/Users/dev/.claude/projects/session.jsonl",
+      "lines": [
+        "{\"session\":{\"id\":\"claude-s-001\"},\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"claude reply\"}]},\"model_name\":\"claude-3-7-sonnet\",\"timestamp\":\"2026-03-01T01:00:01Z\",\"usage\":{\"prompt_tokens\":31,\"completion_tokens\":41}}"
+      ],
+      "expected": {
+        "connector": "claude",
+        "parserKey": "jsonl",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "assistant",
+        "text": "claude reply",
+        "model": "claude-3-7-sonnet",
+        "occurredAt": "2026-03-01T01:00:01Z",
+        "sessionId": "claude-s-001",
+        "inputTokens": 31,
+        "outputTokens": 41,
+        "costUsdNil": true
+      }
+    },
+    {
+      "id": "claude-native-basic",
+      "client": "Claude Code",
+      "source": {
+        "id": "source-claude-native",
+        "name": "claude-project",
+        "provider": "claude"
+      },
+      "sourcePath": "/Users/dev/.claude/projects/native.log",
+      "lines": [
+        "2026-03-01T01:00:02Z assistant: claude native answer"
+      ],
+      "expected": {
+        "connector": "claude",
+        "parserKey": "native",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "assistant",
+        "text": "claude native answer",
+        "model": "",
+        "occurredAt": "2026-03-01T01:00:02Z",
+        "sessionIdNonEmpty": true,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "costUsdNil": true
+      }
+    },
+    {
+      "id": "gemini-jsonl-candidates",
+      "client": "Gemini CLI",
+      "source": {
+        "id": "source-gemini-jsonl",
+        "name": "gemini-workspace",
+        "provider": "gemini-cli"
+      },
+      "sourcePath": "/Users/dev/.gemini/sessions/main.jsonl",
+      "lines": [
+        "{\"session\":\"gemini-s-001\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"gemini reply\"}]}}],\"model\":\"gemini-2.5-pro\",\"time\":\"2026-03-01T02:00:01Z\",\"usageMetadata\":{\"promptTokenCount\":51,\"candidatesTokenCount\":61}}"
+      ],
+      "expected": {
+        "connector": "gemini",
+        "parserKey": "jsonl",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "",
+        "text": "gemini reply",
+        "model": "gemini-2.5-pro",
+        "occurredAt": "2026-03-01T02:00:01Z",
+        "sessionId": "gemini-s-001",
+        "inputTokens": 51,
+        "outputTokens": 61,
+        "costUsdNil": true
+      }
+    },
+    {
+      "id": "gemini-native-tool",
+      "client": "Gemini CLI",
+      "source": {
+        "id": "source-gemini-native",
+        "name": "gemini-workspace",
+        "provider": "gemini-cli"
+      },
+      "sourcePath": "/Users/dev/.gemini/sessions/native.log",
+      "lines": [
+        "2026-03-01T02:00:02Z tool: gemini native output"
+      ],
+      "expected": {
+        "connector": "gemini",
+        "parserKey": "native",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "tool",
+        "text": "gemini native output",
+        "model": "",
+        "occurredAt": "2026-03-01T02:00:02Z",
+        "sessionIdNonEmpty": true,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "costUsdNil": true
+      }
+    },
+    {
+      "id": "aider-jsonl-content",
+      "client": "Aider",
+      "source": {
+        "id": "source-aider-jsonl",
+        "name": "aider-session",
+        "provider": "aider"
+      },
+      "sourcePath": "/Users/dev/.aider/history.jsonl",
+      "lines": [
+        "{\"session_id\":\"aider-s-001\",\"eventType\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"aider request\"}],\"model\":\"aider-llm\",\"created_at\":\"2026-03-01T03:00:01Z\",\"input_tokens\":\"71\",\"output_tokens\":\"81\"}"
+      ],
+      "expected": {
+        "connector": "aider",
+        "parserKey": "jsonl",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "user",
+        "text": "aider request",
+        "model": "aider-llm",
+        "occurredAt": "2026-03-01T03:00:01Z",
+        "sessionId": "aider-s-001",
+        "inputTokens": 71,
+        "outputTokens": 81,
+        "costUsdNil": true
+      }
+    },
+    {
+      "id": "aider-native-system",
+      "client": "Aider",
+      "source": {
+        "id": "source-aider-native",
+        "name": "aider-session",
+        "provider": "aider"
+      },
+      "sourcePath": "/Users/dev/.aider/native.log",
+      "lines": [
+        "2026-03-01T03:00:02Z system: aider native system note"
+      ],
+      "expected": {
+        "connector": "aider",
+        "parserKey": "native",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "system",
+        "text": "aider native system note",
+        "model": "",
+        "occurredAt": "2026-03-01T03:00:02Z",
+        "sessionIdNonEmpty": true,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "costUsdNil": true
+      }
+    },
+    {
+      "id": "opencode-jsonl-message",
+      "client": "OpenCode",
+      "source": {
+        "id": "source-opencode-jsonl",
+        "name": "opencode-history",
+        "provider": "opencode"
+      },
+      "sourcePath": "/Users/dev/.opencode/sessions/main.jsonl",
+      "lines": [
+        "{\"sessionId\":\"opencode-s-001\",\"event_type\":\"message\",\"message\":\"opencode message\",\"role\":\"assistant\",\"usage\":{\"inputTokens\":17,\"outputTokens\":19},\"metadata\":{\"model\":\"opencode-1\"},\"occurredAt\":\"2026-03-01T04:00:01Z\"}"
+      ],
+      "expected": {
+        "connector": "opencode",
+        "parserKey": "jsonl",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "assistant",
+        "text": "opencode message",
+        "model": "opencode-1",
+        "occurredAt": "2026-03-01T04:00:01Z",
+        "sessionId": "opencode-s-001",
+        "inputTokens": 17,
+        "outputTokens": 19,
+        "costUsdNil": true
+      }
+    },
+    {
+      "id": "opencode-native-basic",
+      "client": "OpenCode",
+      "source": {
+        "id": "source-opencode-native",
+        "name": "opencode-history",
+        "provider": "opencode"
+      },
+      "sourcePath": "/Users/dev/.opencode/sessions/native.log",
+      "lines": [
+        "2026-03-01T04:00:02Z assistant: opencode native answer"
+      ],
+      "expected": {
+        "connector": "opencode",
+        "parserKey": "native",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "assistant",
+        "text": "opencode native answer",
+        "model": "",
+        "occurredAt": "2026-03-01T04:00:02Z",
+        "sessionIdNonEmpty": true,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "costUsdNil": true
+      }
+    },
+    {
+      "id": "qwen-code-jsonl-usage",
+      "client": "Qwen Code",
+      "source": {
+        "id": "source-qwen-code-jsonl",
+        "name": "qwen-code-session",
+        "provider": "qwen-code"
+      },
+      "sourcePath": "/Users/dev/.qwen-code/sessions/main.jsonl",
+      "lines": [
+        "{\"session\":{\"id\":\"qwen-s-001\"},\"event_type\":\"message\",\"role\":\"assistant\",\"content\":{\"text\":\"qwen reply\"},\"modelName\":\"qwen-max\",\"occurred_at\":\"2026-03-01T05:00:01Z\",\"promptTokenCount\":25,\"completion_tokens\":35,\"cost\":\"0.56\"}"
+      ],
+      "expected": {
+        "connector": "qwen-code",
+        "parserKey": "jsonl",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "assistant",
+        "text": "qwen reply",
+        "model": "qwen-max",
+        "occurredAt": "2026-03-01T05:00:01Z",
+        "sessionId": "qwen-s-001",
+        "inputTokens": 25,
+        "outputTokens": 35,
+        "costUsd": 0.56
+      }
+    },
+    {
+      "id": "qwen-code-native-basic",
+      "client": "Qwen Code",
+      "source": {
+        "id": "source-qwen-code-native",
+        "name": "qwen-code-session",
+        "provider": "qwen-code"
+      },
+      "sourcePath": "/Users/dev/.qwen-code/sessions/native.log",
+      "lines": [
+        "2026-03-01T05:00:02Z user: qwen native prompt"
+      ],
+      "expected": {
+        "connector": "qwen-code",
+        "parserKey": "native",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "user",
+        "text": "qwen native prompt",
+        "model": "",
+        "occurredAt": "2026-03-01T05:00:02Z",
+        "sessionIdNonEmpty": true,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "costUsdNil": true
+      }
+    },
+    {
+      "id": "cursor-jsonl-author-role",
+      "client": "Cursor IDE",
+      "source": {
+        "id": "source-cursor-jsonl",
+        "name": "cursor-chat",
+        "provider": "cursor"
+      },
+      "sourcePath": "/Users/dev/.cursor/chat/sessions.jsonl",
+      "lines": [
+        "{\"session_id\":\"cursor-s-001\",\"author\":{\"role\":\"assistant\"},\"content\":{\"text\":\"cursor reply\"},\"model\":\"cursor-gpt\",\"time\":\"2026-03-01T06:00:01Z\",\"prompt_tokens\":13,\"completion_tokens\":23}"
+      ],
+      "expected": {
+        "connector": "cursor",
+        "parserKey": "jsonl",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "assistant",
+        "text": "cursor reply",
+        "model": "cursor-gpt",
+        "occurredAt": "2026-03-01T06:00:01Z",
+        "sessionId": "cursor-s-001",
+        "inputTokens": 13,
+        "outputTokens": 23,
+        "costUsdNil": true
+      }
+    },
+    {
+      "id": "cursor-native-basic",
+      "client": "Cursor IDE",
+      "source": {
+        "id": "source-cursor-native",
+        "name": "cursor-chat",
+        "provider": "cursor"
+      },
+      "sourcePath": "/Users/dev/.cursor/chat/native.log",
+      "lines": [
+        "2026-03-01T06:00:02Z assistant: cursor native answer"
+      ],
+      "expected": {
+        "connector": "cursor",
+        "parserKey": "native",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "assistant",
+        "text": "cursor native answer",
+        "model": "",
+        "occurredAt": "2026-03-01T06:00:02Z",
+        "sessionIdNonEmpty": true,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "costUsdNil": true
+      }
+    },
+    {
+      "id": "vscode-jsonl-copilot",
+      "client": "VS Code（Cline/Roo/Continue/Copilot Chat）",
+      "source": {
+        "id": "source-vscode-jsonl",
+        "name": "vscode-copilot",
+        "provider": "vscode"
+      },
+      "sourcePath": "/Users/dev/.vscode/extensions/github.copilot-chat/session.jsonl",
+      "lines": [
+        "{\"session_id\":\"vscode-s-001\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"vscode reply\"}]}}],\"usage\":{\"prompt_tokens\":29,\"completion_tokens\":39},\"model\":\"copilot-gpt-4.1\",\"timestamp\":\"2026-03-01T07:00:01Z\",\"event_type\":\"assistant_message\",\"role\":\"assistant\"}"
+      ],
+      "expected": {
+        "connector": "vscode",
+        "parserKey": "jsonl",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "assistant_message",
+        "role": "assistant",
+        "text": "vscode reply",
+        "model": "copilot-gpt-4.1",
+        "occurredAt": "2026-03-01T07:00:01Z",
+        "sessionId": "vscode-s-001",
+        "inputTokens": 29,
+        "outputTokens": 39,
+        "costUsdNil": true
+      }
+    },
+    {
+      "id": "vscode-native-basic",
+      "client": "VS Code（Cline/Roo/Continue/Copilot Chat）",
+      "source": {
+        "id": "source-vscode-native",
+        "name": "vscode-copilot",
+        "provider": "vscode"
+      },
+      "sourcePath": "/Users/dev/.vscode/extensions/github.copilot-chat/native.log",
+      "lines": [
+        "2026-03-01T07:00:02Z user: vscode native prompt"
+      ],
+      "expected": {
+        "connector": "vscode",
+        "parserKey": "native",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "user",
+        "text": "vscode native prompt",
+        "model": "",
+        "occurredAt": "2026-03-01T07:00:02Z",
+        "sessionIdNonEmpty": true,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "costUsdNil": true
+      }
+    },
+    {
+      "id": "trae-ide-jsonl-message-content",
+      "client": "TRAE IDE",
+      "source": {
+        "id": "source-trae-ide-jsonl",
+        "name": "trae-ide-session",
+        "provider": "trae-ide"
+      },
+      "sourcePath": "/Users/dev/.trae/sessions/main.jsonl",
+      "lines": [
+        "{\"session_id\":\"trae-s-001\",\"event_type\":\"message\",\"message\":{\"content\":{\"text\":\"trae ide reply\"},\"role\":\"assistant\"},\"usage_metadata\":{\"prompt_token_count\":45,\"candidates_token_count\":55},\"metadata\":{\"model\":\"trae-model\"},\"occurred_at\":\"2026-03-01T08:00:01Z\"}"
+      ],
+      "expected": {
+        "connector": "trae-ide",
+        "parserKey": "jsonl",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "assistant",
+        "text": "trae ide reply",
+        "model": "trae-model",
+        "occurredAt": "2026-03-01T08:00:01Z",
+        "sessionId": "trae-s-001",
+        "inputTokens": 45,
+        "outputTokens": 55,
+        "costUsdNil": true
+      }
+    },
+    {
+      "id": "trae-ide-native-basic",
+      "client": "TRAE IDE",
+      "source": {
+        "id": "source-trae-ide-native",
+        "name": "trae-ide-session",
+        "provider": "trae-ide"
+      },
+      "sourcePath": "/Users/dev/.trae/sessions/native.log",
+      "lines": [
+        "2026-03-01T08:00:02Z assistant: trae ide native answer"
+      ],
+      "expected": {
+        "connector": "trae-ide",
+        "parserKey": "native",
+        "eventIndex": 0,
+        "sourceOffset": 1,
+        "eventType": "message",
+        "role": "assistant",
+        "text": "trae ide native answer",
+        "model": "",
+        "occurredAt": "2026-03-01T08:00:02Z",
+        "sessionIdNonEmpty": true,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "costUsdNil": true
+      }
+    }
+  ]
+}
