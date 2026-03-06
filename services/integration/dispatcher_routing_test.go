@@ -88,6 +88,33 @@ func TestRouteChannelsUsesOrchestrationOverride(t *testing.T) {
 	}
 }
 
+func TestBuildTicketWebhookPayloadAcceptsNumericAlertID(t *testing.T) {
+	t.Parallel()
+
+	payload := []byte(`{"alert_id":501,"tenant_id":"tenant-numeric","budget_id":"budget-numeric","source_id":"source-numeric","rule_id":"rule-numeric","severity":"critical","status":"open","occurred_at":"2026-03-05T03:04:05Z"}`)
+	raw, err := buildTicketWebhookPayload(payload, eventTypeAlert)
+	if err != nil {
+		t.Fatalf("buildTicketWebhookPayload returned error: %v", err)
+	}
+
+	var wrapped ticketWebhookChannelPayload
+	if err := json.Unmarshal(raw, &wrapped); err != nil {
+		t.Fatalf("unmarshal wrapped ticket payload failed: %v", err)
+	}
+	if wrapped.Context.AlertID != "501" {
+		t.Fatalf("alert id mismatch: got %q want %q", wrapped.Context.AlertID, "501")
+	}
+	if wrapped.Context.TenantID != "tenant-numeric" {
+		t.Fatalf("tenant id mismatch: got %q want %q", wrapped.Context.TenantID, "tenant-numeric")
+	}
+	if wrapped.Status != "open" {
+		t.Fatalf("status mismatch: got %q want %q", wrapped.Status, "open")
+	}
+	if wrapped.Severity != "critical" {
+		t.Fatalf("severity mismatch: got %q want %q", wrapped.Severity, "critical")
+	}
+}
+
 func TestRouteChannelsSuppressedByOrchestration(t *testing.T) {
 	t.Parallel()
 

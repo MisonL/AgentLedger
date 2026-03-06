@@ -801,20 +801,46 @@ type ticketWebhookEventFields struct {
 	RuleID   string `json:"rule_id,omitempty"`
 }
 
+type stringOrNumber string
+
+func (v *stringOrNumber) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		*v = ""
+		return nil
+	}
+
+	var stringValue string
+	if err := json.Unmarshal(trimmed, &stringValue); err == nil {
+		*v = stringOrNumber(stringValue)
+		return nil
+	}
+
+	var numberValue json.Number
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.UseNumber()
+	if err := decoder.Decode(&numberValue); err == nil {
+		*v = stringOrNumber(numberValue.String())
+		return nil
+	}
+
+	return fmt.Errorf("invalid stringOrNumber value: %s", string(trimmed))
+}
+
 type ticketPayloadEnvelope struct {
-	ID         string `json:"id"`
-	AlertID    string `json:"alert_id"`
-	ReportID   string `json:"report_id"`
-	TenantID   string `json:"tenant_id"`
-	BudgetID   string `json:"budget_id"`
-	SourceID   string `json:"source_id"`
-	RuleID     string `json:"rule_id"`
-	Severity   string `json:"severity"`
-	Status     string `json:"status"`
-	Stage      string `json:"stage"`
-	OccurredAt string `json:"occurred_at"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	ID         stringOrNumber `json:"id"`
+	AlertID    stringOrNumber `json:"alert_id"`
+	ReportID   stringOrNumber `json:"report_id"`
+	TenantID   string         `json:"tenant_id"`
+	BudgetID   string         `json:"budget_id"`
+	SourceID   string         `json:"source_id"`
+	RuleID     string         `json:"rule_id"`
+	Severity   string         `json:"severity"`
+	Status     string         `json:"status"`
+	Stage      string         `json:"stage"`
+	OccurredAt string         `json:"occurred_at"`
+	CreatedAt  string         `json:"created_at"`
+	UpdatedAt  string         `json:"updated_at"`
 }
 
 type stringList []string
@@ -929,9 +955,9 @@ func buildTicketWebhookPayload(payload []byte, eventType string) ([]byte, error)
 		return nil, err
 	}
 
-	alertID := strings.TrimSpace(envelope.AlertID)
+	alertID := strings.TrimSpace(string(envelope.AlertID))
 	if alertID == "" {
-		alertID = strings.TrimSpace(envelope.ID)
+		alertID = strings.TrimSpace(string(envelope.ID))
 	}
 
 	status := strings.TrimSpace(envelope.Status)
@@ -951,7 +977,7 @@ func buildTicketWebhookPayload(payload []byte, eventType string) ([]byte, error)
 			BudgetID: strings.TrimSpace(envelope.BudgetID),
 			SourceID: strings.TrimSpace(envelope.SourceID),
 			AlertID:  alertID,
-			ReportID: strings.TrimSpace(envelope.ReportID),
+			ReportID: strings.TrimSpace(string(envelope.ReportID)),
 			RuleID:   strings.TrimSpace(envelope.RuleID),
 		},
 	}

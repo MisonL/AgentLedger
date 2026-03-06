@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -315,6 +316,165 @@ func TestIntegrationE2EWeeklyOrchestrationDispatchesSelectedChannels(t *testing.
 		t.Fatalf("weekly webhook should keep raw payload, got %s", string(webhookRequest.Body))
 	}
 	wecomProbe.assertNoRequest(t)
+}
+
+func TestIntegrationE2EAlertOrchestrationDispatchesDingTalkEmailWebhookAndTicket(t *testing.T) {
+	env := newIntegrationE2EEnv(t)
+	dingTalkProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
+	emailWebhookProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
+	ticketProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
+
+	cfg := newIntegrationE2EConfig(
+		channelDingTalk,
+		channelEmailWebhook,
+		channelTicket,
+	)
+	cfg.ChannelURLs[channelDingTalk] = dingTalkProbe.server.URL
+	cfg.ChannelURLs[channelEmailWebhook] = emailWebhookProbe.server.URL
+	cfg.ChannelURLs[channelTicket] = ticketProbe.server.URL
+	cfg.EmailFrom = "alerts@example.com"
+
+	env.ensureStream(t, cfg.Stream, cfg.Subject)
+	dispatcher := newAlertDispatcher(env.ctx, env.log, env.js, cfg, nil)
+	dispatcher.httpClient = &http.Client{Timeout: time.Second}
+	env.startConsumer(
+		t,
+		cfg,
+		cfg.Stream,
+		cfg.Subject,
+		cfg.Durable,
+		dispatcher.handleAlertMessage,
+	)
+
+	payload := []byte(`{"id":"alert-e2e-extra-channels","alert_id":"alert-e2e-extra-channels","tenant_id":"tenant-e2e","budget_id":"budget-e2e","source_id":"source-e2e","rule_id":"rule-e2e","severity":"critical","status":"open","occurred_at":"2026-03-05T03:04:05Z","email_to":["ops@example.com","sre@example.com"],"orchestration":{"channels":["dingtalk","email_webhook","ticket"],"fallback":false}}`)
+	env.publish(t, cfg.Subject, payload)
+
+	wantText := formatEventTextPayload(payload, eventTypeAlert)
+
+	dingTalkRequest := dingTalkProbe.waitForRequest(t)
+	var dingTalkBody struct {
+		MsgType string `json:"msgtype"`
+		Text    struct {
+			Content string `json:"content"`
+		} `json:"text"`
+	}
+	if err := json.Unmarshal(dingTalkRequest.Body, &dingTalkBody); err != nil {
+		t.Fatalf("unmarshal dingtalk payload failed: %v", err)
+	}
+	if dingTalkBody.MsgType != "text" {
+		t.Fatalf("dingtalk msgtype mismatch: got %q want %q", dingTalkBody.MsgType, "text")
+	}
+	if dingTalkBody.Text.Content != wantText {
+		t.Fatalf("dingtalk text mismatch:\ngot:  %s\nwant: %s", dingTalkBody.Text.Content, wantText)
+	}
+
+	emailWebhookRequest := emailWebhookProbe.waitForRequest(t)
+	var emailWebhookBody emailWebhookChannelPayload
+	if err := json.Unmarshal(emailWebhookRequest.Body, &emailWebhookBody); err != nil {
+		t.Fatalf("unmarshal email webhook payload failed: %v", err)
+	}
+	if emailWebhookBody.EventType != normalizeEventTypeLabel(eventTypeAlert) {
+		t.Fatalf("email webhook event type mismatch: got %q want %q", emailWebhookBody.EventType, normalizeEventTypeLabel(eventTypeAlert))
+	}
+	if emailWebhookBody.Subject != buildEmailSubject(payload, eventTypeAlert) {
+		t.Fatalf("email webhook subject mismatch: got %q want %q", emailWebhookBody.Subject, buildEmailSubject(payload, eventTypeAlert))
+	}
+	if emailWebhookBody.From != "alerts@example.com" {
+		t.Fatalf("email webhook from mismatch: got %q want %q", emailWebhookBody.From, "alerts@example.com")
+	}
+	if strings.Join(emailWebhookBody.To, ",") != "ops@example.com,sre@example.com" {
+		t.Fatalf("email webhook recipients mismatch: got %v want %v", emailWebhookBody.To, []string{"ops@example.com", "sre@example.com"})
+	}
+	if emailWebhookBody.Body != wantText {
+		t.Fatalf("email webhook body mismatch:\ngot:  %s\nwant: %s", emailWebhookBody.Body, wantText)
+	}
+	if !bytes.Equal(bytes.TrimSpace(emailWebhookBody.Event), payload) {
+		t.Fatalf("email webhook raw event mismatch: got %s want %s", string(emailWebhookBody.Event), string(payload))
+	}
+
+	ticketRequest := ticketProbe.waitForRequest(t)
+	var ticketBody ticketWebhookChannelPayload
+	if err := json.Unmarshal(ticketRequest.Body, &ticketBody); err != nil {
+		t.Fatalf("unmarshal ticket payload failed: %v", err)
+	}
+	if ticketBody.EventType != normalizeEventTypeLabel(eventTypeAlert) {
+		t.Fatalf("ticket event type mismatch: got %q want %q", ticketBody.EventType, normalizeEventTypeLabel(eventTypeAlert))
+	}
+	if ticketBody.Title != buildEmailSubject(payload, eventTypeAlert) {
+		t.Fatalf("ticket title mismatch: got %q want %q", ticketBody.Title, buildEmailSubject(payload, eventTypeAlert))
+	}
+	if ticketBody.Summary != wantText {
+		t.Fatalf("ticket summary mismatch:\ngot:  %s\nwant: %s", ticketBody.Summary, wantText)
+	}
+	if ticketBody.Severity != "critical" {
+		t.Fatalf("ticket severity mismatch: got %q want %q", ticketBody.Severity, "critical")
+	}
+	if ticketBody.Status != "open" {
+		t.Fatalf("ticket status mismatch: got %q want %q", ticketBody.Status, "open")
+	}
+	if ticketBody.Context.TenantID != "tenant-e2e" {
+		t.Fatalf("ticket tenant mismatch: got %q want %q", ticketBody.Context.TenantID, "tenant-e2e")
+	}
+	if ticketBody.Context.BudgetID != "budget-e2e" {
+		t.Fatalf("ticket budget mismatch: got %q want %q", ticketBody.Context.BudgetID, "budget-e2e")
+	}
+	if ticketBody.Context.SourceID != "source-e2e" {
+		t.Fatalf("ticket source mismatch: got %q want %q", ticketBody.Context.SourceID, "source-e2e")
+	}
+	if ticketBody.Context.AlertID != "alert-e2e-extra-channels" {
+		t.Fatalf("ticket alert mismatch: got %q want %q", ticketBody.Context.AlertID, "alert-e2e-extra-channels")
+	}
+	if ticketBody.Context.RuleID != "rule-e2e" {
+		t.Fatalf("ticket rule mismatch: got %q want %q", ticketBody.Context.RuleID, "rule-e2e")
+	}
+	if ticketBody.OccurredAt.UTC().Format(time.RFC3339) != "2026-03-05T03:04:05Z" {
+		t.Fatalf("ticket occurred_at mismatch: got %s want %s", ticketBody.OccurredAt.UTC().Format(time.RFC3339), "2026-03-05T03:04:05Z")
+	}
+	if !bytes.Equal(bytes.TrimSpace(ticketBody.Event), payload) {
+		t.Fatalf("ticket raw event mismatch: got %s want %s", string(ticketBody.Event), string(payload))
+	}
+}
+
+func TestIntegrationE2EAlertOrchestrationDispatchesSMTPEmail(t *testing.T) {
+	env := newIntegrationE2EEnv(t)
+	smtpServer := newFakeSMTPServer(t)
+	defer smtpServer.Close()
+
+	cfg := newIntegrationE2EConfig(channelEmail)
+	cfg.EmailSMTPHost = smtpServer.Host()
+	cfg.EmailSMTPPort = smtpServer.Port()
+	cfg.EmailFrom = "alerts@example.com"
+	cfg.EmailSMTPTLSMode = smtpTLSModeNone
+
+	env.ensureStream(t, cfg.Stream, cfg.Subject)
+	dispatcher := newAlertDispatcher(env.ctx, env.log, env.js, cfg, nil)
+	dispatcher.httpClient = &http.Client{Timeout: time.Second}
+	env.startConsumer(
+		t,
+		cfg,
+		cfg.Stream,
+		cfg.Subject,
+		cfg.Durable,
+		dispatcher.handleAlertMessage,
+	)
+
+	payload := []byte(`{"id":"alert-e2e-email","severity":"warning","email_to":["ops@example.com","sre@example.com"],"orchestration":{"channels":["email"],"fallback":false}}`)
+	env.publish(t, cfg.Subject, payload)
+
+	message := smtpServer.WaitForMessage(t)
+	if message.mailFrom != "<alerts@example.com>" {
+		t.Fatalf("smtp mail from mismatch: got %q want %q", message.mailFrom, "<alerts@example.com>")
+	}
+	if strings.Join(message.rcptTo, ",") != "<ops@example.com>,<sre@example.com>" {
+		t.Fatalf("smtp recipients mismatch: got %v want %v", message.rcptTo, []string{"<ops@example.com>", "<sre@example.com>"})
+	}
+	if !strings.Contains(message.data, "Subject: [agentledger][alert][warning]") {
+		t.Fatalf("smtp subject mismatch: %s", message.data)
+	}
+	if !strings.Contains(message.data, "[agentledger][alert]") ||
+		!strings.Contains(message.data, string(payload)) {
+		t.Fatalf("smtp body mismatch: %s", message.data)
+	}
 }
 
 func TestIntegrationE2ECallbackConsumerForwardsSignedControlPlaneRequest(t *testing.T) {

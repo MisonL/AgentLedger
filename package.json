@@ -31,6 +31,7 @@
     "check:callback-stream-binding": "bash ./scripts/check-callback-stream-binding.sh",
     "test:e2e-governance-routing": "bash ./scripts/check-governance-e2e.sh",
     "test:e2e-integration-routing": "bash ./scripts/e2e-integration-routing.sh",
+    "test:e2e-governance-integration-downstream": "bash ./scripts/e2e-governance-integration-downstream.sh",
     "test:go": "bash ./scripts/go-test-all.sh",
     "test:coverage": "bash ./scripts/test-coverage.sh",
     "test:callback-chain-targeted": "bash ./scripts/test-callback-chain-targeted.sh",
