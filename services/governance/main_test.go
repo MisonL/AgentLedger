@@ -73,6 +73,72 @@ func TestBuildWeeklyReportID(t *testing.T) {
 	}
 }
 
+func TestBuildAlertOrchestrationMatchKeyPrefersDedupeKey(t *testing.T) {
+	alert := alertEvent{
+		AlertID:   12,
+		TenantID:  " tenant-a ",
+		BudgetID:  "budget-1",
+		Severity:  "critical",
+		DedupeKey: "dedupe-42",
+	}
+
+	got := buildAlertOrchestrationMatchKey(alert)
+	if got != "alert:dedupe-42" {
+		t.Fatalf("match key mismatch: got %q want %q", got, "alert:dedupe-42")
+	}
+}
+
+func TestBuildAlertOrchestrationMatchKeyFallsBackToScopedFields(t *testing.T) {
+	sourceID := "src-1"
+	alert := alertEvent{
+		AlertID:  12,
+		TenantID: " tenant-a ",
+		BudgetID: "budget-1",
+		SourceID: &sourceID,
+		Severity: "CRITICAL",
+		Stage:    "warning",
+	}
+
+	got := buildAlertOrchestrationMatchKey(alert)
+	want := "alert|tenant-a|budget-1|critical|src-1|warning"
+	if got != want {
+		t.Fatalf("match key mismatch: got %q want %q", got, want)
+	}
+}
+
+func TestDetectOrchestrationConflicts(t *testing.T) {
+	rules := []alertOrchestrationRule{
+		{
+			ID:        "rule-a",
+			EventType: "alert",
+			Severity:  "critical",
+			Channels:  []string{"webhook", "email"},
+		},
+		{
+			ID:        "rule-b",
+			EventType: "alert",
+			Severity:  "critical",
+			Channels:  []string{"email"},
+		},
+		{
+			ID:        "rule-c",
+			EventType: "weekly",
+			Channels:  []string{"webhook"},
+		},
+	}
+
+	conflicts := detectOrchestrationConflicts(rules)
+	if len(conflicts["rule-a"]) != 1 || conflicts["rule-a"][0] != "rule-b" {
+		t.Fatalf("rule-a conflicts mismatch: got %v want %v", conflicts["rule-a"], []string{"rule-b"})
+	}
+	if len(conflicts["rule-b"]) != 1 || conflicts["rule-b"][0] != "rule-a" {
+		t.Fatalf("rule-b conflicts mismatch: got %v want %v", conflicts["rule-b"], []string{"rule-a"})
+	}
+	if len(conflicts["rule-c"]) != 0 {
+		t.Fatalf("rule-c should have no conflicts, got %v", conflicts["rule-c"])
+	}
+}
+
 func TestResolveWeeklyReportWindow(t *testing.T) {
 	schedule := weeklyReportSchedule{Weekday: time.Monday, Hour: 9, Minute: 0}
 

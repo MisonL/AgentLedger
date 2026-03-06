@@ -126,6 +126,15 @@ type alertDedupeStore struct {
 	maxEntries int
 }
 
+type orchestrationRoutingEnvelope struct {
+	Orchestration *struct {
+		Channels   []string `json:"channels"`
+		DedupeHit  bool     `json:"dedupeHit"`
+		Suppressed bool     `json:"suppressed"`
+		Fallback   bool     `json:"fallback"`
+	} `json:"orchestration"`
+}
+
 type dispatchProgressCleanupResult struct {
 	expired int
 	evicted int
@@ -579,6 +588,57 @@ func (d *alertDispatcher) dispatchWithMessageKey(messageKey string, payload []by
 
 func (d *alertDispatcher) routeChannels(eventType string, payload []byte) []integrationChannel {
 	enabled := append([]integrationChannel(nil), d.cfg.Channels...)
+	if len(enabled) == 0 {
+		return nil
+	}
+
+	orchestratedChannels, fallback, dedupeHit, suppressed, hasOrchestration := extractOrchestrationChannels(payload)
+	if hasOrchestration {
+		if fallback {
+			return d.routeChannelsLegacy(eventType, payload, enabled)
+		}
+		if len(orchestratedChannels) > 0 {
+			return filterChannels(enabled, orchestratedChannels...)
+		}
+		if dedupeHit || suppressed {
+			return nil
+		}
+		return nil
+	}
+
+	return d.routeChannelsLegacy(eventType, payload, enabled)
+}
+
+func extractOrchestrationChannels(
+	payload []byte,
+) ([]integrationChannel, bool, bool, bool, bool) {
+	var envelope orchestrationRoutingEnvelope
+	if err := json.Unmarshal(payload, &envelope); err != nil || envelope.Orchestration == nil {
+		return nil, false, false, false, false
+	}
+
+	channels := make([]integrationChannel, 0, len(envelope.Orchestration.Channels))
+	seen := make(map[integrationChannel]struct{}, len(envelope.Orchestration.Channels))
+	for _, raw := range envelope.Orchestration.Channels {
+		value := integrationChannel(strings.ToLower(strings.TrimSpace(raw)))
+		switch value {
+		case channelWebhook, channelWeCom, channelDingTalk, channelFeishu, channelEmail, channelEmailWebhook, channelTicket:
+			if _, exists := seen[value]; exists {
+				continue
+			}
+			seen[value] = struct{}{}
+			channels = append(channels, value)
+		}
+	}
+
+	return channels, envelope.Orchestration.Fallback, envelope.Orchestration.DedupeHit, envelope.Orchestration.Suppressed, true
+}
+
+func (d *alertDispatcher) routeChannelsLegacy(
+	eventType string,
+	payload []byte,
+	enabled []integrationChannel,
+) []integrationChannel {
 	if len(enabled) == 0 {
 		return nil
 	}

@@ -73,6 +73,50 @@ func TestRouteChannelsWarningNoEnabledTarget(t *testing.T) {
 	}
 }
 
+func TestRouteChannelsUsesOrchestrationOverride(t *testing.T) {
+	t.Parallel()
+
+	dispatcher := &alertDispatcher{cfg: integrationConfig{
+		Channels:    []integrationChannel{channelWebhook, channelWeCom, channelEmail},
+		RoutingMode: routingModeSeverity,
+	}}
+
+	got := dispatcher.routeChannels(eventTypeAlert, []byte(`{"severity":"warning","orchestration":{"channels":["email","wecom"],"fallback":false}}`))
+	want := []integrationChannel{channelWeCom, channelEmail}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("orchestration override mismatch: got %v want %v", got, want)
+	}
+}
+
+func TestRouteChannelsSuppressedByOrchestration(t *testing.T) {
+	t.Parallel()
+
+	dispatcher := &alertDispatcher{cfg: integrationConfig{
+		Channels:    []integrationChannel{channelWebhook, channelWeCom},
+		RoutingMode: routingModeBroadcast,
+	}}
+
+	got := dispatcher.routeChannels(eventTypeAlert, []byte(`{"orchestration":{"channels":[],"suppressed":true}}`))
+	if len(got) != 0 {
+		t.Fatalf("suppressed orchestration should route to no channels, got %v", got)
+	}
+}
+
+func TestRouteChannelsFallbackToLegacyWhenRequested(t *testing.T) {
+	t.Parallel()
+
+	dispatcher := &alertDispatcher{cfg: integrationConfig{
+		Channels:    []integrationChannel{channelWebhook, channelWeCom, channelEmail},
+		RoutingMode: routingModeSeverity,
+	}}
+
+	got := dispatcher.routeChannels(eventTypeAlert, []byte(`{"severity":"warning","orchestration":{"channels":[],"fallback":true}}`))
+	want := []integrationChannel{channelWebhook, channelWeCom, channelEmail}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("fallback orchestration should reuse legacy routing: got %v want %v", got, want)
+	}
+}
+
 func TestExtractSeverity(t *testing.T) {
 	t.Parallel()
 

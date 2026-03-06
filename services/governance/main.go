@@ -28,35 +28,37 @@ import (
 )
 
 const (
-	alertsSubject               = "governance.alerts"
-	alertsStreamName            = "GOVERNANCE_ALERTS"
-	weeklyReportsSubject        = "governance.reports.weekly"
-	weeklyReportsStreamName     = "GOVERNANCE_REPORTS_WEEKLY"
-	defaultEvalInterval         = 60 * time.Second
-	defaultWarningThreshold     = 0.50
-	defaultEscalatedThreshold   = 0.80
-	defaultCriticalThreshold    = 1.00
-	defaultAlertThreshold       = defaultEscalatedThreshold
-	minCycleTimeout             = 5 * time.Second
-	maxCycleTimeout             = 2 * time.Minute
-	alertsStreamRetention       = 30 * 24 * time.Hour
-	alertsStreamDuplicateTTL    = 30 * 24 * time.Hour
-	weeklyReportsRetention      = 90 * 24 * time.Hour
-	weeklyReportsDuplicateTTL   = 14 * 24 * time.Hour
-	defaultReportWeekday        = time.Monday
-	defaultReportHourUTC        = 9
-	defaultReportMinuteUTC      = 0
-	defaultWeeklyTopModelLimit  = 5
-	alertCreatedAuditAction     = "governance.alert_created"
-	alertDispatchedAuditAction  = "governance.alert_dispatched"
-	budgetFrozenAuditAction     = "governance.budget_frozen"
-	weeklyReportAuditAction     = "governance.weekly_report_published"
-	alertCostRoundDecimals      = 1e8
-	weeklyScheduleWeekdayEnv    = "GOV_WEEKLY_REPORT_WEEKDAY"
-	weeklyScheduleTimeUTCEnv    = "GOV_WEEKLY_REPORT_TIME_UTC"
-	weeklyScheduleTimeUTCFormat = "15:04"
-	weeklyReportDedupeCacheTTL  = 14 * 24 * time.Hour
-	weeklyReportDedupeCacheMax  = 50000
+	alertsSubject                     = "governance.alerts"
+	alertsStreamName                  = "GOVERNANCE_ALERTS"
+	weeklyReportsSubject              = "governance.reports.weekly"
+	weeklyReportsStreamName           = "GOVERNANCE_REPORTS_WEEKLY"
+	defaultEvalInterval               = 60 * time.Second
+	defaultWarningThreshold           = 0.50
+	defaultEscalatedThreshold         = 0.80
+	defaultCriticalThreshold          = 1.00
+	defaultAlertThreshold             = defaultEscalatedThreshold
+	minCycleTimeout                   = 5 * time.Second
+	maxCycleTimeout                   = 2 * time.Minute
+	alertsStreamRetention             = 30 * 24 * time.Hour
+	alertsStreamDuplicateTTL          = 30 * 24 * time.Hour
+	weeklyReportsRetention            = 90 * 24 * time.Hour
+	weeklyReportsDuplicateTTL         = 14 * 24 * time.Hour
+	defaultReportWeekday              = time.Monday
+	defaultReportHourUTC              = 9
+	defaultReportMinuteUTC            = 0
+	defaultWeeklyTopModelLimit        = 5
+	alertCreatedAuditAction           = "governance.alert_created"
+	alertDispatchedAuditAction        = "governance.alert_dispatched"
+	budgetFrozenAuditAction           = "governance.budget_frozen"
+	weeklyReportAuditAction           = "governance.weekly_report_published"
+	alertCostRoundDecimals            = 1e8
+	weeklyScheduleWeekdayEnv          = "GOV_WEEKLY_REPORT_WEEKDAY"
+	weeklyScheduleTimeUTCEnv          = "GOV_WEEKLY_REPORT_TIME_UTC"
+	weeklyScheduleTimeUTCFormat       = "15:04"
+	weeklyReportDedupeCacheTTL        = 14 * 24 * time.Hour
+	weeklyReportDedupeCacheMax        = 50000
+	orchestrationDispatchModeRule     = "rule"
+	orchestrationDispatchModeFallback = "fallback"
 )
 
 type governanceService struct {
@@ -116,29 +118,30 @@ type usageSnapshot struct {
 }
 
 type alertEvent struct {
-	AlertID               int64             `json:"alert_id"`
-	TenantID              string            `json:"tenant_id"`
-	BudgetID              string            `json:"budget_id"`
-	SourceID              *string           `json:"source_id,omitempty"`
-	Period                string            `json:"period"`
-	WindowStart           time.Time         `json:"window_start"`
-	WindowEnd             time.Time         `json:"window_end"`
-	TokensUsed            int64             `json:"tokens_used"`
-	CostUsed              float64           `json:"cost_used"`
-	TokenLimit            *int64            `json:"token_limit,omitempty"`
-	CostLimit             *float64          `json:"cost_limit,omitempty"`
-	Threshold             float64           `json:"threshold"`
-	Stage                 string            `json:"stage"`
-	ThresholdSnapshot     thresholdSnapshot `json:"threshold_snapshot"`
-	Severity              string            `json:"severity"`
-	Status                string            `json:"status"`
-	DedupeKey             string            `json:"dedupe_key"`
-	GovernanceStateBefore string            `json:"governance_state_before"`
-	GovernanceStateAfter  string            `json:"governance_state_after"`
-	TokenUsageRatio       *float64          `json:"token_usage_ratio,omitempty"`
-	CostUsageRatio        *float64          `json:"cost_usage_ratio,omitempty"`
-	CreatedAt             time.Time         `json:"created_at"`
-	EvaluatedAt           time.Time         `json:"evaluated_at"`
+	AlertID               int64               `json:"alert_id"`
+	TenantID              string              `json:"tenant_id"`
+	BudgetID              string              `json:"budget_id"`
+	SourceID              *string             `json:"source_id,omitempty"`
+	Period                string              `json:"period"`
+	WindowStart           time.Time           `json:"window_start"`
+	WindowEnd             time.Time           `json:"window_end"`
+	TokensUsed            int64               `json:"tokens_used"`
+	CostUsed              float64             `json:"cost_used"`
+	TokenLimit            *int64              `json:"token_limit,omitempty"`
+	CostLimit             *float64            `json:"cost_limit,omitempty"`
+	Threshold             float64             `json:"threshold"`
+	Stage                 string              `json:"stage"`
+	ThresholdSnapshot     thresholdSnapshot   `json:"threshold_snapshot"`
+	Severity              string              `json:"severity"`
+	Status                string              `json:"status"`
+	DedupeKey             string              `json:"dedupe_key"`
+	GovernanceStateBefore string              `json:"governance_state_before"`
+	GovernanceStateAfter  string              `json:"governance_state_after"`
+	TokenUsageRatio       *float64            `json:"token_usage_ratio,omitempty"`
+	CostUsageRatio        *float64            `json:"cost_usage_ratio,omitempty"`
+	CreatedAt             time.Time           `json:"created_at"`
+	EvaluatedAt           time.Time           `json:"evaluated_at"`
+	Orchestration         *eventOrchestration `json:"orchestration,omitempty"`
 }
 
 type weeklyReportSchedule struct {
@@ -160,6 +163,53 @@ type weeklyReportEvent struct {
 	TopModels     []weeklyReportModelUse `json:"top_models"`
 	GeneratedAt   time.Time              `json:"generated_at"`
 	ReportID      string                 `json:"report_id"`
+	Orchestration *eventOrchestration    `json:"orchestration,omitempty"`
+}
+
+type eventOrchestration struct {
+	MatchedRuleIDs []string `json:"matchedRuleIds,omitempty"`
+	Channels       []string `json:"channels,omitempty"`
+	DedupeHit      bool     `json:"dedupeHit,omitempty"`
+	Suppressed     bool     `json:"suppressed,omitempty"`
+	Fallback       bool     `json:"fallback,omitempty"`
+}
+
+type alertOrchestrationRule struct {
+	ID                       string
+	Name                     string
+	EventType                string
+	Severity                 string
+	SourceID                 string
+	DedupeWindowSeconds      int
+	SuppressionWindowSeconds int
+	MergeWindowSeconds       int
+	Channels                 []string
+}
+
+type alertOrchestrationExecution struct {
+	RuleID          string
+	EventType       string
+	AlertID         *string
+	Severity        *string
+	SourceID        *string
+	Channels        []string
+	ConflictRuleIDs []string
+	DedupeHit       bool
+	Suppressed      bool
+	Metadata        map[string]any
+	CreatedAt       time.Time
+}
+
+type orchestrationResolutionInput struct {
+	TenantID     string
+	EventType    string
+	AlertID      *string
+	Severity     *string
+	SourceID     *string
+	MatchKey     string
+	OccurredAt   time.Time
+	Subject      string
+	BaseMetadata map[string]any
 }
 
 type weeklyReportModelUse struct {
@@ -202,6 +252,154 @@ type weeklyReportDedupeCache struct {
 	items      map[string]time.Time
 	ttl        time.Duration
 	maxEntries int
+}
+
+func normalizeOptionalString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
+}
+
+func normalizeOrchestrationChannels(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	normalized := make([]string, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for _, item := range raw {
+		value := strings.ToLower(strings.TrimSpace(item))
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	return normalized
+}
+
+func matchesSeverityWithWildcard(expected, actual string) bool {
+	expected = strings.ToLower(strings.TrimSpace(expected))
+	actual = strings.ToLower(strings.TrimSpace(actual))
+	if expected == "" || actual == "" {
+		return true
+	}
+	return expected == actual
+}
+
+func matchesSourceWithWildcard(expected, actual string) bool {
+	expected = strings.TrimSpace(expected)
+	actual = strings.TrimSpace(actual)
+	if expected == "" || actual == "" {
+		return true
+	}
+	return expected == actual
+}
+
+func hasChannelOverlap(left, right []string) bool {
+	if len(left) == 0 || len(right) == 0 {
+		return false
+	}
+	leftSet := make(map[string]struct{}, len(left))
+	for _, item := range left {
+		value := strings.ToLower(strings.TrimSpace(item))
+		if value == "" {
+			continue
+		}
+		leftSet[value] = struct{}{}
+	}
+	for _, item := range right {
+		value := strings.ToLower(strings.TrimSpace(item))
+		if value == "" {
+			continue
+		}
+		if _, exists := leftSet[value]; exists {
+			return true
+		}
+	}
+	return false
+}
+
+func detectOrchestrationConflicts(rules []alertOrchestrationRule) map[string][]string {
+	conflicts := make(map[string][]string, len(rules))
+	for _, rule := range rules {
+		conflicts[rule.ID] = nil
+	}
+
+	for i := 0; i < len(rules); i++ {
+		left := rules[i]
+		for j := i + 1; j < len(rules); j++ {
+			right := rules[j]
+			if left.EventType != right.EventType {
+				continue
+			}
+			if !hasChannelOverlap(left.Channels, right.Channels) {
+				continue
+			}
+			if !matchesSeverityWithWildcard(left.Severity, right.Severity) {
+				continue
+			}
+			if !matchesSourceWithWildcard(left.SourceID, right.SourceID) {
+				continue
+			}
+			conflicts[left.ID] = append(conflicts[left.ID], right.ID)
+			conflicts[right.ID] = append(conflicts[right.ID], left.ID)
+		}
+	}
+
+	for ruleID, items := range conflicts {
+		if len(items) == 0 {
+			continue
+		}
+		sort.Strings(items)
+		conflicts[ruleID] = items
+	}
+	return conflicts
+}
+
+func fallbackExecutionRuleID(eventType string) string {
+	return fmt.Sprintf("builtin:fallback:%s", strings.TrimSpace(eventType))
+}
+
+func buildAlertOrchestrationMatchKey(alert alertEvent) string {
+	if dedupeKey := strings.TrimSpace(alert.DedupeKey); dedupeKey != "" {
+		return fmt.Sprintf("alert:%s", dedupeKey)
+	}
+	return strings.Join([]string{
+		"alert",
+		normalizeTenantID(alert.TenantID),
+		strings.TrimSpace(alert.BudgetID),
+		strings.ToLower(strings.TrimSpace(alert.Severity)),
+		normalizeOptionalString(alert.SourceID),
+		strings.ToLower(strings.TrimSpace(alert.Stage)),
+	}, "|")
+}
+
+func buildWeeklyReportOrchestrationMatchKey(report weeklyReportEvent) string {
+	if reportID := strings.TrimSpace(report.ReportID); reportID != "" {
+		return fmt.Sprintf("weekly:%s", reportID)
+	}
+	return strings.Join([]string{
+		"weekly",
+		normalizeTenantID(report.TenantID),
+		report.WeekStart.UTC().Format(time.RFC3339),
+		report.WeekEnd.UTC().Format(time.RFC3339),
+	}, "|")
+}
+
+func asJSONString(value any) []byte {
+	if value == nil {
+		return []byte(`{}`)
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return []byte(`{}`)
+	}
+	return raw
 }
 
 func main() {
@@ -816,7 +1014,7 @@ WHERE id = $1
 		if alert == nil {
 			return nil, false, nil
 		}
-		published, err := s.isAlertDispatched(ctx, alert.AlertID)
+		published, err := s.isAlertDispatched(ctx, alert.TenantID, alert.AlertID)
 		if err != nil {
 			return nil, false, fmt.Errorf("check alert dispatch audit failed: %w", err)
 		}
@@ -827,6 +1025,463 @@ WHERE id = $1
 	}
 
 	return alert, true, nil
+}
+
+func (s *governanceService) loadAlertOrchestrationRules(
+	ctx context.Context,
+	tenantID string,
+	eventType string,
+) ([]alertOrchestrationRule, error) {
+	rows, err := s.pool.Query(ctx, `
+SELECT
+  id,
+  name,
+  event_type,
+  severity,
+  source_id,
+  dedupe_window_seconds,
+  suppression_window_seconds,
+  merge_window_seconds,
+  channels
+FROM alert_orchestration_rules
+WHERE tenant_id = $1
+  AND enabled = TRUE
+  AND event_type = $2
+ORDER BY updated_at DESC, id ASC
+`, normalizeTenantID(tenantID), strings.TrimSpace(eventType))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rules := make([]alertOrchestrationRule, 0)
+	for rows.Next() {
+		var (
+			rule              alertOrchestrationRule
+			severity          *string
+			sourceID          *string
+			channelsRaw       []byte
+			dedupeWindow      int32
+			suppressionWindow int32
+			mergeWindow       int32
+		)
+		if err := rows.Scan(
+			&rule.ID,
+			&rule.Name,
+			&rule.EventType,
+			&severity,
+			&sourceID,
+			&dedupeWindow,
+			&suppressionWindow,
+			&mergeWindow,
+			&channelsRaw,
+		); err != nil {
+			return nil, fmt.Errorf("scan alert orchestration rule failed: %w", err)
+		}
+
+		rule.Severity = strings.ToLower(strings.TrimSpace(normalizeOptionalString(severity)))
+		rule.SourceID = normalizeOptionalString(sourceID)
+		rule.DedupeWindowSeconds = int(dedupeWindow)
+		rule.SuppressionWindowSeconds = int(suppressionWindow)
+		rule.MergeWindowSeconds = int(mergeWindow)
+		if len(channelsRaw) > 0 {
+			if err := json.Unmarshal(channelsRaw, &rule.Channels); err != nil {
+				return nil, fmt.Errorf("unmarshal alert orchestration rule channels failed: %w", err)
+			}
+		}
+		rule.Channels = normalizeOrchestrationChannels(rule.Channels)
+		rules = append(rules, rule)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate alert orchestration rules failed: %w", err)
+	}
+	return rules, nil
+}
+
+func (s *governanceService) hasRecentOrchestrationExecutionWithMatchKey(
+	ctx context.Context,
+	tenantID string,
+	ruleID string,
+	eventType string,
+	matchKey string,
+	window time.Duration,
+	before time.Time,
+) (bool, error) {
+	if window <= 0 || strings.TrimSpace(matchKey) == "" {
+		return false, nil
+	}
+
+	since := before.UTC().Add(-window)
+	var exists bool
+	err := s.pool.QueryRow(ctx, `
+SELECT EXISTS (
+  SELECT 1
+  FROM alert_orchestration_executions
+  WHERE tenant_id = $1
+    AND rule_id = $2
+    AND event_type = $3
+    AND simulated = FALSE
+    AND COALESCE(metadata ->> 'matchKey', '') = $4
+    AND created_at >= $5
+  LIMIT 1
+)
+`, normalizeTenantID(tenantID), strings.TrimSpace(ruleID), strings.TrimSpace(eventType), strings.TrimSpace(matchKey), since).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+func (s *governanceService) createAlertOrchestrationExecutionLog(
+	ctx context.Context,
+	tenantID string,
+	execution alertOrchestrationExecution,
+) error {
+	createdAt := execution.CreatedAt.UTC()
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+
+	_, err := s.pool.Exec(ctx, `
+INSERT INTO alert_orchestration_executions (
+  id,
+  tenant_id,
+  rule_id,
+  event_type,
+  alert_id,
+  severity,
+  source_id,
+  channels,
+  conflict_rule_ids,
+  dedupe_hit,
+  suppressed,
+  simulated,
+  metadata,
+  created_at
+)
+VALUES (
+  $1,
+  $2,
+  $3,
+  $4,
+  $5,
+  $6,
+  $7,
+  $8::jsonb,
+  $9::jsonb,
+  $10,
+  $11,
+  FALSE,
+  $12::jsonb,
+  $13
+)
+`,
+		ingest.NewID("aoe"),
+		normalizeTenantID(tenantID),
+		strings.TrimSpace(execution.RuleID),
+		strings.TrimSpace(execution.EventType),
+		execution.AlertID,
+		execution.Severity,
+		execution.SourceID,
+		asJSONString(normalizeOrchestrationChannels(execution.Channels)),
+		asJSONString(execution.ConflictRuleIDs),
+		execution.DedupeHit,
+		execution.Suppressed,
+		asJSONString(execution.Metadata),
+		createdAt,
+	)
+	if err != nil {
+		return fmt.Errorf("insert alert orchestration execution failed: %w", err)
+	}
+	return nil
+}
+
+func (s *governanceService) applyAlertOrchestration(
+	ctx context.Context,
+	alert alertEvent,
+) (alertEvent, error) {
+	createdAt := alert.EvaluatedAt.UTC()
+	if createdAt.IsZero() {
+		createdAt = alert.CreatedAt.UTC()
+	}
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+
+	rules, err := s.loadAlertOrchestrationRules(ctx, alert.TenantID, "alert")
+	if err != nil {
+		return alert, err
+	}
+
+	severity := strings.ToLower(strings.TrimSpace(alert.Severity))
+	sourceID := normalizeOptionalString(alert.SourceID)
+	matched := make([]alertOrchestrationRule, 0, len(rules))
+	for _, rule := range rules {
+		if !matchesSeverityWithWildcard(rule.Severity, severity) {
+			continue
+		}
+		if !matchesSourceWithWildcard(rule.SourceID, sourceID) {
+			continue
+		}
+		matched = append(matched, rule)
+	}
+
+	alertID := strconv.FormatInt(alert.AlertID, 10)
+	matchKey := buildAlertOrchestrationMatchKey(alert)
+	if len(matched) == 0 {
+		metadata := map[string]any{
+			"dispatchMode":     orchestrationDispatchModeFallback,
+			"fallback":         true,
+			"matchKey":         matchKey,
+			"natsSubject":      alertsSubject,
+			"alertId":          alertID,
+			"severity":         severity,
+			"sourceId":         sourceID,
+			"deliveryChannels": []string{},
+		}
+		if err := s.createAlertOrchestrationExecutionLog(ctx, alert.TenantID, alertOrchestrationExecution{
+			RuleID:    fallbackExecutionRuleID("alert"),
+			EventType: "alert",
+			AlertID:   &alertID,
+			Severity:  &severity,
+			SourceID:  alert.SourceID,
+			Metadata:  metadata,
+			CreatedAt: createdAt,
+		}); err != nil {
+			return alert, err
+		}
+
+		alert.Orchestration = &eventOrchestration{
+			Fallback: true,
+		}
+		return alert, nil
+	}
+
+	conflicts := detectOrchestrationConflicts(matched)
+	matchedRuleIDs := make([]string, 0, len(matched))
+	for _, rule := range matched {
+		matchedRuleIDs = append(matchedRuleIDs, rule.ID)
+	}
+	activeChannels := make([]string, 0)
+	activeChannelSet := make(map[string]struct{})
+	anyDedupeHit := false
+	anySuppressed := false
+	for _, rule := range matched {
+		dedupeHit, err := s.hasRecentOrchestrationExecutionWithMatchKey(
+			ctx,
+			alert.TenantID,
+			rule.ID,
+			"alert",
+			matchKey,
+			time.Duration(rule.DedupeWindowSeconds)*time.Second,
+			createdAt,
+		)
+		if err != nil {
+			return alert, err
+		}
+		suppressed, err := s.hasRecentOrchestrationExecutionWithMatchKey(
+			ctx,
+			alert.TenantID,
+			rule.ID,
+			"alert",
+			matchKey,
+			time.Duration(rule.SuppressionWindowSeconds)*time.Second,
+			createdAt,
+		)
+		if err != nil {
+			return alert, err
+		}
+
+		anyDedupeHit = anyDedupeHit || dedupeHit
+		anySuppressed = anySuppressed || suppressed
+		deliveryChannels := normalizeOrchestrationChannels(rule.Channels)
+		if dedupeHit || suppressed {
+			deliveryChannels = nil
+		}
+		for _, channel := range deliveryChannels {
+			if _, exists := activeChannelSet[channel]; exists {
+				continue
+			}
+			activeChannelSet[channel] = struct{}{}
+			activeChannels = append(activeChannels, channel)
+		}
+
+		metadata := map[string]any{
+			"dispatchMode":     orchestrationDispatchModeRule,
+			"fallback":         false,
+			"matchKey":         matchKey,
+			"natsSubject":      alertsSubject,
+			"alertId":          alertID,
+			"severity":         severity,
+			"sourceId":         sourceID,
+			"ruleName":         rule.Name,
+			"matchedRuleIds":   matchedRuleIDs,
+			"deliveryChannels": deliveryChannels,
+		}
+		if len(conflicts[rule.ID]) > 0 {
+			metadata["conflictRuleIds"] = conflicts[rule.ID]
+		}
+		if err := s.createAlertOrchestrationExecutionLog(ctx, alert.TenantID, alertOrchestrationExecution{
+			RuleID:          rule.ID,
+			EventType:       "alert",
+			AlertID:         &alertID,
+			Severity:        &severity,
+			SourceID:        alert.SourceID,
+			Channels:        rule.Channels,
+			ConflictRuleIDs: conflicts[rule.ID],
+			DedupeHit:       dedupeHit,
+			Suppressed:      suppressed,
+			Metadata:        metadata,
+			CreatedAt:       createdAt,
+		}); err != nil {
+			return alert, err
+		}
+	}
+
+	alert.Orchestration = &eventOrchestration{
+		MatchedRuleIDs: matchedRuleIDs,
+		Channels:       activeChannels,
+		DedupeHit:      anyDedupeHit,
+		Suppressed:     anySuppressed,
+		Fallback:       false,
+	}
+	return alert, nil
+}
+
+func (s *governanceService) applyWeeklyReportOrchestration(
+	ctx context.Context,
+	report weeklyReportEvent,
+) (weeklyReportEvent, error) {
+	createdAt := report.GeneratedAt.UTC()
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+
+	rules, err := s.loadAlertOrchestrationRules(ctx, report.TenantID, "weekly")
+	if err != nil {
+		return report, err
+	}
+
+	matched := make([]alertOrchestrationRule, 0, len(rules))
+	for _, rule := range rules {
+		if !matchesSeverityWithWildcard(rule.Severity, "") {
+			continue
+		}
+		if !matchesSourceWithWildcard(rule.SourceID, "") {
+			continue
+		}
+		matched = append(matched, rule)
+	}
+
+	matchKey := buildWeeklyReportOrchestrationMatchKey(report)
+	if len(matched) == 0 {
+		metadata := map[string]any{
+			"dispatchMode":     orchestrationDispatchModeFallback,
+			"fallback":         true,
+			"matchKey":         matchKey,
+			"natsSubject":      weeklyReportsSubject,
+			"reportId":         strings.TrimSpace(report.ReportID),
+			"deliveryChannels": []string{},
+		}
+		if err := s.createAlertOrchestrationExecutionLog(ctx, report.TenantID, alertOrchestrationExecution{
+			RuleID:    fallbackExecutionRuleID("weekly"),
+			EventType: "weekly",
+			Metadata:  metadata,
+			CreatedAt: createdAt,
+		}); err != nil {
+			return report, err
+		}
+
+		report.Orchestration = &eventOrchestration{
+			Fallback: true,
+		}
+		return report, nil
+	}
+
+	conflicts := detectOrchestrationConflicts(matched)
+	matchedRuleIDs := make([]string, 0, len(matched))
+	for _, rule := range matched {
+		matchedRuleIDs = append(matchedRuleIDs, rule.ID)
+	}
+	activeChannels := make([]string, 0)
+	activeChannelSet := make(map[string]struct{})
+	anyDedupeHit := false
+	anySuppressed := false
+	for _, rule := range matched {
+		dedupeHit, err := s.hasRecentOrchestrationExecutionWithMatchKey(
+			ctx,
+			report.TenantID,
+			rule.ID,
+			"weekly",
+			matchKey,
+			time.Duration(rule.DedupeWindowSeconds)*time.Second,
+			createdAt,
+		)
+		if err != nil {
+			return report, err
+		}
+		suppressed, err := s.hasRecentOrchestrationExecutionWithMatchKey(
+			ctx,
+			report.TenantID,
+			rule.ID,
+			"weekly",
+			matchKey,
+			time.Duration(rule.SuppressionWindowSeconds)*time.Second,
+			createdAt,
+		)
+		if err != nil {
+			return report, err
+		}
+
+		anyDedupeHit = anyDedupeHit || dedupeHit
+		anySuppressed = anySuppressed || suppressed
+		deliveryChannels := normalizeOrchestrationChannels(rule.Channels)
+		if dedupeHit || suppressed {
+			deliveryChannels = nil
+		}
+		for _, channel := range deliveryChannels {
+			if _, exists := activeChannelSet[channel]; exists {
+				continue
+			}
+			activeChannelSet[channel] = struct{}{}
+			activeChannels = append(activeChannels, channel)
+		}
+
+		metadata := map[string]any{
+			"dispatchMode":     orchestrationDispatchModeRule,
+			"fallback":         false,
+			"matchKey":         matchKey,
+			"natsSubject":      weeklyReportsSubject,
+			"reportId":         strings.TrimSpace(report.ReportID),
+			"ruleName":         rule.Name,
+			"matchedRuleIds":   matchedRuleIDs,
+			"deliveryChannels": deliveryChannels,
+		}
+		if len(conflicts[rule.ID]) > 0 {
+			metadata["conflictRuleIds"] = conflicts[rule.ID]
+		}
+		if err := s.createAlertOrchestrationExecutionLog(ctx, report.TenantID, alertOrchestrationExecution{
+			RuleID:          rule.ID,
+			EventType:       "weekly",
+			Channels:        rule.Channels,
+			ConflictRuleIDs: conflicts[rule.ID],
+			DedupeHit:       dedupeHit,
+			Suppressed:      suppressed,
+			Metadata:        metadata,
+			CreatedAt:       createdAt,
+		}); err != nil {
+			return report, err
+		}
+	}
+
+	report.Orchestration = &eventOrchestration{
+		MatchedRuleIDs: matchedRuleIDs,
+		Channels:       activeChannels,
+		DedupeHit:      anyDedupeHit,
+		Suppressed:     anySuppressed,
+		Fallback:       false,
+	}
+	return report, nil
 }
 
 func (s *governanceService) freezeBudgetIfNeeded(
@@ -889,7 +1544,18 @@ WHERE id = $1
 }
 
 func (s *governanceService) publishAlert(ctx context.Context, alert alertEvent) error {
-	payload, err := json.Marshal(alert)
+	orchestratedAlert, orchestrationErr := s.applyAlertOrchestration(ctx, alert)
+	if orchestrationErr != nil {
+		s.log.Warn("apply alert orchestration failed, fallback to legacy dispatch",
+			"error", orchestrationErr,
+			"alert_id", alert.AlertID,
+			"tenant_id", normalizeTenantID(alert.TenantID),
+		)
+		orchestratedAlert = alert
+		orchestratedAlert.Orchestration = &eventOrchestration{Fallback: true}
+	}
+
+	payload, err := json.Marshal(orchestratedAlert)
 	if err != nil {
 		return fmt.Errorf("marshal alert payload failed: %w", err)
 	}
@@ -902,7 +1568,7 @@ func (s *governanceService) publishAlert(ctx context.Context, alert alertEvent) 
 	if err != nil {
 		return fmt.Errorf("publish to %s failed: %w", alertsSubject, err)
 	}
-	if err := s.recordAlertPublished(ctx, alert, ack.Duplicate); err != nil {
+	if err := s.recordAlertPublished(ctx, orchestratedAlert, ack.Duplicate); err != nil {
 		return fmt.Errorf("record alert publish audit failed: %w", err)
 	}
 
@@ -1044,7 +1710,11 @@ LIMIT 1
 	}, nil
 }
 
-func (s *governanceService) isAlertDispatched(ctx context.Context, alertID int64) (bool, error) {
+func (s *governanceService) isAlertDispatched(
+	ctx context.Context,
+	tenantID string,
+	alertID int64,
+) (bool, error) {
 	var exists bool
 	err := s.pool.QueryRow(ctx, `
 SELECT EXISTS (
@@ -1052,9 +1722,10 @@ SELECT EXISTS (
   FROM audit_logs
   WHERE action = $1
     AND event_id = $2
+    AND tenant_id = $3
   LIMIT 1
 )
-`, alertDispatchedAuditAction, alertMessageID(alertID)).Scan(&exists)
+`, alertDispatchedAuditAction, alertMessageID(alertID), normalizeTenantID(tenantID)).Scan(&exists)
 	if err != nil {
 		return false, err
 	}
@@ -1063,6 +1734,7 @@ SELECT EXISTS (
 
 func (s *governanceService) recordAlertDispatched(ctx context.Context, alert alertEvent, duplicate bool) error {
 	eventID := alertMessageID(alert.AlertID)
+	tenantID := normalizeTenantID(alert.TenantID)
 
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -1071,8 +1743,8 @@ func (s *governanceService) recordAlertDispatched(ctx context.Context, alert ale
 	defer tx.Rollback(ctx)
 
 	_, err = tx.Exec(ctx, `
-SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))
-`, alertDispatchedAuditAction, eventID)
+SELECT pg_advisory_xact_lock(hashtext($1 || ':' || $2), hashtext($3))
+`, alertDispatchedAuditAction, eventID, tenantID)
 	if err != nil {
 		return fmt.Errorf("acquire alert dispatch audit lock failed: %w", err)
 	}
@@ -1084,9 +1756,10 @@ SELECT EXISTS (
   FROM audit_logs
   WHERE action = $1
     AND event_id = $2
+    AND tenant_id = $3
   LIMIT 1
 )
-`, alertDispatchedAuditAction, eventID).Scan(&exists)
+`, alertDispatchedAuditAction, eventID, tenantID).Scan(&exists)
 	if err != nil {
 		return fmt.Errorf("check alert dispatch audit exists failed: %w", err)
 	}
@@ -1470,7 +2143,7 @@ func (s *governanceService) publishWeeklyReportForTenant(
 		return false, true, nil
 	}
 
-	exists, err := s.isWeeklyReportPublished(ctx, reportID)
+	exists, err := s.isWeeklyReportPublished(ctx, tenantID, reportID)
 	if err != nil {
 		return false, false, fmt.Errorf("check weekly report published failed: %w", err)
 	}
@@ -1502,10 +2175,6 @@ func (s *governanceService) publishWeeklyReportForTenant(
 	ack, err := s.publishWeeklyReport(ctx, report)
 	if err != nil {
 		return false, false, err
-	}
-
-	if err := s.recordWeeklyReportPublished(ctx, report, ack.Duplicate); err != nil {
-		return false, false, fmt.Errorf("record weekly report audit failed: %w", err)
 	}
 
 	s.weeklyReportDedupe.Mark(reportID)
@@ -1667,7 +2336,11 @@ func summarizeWeeklyModelUsage(rows []weeklyModelAggregate, topLimit int) weekly
 	return summary
 }
 
-func (s *governanceService) isWeeklyReportPublished(ctx context.Context, reportID string) (bool, error) {
+func (s *governanceService) isWeeklyReportPublished(
+	ctx context.Context,
+	tenantID string,
+	reportID string,
+) (bool, error) {
 	var exists bool
 	err := s.pool.QueryRow(ctx, `
 SELECT EXISTS (
@@ -1675,9 +2348,10 @@ SELECT EXISTS (
   FROM audit_logs
   WHERE action = $1
     AND event_id = $2
+    AND tenant_id = $3
   LIMIT 1
 )
-`, weeklyReportAuditAction, reportID).Scan(&exists)
+`, weeklyReportAuditAction, reportID, normalizeTenantID(tenantID)).Scan(&exists)
 	if err != nil {
 		return false, err
 	}
@@ -1685,6 +2359,7 @@ SELECT EXISTS (
 }
 
 func (s *governanceService) recordWeeklyReportPublished(ctx context.Context, report weeklyReportEvent, duplicate bool) error {
+	tenantID := normalizeTenantID(report.TenantID)
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin weekly report audit tx failed: %w", err)
@@ -1692,8 +2367,8 @@ func (s *governanceService) recordWeeklyReportPublished(ctx context.Context, rep
 	defer tx.Rollback(ctx)
 
 	_, err = tx.Exec(ctx, `
-SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))
-`, weeklyReportAuditAction, report.ReportID)
+SELECT pg_advisory_xact_lock(hashtext($1 || ':' || $2), hashtext($3))
+`, weeklyReportAuditAction, report.ReportID, tenantID)
 	if err != nil {
 		return fmt.Errorf("acquire weekly report audit lock failed: %w", err)
 	}
@@ -1705,9 +2380,10 @@ SELECT EXISTS (
   FROM audit_logs
   WHERE action = $1
     AND event_id = $2
+    AND tenant_id = $3
   LIMIT 1
 )
-`, weeklyReportAuditAction, report.ReportID).Scan(&exists)
+`, weeklyReportAuditAction, report.ReportID, tenantID).Scan(&exists)
 	if err != nil {
 		return fmt.Errorf("check weekly report audit exists failed: %w", err)
 	}
@@ -1748,7 +2424,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
 		weeklyReportAuditAction,
 		"info",
 		detail,
-		normalizeTenantID(report.TenantID),
+		tenantID,
 		metadata,
 		report.GeneratedAt,
 	)
@@ -1762,7 +2438,18 @@ VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
 }
 
 func (s *governanceService) publishWeeklyReport(ctx context.Context, report weeklyReportEvent) (*jetstream.PubAck, error) {
-	payload, err := json.Marshal(report)
+	orchestratedReport, orchestrationErr := s.applyWeeklyReportOrchestration(ctx, report)
+	if orchestrationErr != nil {
+		s.log.Warn("apply weekly orchestration failed, fallback to legacy dispatch",
+			"error", orchestrationErr,
+			"report_id", strings.TrimSpace(report.ReportID),
+			"tenant_id", normalizeTenantID(report.TenantID),
+		)
+		orchestratedReport = report
+		orchestratedReport.Orchestration = &eventOrchestration{Fallback: true}
+	}
+
+	payload, err := json.Marshal(orchestratedReport)
 	if err != nil {
 		return nil, fmt.Errorf("marshal weekly report payload failed: %w", err)
 	}
@@ -1778,6 +2465,9 @@ func (s *governanceService) publishWeeklyReport(ctx context.Context, report week
 	)
 	if err != nil {
 		return nil, fmt.Errorf("publish to %s failed: %w", weeklyReportsSubject, err)
+	}
+	if err := s.recordWeeklyReportPublished(ctx, orchestratedReport, ack.Duplicate); err != nil {
+		return nil, fmt.Errorf("record weekly report audit failed: %w", err)
 	}
 
 	s.log.Info(
