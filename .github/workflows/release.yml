@@ -56,6 +56,12 @@ jobs:
           bun run sdk:test
           bun run check:callback-stream-binding
 
+      - name: 治理链真实 E2E
+        env:
+          AGENTLEDGER_E2E: "1"
+          GOV_E2E_DATABASE_URL: ${{ secrets.GOV_E2E_DATABASE_URL }}
+        run: bun run test:e2e-governance-routing
+
   build-and-publish:
     name: 发布客户端构建产物
     needs: pre-release-gate

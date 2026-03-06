@@ -29,6 +29,7 @@
     "sdk:build": "bun run ./scripts/sdk-build.ts",
     "test:scripts": "bun test ./scripts/check-support-matrix.test.ts ./scripts/verify-evidence-bundle.test.ts ./scripts/backfill-source-region.test.ts ./scripts/sdk-common.test.ts",
     "check:callback-stream-binding": "bash ./scripts/check-callback-stream-binding.sh",
+    "test:e2e-governance-routing": "bash ./scripts/check-governance-e2e.sh",
     "test:go": "bash ./scripts/go-test-all.sh",
     "test:coverage": "bash ./scripts/test-coverage.sh",
     "test:callback-chain-targeted": "bash ./scripts/test-callback-chain-targeted.sh",

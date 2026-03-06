@@ -173,15 +173,15 @@ bun run test:e2e-governance-callback-chain
 ### 5.1 治理链真实 E2E（新增）
 
 ```bash
-AGENTLEDGER_E2E=1 \
 GOV_E2E_DATABASE_URL='postgres://agentledger:agentledger@127.0.0.1:55432/agentledger_governance_e2e?sslmode=disable' \
-go test ./services/governance -run '^TestGovernanceE2E' -count=1 -v
+bun run test:e2e-governance-routing
 ```
 
 说明：
 
 - 只需要真实 PostgreSQL；NATS 由测试内部以嵌入式 JetStream 拉起。
 - 重点覆盖 `fallback / dedupe / suppressed / fail-open / weekly` 五类治理分发场景。
+- `scripts/check-governance-e2e.sh` 会强制校验 `GOV_E2E_DATABASE_URL`，并固定用 `AGENTLEDGER_E2E=1` 执行真实治理链 E2E。
 
 ### 6. 审计取证包导出与校验（新增）
 
