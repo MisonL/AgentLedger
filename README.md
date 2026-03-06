@@ -21,11 +21,20 @@ AgentLedger 面向企业研发与平台团队，目标是把分散在 AI CLI 与
 | Source 管理 | source 新增/查询/删除、连通性测试、同步任务管理 |
 | Agent 自动采集（新增） | `agent collect` 按 docs/09 的 P0/P1 客户端矩阵自动采集本机会话并上报；支持 `--tool=auto` 和显式 `--tool=<client-key>`。 |
 | 预算治理 | budgets 读写、阈值分级、告警与状态流转 |
+| 数据主权与复制治理（新增） | `residency policy / region mappings / replication jobs` 全链路；Governance 支持策略保存、复制任务创建、审批、取消与状态刷新 |
 | 审计取证（新增） | 审计取证包导出（链式哈希 + HMAC 签名）与本地验签命令 |
 | 集成分发 | 支持 `alert/weekly` 双事件；`webhook` 原样转发，`wecom/dingtalk/feishu` 使用 `text` 模板消息 |
 | 回调链路 | governance -> integration -> control-plane callback 闭环 |
-| Web Console | Dashboard / Sessions / Analytics / Sources / Pricing 最小可用页面 |
+| 开放平台与质量回放（新增） | OpenAPI 摘要、API Key/Webhook 管理、`/api/v2/quality/*` 质量评估与项目趋势、`/api/v2/replay/*` datasets/runs/diffs/artifacts/download |
+| Web Console | Dashboard / Sessions / Analytics / Governance / Sources / Pricing；Governance 内含 Residency 策略/复制审批工作台、Open Platform 工作台、Quality project-trends、Replay dataset/run/diff/artifacts/download 工作台 |
 | 工程质量 | Bun + Go 混合 monorepo、基础 CI、脚本化门禁 |
+
+## 本轮治理闭环更新
+
+- Replay Webhook 事件已对外统一为“旧版 `replay.job.*` 兼容保留 + 新版 `replay.run.*` 正式事件”，覆盖 `started/completed/regression_detected/failed/cancelled`。
+- `alert/weekly` 两类治理事件现在都会先经过 orchestration 规则匹配，再带着 `dispatchMode=rule|fallback`、`dedupeHit`、`suppressed`、`conflictRuleIds` 进入执行日志与 integration 路由。
+- Governance 控制台已补齐 execution log 的 `dispatchMode` / `conflict` 筛选与结果集统计，不再依赖 `metadata.dispatchMode` 的非正式字段。
+- 真实治理链 E2E 已覆盖 `fallback / dedupe / suppressed / fail-open / weekly`，使用真实 PostgreSQL + 嵌入式 NATS 验证主链路。
 
 ## 架构
 
@@ -161,6 +170,19 @@ bun run test:e2e-governance-callback-chain
 
 关键变量：`INTEGRATION_CALLBACK_STREAM`、`INTEGRATION_CALLBACK_SUBJECT`（或 `INTEGRATION_CALLBACK_TOPIC`）、`INTEGRATION_CALLBACK_DURABLE`、`CONTROL_PLANE_BASE_URL`、`INTEGRATION_CALLBACK_PATH`、`INTEGRATION_CALLBACK_SECRET`。详细说明见 `docs/13-环境变量参考.md`。
 
+### 5.1 治理链真实 E2E（新增）
+
+```bash
+AGENTLEDGER_E2E=1 \
+GOV_E2E_DATABASE_URL='postgres://agentledger:agentledger@127.0.0.1:55432/agentledger_governance_e2e?sslmode=disable' \
+go test ./services/governance -run '^TestGovernanceE2E' -count=1 -v
+```
+
+说明：
+
+- 只需要真实 PostgreSQL；NATS 由测试内部以嵌入式 JetStream 拉起。
+- 重点覆盖 `fallback / dedupe / suppressed / fail-open / weekly` 五类治理分发场景。
+
 ### 6. 审计取证包导出与校验（新增）
 
 ```bash
@@ -176,7 +198,10 @@ bun run evidence:verify -- --file ./evidence-bundle.v1.json --signing-key <your-
 ### 7. SDK 一键构建（新增）
 
 ```bash
-# 生成 8 语言 SDK（全 operation 覆盖）并完成校验
+# SDK 只读门禁（CI 默认）：校验 + 覆盖测试 + SHA256 一致性
+bun run sdk:check
+
+# 需要单独定位时可拆分执行
 bun run sdk:verify
 bun run sdk:test
 
@@ -200,6 +225,7 @@ bun run sdk:build
 | 文本规范（LF/BOM） | `bun run check:text-normalization` | `scripts/check-text-normalization.sh` |
 | 支持矩阵一致性（P0/P1 + parser 入口） | `bun run check:support-matrix` | `scripts/check-support-matrix.ts` |
 | 回调配置绑定一致性 | `bun run check:callback-stream-binding` | `scripts/check-callback-stream-binding.sh` |
+| SDK 只读一致性门禁 | `bun run sdk:check` | `scripts/sdk-check.ts` |
 
 ### Coverage 阈值（当前执行）
 
