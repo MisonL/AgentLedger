@@ -4,9 +4,9 @@
   "openapi": {
     "source": "internal:buildOpenApiDocument()",
     "title": "AgentLedger Control Plane API",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "specVersion": "3.0.3",
-    "digest": "6ee3566bbaa5d7cd4c4a5d2dd6d3d28f8b246d1e4ab9677c5b7052c731749dba"
+    "digest": "4ad461c6af1877f454ce24f9c08c4b1efb0e0ccebaab64715d88b5996c97dab8"
   },
   "operations": [
     {
@@ -19,6 +19,7 @@
       "methodNamePascal": "ListApiKeys",
       "hasRequestBody": false,
       "pathParams": [],
+      "wirePathParams": [],
       "queryParams": [
         "scope",
         "status",
@@ -37,6 +38,7 @@
       "methodNamePascal": "CreateApiKey",
       "hasRequestBody": true,
       "pathParams": [],
+      "wirePathParams": [],
       "queryParams": []
     },
     {
@@ -51,6 +53,9 @@
       "pathParams": [
         "id"
       ],
+      "wirePathParams": [
+        "id"
+      ],
       "queryParams": []
     },
     {
@@ -63,6 +68,7 @@
       "methodNamePascal": "GetOpenApiDocument",
       "hasRequestBody": false,
       "pathParams": [],
+      "wirePathParams": [],
       "queryParams": []
     },
     {
@@ -75,6 +81,7 @@
       "methodNamePascal": "CreateQualityEvent",
       "hasRequestBody": true,
       "pathParams": [],
+      "wirePathParams": [],
       "queryParams": []
     },
     {
@@ -87,7 +94,17 @@
       "methodNamePascal": "ListQualityDailyMetrics",
       "hasRequestBody": false,
       "pathParams": [],
-      "queryParams": []
+      "wirePathParams": [],
+      "queryParams": [
+        "from",
+        "to",
+        "metric",
+        "provider",
+        "repo",
+        "workflow",
+        "runId",
+        "groupBy"
+      ]
     },
     {
       "id": "list_quality_scorecards",
@@ -99,6 +116,7 @@
       "methodNamePascal": "ListQualityScorecards",
       "hasRequestBody": false,
       "pathParams": [],
+      "wirePathParams": [],
       "queryParams": []
     },
     {
@@ -113,6 +131,9 @@
       "pathParams": [
         "id"
       ],
+      "wirePathParams": [
+        "id"
+      ],
       "queryParams": []
     },
     {
@@ -125,6 +146,7 @@
       "methodNamePascal": "ListReplayBaselines",
       "hasRequestBody": false,
       "pathParams": [],
+      "wirePathParams": [],
       "queryParams": []
     },
     {
@@ -137,6 +159,7 @@
       "methodNamePascal": "CreateReplayBaseline",
       "hasRequestBody": true,
       "pathParams": [],
+      "wirePathParams": [],
       "queryParams": []
     },
     {
@@ -149,6 +172,7 @@
       "methodNamePascal": "ListReplayJobs",
       "hasRequestBody": false,
       "pathParams": [],
+      "wirePathParams": [],
       "queryParams": []
     },
     {
@@ -161,6 +185,7 @@
       "methodNamePascal": "CreateReplayJob",
       "hasRequestBody": true,
       "pathParams": [],
+      "wirePathParams": [],
       "queryParams": []
     },
     {
@@ -173,6 +198,9 @@
       "methodNamePascal": "GetReplayJob",
       "hasRequestBody": false,
       "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
         "id"
       ],
       "queryParams": []
@@ -189,6 +217,9 @@
       "pathParams": [
         "id"
       ],
+      "wirePathParams": [
+        "id"
+      ],
       "queryParams": []
     },
     {
@@ -201,6 +232,7 @@
       "methodNamePascal": "ListWebhookEndpoints",
       "hasRequestBody": false,
       "pathParams": [],
+      "wirePathParams": [],
       "queryParams": [
         "status",
         "keyword"
@@ -216,6 +248,7 @@
       "methodNamePascal": "CreateWebhookEndpoint",
       "hasRequestBody": true,
       "pathParams": [],
+      "wirePathParams": [],
       "queryParams": []
     },
     {
@@ -228,6 +261,9 @@
       "methodNamePascal": "UpdateWebhookEndpoint",
       "hasRequestBody": true,
       "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
         "id"
       ],
       "queryParams": []
@@ -244,6 +280,9 @@
       "pathParams": [
         "id"
       ],
+      "wirePathParams": [
+        "id"
+      ],
       "queryParams": []
     },
     {
@@ -258,6 +297,547 @@
       "pathParams": [
         "id"
       ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": []
+    },
+    {
+      "id": "list_webhook_replay_tasks",
+      "operationId": "listWebhookReplayTasks",
+      "method": "GET",
+      "path": "/api/v1/webhooks/replay-tasks",
+      "methodNameCamel": "listWebhookReplayTasks",
+      "methodNameSnake": "list_webhook_replay_tasks",
+      "methodNamePascal": "ListWebhookReplayTasks",
+      "hasRequestBody": false,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": [
+        "webhookId",
+        "status",
+        "cursor"
+      ]
+    },
+    {
+      "id": "get_webhook_replay_task",
+      "operationId": "getWebhookReplayTask",
+      "method": "GET",
+      "path": "/api/v1/webhooks/replay-tasks/{id}",
+      "methodNameCamel": "getWebhookReplayTask",
+      "methodNameSnake": "get_webhook_replay_task",
+      "methodNamePascal": "GetWebhookReplayTask",
+      "hasRequestBody": false,
+      "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": []
+    },
+    {
+      "id": "create_quality_evaluation_v2",
+      "operationId": "createQualityEvaluationV2",
+      "method": "POST",
+      "path": "/api/v2/quality/evaluations",
+      "methodNameCamel": "createQualityEvaluationV2",
+      "methodNameSnake": "create_quality_evaluation_v2",
+      "methodNamePascal": "CreateQualityEvaluationV2",
+      "hasRequestBody": true,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": []
+    },
+    {
+      "id": "list_quality_metrics_v2",
+      "operationId": "listQualityMetricsV2",
+      "method": "GET",
+      "path": "/api/v2/quality/metrics",
+      "methodNameCamel": "listQualityMetricsV2",
+      "methodNameSnake": "list_quality_metrics_v2",
+      "methodNamePascal": "ListQualityMetricsV2",
+      "hasRequestBody": false,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": [
+        "from",
+        "to",
+        "metric",
+        "provider",
+        "repo",
+        "workflow",
+        "runId",
+        "groupBy"
+      ]
+    },
+    {
+      "id": "get_quality_cost_correlation_v2",
+      "operationId": "getQualityCostCorrelationV2",
+      "method": "GET",
+      "path": "/api/v2/quality/reports/cost-correlation",
+      "methodNameCamel": "getQualityCostCorrelationV2",
+      "methodNameSnake": "get_quality_cost_correlation_v2",
+      "methodNamePascal": "GetQualityCostCorrelationV2",
+      "hasRequestBody": false,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": [
+        "from",
+        "to",
+        "metric"
+      ]
+    },
+    {
+      "id": "get_quality_project_trends_v2",
+      "operationId": "getQualityProjectTrendsV2",
+      "method": "GET",
+      "path": "/api/v2/quality/reports/project-trends",
+      "methodNameCamel": "getQualityProjectTrendsV2",
+      "methodNameSnake": "get_quality_project_trends_v2",
+      "methodNamePascal": "GetQualityProjectTrendsV2",
+      "hasRequestBody": false,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": [
+        "from",
+        "to",
+        "metric",
+        "provider",
+        "workflow",
+        "includeUnknown",
+        "limit"
+      ]
+    },
+    {
+      "id": "list_quality_scorecards_v2",
+      "operationId": "listQualityScorecardsV2",
+      "method": "GET",
+      "path": "/api/v2/quality/scorecards",
+      "methodNameCamel": "listQualityScorecardsV2",
+      "methodNameSnake": "list_quality_scorecards_v2",
+      "methodNamePascal": "ListQualityScorecardsV2",
+      "hasRequestBody": false,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": [
+        "metric"
+      ]
+    },
+    {
+      "id": "update_quality_scorecard_v2",
+      "operationId": "updateQualityScorecardV2",
+      "method": "PUT",
+      "path": "/api/v2/quality/scorecards/{id}",
+      "methodNameCamel": "updateQualityScorecardV2",
+      "methodNameSnake": "update_quality_scorecard_v2",
+      "methodNamePascal": "UpdateQualityScorecardV2",
+      "hasRequestBody": true,
+      "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": []
+    },
+    {
+      "id": "list_replay_datasets_v2",
+      "operationId": "listReplayDatasetsV2",
+      "method": "GET",
+      "path": "/api/v2/replay/datasets",
+      "methodNameCamel": "listReplayDatasetsV2",
+      "methodNameSnake": "list_replay_datasets_v2",
+      "methodNamePascal": "ListReplayDatasetsV2",
+      "hasRequestBody": false,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": [
+        "keyword"
+      ]
+    },
+    {
+      "id": "create_replay_dataset_v2",
+      "operationId": "createReplayDatasetV2",
+      "method": "POST",
+      "path": "/api/v2/replay/datasets",
+      "methodNameCamel": "createReplayDatasetV2",
+      "methodNameSnake": "create_replay_dataset_v2",
+      "methodNamePascal": "CreateReplayDatasetV2",
+      "hasRequestBody": true,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": []
+    },
+    {
+      "id": "list_replay_dataset_cases_v2",
+      "operationId": "listReplayDatasetCasesV2",
+      "method": "GET",
+      "path": "/api/v2/replay/datasets/{id}/cases",
+      "methodNameCamel": "listReplayDatasetCasesV2",
+      "methodNameSnake": "list_replay_dataset_cases_v2",
+      "methodNamePascal": "ListReplayDatasetCasesV2",
+      "hasRequestBody": false,
+      "pathParams": [
+        "datasetId"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": [
+        "limit"
+      ],
+      "compatibilityAliases": {
+        "path": [
+          {
+            "canonicalName": "datasetId",
+            "wireName": "id",
+            "compatibilityNames": [
+              "id",
+              "baselineId"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "replace_replay_dataset_cases_v2",
+      "operationId": "replaceReplayDatasetCasesV2",
+      "method": "POST",
+      "path": "/api/v2/replay/datasets/{id}/cases",
+      "methodNameCamel": "replaceReplayDatasetCasesV2",
+      "methodNameSnake": "replace_replay_dataset_cases_v2",
+      "methodNamePascal": "ReplaceReplayDatasetCasesV2",
+      "hasRequestBody": true,
+      "pathParams": [
+        "datasetId"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": [],
+      "compatibilityAliases": {
+        "path": [
+          {
+            "canonicalName": "datasetId",
+            "wireName": "id",
+            "compatibilityNames": [
+              "id",
+              "baselineId"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "materialize_replay_dataset_cases_v2",
+      "operationId": "materializeReplayDatasetCasesV2",
+      "method": "POST",
+      "path": "/api/v2/replay/datasets/{id}/materialize",
+      "methodNameCamel": "materializeReplayDatasetCasesV2",
+      "methodNameSnake": "materialize_replay_dataset_cases_v2",
+      "methodNamePascal": "MaterializeReplayDatasetCasesV2",
+      "hasRequestBody": true,
+      "pathParams": [
+        "datasetId"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": [],
+      "compatibilityAliases": {
+        "path": [
+          {
+            "canonicalName": "datasetId",
+            "wireName": "id",
+            "compatibilityNames": [
+              "id",
+              "baselineId"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "list_replay_runs_v2",
+      "operationId": "listReplayRunsV2",
+      "method": "GET",
+      "path": "/api/v2/replay/runs",
+      "methodNameCamel": "listReplayRunsV2",
+      "methodNameSnake": "list_replay_runs_v2",
+      "methodNamePascal": "ListReplayRunsV2",
+      "hasRequestBody": false,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": [
+        "status",
+        "datasetId"
+      ],
+      "compatibilityAliases": {
+        "query": [
+          {
+            "canonicalName": "datasetId",
+            "compatibilityNames": [
+              "baselineId"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "create_replay_run_v2",
+      "operationId": "createReplayRunV2",
+      "method": "POST",
+      "path": "/api/v2/replay/runs",
+      "methodNameCamel": "createReplayRunV2",
+      "methodNameSnake": "create_replay_run_v2",
+      "methodNamePascal": "CreateReplayRunV2",
+      "hasRequestBody": true,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": [],
+      "compatibilityAliases": {
+        "body": [
+          {
+            "canonicalName": "datasetId",
+            "compatibilityNames": [
+              "baselineId"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "get_replay_run_v2",
+      "operationId": "getReplayRunV2",
+      "method": "GET",
+      "path": "/api/v2/replay/runs/{id}",
+      "methodNameCamel": "getReplayRunV2",
+      "methodNameSnake": "get_replay_run_v2",
+      "methodNamePascal": "GetReplayRunV2",
+      "hasRequestBody": false,
+      "pathParams": [
+        "runId"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": [],
+      "compatibilityAliases": {
+        "path": [
+          {
+            "canonicalName": "runId",
+            "wireName": "id",
+            "compatibilityNames": [
+              "id",
+              "jobId"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "get_replay_run_artifacts_v2",
+      "operationId": "getReplayRunArtifactsV2",
+      "method": "GET",
+      "path": "/api/v2/replay/runs/{id}/artifacts",
+      "methodNameCamel": "getReplayRunArtifactsV2",
+      "methodNameSnake": "get_replay_run_artifacts_v2",
+      "methodNamePascal": "GetReplayRunArtifactsV2",
+      "hasRequestBody": false,
+      "pathParams": [
+        "runId"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": [],
+      "compatibilityAliases": {
+        "path": [
+          {
+            "canonicalName": "runId",
+            "wireName": "id",
+            "compatibilityNames": [
+              "id",
+              "jobId"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "download_replay_run_artifact_v2",
+      "operationId": "downloadReplayRunArtifactV2",
+      "method": "GET",
+      "path": "/api/v2/replay/runs/{id}/artifacts/{artifactType}/download",
+      "methodNameCamel": "downloadReplayRunArtifactV2",
+      "methodNameSnake": "download_replay_run_artifact_v2",
+      "methodNamePascal": "DownloadReplayRunArtifactV2",
+      "hasRequestBody": false,
+      "pathParams": [
+        "runId",
+        "artifactType"
+      ],
+      "wirePathParams": [
+        "id",
+        "artifactType"
+      ],
+      "queryParams": [],
+      "compatibilityAliases": {
+        "path": [
+          {
+            "canonicalName": "runId",
+            "wireName": "id",
+            "compatibilityNames": [
+              "id",
+              "jobId"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "get_replay_run_diffs_v2",
+      "operationId": "getReplayRunDiffsV2",
+      "method": "GET",
+      "path": "/api/v2/replay/runs/{id}/diffs",
+      "methodNameCamel": "getReplayRunDiffsV2",
+      "methodNameSnake": "get_replay_run_diffs_v2",
+      "methodNamePascal": "GetReplayRunDiffsV2",
+      "hasRequestBody": false,
+      "pathParams": [
+        "runId"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": [
+        "datasetId",
+        "keyword",
+        "limit"
+      ],
+      "compatibilityAliases": {
+        "path": [
+          {
+            "canonicalName": "runId",
+            "wireName": "id",
+            "compatibilityNames": [
+              "id",
+              "jobId"
+            ]
+          }
+        ],
+        "query": [
+          {
+            "canonicalName": "datasetId",
+            "compatibilityNames": [
+              "baselineId"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "get_residency_policy_v2",
+      "operationId": "getResidencyPolicyV2",
+      "method": "GET",
+      "path": "/api/v2/residency/policies/current",
+      "methodNameCamel": "getResidencyPolicyV2",
+      "methodNameSnake": "get_residency_policy_v2",
+      "methodNamePascal": "GetResidencyPolicyV2",
+      "hasRequestBody": false,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": []
+    },
+    {
+      "id": "update_residency_policy_v2",
+      "operationId": "updateResidencyPolicyV2",
+      "method": "PUT",
+      "path": "/api/v2/residency/policies/current",
+      "methodNameCamel": "updateResidencyPolicyV2",
+      "methodNameSnake": "update_residency_policy_v2",
+      "methodNamePascal": "UpdateResidencyPolicyV2",
+      "hasRequestBody": true,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": []
+    },
+    {
+      "id": "list_residency_region_mappings_v2",
+      "operationId": "listResidencyRegionMappingsV2",
+      "method": "GET",
+      "path": "/api/v2/residency/region-mappings",
+      "methodNameCamel": "listResidencyRegionMappingsV2",
+      "methodNameSnake": "list_residency_region_mappings_v2",
+      "methodNamePascal": "ListResidencyRegionMappingsV2",
+      "hasRequestBody": false,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": []
+    },
+    {
+      "id": "list_residency_replications_v2",
+      "operationId": "listResidencyReplicationsV2",
+      "method": "GET",
+      "path": "/api/v2/residency/replications",
+      "methodNameCamel": "listResidencyReplicationsV2",
+      "methodNameSnake": "list_residency_replications_v2",
+      "methodNamePascal": "ListResidencyReplicationsV2",
+      "hasRequestBody": false,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": [
+        "status",
+        "sourceRegion",
+        "targetRegion"
+      ]
+    },
+    {
+      "id": "create_residency_replication_v2",
+      "operationId": "createResidencyReplicationV2",
+      "method": "POST",
+      "path": "/api/v2/residency/replications",
+      "methodNameCamel": "createResidencyReplicationV2",
+      "methodNameSnake": "create_residency_replication_v2",
+      "methodNamePascal": "CreateResidencyReplicationV2",
+      "hasRequestBody": true,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": []
+    },
+    {
+      "id": "approve_residency_replication_v2",
+      "operationId": "approveResidencyReplicationV2",
+      "method": "POST",
+      "path": "/api/v2/residency/replications/{id}/approvals",
+      "methodNameCamel": "approveResidencyReplicationV2",
+      "methodNameSnake": "approve_residency_replication_v2",
+      "methodNamePascal": "ApproveResidencyReplicationV2",
+      "hasRequestBody": true,
+      "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": []
+    },
+    {
+      "id": "cancel_residency_replication_v2",
+      "operationId": "cancelResidencyReplicationV2",
+      "method": "POST",
+      "path": "/api/v2/residency/replications/{id}/cancel",
+      "methodNameCamel": "cancelResidencyReplicationV2",
+      "methodNameSnake": "cancel_residency_replication_v2",
+      "methodNamePascal": "CancelResidencyReplicationV2",
+      "hasRequestBody": true,
+      "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
       "queryParams": []
     }
   ],
@@ -266,7 +846,7 @@
       "id": "typescript",
       "name": "TypeScript",
       "directory": "typescript",
-      "operationCount": 19,
+      "operationCount": 45,
       "generatedFiles": [
         "operations.json",
         "package.json",
@@ -279,7 +859,7 @@
       "id": "python",
       "name": "Python",
       "directory": "python",
-      "operationCount": 19,
+      "operationCount": 45,
       "generatedFiles": [
         "agentledger_sdk/__init__.py",
         "agentledger_sdk/client.py",
@@ -292,7 +872,7 @@
       "id": "go",
       "name": "Go",
       "directory": "go",
-      "operationCount": 19,
+      "operationCount": 45,
       "generatedFiles": [
         "client.go",
         "go.mod",
@@ -304,7 +884,7 @@
       "id": "java",
       "name": "Java",
       "directory": "java",
-      "operationCount": 19,
+      "operationCount": 45,
       "generatedFiles": [
         "operations.json",
         "pom.xml",
@@ -316,7 +896,7 @@
       "id": "csharp",
       "name": "C#",
       "directory": "csharp",
-      "operationCount": 19,
+      "operationCount": 45,
       "generatedFiles": [
         "AgentLedger.Sdk.csproj",
         "AgentLedgerClient.cs",
@@ -328,7 +908,7 @@
       "id": "php",
       "name": "PHP",
       "directory": "php",
-      "operationCount": 19,
+      "operationCount": 45,
       "generatedFiles": [
         "composer.json",
         "operations.json",
@@ -340,7 +920,7 @@
       "id": "ruby",
       "name": "Ruby",
       "directory": "ruby",
-      "operationCount": 19,
+      "operationCount": 45,
       "generatedFiles": [
         "agentledger-sdk.gemspec",
         "lib/agentledger_sdk.rb",
@@ -353,7 +933,7 @@
       "id": "swift",
       "name": "Swift",
       "directory": "swift",
-      "operationCount": 19,
+      "operationCount": 45,
       "generatedFiles": [
         "operations.json",
         "Package.swift",

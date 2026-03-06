@@ -54,4 +54,144 @@ describe("extractOpenApiOperations", () => {
       methodNamePascal: "ListApiKeys",
     });
   });
+
+  it("对 replay v2 操作应用 canonical 参数覆盖与兼容别名", () => {
+    const operations = extractOpenApiOperations({
+      openapi: "3.0.3",
+      info: {
+        title: "Replay API",
+        version: "1.0.0",
+      },
+      paths: {
+        "/api/v2/replay/datasets/{id}/cases": {
+          get: {
+            operationId: "listReplayDatasetCasesV2",
+            parameters: [
+              { name: "limit", in: "query", schema: { type: "integer" } },
+            ],
+            responses: {
+              200: { description: "ok" },
+            },
+          },
+        },
+        "/api/v2/replay/datasets/{id}/materialize": {
+          post: {
+            operationId: "materializeReplayDatasetCasesV2",
+            requestBody: {
+              required: true,
+            },
+            responses: {
+              200: { description: "ok" },
+            },
+          },
+        },
+        "/api/v2/replay/runs": {
+          get: {
+            operationId: "listReplayRunsV2",
+            parameters: [
+              { name: "status", in: "query", schema: { type: "string" } },
+              { name: "datasetId", in: "query", schema: { type: "string" } },
+              { name: "baselineId", in: "query", schema: { type: "string" } },
+            ],
+            responses: {
+              200: { description: "ok" },
+            },
+          },
+          post: {
+            operationId: "createReplayRunV2",
+            requestBody: {
+              required: true,
+            },
+            responses: {
+              200: { description: "ok" },
+            },
+          },
+        },
+        "/api/v2/replay/runs/{id}/diffs": {
+          get: {
+            operationId: "getReplayRunDiffsV2",
+            parameters: [
+              { name: "baselineId", in: "query", schema: { type: "string" } },
+              { name: "datasetId", in: "query", schema: { type: "string" } },
+              { name: "keyword", in: "query", schema: { type: "string" } },
+            ],
+            responses: {
+              200: { description: "ok" },
+            },
+          },
+        },
+      },
+    });
+
+    expect(operations).toHaveLength(5);
+    expect(operations.find((item) => item.operationId === "listReplayDatasetCasesV2")).toMatchObject({
+      pathParams: ["datasetId"],
+      wirePathParams: ["id"],
+      compatibilityAliases: {
+        path: [
+          {
+            canonicalName: "datasetId",
+            wireName: "id",
+            compatibilityNames: ["id", "baselineId"],
+          },
+        ],
+      },
+    });
+    expect(
+      operations.find((item) => item.operationId === "materializeReplayDatasetCasesV2")
+    ).toMatchObject({
+      pathParams: ["datasetId"],
+      wirePathParams: ["id"],
+      compatibilityAliases: {
+        path: [
+          {
+            canonicalName: "datasetId",
+            wireName: "id",
+            compatibilityNames: ["id", "baselineId"],
+          },
+        ],
+      },
+    });
+    expect(operations.find((item) => item.operationId === "listReplayRunsV2")).toMatchObject({
+      queryParams: ["status", "datasetId"],
+      compatibilityAliases: {
+        query: [
+          {
+            canonicalName: "datasetId",
+            compatibilityNames: ["baselineId"],
+          },
+        ],
+      },
+    });
+    expect(operations.find((item) => item.operationId === "createReplayRunV2")).toMatchObject({
+      compatibilityAliases: {
+        body: [
+          {
+            canonicalName: "datasetId",
+            compatibilityNames: ["baselineId"],
+          },
+        ],
+      },
+    });
+    expect(operations.find((item) => item.operationId === "getReplayRunDiffsV2")).toMatchObject({
+      pathParams: ["runId"],
+      wirePathParams: ["id"],
+      queryParams: ["datasetId", "keyword"],
+      compatibilityAliases: {
+        path: [
+          {
+            canonicalName: "runId",
+            wireName: "id",
+            compatibilityNames: ["id", "jobId"],
+          },
+        ],
+        query: [
+          {
+            canonicalName: "datasetId",
+            compatibilityNames: ["baselineId"],
+          },
+        ],
+      },
+    });
+  });
 });

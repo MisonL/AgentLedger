@@ -19,6 +19,7 @@
     "check:text-normalization": "bash ./scripts/check-text-normalization.sh",
     "check:support-matrix": "bun run ./scripts/check-support-matrix.ts",
     "sdk:generate": "bun run ./scripts/sdk-generate.ts",
+    "sdk:check": "bun run ./scripts/sdk-check.ts",
     "sdk:verify": "bun run ./scripts/sdk-verify.ts",
     "sdk:test": "bun run ./scripts/sdk-test.ts",
     "sdk:bundle": "bun run ./scripts/sdk-bundle.ts",

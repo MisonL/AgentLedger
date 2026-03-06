@@ -23,7 +23,21 @@ export interface OpenApiOperationSpec {
   methodNameSnake: string;
   hasRequestBody: boolean;
   pathParams: string[];
+  wirePathParams: string[];
   queryParams: string[];
+  compatibilityAliases?: OpenApiOperationCompatibilitySpec;
+}
+
+export interface OpenApiOperationAliasSpec {
+  canonicalName: string;
+  wireName?: string;
+  compatibilityNames: string[];
+}
+
+export interface OpenApiOperationCompatibilitySpec {
+  path?: OpenApiOperationAliasSpec[];
+  query?: OpenApiOperationAliasSpec[];
+  body?: OpenApiOperationAliasSpec[];
 }
 
 export function asRecord(value: unknown): Record<string, unknown> | null {
@@ -221,6 +235,121 @@ function buildFallbackOperationId(method: string, pathValue: string): string {
   return `${method}_${normalizedPath || "root"}`;
 }
 
+function applyReplayCanonicalOperationOverrides(
+  operations: OpenApiOperationSpec[]
+): OpenApiOperationSpec[] {
+  return operations.map((operation) => {
+    const nextOperation: OpenApiOperationSpec = {
+      ...operation,
+      pathParams: [...operation.pathParams],
+      wirePathParams: [...operation.wirePathParams],
+      queryParams: [...operation.queryParams],
+      compatibilityAliases: operation.compatibilityAliases
+        ? {
+            path: operation.compatibilityAliases.path?.map((item) => ({
+              ...item,
+              compatibilityNames: [...item.compatibilityNames],
+            })),
+            query: operation.compatibilityAliases.query?.map((item) => ({
+              ...item,
+              compatibilityNames: [...item.compatibilityNames],
+            })),
+            body: operation.compatibilityAliases.body?.map((item) => ({
+              ...item,
+              compatibilityNames: [...item.compatibilityNames],
+            })),
+          }
+        : undefined,
+    };
+
+    switch (nextOperation.operationId) {
+      case "listReplayDatasetCasesV2":
+      case "replaceReplayDatasetCasesV2":
+      case "materializeReplayDatasetCasesV2":
+        nextOperation.pathParams = ["datasetId"];
+        nextOperation.compatibilityAliases = {
+          ...(nextOperation.compatibilityAliases ?? {}),
+          path: [
+            {
+              canonicalName: "datasetId",
+              wireName: "id",
+              compatibilityNames: ["id", "baselineId"],
+            },
+          ],
+        };
+        return nextOperation;
+      case "listReplayRunsV2":
+        nextOperation.queryParams = nextOperation.queryParams.filter(
+          (item) => item !== "baselineId"
+        );
+        nextOperation.compatibilityAliases = {
+          ...(nextOperation.compatibilityAliases ?? {}),
+          query: [
+            {
+              canonicalName: "datasetId",
+              compatibilityNames: ["baselineId"],
+            },
+          ],
+        };
+        return nextOperation;
+      case "createReplayRunV2":
+        nextOperation.compatibilityAliases = {
+          ...(nextOperation.compatibilityAliases ?? {}),
+          body: [
+            {
+              canonicalName: "datasetId",
+              compatibilityNames: ["baselineId"],
+            },
+          ],
+        };
+        return nextOperation;
+      case "getReplayRunV2":
+      case "getReplayRunArtifactsV2":
+      case "downloadReplayRunArtifactV2":
+        nextOperation.pathParams = nextOperation.pathParams.map((item) =>
+          item === "id" ? "runId" : item
+        );
+        nextOperation.compatibilityAliases = {
+          ...(nextOperation.compatibilityAliases ?? {}),
+          path: [
+            {
+              canonicalName: "runId",
+              wireName: "id",
+              compatibilityNames: ["id", "jobId"],
+            },
+          ],
+        };
+        return nextOperation;
+      case "getReplayRunDiffsV2":
+        nextOperation.pathParams = nextOperation.pathParams.map((item) =>
+          item === "id" ? "runId" : item
+        );
+        nextOperation.queryParams = nextOperation.queryParams.filter(
+          (item) => item !== "baselineId"
+        );
+        nextOperation.compatibilityAliases = {
+          ...(nextOperation.compatibilityAliases ?? {}),
+          path: [
+            {
+              canonicalName: "runId",
+              wireName: "id",
+              compatibilityNames: ["id", "jobId"],
+            },
+          ],
+          query: [
+            {
+              canonicalName: "datasetId",
+              compatibilityNames: ["baselineId"],
+            },
+          ],
+        };
+        return nextOperation;
+      default:
+        return nextOperation;
+    }
+  });
+}
+
 export function extractOpenApiOperations(
   document: Record<string, unknown>
 ): OpenApiOperationSpec[] {
@@ -271,11 +400,12 @@ export function extractOpenApiOperations(
         methodNamePascal: ensureIdentifierHead(toPascalCase(methodNameCamel), "Op"),
         methodNameSnake: ensureIdentifierHead(toSnakeCase(methodNameCamel), "op"),
         hasRequestBody: Boolean(operation.requestBody),
-        pathParams,
+        pathParams: [...pathParams],
+        wirePathParams: [...pathParams],
         queryParams: collectQueryParams(operation, pathItem),
       });
     }
   }
 
-  return operations;
+  return applyReplayCanonicalOperationOverrides(operations);
 }
