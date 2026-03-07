@@ -51,6 +51,7 @@ import {
   fetchRuleAssetVersions,
   fetchRuleAssetVersionDiff,
   fetchRuleAssets,
+  fetchTokenPulseRuntimeEvents,
   fetchUsageWeeklySummary,
   fetchSourceHealth,
   fetchSourceParseFailures,
@@ -138,6 +139,8 @@ import type {
   RuleAssetVersionDiffResponse,
   RuleAssetVersion,
   RuleLifecycleStatus,
+  TokenPulseRuntimeEvent,
+  TokenPulseRuntimeEventStatus,
   Session,
   SessionDetailResponse,
   SessionSearchInput,
@@ -445,6 +448,16 @@ const RULE_APPROVAL_DECISION_OPTIONS: Array<{
 }> = [
   { value: "approved", label: "approved" },
   { value: "rejected", label: "rejected" },
+];
+
+const TOKENPULSE_RUNTIME_STATUS_FILTER_OPTIONS: Array<
+  { value: ""; label: string } | { value: TokenPulseRuntimeEventStatus; label: string }
+> = [
+  { value: "", label: "全部状态" },
+  { value: "success", label: "success" },
+  { value: "failure", label: "failure" },
+  { value: "blocked", label: "blocked" },
+  { value: "timeout", label: "timeout" },
 ];
 
 const MCP_RISK_LEVEL_OPTIONS: Array<{ value: McpRiskLevel; label: string }> = [
@@ -2960,6 +2973,22 @@ function GovernancePage() {
   const [ruleFeedback, setRuleFeedback] = useState<string | null>(null);
   const [ruleError, setRuleError] = useState<string | null>(null);
 
+  const [tokenPulseRuntimeTraceId, setTokenPulseRuntimeTraceId] = useState("");
+  const [tokenPulseRuntimeProviderFilter, setTokenPulseRuntimeProviderFilter] =
+    useState("");
+  const [tokenPulseRuntimeStatusFilter, setTokenPulseRuntimeStatusFilter] =
+    useState<TokenPulseRuntimeEventStatus | "">("");
+  const [tokenPulseRuntimePayload, setTokenPulseRuntimePayload] = useState<{
+    items: TokenPulseRuntimeEvent[];
+    total: number;
+  } | null>(null);
+  const [tokenPulseRuntimeFeedback, setTokenPulseRuntimeFeedback] =
+    useState<string | null>(null);
+  const [tokenPulseRuntimeError, setTokenPulseRuntimeError] =
+    useState<string | null>(null);
+  const [hasLoadedTokenPulseRuntimeEvents, setHasLoadedTokenPulseRuntimeEvents] =
+    useState(false);
+
   const [mcpPolicyKeyword, setMcpPolicyKeyword] = useState("");
   const [mcpPolicyToolId, setMcpPolicyToolId] = useState("");
   const [mcpPolicyRiskLevel, setMcpPolicyRiskLevel] =
@@ -3913,6 +3942,41 @@ function GovernancePage() {
     },
   });
 
+  const loadTokenPulseRuntimeEventsMutation = useMutation({
+    mutationFn: ({
+      traceId,
+      provider,
+      status,
+    }: {
+      traceId: string;
+      provider?: string;
+      status?: TokenPulseRuntimeEventStatus;
+    }) =>
+      fetchTokenPulseRuntimeEvents({
+        traceId,
+        provider,
+        status,
+        limit: 50,
+      }),
+    onSuccess: (payload) => {
+      setTokenPulseRuntimeError(null);
+      setHasLoadedTokenPulseRuntimeEvents(true);
+      setTokenPulseRuntimePayload({
+        items: payload.items,
+        total: payload.total,
+      });
+      setTokenPulseRuntimeFeedback(`TokenPulse 运行时摘要已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setTokenPulseRuntimeFeedback(null);
+      setHasLoadedTokenPulseRuntimeEvents(true);
+      setTokenPulseRuntimePayload(null);
+      setTokenPulseRuntimeError(
+        `TokenPulse 运行时摘要加载失败：${toErrorMessage(error)}`,
+      );
+    },
+  });
+
   const upsertMcpPolicyMutation = useMutation({
     mutationFn: ({
       toolId,
@@ -4724,6 +4788,8 @@ function GovernancePage() {
           rejected: 0,
         }
       : null;
+  const tokenPulseRuntimeItems: TokenPulseRuntimeEvent[] =
+    tokenPulseRuntimePayload?.items ?? [];
   const mcpPolicyItems: McpToolPolicy[] = mcpPoliciesQuery.data?.items ?? [];
   const mcpApprovalItems: McpApprovalRequest[] =
     mcpApprovalsQuery.data?.items ?? [];
@@ -7275,6 +7341,147 @@ function GovernancePage() {
             请选择一个规则资产查看版本与审批详情。
           </p>
         )}
+      </section>
+
+      <section className="panel">
+        <header>
+          <h2>TokenPulse Runtime Events</h2>
+          <p>按 traceId 联查 TokenPulse 运行时摘要事件。</p>
+        </header>
+
+        <div className="filters-row governance-inline-grid">
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="tokenpulse-runtime-trace-id"
+          >
+            Trace ID
+            <input
+              id="tokenpulse-runtime-trace-id"
+              type="text"
+              value={tokenPulseRuntimeTraceId}
+              onChange={(event) => setTokenPulseRuntimeTraceId(event.target.value)}
+              placeholder="例如：trace-oauth-runtime-20260308-0001"
+            />
+          </label>
+
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="tokenpulse-runtime-provider"
+          >
+            Provider
+            <input
+              id="tokenpulse-runtime-provider"
+              type="text"
+              value={tokenPulseRuntimeProviderFilter}
+              onChange={(event) =>
+                setTokenPulseRuntimeProviderFilter(event.target.value)
+              }
+              placeholder="可选，例如：claude"
+            />
+          </label>
+
+          <label
+            className="inline-field"
+            htmlFor="tokenpulse-runtime-status-filter"
+          >
+            运行时状态
+            <select
+              id="tokenpulse-runtime-status-filter"
+              value={tokenPulseRuntimeStatusFilter}
+              onChange={(event) =>
+                setTokenPulseRuntimeStatusFilter(
+                  event.target.value as TokenPulseRuntimeEventStatus | "",
+                )
+              }
+            >
+              {TOKENPULSE_RUNTIME_STATUS_FILTER_OPTIONS.map((option) => (
+                <option key={option.value || "all"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button
+            type="button"
+            className="submit-button"
+            disabled={loadTokenPulseRuntimeEventsMutation.isPending}
+            onClick={() => {
+              const traceId = tokenPulseRuntimeTraceId.trim();
+              if (!traceId) {
+                setTokenPulseRuntimeFeedback(null);
+                setTokenPulseRuntimeError("Trace ID 不能为空。");
+                return;
+              }
+              setTokenPulseRuntimeFeedback(null);
+              setTokenPulseRuntimeError(null);
+              loadTokenPulseRuntimeEventsMutation.mutate({
+                traceId,
+                provider: tokenPulseRuntimeProviderFilter.trim() || undefined,
+                status: tokenPulseRuntimeStatusFilter || undefined,
+              });
+            }}
+          >
+            {loadTokenPulseRuntimeEventsMutation.isPending ? "查询中..." : "查询运行时摘要"}
+          </button>
+        </div>
+
+        {loadTokenPulseRuntimeEventsMutation.isPending ? (
+          <p className="feedback info">TokenPulse 运行时摘要加载中...</p>
+        ) : null}
+        {tokenPulseRuntimeFeedback ? (
+          <p className="feedback success">{tokenPulseRuntimeFeedback}</p>
+        ) : null}
+        {tokenPulseRuntimeError ? (
+          <p className="feedback error">{tokenPulseRuntimeError}</p>
+        ) : null}
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>Trace ID</th>
+                <th>Project</th>
+                <th>Provider</th>
+                <th>Model</th>
+                <th>Resolved Model</th>
+                <th>Route Policy</th>
+                <th>Status</th>
+                <th>Error Code</th>
+                <th>Cost</th>
+                <th>Started At</th>
+                <th>Finished At</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tokenPulseRuntimeItems.length === 0 ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={11}>
+                    {hasLoadedTokenPulseRuntimeEvents
+                      ? "未查询到 TokenPulse 运行时摘要。"
+                      : "请输入 Trace ID 后查询 TokenPulse 运行时摘要。"}
+                  </td>
+                </tr>
+              ) : (
+                tokenPulseRuntimeItems.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.traceId}</td>
+                    <td>{item.projectId ?? "--"}</td>
+                    <td>{item.provider}</td>
+                    <td>{item.model}</td>
+                    <td>{item.resolvedModel}</td>
+                    <td>{item.routePolicy}</td>
+                    <td>{item.status}</td>
+                    <td>{item.errorCode ?? "--"}</td>
+                    <td>{item.cost ?? "--"}</td>
+                    <td>{formatDateTime(item.startedAt)}</td>
+                    <td>{item.finishedAt ? formatDateTime(item.finishedAt) : "--"}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="panel">

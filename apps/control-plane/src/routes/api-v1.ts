@@ -17,6 +17,7 @@ import { ruleRoutes } from "./rules";
 import { sessionRoutes } from "./sessions";
 import { sourceRoutes } from "./sources";
 import { systemConfigRoutes } from "./system-config";
+import { tokenPulseRuntimeRoutes } from "./tokenpulse-runtime";
 import { usageRoutes } from "./usage";
 import type { AppEnv } from "../types";
 
@@ -38,6 +39,7 @@ apiV1Routes.route("/", openPlatformRoutes);
 apiV1Routes.route("/", qualityRoutes);
 apiV1Routes.route("/", replayRoutes);
 apiV1Routes.route("/", integrationCallbackRoutes);
+apiV1Routes.route("/", tokenPulseRuntimeRoutes);
 apiV1Routes.route("/", auditRoutes);
 apiV1Routes.route("/auth", authRoutes);
 apiV1Routes.route("/", identityRoutes);

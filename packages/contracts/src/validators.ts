@@ -32,6 +32,10 @@ import type {
   AuditItem,
   AuditLevel,
   AuditListInput,
+  TokenPulseRoutePolicy,
+  TokenPulseRuntimeEventIngestInput,
+  TokenPulseRuntimeEventListInput,
+  TokenPulseRuntimeEventStatus,
   DataResidencyMode,
   AlertSeverity,
   AlertStatus,
@@ -230,6 +234,17 @@ const MCP_INVOCATION_RESULT_SET = new Set<McpInvocationResult>([
   "approved",
 ]);
 const AUDIT_LEVEL_SET = new Set<AuditLevel>(["info", "warning", "error", "critical"]);
+const TOKENPULSE_ROUTE_POLICY_SET = new Set<TokenPulseRoutePolicy>([
+  "round_robin",
+  "latest_valid",
+  "sticky_user",
+]);
+const TOKENPULSE_RUNTIME_EVENT_STATUS_SET = new Set<TokenPulseRuntimeEventStatus>([
+  "success",
+  "failure",
+  "blocked",
+  "timeout",
+]);
 const EXPORT_FORMAT_SET = new Set<ExportFormat>(["json", "csv"]);
 const SESSION_EXPORT_JOB_STATUS_SET = new Set<SessionExportJobStatus>([
   "pending",
@@ -622,6 +637,26 @@ export function isMcpInvocationResult(value: unknown): value is McpInvocationRes
 
 export function isAuditLevel(value: unknown): value is AuditLevel {
   return typeof value === "string" && AUDIT_LEVEL_SET.has(value as AuditLevel);
+}
+
+export function isTokenPulseRoutePolicy(
+  value: unknown
+): value is TokenPulseRoutePolicy {
+  return (
+    typeof value === "string" &&
+    TOKENPULSE_ROUTE_POLICY_SET.has(value as TokenPulseRoutePolicy)
+  );
+}
+
+export function isTokenPulseRuntimeEventStatus(
+  value: unknown
+): value is TokenPulseRuntimeEventStatus {
+  return (
+    typeof value === "string" &&
+    TOKENPULSE_RUNTIME_EVENT_STATUS_SET.has(
+      value as TokenPulseRuntimeEventStatus
+    )
+  );
 }
 
 export function isExportFormat(value: unknown): value is ExportFormat {
@@ -5199,6 +5234,152 @@ export function validateAuditListInput(input: unknown): ValidationResult<AuditLi
       level: level as AuditLevel | undefined,
       from,
       to,
+      limit,
+      cursor,
+    },
+  };
+}
+
+export function validateTokenPulseRuntimeEventIngestInput(
+  input: unknown
+): ValidationResult<TokenPulseRuntimeEventIngestInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const tenantId = normalizeString(input.tenantId);
+  const projectId = normalizeString(input.projectId);
+  const traceId = normalizeString(input.traceId);
+  const provider = normalizeString(input.provider)?.toLowerCase();
+  const model = normalizeString(input.model);
+  const resolvedModel = normalizeString(input.resolvedModel);
+  const routePolicy = normalizeString(input.routePolicy);
+  const accountId = normalizeString(input.accountId);
+  const status = normalizeString(input.status);
+  const startedAt = normalizeString(input.startedAt);
+  const finishedAt = normalizeString(input.finishedAt);
+  const errorCode = normalizeString(input.errorCode);
+  const cost = normalizeString(input.cost);
+
+  if (!tenantId) {
+    return { success: false, error: "tenantId 必须为非空字符串。" };
+  }
+  if (!traceId) {
+    return { success: false, error: "traceId 必须为非空字符串。" };
+  }
+  if (!provider || !/^[a-z0-9_-]{1,32}$/.test(provider)) {
+    return { success: false, error: "provider 必须是 1 到 32 位的小写 provider 标识。" };
+  }
+  if (!model) {
+    return { success: false, error: "model 必须为非空字符串。" };
+  }
+  if (!resolvedModel) {
+    return { success: false, error: "resolvedModel 必须为非空字符串。" };
+  }
+  if (!routePolicy || !isTokenPulseRoutePolicy(routePolicy)) {
+    return {
+      success: false,
+      error: "routePolicy 必须是 round_robin/latest_valid/sticky_user 之一。",
+    };
+  }
+  if (!status || !isTokenPulseRuntimeEventStatus(status)) {
+    return {
+      success: false,
+      error: "status 必须是 success/failure/blocked/timeout 之一。",
+    };
+  }
+  if (!startedAt || !isISODate(startedAt)) {
+    return { success: false, error: "startedAt 必须为 ISO 日期字符串。" };
+  }
+  if (input.finishedAt !== undefined && (!finishedAt || !isISODate(finishedAt))) {
+    return { success: false, error: "finishedAt 必须为 ISO 日期字符串。" };
+  }
+  if (finishedAt && Date.parse(finishedAt) < Date.parse(startedAt)) {
+    return { success: false, error: "finishedAt 不能早于 startedAt。" };
+  }
+  if (status === "success" && input.errorCode !== undefined) {
+    return { success: false, error: "status=success 时 errorCode 不应出现。" };
+  }
+  if (input.errorCode !== undefined && !errorCode) {
+    return { success: false, error: "errorCode 必须为非空字符串。" };
+  }
+  if (
+    input.cost !== undefined &&
+    (!cost || !/^\d+(\.\d{1,6})?$/.test(cost))
+  ) {
+    return {
+      success: false,
+      error: "cost 必须是美元十进制金额字符串，最多 6 位小数。",
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId,
+      projectId,
+      traceId,
+      provider,
+      model,
+      resolvedModel,
+      routePolicy,
+      accountId,
+      status,
+      startedAt,
+      finishedAt,
+      errorCode,
+      cost,
+    },
+  };
+}
+
+export function validateTokenPulseRuntimeEventListInput(
+  input: unknown
+): ValidationResult<TokenPulseRuntimeEventListInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "查询参数必须是对象。" };
+  }
+
+  const traceId = normalizeString(input.traceId);
+  const provider = normalizeString(input.provider)?.toLowerCase();
+  const status = normalizeString(input.status);
+  const limit = toOptionalInteger(input.limit);
+  const cursor = normalizeString(input.cursor);
+
+  if (input.traceId !== undefined && !traceId) {
+    return { success: false, error: "traceId 必须为非空字符串。" };
+  }
+  if (
+    input.provider !== undefined &&
+    (!provider || !/^[a-z0-9_-]{1,32}$/.test(provider))
+  ) {
+    return { success: false, error: "provider 必须是 1 到 32 位的小写 provider 标识。" };
+  }
+  if (
+    input.status !== undefined &&
+    (!status || !isTokenPulseRuntimeEventStatus(status))
+  ) {
+    return {
+      success: false,
+      error: "status 必须是 success/failure/blocked/timeout 之一。",
+    };
+  }
+  if (
+    limit !== undefined &&
+    (!Number.isInteger(limit) || limit <= 0 || limit > AUDIT_LIMIT_MAX)
+  ) {
+    return { success: false, error: `limit 必须是 1 到 ${AUDIT_LIMIT_MAX} 的整数。` };
+  }
+  if (input.cursor !== undefined && !cursor) {
+    return { success: false, error: "cursor 必须为非空字符串。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      traceId,
+      provider,
+      status: status as TokenPulseRuntimeEventStatus | undefined,
       limit,
       cursor,
     },

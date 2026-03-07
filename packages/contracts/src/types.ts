@@ -1496,6 +1496,69 @@ export interface AuditListInput {
   cursor?: string;
 }
 
+export type TokenPulseRoutePolicy =
+  | "round_robin"
+  | "latest_valid"
+  | "sticky_user";
+
+export type TokenPulseRuntimeEventStatus =
+  | "success"
+  | "failure"
+  | "blocked"
+  | "timeout";
+
+export interface TokenPulseRuntimeEvent {
+  id: string;
+  tenantId: string;
+  projectId?: string;
+  traceId: string;
+  provider: string;
+  model: string;
+  resolvedModel: string;
+  routePolicy: TokenPulseRoutePolicy;
+  accountId?: string;
+  status: TokenPulseRuntimeEventStatus;
+  startedAt: string;
+  finishedAt?: string;
+  errorCode?: string;
+  cost?: string;
+  idempotencyKey: string;
+  specVersion: "v1";
+  keyId: string;
+  createdAt: string;
+}
+
+export interface TokenPulseRuntimeEventIngestInput {
+  tenantId: string;
+  projectId?: string;
+  traceId: string;
+  provider: string;
+  model: string;
+  resolvedModel: string;
+  routePolicy: TokenPulseRoutePolicy;
+  accountId?: string;
+  status: TokenPulseRuntimeEventStatus;
+  startedAt: string;
+  finishedAt?: string;
+  errorCode?: string;
+  cost?: string;
+}
+
+export interface TokenPulseRuntimeEventListInput {
+  traceId?: string;
+  provider?: string;
+  status?: TokenPulseRuntimeEventStatus;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface TokenPulseRuntimeEventListResponse {
+  items: TokenPulseRuntimeEvent[];
+  total: number;
+  filters: TokenPulseRuntimeEventListInput;
+  nextCursor: string | null;
+}
+
 export interface AuditExportQueryInput extends AuditListInput {
   format: ExportFormat;
   eventId?: string;

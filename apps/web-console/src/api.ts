@@ -123,6 +123,11 @@ import type {
   RuleLifecycleStatus,
   RulePublishInput,
   RuleRollbackInput,
+  TokenPulseRoutePolicy,
+  TokenPulseRuntimeEvent,
+  TokenPulseRuntimeEventListInput,
+  TokenPulseRuntimeEventListResponse,
+  TokenPulseRuntimeEventStatus,
   SourceAccessMode,
   SourceConnectionTestResponse,
   SourceHealth,
@@ -662,6 +667,27 @@ function isRuleRequiredApprovals(
   return value === 1 || value === 2;
 }
 
+function isTokenPulseRoutePolicy(
+  value: unknown,
+): value is TokenPulseRoutePolicy {
+  return (
+    value === "round_robin" ||
+    value === "latest_valid" ||
+    value === "sticky_user"
+  );
+}
+
+function isTokenPulseRuntimeEventStatus(
+  value: unknown,
+): value is TokenPulseRuntimeEventStatus {
+  return (
+    value === "success" ||
+    value === "failure" ||
+    value === "blocked" ||
+    value === "timeout"
+  );
+}
+
 function isRuleAssetListInput(value: unknown): value is RuleAssetListInput {
   if (!isRecord(value)) {
     return false;
@@ -780,6 +806,98 @@ function isRuleAssetVersionDiffResponse(
     Number.isInteger(summary.unchanged) &&
     summary.unchanged >= 0 &&
     typeof summary.changed === "boolean"
+  );
+}
+
+function isTokenPulseRuntimeEvent(
+  value: unknown,
+): value is TokenPulseRuntimeEvent {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const projectIdOk =
+    value.projectId === undefined ||
+    value.projectId === null ||
+    typeof value.projectId === "string";
+  const accountIdOk =
+    value.accountId === undefined ||
+    value.accountId === null ||
+    typeof value.accountId === "string";
+  const finishedAtOk =
+    value.finishedAt === undefined ||
+    value.finishedAt === null ||
+    isISODateString(value.finishedAt);
+  const errorCodeOk =
+    value.errorCode === undefined ||
+    value.errorCode === null ||
+    typeof value.errorCode === "string";
+  const costOk =
+    value.cost === undefined ||
+    value.cost === null ||
+    (typeof value.cost === "string" &&
+      /^\d+(?:\.\d{1,6})?$/.test(value.cost));
+  return (
+    typeof value.id === "string" &&
+    typeof value.tenantId === "string" &&
+    projectIdOk &&
+    typeof value.traceId === "string" &&
+    typeof value.provider === "string" &&
+    typeof value.model === "string" &&
+    typeof value.resolvedModel === "string" &&
+    isTokenPulseRoutePolicy(value.routePolicy) &&
+    accountIdOk &&
+    isTokenPulseRuntimeEventStatus(value.status) &&
+    isISODateString(value.startedAt) &&
+    finishedAtOk &&
+    errorCodeOk &&
+    costOk &&
+    typeof value.idempotencyKey === "string" &&
+    value.specVersion === "v1" &&
+    typeof value.keyId === "string" &&
+    isISODateString(value.createdAt)
+  );
+}
+
+function isTokenPulseRuntimeEventListInput(
+  value: unknown,
+): value is TokenPulseRuntimeEventListInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const traceIdOk =
+    value.traceId === undefined || typeof value.traceId === "string";
+  const providerOk =
+    value.provider === undefined || typeof value.provider === "string";
+  const statusOk =
+    value.status === undefined || isTokenPulseRuntimeEventStatus(value.status);
+  const limitOk =
+    value.limit === undefined ||
+    (typeof value.limit === "number" &&
+      Number.isInteger(value.limit) &&
+      value.limit >= 1);
+  const cursorOk =
+    value.cursor === undefined || typeof value.cursor === "string";
+  return traceIdOk && providerOk && statusOk && limitOk && cursorOk;
+}
+
+function isTokenPulseRuntimeEventListResponse(
+  value: unknown,
+): value is TokenPulseRuntimeEventListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const nextCursorOk =
+    value.nextCursor === null ||
+    value.nextCursor === undefined ||
+    typeof value.nextCursor === "string";
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isTokenPulseRuntimeEvent(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isTokenPulseRuntimeEventListInput(value.filters) &&
+    nextCursorOk
   );
 }
 
@@ -2843,6 +2961,32 @@ function buildUsageExportQuery(format: ExportFormat, input: UsageExportQueryInpu
   return `?${params.toString()}`;
 }
 
+function buildTokenPulseRuntimeEventListQuery(
+  input: TokenPulseRuntimeEventListInput = {},
+): string {
+  const params = new URLSearchParams();
+  if (typeof input.traceId === "string" && input.traceId.trim().length > 0) {
+    params.set("traceId", input.traceId.trim());
+  }
+  if (typeof input.provider === "string" && input.provider.trim().length > 0) {
+    params.set("provider", input.provider.trim().toLowerCase());
+  }
+  if (typeof input.status === "string" && input.status.trim().length > 0) {
+    params.set("status", input.status.trim());
+  }
+  if (
+    typeof input.limit === "number" &&
+    Number.isInteger(input.limit) &&
+    input.limit > 0
+  ) {
+    params.set("limit", String(input.limit));
+  }
+  if (typeof input.cursor === "string" && input.cursor.trim().length > 0) {
+    params.set("cursor", input.cursor.trim());
+  }
+  return `?${params.toString()}`;
+}
+
 function isUsageAggregateResponse<TItem>(
   value: unknown
 ): value is UsageAggregateResponse<TItem> {
@@ -3688,6 +3832,21 @@ export async function fetchAlerts(
   }
 
   throw new Error("alerts 分页超过安全上限，请收窄筛选条件后重试。");
+}
+
+export async function fetchTokenPulseRuntimeEvents(
+  input: TokenPulseRuntimeEventListInput = {},
+  signal?: AbortSignal,
+): Promise<TokenPulseRuntimeEventListResponse> {
+  const result = await requestJson<unknown>(
+    `/api/v1/integrations/tokenpulse/runtime-events${buildTokenPulseRuntimeEventListQuery(input)}`,
+    undefined,
+    signal,
+  );
+  if (!isTokenPulseRuntimeEventListResponse(result)) {
+    throw new Error("tokenpulse runtime events 返回结构不合法");
+  }
+  return result;
 }
 
 export async function updateAlertStatus(

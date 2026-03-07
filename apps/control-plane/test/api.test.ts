@@ -40,6 +40,12 @@ import {
   flushWebhookReplayExecutionQueueForTests,
   resetWebhookReplayExecutionWorkerForTests,
 } from "../src/routes/open-platform";
+import {
+  computeTokenPulseRuntimeIdempotencyKey,
+  computeTokenPulseRuntimeSignature,
+  TOKENPULSE_RUNTIME_DEFAULT_KEY_ID,
+  TOKENPULSE_RUNTIME_SPEC_VERSION,
+} from "../src/routes/tokenpulse-runtime-signature";
 import type {
   SourceParseFailure,
   UsageHeatmapQueryInput,
@@ -1263,6 +1269,83 @@ describe("Control Plane API", () => {
       options,
     );
     return app.request("/api/v1/integrations/callbacks/alerts", request.init);
+  }
+
+  function buildTokenPulseRuntimeSignedRequest(
+    secret: string,
+    payload: Record<string, unknown>,
+    options: {
+      specVersion?: string;
+      keyId?: string;
+      timestamp?: string;
+      idempotencyKey?: string;
+      signature?: string;
+    } = {},
+  ): {
+    init: RequestInit;
+    specVersion: string;
+    keyId: string;
+    timestamp: string;
+    idempotencyKey: string;
+    signature: string;
+  } {
+    const specVersion = options.specVersion ?? TOKENPULSE_RUNTIME_SPEC_VERSION;
+    const keyId = options.keyId ?? TOKENPULSE_RUNTIME_DEFAULT_KEY_ID;
+    const timestamp = options.timestamp ?? String(Math.floor(Date.now() / 1000));
+    const idempotencyKey =
+      options.idempotencyKey ??
+      computeTokenPulseRuntimeIdempotencyKey({
+        tenantId: String(payload.tenantId ?? ""),
+        traceId: String(payload.traceId ?? ""),
+        provider: String(payload.provider ?? ""),
+        model: String(payload.model ?? ""),
+        startedAt: String(payload.startedAt ?? ""),
+      });
+    const body = JSON.stringify(payload);
+    const signature =
+      options.signature ??
+      computeTokenPulseRuntimeSignature(secret, {
+        specVersion,
+        keyId,
+        timestamp,
+        idempotencyKey,
+        rawBody: body,
+      });
+
+    return {
+      init: {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-tokenpulse-spec-version": specVersion,
+          "x-tokenpulse-key-id": keyId,
+          "x-tokenpulse-timestamp": timestamp,
+          "x-tokenpulse-idempotency-key": idempotencyKey,
+          "x-tokenpulse-signature": signature,
+        },
+        body,
+      },
+      specVersion,
+      keyId,
+      timestamp,
+      idempotencyKey,
+      signature,
+    };
+  }
+
+  async function postTokenPulseRuntimeEvent(
+    secret: string,
+    payload: Record<string, unknown>,
+    options: {
+      specVersion?: string;
+      keyId?: string;
+      timestamp?: string;
+      idempotencyKey?: string;
+      signature?: string;
+    } = {},
+  ): Promise<Response> {
+    const request = buildTokenPulseRuntimeSignedRequest(secret, payload, options);
+    return app.request("/api/v1/integrations/tokenpulse/runtime-events", request.init);
   }
 
   function jsonRequest(
@@ -10136,6 +10219,331 @@ describe("Control Plane API", () => {
       }
       await alertA.cleanup();
       await alertB.cleanup();
+    }
+  });
+
+  test("TokenPulse runtime events 路由支持 202/200、租户隔离与审计查询", async () => {
+    const nonce = createNonce("tokenpulse-runtime");
+    const ownerA = await registerAndLoginUser(`${nonce}-owner-a`);
+    const ownerB = await registerAndLoginUser(`${nonce}-owner-b`);
+    if (!ownerA.userId || !ownerB.userId) {
+      throw new Error("无法解析 TokenPulse runtime 测试用户 ID。");
+    }
+
+    const tenantAResult = await createTenantByAuth(
+      ownerA.accessToken,
+      {
+        name: `TokenPulse Runtime Tenant A ${nonce}`,
+        slug: `tokenpulse-runtime-a-${nonce}`,
+      },
+      ownerA.userId,
+    );
+    assertApiStatus(tenantAResult, [201]);
+    const tenantAId = extractEntityId(tenantAResult.payload);
+    if (!tenantAId) {
+      throw new Error("租户 A 创建失败，缺少 tenantId。");
+    }
+
+    const tenantBResult = await createTenantByAuth(
+      ownerB.accessToken,
+      {
+        name: `TokenPulse Runtime Tenant B ${nonce}`,
+        slug: `tokenpulse-runtime-b-${nonce}`,
+      },
+      ownerB.userId,
+    );
+    assertApiStatus(tenantBResult, [201]);
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error("租户 B 创建失败，缺少 tenantId。");
+    }
+
+    const tenantAHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      ownerA.accessToken,
+      ownerA.userId,
+    );
+    const tenantBHeaders = await issueTenantScopedAuthHeaders(
+      tenantBId,
+      ownerB.accessToken,
+      ownerB.userId,
+    );
+
+    const originalWebhookSecret = Bun.env.AGENTLEDGER_TOKENPULSE_WEBHOOK_SECRET;
+    const originalWebhookKeyId = Bun.env.AGENTLEDGER_TOKENPULSE_WEBHOOK_KEY_ID;
+    const webhookSecret = `tokenpulse-secret-${nonce}`;
+    Bun.env.AGENTLEDGER_TOKENPULSE_WEBHOOK_SECRET = webhookSecret;
+    Bun.env.AGENTLEDGER_TOKENPULSE_WEBHOOK_KEY_ID = TOKENPULSE_RUNTIME_DEFAULT_KEY_ID;
+
+    try {
+      const payload = {
+        tenantId: tenantAId,
+        projectId: "project-risk-control",
+        traceId: `trace-${nonce}`,
+        provider: "claude",
+        model: "claude-sonnet",
+        resolvedModel: "claude:claude-3-7-sonnet-20250219",
+        routePolicy: "latest_valid",
+        accountId: "claude-account-01",
+        status: "success",
+        startedAt: "2026-03-08T09:59:58.123Z",
+        finishedAt: "2026-03-08T09:59:59.204Z",
+        cost: "0.002310",
+      } as const;
+
+      const firstResponse = await postTokenPulseRuntimeEvent(
+        webhookSecret,
+        payload,
+      );
+      expect(firstResponse.status).toBe(202);
+      const firstBody = (await firstResponse.json()) as {
+        duplicate: boolean;
+        item: {
+          tenantId: string;
+          projectId?: string;
+          traceId: string;
+          provider: string;
+          routePolicy: string;
+          status: string;
+          cost?: string;
+          idempotencyKey: string;
+          specVersion: string;
+        };
+      };
+      expect(firstBody.duplicate).toBe(false);
+      expect(firstBody.item.tenantId).toBe(tenantAId);
+      expect(firstBody.item.projectId).toBe("project-risk-control");
+      expect(firstBody.item.traceId).toBe(payload.traceId);
+      expect(firstBody.item.provider).toBe("claude");
+      expect(firstBody.item.routePolicy).toBe("latest_valid");
+      expect(firstBody.item.status).toBe("success");
+      expect(firstBody.item.cost).toBe("0.002310");
+      expect(firstBody.item.specVersion).toBe("v1");
+
+      const duplicateResponse = await postTokenPulseRuntimeEvent(
+        webhookSecret,
+        payload,
+      );
+      expect(duplicateResponse.status).toBe(200);
+      const duplicateBody = (await duplicateResponse.json()) as {
+        duplicate: boolean;
+        item: {
+          idempotencyKey: string;
+          traceId: string;
+        };
+      };
+      expect(duplicateBody.duplicate).toBe(true);
+      expect(duplicateBody.item.idempotencyKey).toBe(firstBody.item.idempotencyKey);
+      expect(duplicateBody.item.traceId).toBe(payload.traceId);
+
+      const queryResponse = await app.request(
+        `/api/v1/integrations/tokenpulse/runtime-events?traceId=${encodeURIComponent(payload.traceId)}`,
+        {
+          headers: tenantAHeaders,
+        },
+      );
+      expect(queryResponse.status).toBe(200);
+      const queryBody = (await queryResponse.json()) as {
+        items: Array<{
+          tenantId: string;
+          traceId: string;
+          provider: string;
+          status: string;
+          routePolicy: string;
+          cost?: string;
+        }>;
+        total: number;
+        filters: {
+          traceId?: string;
+        };
+      };
+      expect(queryBody.total).toBe(1);
+      expect(queryBody.filters.traceId).toBe(payload.traceId);
+      expect(queryBody.items).toHaveLength(1);
+      expect(queryBody.items[0]?.tenantId).toBe(tenantAId);
+      expect(queryBody.items[0]?.provider).toBe("claude");
+      expect(queryBody.items[0]?.status).toBe("success");
+      expect(queryBody.items[0]?.routePolicy).toBe("latest_valid");
+      expect(queryBody.items[0]?.cost).toBe("0.002310");
+
+      const crossTenantResponse = await app.request(
+        `/api/v1/integrations/tokenpulse/runtime-events?traceId=${encodeURIComponent(payload.traceId)}`,
+        {
+          headers: tenantBHeaders,
+        },
+      );
+      expect(crossTenantResponse.status).toBe(200);
+      const crossTenantBody = (await crossTenantResponse.json()) as {
+        items: unknown[];
+        total: number;
+      };
+      expect(crossTenantBody.total).toBe(0);
+      expect(crossTenantBody.items).toHaveLength(0);
+
+      const ingestAudits = await queryAuditByActionWithHeaders(
+        "control_plane.tokenpulse_runtime_event_ingested",
+        payload.traceId,
+        tenantAHeaders,
+      );
+      expect(
+        ingestAudits.items.some(
+          (item) =>
+            item.action === "control_plane.tokenpulse_runtime_event_ingested" &&
+            item.metadata.traceId === payload.traceId &&
+            item.metadata.provider === "claude" &&
+            item.metadata.status === "success" &&
+            item.metadata.duplicate === false,
+        ),
+      ).toBe(true);
+
+      const duplicateAudits = await queryAuditByActionWithHeaders(
+        "control_plane.tokenpulse_runtime_event_duplicate",
+        payload.traceId,
+        tenantAHeaders,
+      );
+      expect(
+        duplicateAudits.items.some(
+          (item) =>
+            item.action === "control_plane.tokenpulse_runtime_event_duplicate" &&
+            item.metadata.traceId === payload.traceId &&
+            item.metadata.duplicate === true,
+        ),
+      ).toBe(true);
+
+      const queryAudits = await queryAuditByActionWithHeaders(
+        "control_plane.tokenpulse_runtime_event_queried",
+        payload.traceId,
+        tenantAHeaders,
+      );
+      expect(
+        queryAudits.items.some(
+          (item) =>
+            item.action === "control_plane.tokenpulse_runtime_event_queried" &&
+            item.metadata.traceId === payload.traceId &&
+            item.metadata.resultCount === 1,
+        ),
+      ).toBe(true);
+    } finally {
+      if (originalWebhookSecret === undefined) {
+        delete Bun.env.AGENTLEDGER_TOKENPULSE_WEBHOOK_SECRET;
+      } else {
+        Bun.env.AGENTLEDGER_TOKENPULSE_WEBHOOK_SECRET = originalWebhookSecret;
+      }
+      if (originalWebhookKeyId === undefined) {
+        delete Bun.env.AGENTLEDGER_TOKENPULSE_WEBHOOK_KEY_ID;
+      } else {
+        Bun.env.AGENTLEDGER_TOKENPULSE_WEBHOOK_KEY_ID = originalWebhookKeyId;
+      }
+    }
+  });
+
+  test("TokenPulse runtime events 路由对 header 和 payload 非法值返回 400/401", async () => {
+    const originalWebhookSecret = Bun.env.AGENTLEDGER_TOKENPULSE_WEBHOOK_SECRET;
+    const originalWebhookKeyId = Bun.env.AGENTLEDGER_TOKENPULSE_WEBHOOK_KEY_ID;
+    const webhookSecret = `tokenpulse-secret-${createNonce("tokenpulse-runtime-invalid")}`;
+    Bun.env.AGENTLEDGER_TOKENPULSE_WEBHOOK_SECRET = webhookSecret;
+    Bun.env.AGENTLEDGER_TOKENPULSE_WEBHOOK_KEY_ID = TOKENPULSE_RUNTIME_DEFAULT_KEY_ID;
+
+    try {
+      const payload = {
+        tenantId: "default",
+        traceId: createNonce("tokenpulse-trace"),
+        provider: "claude",
+        model: "claude-sonnet",
+        resolvedModel: "claude:claude-3-7-sonnet-20250219",
+        routePolicy: "latest_valid",
+        status: "success",
+        startedAt: "2026-03-08T09:59:58.123Z",
+      };
+
+      const invalidSpecRequest = buildTokenPulseRuntimeSignedRequest(
+        webhookSecret,
+        payload,
+        {
+          specVersion: "v2",
+        },
+      );
+      const invalidSpecResponse = await app.request(
+        "/api/v1/integrations/tokenpulse/runtime-events",
+        invalidSpecRequest.init,
+      );
+      expect(invalidSpecResponse.status).toBe(400);
+
+      const invalidKeyIdResponse = await postTokenPulseRuntimeEvent(
+        webhookSecret,
+        payload,
+        {
+          keyId: "unknown-key-id",
+        },
+      );
+      expect(invalidKeyIdResponse.status).toBe(401);
+
+      const expiredTimestampResponse = await postTokenPulseRuntimeEvent(
+        webhookSecret,
+        payload,
+        {
+          timestamp: String(Math.floor(Date.now() / 1000) - 10 * 60),
+        },
+      );
+      expect(expiredTimestampResponse.status).toBe(401);
+
+      const invalidSignatureResponse = await postTokenPulseRuntimeEvent(
+        webhookSecret,
+        payload,
+        {
+          signature: "deadbeef",
+        },
+      );
+      expect(invalidSignatureResponse.status).toBe(401);
+
+      const idempotencyMismatchResponse = await postTokenPulseRuntimeEvent(
+        webhookSecret,
+        payload,
+        {
+          idempotencyKey: createNonce("tokenpulse-mismatch"),
+        },
+      );
+      expect(idempotencyMismatchResponse.status).toBe(400);
+
+      const invalidStatusResponse = await postTokenPulseRuntimeEvent(
+        webhookSecret,
+        {
+          ...payload,
+          status: "cancelled",
+        },
+      );
+      expect(invalidStatusResponse.status).toBe(400);
+
+      const invalidRoutePolicyResponse = await postTokenPulseRuntimeEvent(
+        webhookSecret,
+        {
+          ...payload,
+          status: "failure",
+          routePolicy: "custom_policy",
+        },
+      );
+      expect(invalidRoutePolicyResponse.status).toBe(400);
+
+      const invalidCostResponse = await postTokenPulseRuntimeEvent(
+        webhookSecret,
+        {
+          ...payload,
+          status: "failure",
+          cost: 0.123,
+        },
+      );
+      expect(invalidCostResponse.status).toBe(400);
+    } finally {
+      if (originalWebhookSecret === undefined) {
+        delete Bun.env.AGENTLEDGER_TOKENPULSE_WEBHOOK_SECRET;
+      } else {
+        Bun.env.AGENTLEDGER_TOKENPULSE_WEBHOOK_SECRET = originalWebhookSecret;
+      }
+      if (originalWebhookKeyId === undefined) {
+        delete Bun.env.AGENTLEDGER_TOKENPULSE_WEBHOOK_KEY_ID;
+      } else {
+        Bun.env.AGENTLEDGER_TOKENPULSE_WEBHOOK_KEY_ID = originalWebhookKeyId;
+      }
     }
   });
 

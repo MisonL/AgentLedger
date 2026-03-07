@@ -5407,6 +5407,153 @@ describe("Web Console", () => {
     GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
   );
 
+  test(
+    "治理页支持按 traceId 查询 TokenPulse 运行时摘要",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-tokenpulse-runtime",
+        refreshToken: "refresh-token-governance-tokenpulse-runtime",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const fetchSpy = mockGovernancePageFetch({
+        extraHandler: (_input, _init, context) => {
+          if (
+            context.pathname === "/api/v1/integrations/tokenpulse/runtime-events" &&
+            context.method === "GET"
+          ) {
+            return mockJsonResponse({
+              items: [
+                {
+                  id: "tp-runtime-1",
+                  tenantId: "default",
+                  projectId: "project-risk-control",
+                  traceId: "trace-oauth-runtime-20260308-0001",
+                  provider: "claude",
+                  model: "claude-sonnet",
+                  resolvedModel: "claude:claude-3-7-sonnet-20250219",
+                  routePolicy: "latest_valid",
+                  accountId: "claude-account-01",
+                  status: "success",
+                  startedAt: "2026-03-08T09:59:58.123Z",
+                  finishedAt: "2026-03-08T09:59:59.204Z",
+                  cost: "0.002310",
+                  idempotencyKey: "tp-idempotency-1",
+                  specVersion: "v1",
+                  keyId: "tokenpulse-runtime-v1",
+                  createdAt: "2026-03-08T09:59:59.500Z",
+                },
+              ],
+              total: 1,
+              filters: {
+                traceId: "trace-oauth-runtime-20260308-0001",
+                provider: "claude",
+                status: "success",
+                limit: 50,
+              },
+              nextCursor: null,
+            });
+          }
+          return undefined;
+        },
+      });
+
+      render(<App />);
+
+      const heading = await screen.findByRole("heading", {
+        name: "TokenPulse Runtime Events",
+        level: 2,
+      });
+      const section = heading.closest("section");
+      if (!(section instanceof HTMLElement)) {
+        throw new Error("未找到 TokenPulse Runtime Events 所在 section。");
+      }
+      const sectionScreen = within(section);
+
+      fireEvent.change(sectionScreen.getByLabelText("Trace ID"), {
+        target: { value: "trace-oauth-runtime-20260308-0001" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("Provider"), {
+        target: { value: "claude" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("运行时状态"), {
+        target: { value: "success" },
+      });
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "查询运行时摘要" }),
+      );
+
+      expect(
+        await sectionScreen.findByText("TokenPulse 运行时摘要已加载，共 1 条。"),
+      ).toBeInTheDocument();
+      expect(
+        sectionScreen.getByText("claude:claude-3-7-sonnet-20250219"),
+      ).toBeInTheDocument();
+      expect(sectionScreen.getByText("0.002310")).toBeInTheDocument();
+      expect(sectionScreen.getByText("project-risk-control")).toBeInTheDocument();
+
+      expect(
+        fetchSpy.mock.calls.some(([url]) => {
+          const parsed = new URL(toUrl(url), "http://localhost");
+          return (
+            parsed.pathname === "/api/v1/integrations/tokenpulse/runtime-events" &&
+            parsed.searchParams.get("traceId") ===
+              "trace-oauth-runtime-20260308-0001" &&
+            parsed.searchParams.get("provider") === "claude" &&
+            parsed.searchParams.get("status") === "success"
+          );
+        }),
+      ).toBe(true);
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "治理页 TokenPulse 运行时摘要在 traceId 为空时阻止请求",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-tokenpulse-runtime-empty",
+        refreshToken: "refresh-token-governance-tokenpulse-runtime-empty",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const fetchSpy = mockGovernancePageFetch();
+
+      render(<App />);
+
+      const heading = await screen.findByRole("heading", {
+        name: "TokenPulse Runtime Events",
+        level: 2,
+      });
+      const section = heading.closest("section");
+      if (!(section instanceof HTMLElement)) {
+        throw new Error("未找到 TokenPulse Runtime Events 所在 section。");
+      }
+      const sectionScreen = within(section);
+
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "查询运行时摘要" }),
+      );
+
+      expect(
+        await sectionScreen.findByText("Trace ID 不能为空。"),
+      ).toBeInTheDocument();
+      expect(
+        fetchSpy.mock.calls.some(([url]) => {
+          const parsed = new URL(toUrl(url), "http://localhost");
+          return (
+            parsed.pathname === "/api/v1/integrations/tokenpulse/runtime-events"
+          );
+        }),
+      ).toBe(false);
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
   test("治理页支持 Sessions/Usage 导出", async () => {
     window.location.hash = "#/governance";
     setAuthTokens({

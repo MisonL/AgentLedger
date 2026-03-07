@@ -16,6 +16,11 @@ import type {
   AuditItem,
   AuditLevel,
   AuditListInput,
+  TokenPulseRoutePolicy,
+  TokenPulseRuntimeEvent,
+  TokenPulseRuntimeEventIngestInput,
+  TokenPulseRuntimeEventListInput,
+  TokenPulseRuntimeEventStatus,
   Budget,
   BudgetGovernanceState,
   BudgetPeriod,
@@ -97,6 +102,7 @@ const DEFAULT_SESSION_LIMIT = 50;
 const DEFAULT_ALERT_LIMIT = 50;
 const DEFAULT_ALERT_ORCHESTRATION_EXECUTION_LIMIT = 50;
 const DEFAULT_AUDIT_LIMIT = 50;
+const DEFAULT_TOKENPULSE_RUNTIME_EVENT_LIMIT = 50;
 const DEFAULT_SYNC_JOB_LIMIT = 50;
 const DEFAULT_PARSE_FAILURE_LIMIT = 50;
 const MAX_PARSE_FAILURE_LIMIT = 500;
@@ -150,6 +156,17 @@ const MCP_APPROVAL_STATUSES: ReadonlyArray<McpApprovalStatus> = [
   "pending",
   "approved",
   "rejected",
+];
+const TOKENPULSE_ROUTE_POLICIES: ReadonlyArray<TokenPulseRoutePolicy> = [
+  "round_robin",
+  "latest_valid",
+  "sticky_user",
+];
+const TOKENPULSE_RUNTIME_EVENT_STATUSES: ReadonlyArray<TokenPulseRuntimeEventStatus> = [
+  "success",
+  "failure",
+  "blocked",
+  "timeout",
 ];
 const REPLAY_JOB_STATUS_SET: ReadonlyArray<ReplayJobStatus> = [
   "pending",
@@ -329,6 +346,17 @@ export interface AuditListResult {
   nextCursor: string | null;
 }
 
+export interface TokenPulseRuntimeEventListResult {
+  items: TokenPulseRuntimeEvent[];
+  total: number;
+  nextCursor: string | null;
+}
+
+export interface TokenPulseRuntimeEventWriteResult {
+  event: TokenPulseRuntimeEvent;
+  created: boolean;
+}
+
 export interface AlertListResult {
   items: Alert[];
   total: number;
@@ -399,6 +427,14 @@ export interface AppendAuditLogInput {
   detail?: string;
   metadata?: Record<string, unknown>;
   createdAt?: string;
+}
+
+export interface CreateTokenPulseRuntimeEventInput
+  extends TokenPulseRuntimeEventIngestInput {
+  specVersion: "v1";
+  keyId: string;
+  idempotencyKey: string;
+  payload: Record<string, unknown>;
 }
 
 export interface CreateSyncJobOptions {
@@ -588,6 +624,15 @@ interface NormalizedAuditListInput {
   cursor?: string;
 }
 
+interface NormalizedTokenPulseRuntimeEventListInput {
+  tenantId: string;
+  traceId?: string;
+  provider?: string;
+  status?: TokenPulseRuntimeEventStatus;
+  limit: number;
+  cursor?: string;
+}
+
 interface NormalizedQualityDailyMetricsInput {
   from?: string;
   to?: string;
@@ -710,6 +755,10 @@ interface PricingCatalogEntryRecord extends PricingCatalogEntry {
 interface ClaimIntegrationAlertCallbackResult {
   claimed: boolean;
   record: IntegrationAlertCallbackRecord;
+}
+
+interface TokenPulseRuntimeEventRecord extends TokenPulseRuntimeEvent {
+  payload: Record<string, unknown>;
 }
 
 export interface ReleaseRequestActor {
@@ -2251,6 +2300,30 @@ function toAuditLevel(value: unknown): AuditLevel {
   return "info";
 }
 
+function toTokenPulseRoutePolicy(value: unknown): TokenPulseRoutePolicy {
+  if (
+    typeof value === "string" &&
+    TOKENPULSE_ROUTE_POLICIES.includes(value as TokenPulseRoutePolicy)
+  ) {
+    return value as TokenPulseRoutePolicy;
+  }
+  return "latest_valid";
+}
+
+function toTokenPulseRuntimeEventStatus(
+  value: unknown
+): TokenPulseRuntimeEventStatus {
+  if (
+    typeof value === "string" &&
+    TOKENPULSE_RUNTIME_EVENT_STATUSES.includes(
+      value as TokenPulseRuntimeEventStatus
+    )
+  ) {
+    return value as TokenPulseRuntimeEventStatus;
+  }
+  return "failure";
+}
+
 function normalizeDistinctStringArray(
   values: unknown,
   options: {
@@ -3138,6 +3211,35 @@ function mapAuditRow(row: DbRow): AuditItem {
   };
 }
 
+function mapTokenPulseRuntimeEventRow(row: DbRow): TokenPulseRuntimeEventRecord {
+  const payload = toDbRow(row.payload_json) ?? {};
+  return {
+    id: firstNonEmptyString(row.id) ?? crypto.randomUUID(),
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    projectId: firstNonEmptyString(row.project_id) ?? undefined,
+    traceId: firstNonEmptyString(row.trace_id) ?? "",
+    provider: firstNonEmptyString(row.provider) ?? "",
+    model: firstNonEmptyString(row.model) ?? "",
+    resolvedModel: firstNonEmptyString(row.resolved_model) ?? "",
+    routePolicy: toTokenPulseRoutePolicy(firstNonEmptyString(row.route_policy)),
+    accountId: firstNonEmptyString(row.account_id) ?? undefined,
+    status: toTokenPulseRuntimeEventStatus(firstNonEmptyString(row.status)),
+    startedAt: toIsoString(row.started_at) ?? new Date().toISOString(),
+    finishedAt: toIsoString(row.finished_at) ?? undefined,
+    errorCode: firstNonEmptyString(row.error_code) ?? undefined,
+    cost: firstNonEmptyString(row.cost) ?? undefined,
+    idempotencyKey: firstNonEmptyString(row.idempotency_key) ?? "",
+    specVersion:
+      firstNonEmptyString(row.spec_version) === "v1" ? "v1" : "v1",
+    keyId: firstNonEmptyString(row.key_id) ?? "tokenpulse-runtime-v1",
+    createdAt:
+      toIsoString(row.created_at) ??
+      toIsoString(row.started_at) ??
+      new Date().toISOString(),
+    payload,
+  };
+}
+
 function mapUserRow(row: DbRow): LocalUser {
   return {
     id: firstNonEmptyString(row.id) ?? "",
@@ -3477,6 +3579,25 @@ function normalizeAuditListInput(
     from: input.from,
     to: input.to,
     limit: input.limit ?? DEFAULT_AUDIT_LIMIT,
+    cursor: firstNonEmptyString(input.cursor) ?? undefined,
+  };
+}
+
+function normalizeTokenPulseRuntimeEventListInput(
+  tenantId: string,
+  input: TokenPulseRuntimeEventListInput = {}
+): NormalizedTokenPulseRuntimeEventListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(
+    200,
+    Math.max(1, rawLimit ?? DEFAULT_TOKENPULSE_RUNTIME_EVENT_LIMIT)
+  );
+  return {
+    tenantId: firstNonEmptyString(tenantId) ?? DEFAULT_TENANT_ID,
+    traceId: firstNonEmptyString(input.traceId) ?? undefined,
+    provider: firstNonEmptyString(input.provider)?.toLowerCase() ?? undefined,
+    status: input.status,
+    limit,
     cursor: firstNonEmptyString(input.cursor) ?? undefined,
   };
 }
@@ -3986,6 +4107,7 @@ class ControlPlaneRepository {
   private readonly memoryPricingCatalogVersions: PricingCatalogVersionRecord[] = [];
   private readonly memoryPricingCatalogEntries: PricingCatalogEntryRecord[] = [];
   private readonly memoryAudits: AuditItem[] = [];
+  private readonly memoryTokenPulseRuntimeEvents: TokenPulseRuntimeEventRecord[] = [];
   private readonly memoryUsers: LocalUser[] = [];
   private readonly memoryTenants: Tenant[] = [];
   private readonly memoryOrganizations: Organization[] = [];
@@ -7485,6 +7607,340 @@ class ControlPlaneRepository {
     }
   }
 
+  async insertTokenPulseRuntimeEvent(
+    input: TokenPulseRuntimeEventIngestInput & {
+      idempotencyKey: string;
+      specVersion: "v1";
+      keyId: string;
+      createdAt?: string;
+    }
+  ): Promise<TokenPulseRuntimeEventWriteResult> {
+    const now = toIsoString(input.createdAt) ?? new Date().toISOString();
+    const payload = {
+      tenantId: input.tenantId,
+      projectId: input.projectId,
+      traceId: input.traceId,
+      provider: input.provider,
+      model: input.model,
+      resolvedModel: input.resolvedModel,
+      routePolicy: input.routePolicy,
+      accountId: input.accountId,
+      status: input.status,
+      startedAt: input.startedAt,
+      finishedAt: input.finishedAt,
+      errorCode: input.errorCode,
+      cost: input.cost,
+    } satisfies TokenPulseRuntimeEventIngestInput;
+    const normalizedRecord: TokenPulseRuntimeEventRecord = {
+      id: crypto.randomUUID(),
+      tenantId: firstNonEmptyString(input.tenantId) ?? DEFAULT_TENANT_ID,
+      projectId: firstNonEmptyString(input.projectId) ?? undefined,
+      traceId: firstNonEmptyString(input.traceId) ?? "",
+      provider: firstNonEmptyString(input.provider) ?? "",
+      model: firstNonEmptyString(input.model) ?? "",
+      resolvedModel: firstNonEmptyString(input.resolvedModel) ?? "",
+      routePolicy: toTokenPulseRoutePolicy(input.routePolicy),
+      accountId: firstNonEmptyString(input.accountId) ?? undefined,
+      status: toTokenPulseRuntimeEventStatus(input.status),
+      startedAt: toIsoString(input.startedAt) ?? now,
+      finishedAt: toIsoString(input.finishedAt) ?? undefined,
+      errorCode: firstNonEmptyString(input.errorCode) ?? undefined,
+      cost: firstNonEmptyString(input.cost) ?? undefined,
+      idempotencyKey: firstNonEmptyString(input.idempotencyKey) ?? crypto.randomUUID(),
+      specVersion: "v1",
+      keyId: firstNonEmptyString(input.keyId) ?? "tokenpulse-runtime-v1",
+      createdAt: now,
+      payload: toDbRow(payload) ?? {},
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.insertTokenPulseRuntimeEventToMemory(normalizedRecord);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO tokenpulse_runtime_events (
+           id,
+           tenant_id,
+           project_id,
+           trace_id,
+           provider,
+           model,
+           resolved_model,
+           route_policy,
+           account_id,
+           status,
+           started_at,
+           finished_at,
+           error_code,
+           cost,
+           idempotency_key,
+           spec_version,
+           key_id,
+           payload_json,
+           created_at
+         )
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6,
+           $7,
+           $8,
+           $9,
+           $10,
+           $11::timestamptz,
+           $12::timestamptz,
+           $13,
+           $14,
+           $15,
+           $16,
+           $17,
+           $18::jsonb,
+           $19::timestamptz
+         )
+         ON CONFLICT (tenant_id, idempotency_key)
+         DO NOTHING
+         RETURNING id,
+                   tenant_id,
+                   project_id,
+                   trace_id,
+                   provider,
+                   model,
+                   resolved_model,
+                   route_policy,
+                   account_id,
+                   status,
+                   started_at,
+                   finished_at,
+                   error_code,
+                   cost,
+                   idempotency_key,
+                   spec_version,
+                   key_id,
+                   payload_json,
+                   created_at`,
+        [
+          normalizedRecord.id,
+          normalizedRecord.tenantId,
+          normalizedRecord.projectId ?? null,
+          normalizedRecord.traceId,
+          normalizedRecord.provider,
+          normalizedRecord.model,
+          normalizedRecord.resolvedModel,
+          normalizedRecord.routePolicy,
+          normalizedRecord.accountId ?? null,
+          normalizedRecord.status,
+          normalizedRecord.startedAt,
+          normalizedRecord.finishedAt ?? null,
+          normalizedRecord.errorCode ?? null,
+          normalizedRecord.cost ?? null,
+          normalizedRecord.idempotencyKey,
+          normalizedRecord.specVersion,
+          normalizedRecord.keyId,
+          safeStringifyJson(normalizedRecord.payload),
+          normalizedRecord.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      if (row) {
+        return {
+          created: true,
+          event: this.cloneTokenPulseRuntimeEvent(mapTokenPulseRuntimeEventRow(row)),
+        };
+      }
+
+      const existing = await this.getTokenPulseRuntimeEventByIdempotencyKey(
+        normalizedRecord.tenantId,
+        normalizedRecord.idempotencyKey
+      );
+      if (existing) {
+        return {
+          created: false,
+          event: existing,
+        };
+      }
+
+      return this.insertTokenPulseRuntimeEventToMemory(normalizedRecord);
+    } catch (error) {
+      this.disableDb(error, "写入 TokenPulse runtime event 失败");
+      return this.insertTokenPulseRuntimeEventToMemory(normalizedRecord);
+    }
+  }
+
+  async getTokenPulseRuntimeEventByIdempotencyKey(
+    tenantId: string,
+    idempotencyKey: string
+  ): Promise<TokenPulseRuntimeEvent | null> {
+    const normalizedTenantId = firstNonEmptyString(tenantId) ?? DEFAULT_TENANT_ID;
+    const normalizedIdempotencyKey = firstNonEmptyString(idempotencyKey);
+    if (!normalizedIdempotencyKey) {
+      return null;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getTokenPulseRuntimeEventByIdempotencyKeyFromMemory(
+        normalizedTenantId,
+        normalizedIdempotencyKey
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                project_id,
+                trace_id,
+                provider,
+                model,
+                resolved_model,
+                route_policy,
+                account_id,
+                status,
+                started_at,
+                finished_at,
+                error_code,
+                cost,
+                idempotency_key,
+                spec_version,
+                key_id,
+                payload_json,
+                created_at
+         FROM tokenpulse_runtime_events
+         WHERE tenant_id = $1
+           AND idempotency_key = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedIdempotencyKey]
+      );
+      const row = result.rows[0];
+      return row ? this.cloneTokenPulseRuntimeEvent(mapTokenPulseRuntimeEventRow(row)) : null;
+    } catch (error) {
+      this.disableDb(error, "查询 TokenPulse runtime event 幂等记录失败");
+      return this.getTokenPulseRuntimeEventByIdempotencyKeyFromMemory(
+        normalizedTenantId,
+        normalizedIdempotencyKey
+      );
+    }
+  }
+
+  async listTokenPulseRuntimeEvents(
+    tenantId: string,
+    input: TokenPulseRuntimeEventListInput = {}
+  ): Promise<TokenPulseRuntimeEventListResult> {
+    const normalizedTenantId = firstNonEmptyString(tenantId) ?? DEFAULT_TENANT_ID;
+    const normalized = normalizeTokenPulseRuntimeEventListInput(
+      normalizedTenantId,
+      input
+    );
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listTokenPulseRuntimeEventsFromMemory(normalizedTenantId, normalized);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+      const cursor = decodeTimePaginationCursor(normalized.cursor);
+
+      if (normalized.traceId) {
+        params.push(normalized.traceId);
+        whereClauses.push(`trace_id = $${params.length}`);
+      }
+      if (normalized.provider) {
+        params.push(normalized.provider);
+        whereClauses.push(`provider = $${params.length}`);
+      }
+      if (normalized.status) {
+        params.push(normalized.status);
+        whereClauses.push(`status = $${params.length}`);
+      }
+
+      const whereSql = `WHERE ${whereClauses.join(" AND ")}`;
+      const countResult = await pool.query(
+        `SELECT COUNT(*)::int AS total
+         FROM tokenpulse_runtime_events
+         ${whereSql}`,
+        params
+      );
+
+      const listParams = [...params];
+      const listWhereClauses = [...whereClauses];
+      if (cursor) {
+        listParams.push(cursor.timestamp);
+        const timestampToken = `$${listParams.length}`;
+        listParams.push(cursor.id);
+        const idToken = `$${listParams.length}`;
+        listWhereClauses.push(
+          `(created_at < ${timestampToken}::timestamptz
+            OR (created_at = ${timestampToken}::timestamptz AND id::text < ${idToken}))`
+        );
+      }
+      const listWhereSql = `WHERE ${listWhereClauses.join(" AND ")}`;
+      listParams.push(normalized.limit + 1);
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                project_id,
+                trace_id,
+                provider,
+                model,
+                resolved_model,
+                route_policy,
+                account_id,
+                status,
+                started_at,
+                finished_at,
+                error_code,
+                cost,
+                idempotency_key,
+                spec_version,
+                key_id,
+                payload_json,
+                created_at,
+                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+                  AS created_at_cursor
+         FROM tokenpulse_runtime_events
+         ${listWhereSql}
+         ORDER BY created_at DESC, id::text DESC
+         LIMIT $${listParams.length}`,
+        listParams
+      );
+      const mappedItems = result.rows.map(mapTokenPulseRuntimeEventRow);
+      const hasMore = mappedItems.length > normalized.limit;
+      const items = hasMore ? mappedItems.slice(0, normalized.limit) : mappedItems;
+      const cursorRows = hasMore ? result.rows.slice(0, normalized.limit) : result.rows;
+      const lastItem = items[items.length - 1];
+      const lastCursorRow = cursorRows[cursorRows.length - 1];
+      const cursorTimestamp =
+        firstNonEmptyString((lastCursorRow as DbRow | undefined)?.created_at_cursor) ??
+        toIsoString((lastCursorRow as DbRow | undefined)?.created_at);
+      const nextCursor =
+        hasMore &&
+        lastItem &&
+        typeof cursorTimestamp === "string" &&
+        Number.isFinite(Date.parse(cursorTimestamp)) &&
+        lastItem.id.trim().length > 0
+          ? encodeTimePaginationCursor({
+              timestamp: cursorTimestamp,
+              id: lastItem.id,
+            })
+          : null;
+
+      return {
+        items: items.map((item) => this.cloneTokenPulseRuntimeEvent(item)),
+        total: Math.max(0, Math.trunc(toNumber(countResult.rows[0]?.total, 0))),
+        nextCursor,
+      };
+    } catch (error) {
+      this.disableDb(error, "查询 TokenPulse runtime events 失败");
+      return this.listTokenPulseRuntimeEventsFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
   async listAlerts(tenantId: string, input: AlertListInput): Promise<AlertListResult> {
     const normalized = normalizeAlertListInput(input);
     const pool = await this.getPool();
@@ -10519,6 +10975,32 @@ class ControlPlaneRepository {
     } catch (error) {
       this.disableDb(error, "查询 tenants 失败");
       return this.listTenantsFromMemory();
+    }
+  }
+
+  async getTenantById(tenantId: string): Promise<Tenant | null> {
+    const normalizedTenantId = firstNonEmptyString(tenantId) ?? DEFAULT_TENANT_ID;
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getTenantByIdFromMemory(normalizedTenantId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                name,
+                created_at,
+                updated_at
+         FROM tenants
+         WHERE id = $1
+         LIMIT 1`,
+        [normalizedTenantId]
+      );
+      const row = result.rows[0];
+      return row ? mapTenantRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询单条 tenant 失败");
+      return this.getTenantByIdFromMemory(normalizedTenantId);
     }
   }
 
@@ -16071,6 +16553,155 @@ class ControlPlaneRepository {
     await pool.query(
       `CREATE INDEX IF NOT EXISTS idx_integration_alert_callbacks_tenant_processed_at
        ON integration_alert_callbacks (tenant_id, processed_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS tokenpulse_runtime_events (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT 'default',
+         project_id TEXT,
+         trace_id TEXT NOT NULL,
+         provider TEXT NOT NULL,
+         model TEXT NOT NULL,
+         resolved_model TEXT NOT NULL,
+         route_policy TEXT NOT NULL,
+         account_id TEXT,
+         status TEXT NOT NULL,
+         started_at TIMESTAMPTZ NOT NULL,
+         finished_at TIMESTAMPTZ,
+         error_code TEXT,
+         cost TEXT,
+         idempotency_key TEXT NOT NULL,
+         spec_version TEXT NOT NULL DEFAULT 'v1',
+         key_id TEXT NOT NULL DEFAULT 'tokenpulse-runtime-v1',
+         payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE tokenpulse_runtime_events
+         ADD COLUMN IF NOT EXISTS id TEXT,
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS project_id TEXT,
+         ADD COLUMN IF NOT EXISTS trace_id TEXT,
+         ADD COLUMN IF NOT EXISTS provider TEXT,
+         ADD COLUMN IF NOT EXISTS model TEXT,
+         ADD COLUMN IF NOT EXISTS resolved_model TEXT,
+         ADD COLUMN IF NOT EXISTS route_policy TEXT,
+         ADD COLUMN IF NOT EXISTS account_id TEXT,
+         ADD COLUMN IF NOT EXISTS status TEXT,
+         ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS error_code TEXT,
+         ADD COLUMN IF NOT EXISTS cost TEXT,
+         ADD COLUMN IF NOT EXISTS idempotency_key TEXT,
+         ADD COLUMN IF NOT EXISTS spec_version TEXT,
+         ADD COLUMN IF NOT EXISTS key_id TEXT,
+         ADD COLUMN IF NOT EXISTS payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ`
+    );
+
+    await pool.query(
+      `UPDATE tokenpulse_runtime_events
+       SET id = COALESCE(NULLIF(id, ''), md5(random()::text || clock_timestamp()::text)),
+           tenant_id = COALESCE(NULLIF(tenant_id, ''), 'default'),
+           trace_id = COALESCE(NULLIF(trace_id, ''), '__missing_trace_id__'),
+           provider = COALESCE(NULLIF(provider, ''), '__missing_provider__'),
+           model = COALESCE(NULLIF(model, ''), '__missing_model__'),
+           resolved_model = COALESCE(NULLIF(resolved_model, ''), '__missing_resolved_model__'),
+           route_policy = CASE
+             WHEN route_policy IN ('round_robin', 'latest_valid', 'sticky_user')
+               THEN route_policy
+             ELSE 'latest_valid'
+           END,
+           status = CASE
+             WHEN status IN ('success', 'failure', 'blocked', 'timeout')
+               THEN status
+             ELSE 'failure'
+           END,
+           started_at = COALESCE(started_at, created_at, NOW()),
+           payload_json = CASE
+             WHEN payload_json IS NULL THEN '{}'::jsonb
+             ELSE payload_json
+           END,
+           idempotency_key = COALESCE(
+             NULLIF(idempotency_key, ''),
+             md5(random()::text || clock_timestamp()::text)
+           ),
+           spec_version = CASE
+             WHEN spec_version = 'v1' THEN 'v1'
+             ELSE 'v1'
+           END,
+           key_id = COALESCE(NULLIF(key_id, ''), 'tokenpulse-runtime-v1'),
+           created_at = COALESCE(created_at, started_at, NOW())
+       WHERE id IS NULL
+          OR id = ''
+          OR tenant_id IS NULL
+          OR tenant_id = ''
+          OR trace_id IS NULL
+          OR trace_id = ''
+          OR provider IS NULL
+          OR provider = ''
+          OR model IS NULL
+          OR model = ''
+          OR resolved_model IS NULL
+          OR resolved_model = ''
+          OR route_policy IS NULL
+          OR route_policy NOT IN ('round_robin', 'latest_valid', 'sticky_user')
+          OR status IS NULL
+          OR status NOT IN ('success', 'failure', 'blocked', 'timeout')
+          OR started_at IS NULL
+          OR payload_json IS NULL
+          OR idempotency_key IS NULL
+          OR idempotency_key = ''
+          OR spec_version IS NULL
+          OR key_id IS NULL
+          OR key_id = ''
+          OR created_at IS NULL`
+    );
+
+    await pool.query(
+      `ALTER TABLE tokenpulse_runtime_events
+         ALTER COLUMN id SET NOT NULL,
+         ALTER COLUMN tenant_id SET DEFAULT 'default',
+         ALTER COLUMN tenant_id SET NOT NULL,
+         ALTER COLUMN trace_id SET NOT NULL,
+         ALTER COLUMN provider SET NOT NULL,
+         ALTER COLUMN model SET NOT NULL,
+         ALTER COLUMN resolved_model SET NOT NULL,
+         ALTER COLUMN route_policy SET NOT NULL,
+         ALTER COLUMN status SET NOT NULL,
+         ALTER COLUMN started_at SET NOT NULL,
+         ALTER COLUMN payload_json SET DEFAULT '{}'::jsonb,
+         ALTER COLUMN payload_json SET NOT NULL,
+         ALTER COLUMN idempotency_key SET NOT NULL,
+         ALTER COLUMN spec_version SET DEFAULT 'v1',
+         ALTER COLUMN spec_version SET NOT NULL,
+         ALTER COLUMN key_id SET DEFAULT 'tokenpulse-runtime-v1',
+         ALTER COLUMN key_id SET NOT NULL,
+         ALTER COLUMN created_at SET DEFAULT NOW(),
+         ALTER COLUMN created_at SET NOT NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_tokenpulse_runtime_events_tenant_idempotency_key
+       ON tokenpulse_runtime_events (tenant_id, idempotency_key)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_tokenpulse_runtime_events_tenant_trace_created_at
+       ON tokenpulse_runtime_events (tenant_id, trace_id, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_tokenpulse_runtime_events_tenant_provider_created_at
+       ON tokenpulse_runtime_events (tenant_id, provider, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_tokenpulse_runtime_events_tenant_status_created_at
+       ON tokenpulse_runtime_events (tenant_id, status, created_at DESC)`
     );
 
     await pool.query(
@@ -21821,6 +22452,64 @@ class ControlPlaneRepository {
     };
   }
 
+  private cloneTokenPulseRuntimeEvent(
+    event: TokenPulseRuntimeEventRecord
+  ): TokenPulseRuntimeEvent {
+    return {
+      id: event.id,
+      tenantId: event.tenantId,
+      projectId: event.projectId,
+      traceId: event.traceId,
+      provider: event.provider,
+      model: event.model,
+      resolvedModel: event.resolvedModel,
+      routePolicy: event.routePolicy,
+      accountId: event.accountId,
+      status: event.status,
+      startedAt: event.startedAt,
+      finishedAt: event.finishedAt,
+      errorCode: event.errorCode,
+      cost: event.cost,
+      idempotencyKey: event.idempotencyKey,
+      specVersion: event.specVersion,
+      keyId: event.keyId,
+      createdAt: event.createdAt,
+    };
+  }
+
+  private getTokenPulseRuntimeEventByIdempotencyKeyFromMemory(
+    tenantId: string,
+    idempotencyKey: string
+  ): TokenPulseRuntimeEvent | null {
+    const matched = this.memoryTokenPulseRuntimeEvents.find(
+      (item) => item.tenantId === tenantId && item.idempotencyKey === idempotencyKey
+    );
+    return matched ? this.cloneTokenPulseRuntimeEvent(matched) : null;
+  }
+
+  private insertTokenPulseRuntimeEventToMemory(
+    event: TokenPulseRuntimeEventRecord
+  ): TokenPulseRuntimeEventWriteResult {
+    const existing = this.memoryTokenPulseRuntimeEvents.find(
+      (item) => item.tenantId === event.tenantId && item.idempotencyKey === event.idempotencyKey
+    );
+    if (existing) {
+      return {
+        created: false,
+        event: this.cloneTokenPulseRuntimeEvent(existing),
+      };
+    }
+    const stored: TokenPulseRuntimeEventRecord = {
+      ...event,
+      payload: { ...event.payload },
+    };
+    this.memoryTokenPulseRuntimeEvents.unshift(stored);
+    return {
+      created: true,
+      event: this.cloneTokenPulseRuntimeEvent(stored),
+    };
+  }
+
   private listAuditsFromMemory(input: NormalizedAuditListInput): AuditListResult {
     const keyword = input.keyword?.toLowerCase();
     const fromTimestamp = input.from ? Date.parse(input.from) : undefined;
@@ -21911,6 +22600,83 @@ class ControlPlaneRepository {
           })
         : null;
 
+    return {
+      items: pagedItems,
+      total,
+      nextCursor,
+    };
+  }
+
+  private listTokenPulseRuntimeEventsFromMemory(
+    tenantId: string,
+    input: NormalizedTokenPulseRuntimeEventListInput
+  ): TokenPulseRuntimeEventListResult {
+    const cursor = decodeTimePaginationCursor(input.cursor);
+    const items = this.memoryTokenPulseRuntimeEvents
+      .filter((event) => {
+        if (event.tenantId !== tenantId) {
+          return false;
+        }
+        if (input.traceId && event.traceId !== input.traceId) {
+          return false;
+        }
+        if (input.provider && event.provider !== input.provider) {
+          return false;
+        }
+        if (input.status && event.status !== input.status) {
+          return false;
+        }
+        if (!cursor) {
+          return true;
+        }
+        const createdAtTimestamp = Date.parse(event.createdAt);
+        const cursorTimestamp = Date.parse(cursor.timestamp);
+        if (Number.isFinite(createdAtTimestamp) && Number.isFinite(cursorTimestamp)) {
+          if (createdAtTimestamp < cursorTimestamp) {
+            return true;
+          }
+          if (createdAtTimestamp > cursorTimestamp) {
+            return false;
+          }
+          return event.id < cursor.id;
+        }
+        const createdAtCompare = event.createdAt.localeCompare(cursor.timestamp);
+        if (createdAtCompare < 0) {
+          return true;
+        }
+        if (createdAtCompare > 0) {
+          return false;
+        }
+        return event.id < cursor.id;
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+    const total = this.memoryTokenPulseRuntimeEvents.filter((event) => {
+      if (event.tenantId !== tenantId) {
+        return false;
+      }
+      if (input.traceId && event.traceId !== input.traceId) {
+        return false;
+      }
+      if (input.provider && event.provider !== input.provider) {
+        return false;
+      }
+      if (input.status && event.status !== input.status) {
+        return false;
+      }
+      return true;
+    }).length;
+    const hasMore = items.length > input.limit;
+    const pagedItems = (hasMore ? items.slice(0, input.limit) : items).map((event) =>
+      this.cloneTokenPulseRuntimeEvent(event)
+    );
+    const lastItem = pagedItems[pagedItems.length - 1];
+    const nextCursor =
+      hasMore && lastItem
+        ? encodeTimePaginationCursor({
+            timestamp: lastItem.createdAt,
+            id: lastItem.id,
+          })
+        : null;
     return {
       items: pagedItems,
       total,
@@ -22026,6 +22792,12 @@ class ControlPlaneRepository {
     return [...this.memoryTenants]
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
       .map((tenant) => ({ ...tenant }));
+  }
+
+  private getTenantByIdFromMemory(tenantId: string): Tenant | null {
+    this.ensureDefaultTenantInMemory();
+    const matched = this.memoryTenants.find((tenant) => tenant.id === tenantId);
+    return matched ? { ...matched } : null;
   }
 
   private createTenantInMemory(tenant: Tenant): Tenant {
