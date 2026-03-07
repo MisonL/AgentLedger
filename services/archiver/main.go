@@ -24,6 +24,7 @@ import (
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/klauspost/compress/zstd"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
@@ -41,6 +42,8 @@ const (
 	defaultLocalArchiveDir = "/data/agentledger/archive/raw"
 	defaultObjectPrefix    = "agentledger/archive/raw"
 	objectContentType      = "application/x-ndjson"
+	jsonlFileExtension     = ".jsonl"
+	zstdFileExtension      = ".zst"
 )
 
 type archiveMode string
@@ -51,9 +54,17 @@ const (
 	archiveModeHybrid archiveMode = "hybrid"
 )
 
+type archiveLocalCompression string
+
+const (
+	archiveLocalCompressionNone archiveLocalCompression = "none"
+	archiveLocalCompressionZstd archiveLocalCompression = "zstd"
+)
+
 type archiveConfig struct {
 	Mode               archiveMode
 	LocalRoot          string
+	LocalCompression   archiveLocalCompression
 	ObjectProvider     string
 	ObjectBucket       string
 	ObjectPrefix       string
@@ -105,7 +116,8 @@ type objectArchiveWriter interface {
 }
 
 type localArchiveWriter struct {
-	rootDir string
+	rootDir     string
+	compression archiveLocalCompression
 }
 
 type s3ArchiveWriter struct {
@@ -197,6 +209,7 @@ func main() {
 		"subject", archiveSubjectName,
 		"mode", archiveCfg.Mode,
 		"local_root", archiveCfg.LocalRoot,
+		"local_compression", archiveCfg.LocalCompression,
 		"object_provider", archiveCfg.ObjectProvider,
 		"object_bucket", archiveCfg.ObjectBucket,
 	)
@@ -220,10 +233,15 @@ func loadArchiveConfig() (archiveConfig, error) {
 	if err != nil {
 		return archiveConfig{}, err
 	}
+	localCompression, err := parseArchiveLocalCompression(os.Getenv("ARCHIVE_LOCAL_COMPRESSION"))
+	if err != nil {
+		return archiveConfig{}, err
+	}
 
 	cfg := archiveConfig{
 		Mode:               mode,
 		LocalRoot:          firstNonEmpty(strings.TrimSpace(os.Getenv("ARCHIVE_LOCAL_ROOT")), defaultLocalArchiveDir),
+		LocalCompression:   localCompression,
 		ObjectProvider:     strings.ToLower(strings.TrimSpace(os.Getenv("ARCHIVE_OBJECT_PROVIDER"))),
 		ObjectBucket:       strings.TrimSpace(os.Getenv("ARCHIVE_OBJECT_BUCKET")),
 		ObjectPrefix:       strings.Trim(strings.TrimSpace(firstNonEmpty(os.Getenv("ARCHIVE_OBJECT_PREFIX"), defaultObjectPrefix)), "/"),
@@ -276,6 +294,18 @@ func parseArchiveMode(raw string) (archiveMode, error) {
 	}
 }
 
+func parseArchiveLocalCompression(raw string) (archiveLocalCompression, error) {
+	compression := strings.ToLower(strings.TrimSpace(raw))
+	switch compression {
+	case "", "none", "jsonl":
+		return archiveLocalCompressionNone, nil
+	case "zstd", "jsonl+zstd", "jsonl.zst":
+		return archiveLocalCompressionZstd, nil
+	default:
+		return "", fmt.Errorf("invalid ARCHIVE_LOCAL_COMPRESSION: %s", raw)
+	}
+}
+
 func newArchiverService(
 	ctx context.Context,
 	log *slog.Logger,
@@ -290,7 +320,10 @@ func newArchiverService(
 	}
 
 	if cfg.Mode == archiveModeLocal || cfg.Mode == archiveModeHybrid {
-		svc.localWriter = &localArchiveWriter{rootDir: cfg.LocalRoot}
+		svc.localWriter = &localArchiveWriter{
+			rootDir:     cfg.LocalRoot,
+			compression: cfg.LocalCompression,
+		}
 	}
 
 	if cfg.Mode == archiveModeObject || cfg.Mode == archiveModeHybrid {
@@ -482,7 +515,11 @@ func (s *archiverService) archive(ctx context.Context, job archiveJob) ([]archiv
 
 	records := make([]archiveObjectRecord, 0, 2)
 	if s.localWriter != nil {
-		localPath, err := s.localWriter.WriteAtomic(ctx, relativeKey, line)
+		localRelativeKey, localContent, err := s.localWriter.PrepareWrite(relativeKey, line)
+		if err != nil {
+			return nil, fmt.Errorf("prepare local archive failed: %w", err)
+		}
+		localPath, err := s.localWriter.WriteAtomic(ctx, localRelativeKey, localContent)
 		if err != nil {
 			return nil, fmt.Errorf("write local archive failed: %w", err)
 		}
@@ -490,7 +527,7 @@ func (s *archiverService) archive(ctx context.Context, job archiveJob) ([]archiv
 			Backend:    "local",
 			ObjectKey:  localPath,
 			Checksum:   checksum,
-			SizeBytes:  int64(len(line)),
+			SizeBytes:  int64(len(localContent)),
 			ArchivedAt: archivedAt,
 		})
 	}
@@ -598,7 +635,7 @@ func buildArchiveRelativeKey(
 	if len(shortChecksum) > 16 {
 		shortChecksum = shortChecksum[:16]
 	}
-	filename := fmt.Sprintf("%s_%s.jsonl", eventSegment, shortChecksum)
+	filename := fmt.Sprintf("%s_%s%s", eventSegment, shortChecksum, jsonlFileExtension)
 	return path.Join(
 		occurredAt.UTC().Format("2006/01/02"),
 		tenantSegment,
@@ -688,6 +725,34 @@ func (w *localArchiveWriter) WriteAtomic(ctx context.Context, relativeKey string
 	}
 
 	return fullPath, nil
+}
+
+func (w *localArchiveWriter) PrepareWrite(relativeKey string, content []byte) (string, []byte, error) {
+	switch w.compression {
+	case "", archiveLocalCompressionNone:
+		return relativeKey, content, nil
+	case archiveLocalCompressionZstd:
+		compressed, err := compressZstd(content)
+		if err != nil {
+			return "", nil, fmt.Errorf("compress zstd archive failed: %w", err)
+		}
+		return relativeKey + zstdFileExtension, compressed, nil
+	default:
+		return "", nil, fmt.Errorf("unsupported local compression: %s", w.compression)
+	}
+}
+
+func compressZstd(content []byte) ([]byte, error) {
+	encoder, err := zstd.NewWriter(
+		nil,
+		zstd.WithEncoderConcurrency(1),
+		zstd.WithEncoderLevel(zstd.SpeedDefault),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create zstd encoder failed: %w", err)
+	}
+	defer encoder.Close()
+	return encoder.EncodeAll(content, make([]byte, 0, len(content))), nil
 }
 
 func (w *s3ArchiveWriter) PutObject(ctx context.Context, key string, content []byte) error {

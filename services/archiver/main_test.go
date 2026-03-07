@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 func TestParseArchiveMode(t *testing.T) {
@@ -78,6 +81,40 @@ func TestDecodeArchiveMessage(t *testing.T) {
 	}
 }
 
+func TestParseArchiveLocalCompression(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    archiveLocalCompression
+		wantErr bool
+	}{
+		{name: "default", input: "", want: archiveLocalCompressionNone},
+		{name: "none", input: "none", want: archiveLocalCompressionNone},
+		{name: "jsonl alias", input: "jsonl", want: archiveLocalCompressionNone},
+		{name: "zstd", input: "zstd", want: archiveLocalCompressionZstd},
+		{name: "jsonl plus zstd alias", input: "jsonl+zstd", want: archiveLocalCompressionZstd},
+		{name: "invalid", input: "gzip", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseArchiveLocalCompression(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseArchiveLocalCompression(%q) expected error", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseArchiveLocalCompression(%q) unexpected error: %v", tt.input, err)
+			}
+			if got != tt.want {
+				t.Fatalf("parseArchiveLocalCompression(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildArchiveRelativeKey(t *testing.T) {
 	key := buildArchiveRelativeKey(
 		time.Date(2026, 3, 2, 15, 0, 0, 0, time.UTC),
@@ -130,5 +167,99 @@ func TestLocalArchiveWriterWriteAtomic(t *testing.T) {
 	}
 	if filepath.Clean(path1) != filepath.Clean(path2) {
 		t.Fatalf("path mismatch on duplicate write: %s vs %s", path1, path2)
+	}
+}
+
+type stubObjectArchiveWriter struct {
+	keys     []string
+	contents [][]byte
+}
+
+func (w *stubObjectArchiveWriter) PutObject(_ context.Context, key string, content []byte) error {
+	w.keys = append(w.keys, key)
+	w.contents = append(w.contents, append([]byte(nil), content...))
+	return nil
+}
+
+func TestArchiverArchiveHybridWritesLocalZstdAndObjectJSONL(t *testing.T) {
+	root := t.TempDir()
+	objectWriter := &stubObjectArchiveWriter{}
+	svc := &archiverService{
+		mode: archiveModeHybrid,
+		localWriter: &localArchiveWriter{
+			rootDir:     root,
+			compression: archiveLocalCompressionZstd,
+		},
+		objectWriter:  objectWriter,
+		objectBackend: "s3",
+		objectPrefix:  "agentledger/archive/raw",
+	}
+
+	job := archiveJob{
+		Tenant:     "tenant-a",
+		Source:     "source-1",
+		Session:    "session-1",
+		Event:      "evt-1",
+		OccurredAt: time.Date(2026, 3, 2, 10, 11, 12, 0, time.UTC),
+		RawPayload: []byte(`{"id":"evt-1","ok":true}`),
+	}
+
+	records, err := svc.archive(context.Background(), job)
+	if err != nil {
+		t.Fatalf("archive failed: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("archive record count = %d, want 2", len(records))
+	}
+	if len(objectWriter.keys) != 1 || len(objectWriter.contents) != 1 {
+		t.Fatalf("unexpected object writes: keys=%d contents=%d", len(objectWriter.keys), len(objectWriter.contents))
+	}
+
+	localRecord := records[0]
+	objectRecord := records[1]
+	expectedLine := buildJSONLLine(job.RawPayload)
+
+	if localRecord.Backend != "local" {
+		t.Fatalf("local backend = %s, want local", localRecord.Backend)
+	}
+	if !strings.HasSuffix(localRecord.ObjectKey, ".jsonl.zst") {
+		t.Fatalf("local archive path = %s, want .jsonl.zst suffix", localRecord.ObjectKey)
+	}
+	localCompressed, err := os.ReadFile(localRecord.ObjectKey)
+	if err != nil {
+		t.Fatalf("ReadFile local archive failed: %v", err)
+	}
+	if int64(len(localCompressed)) != localRecord.SizeBytes {
+		t.Fatalf("local size_bytes = %d, want %d", localRecord.SizeBytes, len(localCompressed))
+	}
+
+	decoder, err := zstd.NewReader(nil)
+	if err != nil {
+		t.Fatalf("NewReader failed: %v", err)
+	}
+	defer decoder.Close()
+
+	localDecoded, err := decoder.DecodeAll(localCompressed, nil)
+	if err != nil {
+		t.Fatalf("DecodeAll local archive failed: %v", err)
+	}
+	if !bytes.Equal(localDecoded, expectedLine) {
+		t.Fatalf("decoded local archive mismatch: got %q want %q", string(localDecoded), string(expectedLine))
+	}
+
+	if objectRecord.Backend != "s3" {
+		t.Fatalf("object backend = %s, want s3", objectRecord.Backend)
+	}
+	if !strings.HasSuffix(objectRecord.ObjectKey, ".jsonl") {
+		t.Fatalf("object key = %s, want .jsonl suffix", objectRecord.ObjectKey)
+	}
+	if objectWriter.keys[0] != objectRecord.ObjectKey {
+		t.Fatalf("object key mismatch: writer=%s record=%s", objectWriter.keys[0], objectRecord.ObjectKey)
+	}
+	if !bytes.Equal(objectWriter.contents[0], expectedLine) {
+		t.Fatalf("object content mismatch: got %q want %q", string(objectWriter.contents[0]), string(expectedLine))
+	}
+	if objectRecord.SizeBytes != int64(len(expectedLine)) {
+		t.Fatalf("object size_bytes = %d, want %d", objectRecord.SizeBytes, len(expectedLine))
 	}
 }

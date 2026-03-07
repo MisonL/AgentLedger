@@ -20,6 +20,7 @@ AgentLedger 面向企业研发与平台团队，目标是把分散在 AI CLI 与
 | 会话与使用量 | 使用热力图（usage heatmap）、daily/monthly/models/sessions 聚合、会话详情与事件列表 |
 | Source 管理 | source 新增/查询/删除、连通性测试、同步任务管理 |
 | Agent 自动采集（新增） | `agent collect` 按 docs/09 的 P0/P1 客户端矩阵自动采集本机会话并上报；支持 `--tool=auto` 和显式 `--tool=<client-key>`。 |
+| 归档与保留（新增） | `services/archiver` 支持 `local/object/hybrid` 三种归档模型；本地归档可选 JSONL + ZSTD 压缩落盘（`.jsonl.zst`），对象存储继续保持 `.jsonl`。 |
 | 预算治理 | budgets 读写、阈值分级、告警与状态流转 |
 | 数据主权与复制治理（新增） | `residency policy / region mappings / replication jobs` 全链路；Governance 支持策略保存、复制任务创建、审批、取消与状态刷新 |
 | 审计取证（新增） | 审计取证包导出（链式哈希 + HMAC 签名）与本地验签命令 |
@@ -159,6 +160,16 @@ export PULLER_SYNC_RETRY_MAX_BACKOFF_MS=2000
 export PULLER_JOB_MAX_RETRIES=3
 export PULLER_JOB_RETRY_BASE_DELAY=5s
 ```
+
+如需启用 `services/archiver` 本地 JSONL + ZSTD 压缩归档，可在启动前设置：
+
+```bash
+export ARCHIVE_MODE=local
+export ARCHIVE_LOCAL_ROOT=/data/agentledger/archive/raw
+export ARCHIVE_LOCAL_COMPRESSION=zstd
+```
+
+如需同时写本地和对象存储，可把 `ARCHIVE_MODE` 改为 `hybrid`。完整 `ARCHIVE_*` 说明见 `docs/13-环境变量参考.md`。
 
 ### 5. 回调链路联调（建议先跑）
 
