@@ -360,6 +360,11 @@ export interface RuleApprovalListResult {
   total: number;
 }
 
+export interface RuleApprovalWriteResult {
+  approval: RuleApproval;
+  created: boolean;
+}
+
 export interface McpToolPolicyListResult {
   items: McpToolPolicy[];
   total: number;
@@ -9188,7 +9193,7 @@ class ControlPlaneRepository {
       approverUserId: string;
       approverEmail?: string;
     }
-  ): Promise<RuleApproval | null> {
+  ): Promise<RuleApprovalWriteResult | null> {
     const normalizedTenantId = normalizeScopedTenantId(tenantId);
     const normalizedAssetId = firstNonEmptyString(assetId);
     const approverUserId = firstNonEmptyString(options.approverUserId);
@@ -9255,7 +9260,8 @@ class ControlPlaneRepository {
                    approver_email,
                    decision,
                    reason,
-                   created_at`,
+                   created_at,
+                   (xmax = 0) AS inserted`,
         [
           approval.id,
           approval.tenantId,
@@ -9269,7 +9275,12 @@ class ControlPlaneRepository {
         ]
       );
       const row = result.rows[0];
-      return row ? mapRuleApprovalRow(row) : null;
+      return row
+        ? {
+            approval: mapRuleApprovalRow(row),
+            created: toBoolean(row.inserted, false),
+          }
+        : null;
     } catch (error) {
       this.disableDb(error, "创建规则审批记录失败");
       return this.createRuleApprovalToMemory(approval);
@@ -21287,7 +21298,9 @@ class ControlPlaneRepository {
     };
   }
 
-  private createRuleApprovalToMemory(approval: RuleApproval): RuleApproval | null {
+  private createRuleApprovalToMemory(
+    approval: RuleApproval
+  ): RuleApprovalWriteResult | null {
     const versionExists = this.memoryRuleAssetVersions.some(
       (item) =>
         item.tenantId === approval.tenantId &&
@@ -21305,10 +21318,26 @@ class ControlPlaneRepository {
         item.approverUserId === approval.approverUserId
     );
     if (index >= 0) {
+      const existing = this.memoryRuleApprovals[index];
+      if (!existing) {
+        return null;
+      }
+      const updatedApproval: RuleApproval = {
+        ...approval,
+        id: existing.id,
+      };
       this.memoryRuleApprovals.splice(index, 1);
+      this.memoryRuleApprovals.unshift(this.cloneRuleApproval(updatedApproval));
+      return {
+        approval: this.cloneRuleApproval(updatedApproval),
+        created: false,
+      };
     }
     this.memoryRuleApprovals.unshift(this.cloneRuleApproval(approval));
-    return this.cloneRuleApproval(approval);
+    return {
+      approval: this.cloneRuleApproval(approval),
+      created: true,
+    };
   }
 
   private cloneMcpToolPolicy(policy: McpToolPolicy): McpToolPolicy {

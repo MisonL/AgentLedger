@@ -12830,6 +12830,58 @@ describe("Control Plane API", () => {
         item.metadata.approverUserId === auth.userId,
     );
     expect(approvalAudit).toBeDefined();
+    expect(
+      approvalAudits.items.filter(
+        (item) =>
+          item.action === "control_plane.rule_approval_created" &&
+          item.metadata.resourceId === approval.id,
+      ),
+    ).toHaveLength(1);
+
+    const updateApprovalResponse = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/approvals`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          version: 1,
+          decision: "rejected",
+          reason: "需要补充验证",
+        }),
+      },
+    );
+    expect(updateApprovalResponse.status).toBe(200);
+    const updatedApproval = (await updateApprovalResponse.json()) as {
+      id: string;
+      version: number;
+      decision: string;
+      reason?: string;
+    };
+    expect(updatedApproval.id).toBe(approval.id);
+    expect(updatedApproval.version).toBe(1);
+    expect(updatedApproval.decision).toBe("rejected");
+    expect(updatedApproval.reason).toBe("需要补充验证");
+
+    const updatedApprovalAudits = await queryAuditByActionWithHeaders(
+      "control_plane.rule_approval_updated",
+      approval.id,
+      tenantAHeaders,
+    );
+    const updatedApprovalAudit = updatedApprovalAudits.items.find(
+      (item) =>
+        item.action === "control_plane.rule_approval_updated" &&
+        item.metadata.resourceId === approval.id &&
+        item.metadata.assetId === asset.id &&
+        item.metadata.operation === "updated" &&
+        item.metadata.version === 1 &&
+        item.metadata.decision === "rejected" &&
+        item.metadata.reason === "需要补充验证" &&
+        item.metadata.approverUserId === auth.userId,
+    );
+    expect(updatedApprovalAudit).toBeDefined();
 
     const listApprovalsResponse = await app.request(
       `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/approvals?version=1`,
@@ -12839,11 +12891,14 @@ describe("Control Plane API", () => {
     );
     expect(listApprovalsResponse.status).toBe(200);
     const listApprovalsBody = (await listApprovalsResponse.json()) as {
-      items: Array<{ version: number; decision: string }>;
+      items: Array<{ version: number; decision: string; id: string }>;
     };
     expect(
       listApprovalsBody.items.some(
-        (item) => item.version === 1 && item.decision === "approved",
+        (item) =>
+          item.id === approval.id &&
+          item.version === 1 &&
+          item.decision === "rejected",
       ),
     ).toBe(true);
 

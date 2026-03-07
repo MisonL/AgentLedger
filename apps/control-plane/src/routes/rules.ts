@@ -356,7 +356,7 @@ ruleRoutes.post("/rules/assets/:id/approvals", async (c) => {
   if (!result.success) {
     return c.json({ message: result.error }, 400);
   }
-  const approval = await repository.createRuleApproval(
+  const approvalResult = await repository.createRuleApproval(
     auth.tenantId,
     assetId,
     result.data,
@@ -365,21 +365,27 @@ ruleRoutes.post("/rules/assets/:id/approvals", async (c) => {
       approverEmail: auth.email,
     },
   );
-  if (!approval) {
+  if (!approvalResult) {
     return c.json({ message: "规则版本不存在，无法提交审批。" }, 404);
   }
+  const { approval, created } = approvalResult;
   const requestId = c.get("requestId");
   await appendAuditLogSafely({
     tenantId: auth.tenantId,
     eventId: `cp:${requestId}`,
-    action: "control_plane.rule_approval_created",
+    action: created
+      ? "control_plane.rule_approval_created"
+      : "control_plane.rule_approval_updated",
     level: "info",
-    detail: `Created rule approval ${approval.id} for asset ${assetId} version ${approval.version}.`,
+    detail: created
+      ? `Created rule approval ${approval.id} for asset ${assetId} version ${approval.version}.`
+      : `Updated rule approval ${approval.id} for asset ${assetId} version ${approval.version}.`,
     metadata: {
       requestId,
       tenantId: auth.tenantId,
       resourceId: approval.id,
       assetId,
+      operation: created ? "created" : "updated",
       version: approval.version,
       decision: approval.decision,
       approverUserId: approval.approverUserId,
@@ -387,5 +393,5 @@ ruleRoutes.post("/rules/assets/:id/approvals", async (c) => {
       reason: approval.reason,
     },
   });
-  return c.json(approval, 201);
+  return c.json(approval, created ? 201 : 200);
 });
