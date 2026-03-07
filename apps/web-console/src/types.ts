@@ -445,6 +445,8 @@ export interface RuleScopeBinding {
   clients?: string[];
 }
 
+export type RuleRequiredApprovals = 1 | 2;
+
 export interface RuleAsset {
   id: string;
   tenantId: string;
@@ -453,6 +455,7 @@ export interface RuleAsset {
   status: RuleLifecycleStatus;
   latestVersion: number;
   publishedVersion?: number;
+  requiredApprovals: RuleRequiredApprovals;
   scopeBinding: RuleScopeBinding;
   createdAt: string;
   updatedAt: string;
@@ -473,6 +476,7 @@ export interface RuleAssetListResponse {
 export interface RuleAssetCreateInput {
   name: string;
   description?: string;
+  requiredApprovals?: RuleRequiredApprovals;
   scopeBinding?: RuleScopeBinding;
 }
 
@@ -490,6 +494,30 @@ export interface RuleAssetVersion {
 export interface RuleAssetVersionCreateInput {
   content: string;
   changelog?: string;
+}
+
+export type RuleVersionDiffLineType = "added" | "removed" | "unchanged";
+
+export interface RuleAssetVersionDiffLine {
+  type: RuleVersionDiffLineType;
+  content: string;
+  oldLineNumber?: number;
+  newLineNumber?: number;
+}
+
+export interface RuleAssetVersionDiffSummary {
+  added: number;
+  removed: number;
+  unchanged: number;
+  changed: boolean;
+}
+
+export interface RuleAssetVersionDiffResponse {
+  assetId: string;
+  fromVersion: number;
+  toVersion: number;
+  lines: RuleAssetVersionDiffLine[];
+  summary: RuleAssetVersionDiffSummary;
 }
 
 export interface RuleApproval {

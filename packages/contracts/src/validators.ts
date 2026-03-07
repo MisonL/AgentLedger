@@ -4713,6 +4713,7 @@ export function validateRuleAssetCreateInput(
   }
   const name = normalizeString(input.name);
   const description = normalizeString(input.description);
+  const requiredApprovals = toOptionalInteger(input.requiredApprovals);
   const scopeBinding = normalizeRuleScopeBinding(input.scopeBinding);
 
   if (!name) {
@@ -4720,6 +4721,16 @@ export function validateRuleAssetCreateInput(
   }
   if (input.description !== undefined && !description) {
     return { success: false, error: "description 必须为非空字符串。" };
+  }
+  if (
+    input.requiredApprovals !== undefined &&
+    (!Number.isInteger(requiredApprovals) ||
+      (requiredApprovals !== 1 && requiredApprovals !== 2))
+  ) {
+    return {
+      success: false,
+      error: "requiredApprovals 必须是 1 或 2。",
+    };
   }
   if (scopeBinding === "invalid") {
     return { success: false, error: "scopeBinding 必须是对象，且 organizations/projects/clients 必须是字符串数组。" };
@@ -4729,6 +4740,7 @@ export function validateRuleAssetCreateInput(
     data: {
       name,
       description,
+      requiredApprovals,
       scopeBinding,
     },
   };

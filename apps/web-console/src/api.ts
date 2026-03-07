@@ -110,6 +110,8 @@ import type {
   RuleAssetCreateInput,
   RuleAssetListInput,
   RuleAssetListResponse,
+  RuleRequiredApprovals,
+  RuleAssetVersionDiffResponse,
   RuleApprovalCreateInput,
   RuleApprovalDecision,
   RuleApprovalListInput,
@@ -636,6 +638,7 @@ function isRuleAsset(value: unknown): value is RuleAsset {
       Number.isInteger(value.publishedVersion) &&
       value.publishedVersion >= 0);
   const scopeBindingOk = isRecord(value.scopeBinding);
+  const requiredApprovalsOk = isRuleRequiredApprovals(value.requiredApprovals);
   return (
     typeof value.id === "string" &&
     typeof value.tenantId === "string" &&
@@ -646,10 +649,17 @@ function isRuleAsset(value: unknown): value is RuleAsset {
     Number.isInteger(value.latestVersion) &&
     value.latestVersion >= 0 &&
     publishedVersionOk &&
+    requiredApprovalsOk &&
     scopeBindingOk &&
     isISODateString(value.createdAt) &&
     isISODateString(value.updatedAt)
   );
+}
+
+function isRuleRequiredApprovals(
+  value: unknown,
+): value is RuleRequiredApprovals {
+  return value === 1 || value === 2;
 }
 
 function isRuleAssetListInput(value: unknown): value is RuleAssetListInput {
@@ -716,6 +726,60 @@ function isRuleAssetVersionListResponse(value: unknown): value is {
     typeof value.total === "number" &&
     Number.isInteger(value.total) &&
     value.total >= 0
+  );
+}
+
+function isRuleAssetVersionDiffResponse(
+  value: unknown,
+): value is RuleAssetVersionDiffResponse {
+  if (!isRecord(value) || !isRecord(value.summary)) {
+    return false;
+  }
+  const summary = value.summary;
+  return (
+    typeof value.assetId === "string" &&
+    typeof value.fromVersion === "number" &&
+    Number.isInteger(value.fromVersion) &&
+    value.fromVersion > 0 &&
+    typeof value.toVersion === "number" &&
+    Number.isInteger(value.toVersion) &&
+    value.toVersion > 0 &&
+    Array.isArray(value.lines) &&
+    value.lines.every((line) => {
+      if (!isRecord(line)) {
+        return false;
+      }
+      const typeOk =
+        line.type === "added" ||
+        line.type === "removed" ||
+        line.type === "unchanged";
+      const oldLineOk =
+        line.oldLineNumber === undefined ||
+        (typeof line.oldLineNumber === "number" &&
+          Number.isInteger(line.oldLineNumber) &&
+          line.oldLineNumber > 0);
+      const newLineOk =
+        line.newLineNumber === undefined ||
+        (typeof line.newLineNumber === "number" &&
+          Number.isInteger(line.newLineNumber) &&
+          line.newLineNumber > 0);
+      return (
+        typeOk &&
+        typeof line.content === "string" &&
+        oldLineOk &&
+        newLineOk
+      );
+    }) &&
+    typeof summary.added === "number" &&
+    Number.isInteger(summary.added) &&
+    summary.added >= 0 &&
+    typeof summary.removed === "number" &&
+    Number.isInteger(summary.removed) &&
+    summary.removed >= 0 &&
+    typeof summary.unchanged === "number" &&
+    Number.isInteger(summary.unchanged) &&
+    summary.unchanged >= 0 &&
+    typeof summary.changed === "boolean"
   );
 }
 
@@ -4150,6 +4214,12 @@ export async function createRuleAsset(
   input: RuleAssetCreateInput,
   signal?: AbortSignal
 ): Promise<RuleAsset> {
+  if (
+    input.requiredApprovals !== undefined &&
+    !isRuleRequiredApprovals(input.requiredApprovals)
+  ) {
+    throw new Error("requiredApprovals 仅支持 1 或 2。");
+  }
   const result = await requestJson<unknown>(
     "/api/v1/rules/assets",
     {
@@ -4182,6 +4252,41 @@ export async function fetchRuleAssetVersions(
   );
   if (!isRuleAssetVersionListResponse(result)) {
     throw new Error("rules.assets.versions 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchRuleAssetVersionDiff(
+  assetId: string,
+  input: {
+    fromVersion: number;
+    toVersion: number;
+  },
+  signal?: AbortSignal,
+): Promise<RuleAssetVersionDiffResponse> {
+  const normalizedAssetId = assetId.trim();
+  if (!normalizedAssetId) {
+    throw new Error("assetId 不能为空。");
+  }
+  if (
+    !Number.isInteger(input.fromVersion) ||
+    input.fromVersion < 1 ||
+    !Number.isInteger(input.toVersion) ||
+    input.toVersion < 1
+  ) {
+    throw new Error("fromVersion 和 toVersion 必须是正整数。");
+  }
+  const query = new URLSearchParams({
+    fromVersion: String(input.fromVersion),
+    toVersion: String(input.toVersion),
+  });
+  const result = await requestJson<unknown>(
+    `/api/v1/rules/assets/${encodeURIComponent(normalizedAssetId)}/versions/diff?${query.toString()}`,
+    undefined,
+    signal,
+  );
+  if (!isRuleAssetVersionDiffResponse(result)) {
+    throw new Error("rules.assets.versions.diff 返回结构不合法");
   }
   return result;
 }

@@ -49,6 +49,7 @@ import {
   fetchResidencyRegions,
   fetchRuleApprovals,
   fetchRuleAssetVersions,
+  fetchRuleAssetVersionDiff,
   fetchRuleAssets,
   fetchUsageWeeklySummary,
   fetchSourceHealth,
@@ -134,6 +135,7 @@ import type {
   RuleApproval,
   RuleApprovalDecision,
   RuleAsset,
+  RuleAssetVersionDiffResponse,
   RuleAssetVersion,
   RuleLifecycleStatus,
   Session,
@@ -904,6 +906,23 @@ function formatRuleScopeBinding(
   }
 
   return segments.length > 0 ? segments.join(" | ") : "全局";
+}
+
+function formatRuleRequiredApprovals(
+  requiredApprovals: RuleAsset["requiredApprovals"],
+): string {
+  return `${requiredApprovals === 2 ? 2 : 1} 人`;
+}
+
+function formatRuleDiffLineType(type: RuleAssetVersionDiffResponse["lines"][number]["type"]): string {
+  switch (type) {
+    case "added":
+      return "新增";
+    case "removed":
+      return "删除";
+    default:
+      return "未变";
+  }
 }
 
 function isValidHttpUrl(value: string): boolean {
@@ -2918,6 +2937,7 @@ function GovernancePage() {
   const [ruleKeyword, setRuleKeyword] = useState("");
   const [ruleName, setRuleName] = useState("");
   const [ruleDescription, setRuleDescription] = useState("");
+  const [ruleRequiredApprovals, setRuleRequiredApprovals] = useState<1 | 2>(1);
   const [ruleScopeOrganizations, setRuleScopeOrganizations] = useState("");
   const [ruleScopeProjects, setRuleScopeProjects] = useState("");
   const [ruleScopeClients, setRuleScopeClients] = useState("");
@@ -2933,6 +2953,10 @@ function GovernancePage() {
   const [ruleApprovalDecision, setRuleApprovalDecision] =
     useState<RuleApprovalDecision>("approved");
   const [ruleApprovalReason, setRuleApprovalReason] = useState("");
+  const [ruleDiffFromVersion, setRuleDiffFromVersion] = useState("");
+  const [ruleDiffToVersion, setRuleDiffToVersion] = useState("");
+  const [ruleDiffPayload, setRuleDiffPayload] =
+    useState<RuleAssetVersionDiffResponse | null>(null);
   const [ruleFeedback, setRuleFeedback] = useState<string | null>(null);
   const [ruleError, setRuleError] = useState<string | null>(null);
 
@@ -3456,6 +3480,9 @@ function GovernancePage() {
       setRulePublishVersion("");
       setRuleRollbackVersion("");
       setRuleApprovalVersion("");
+      setRuleDiffFromVersion("");
+      setRuleDiffToVersion("");
+      setRuleDiffPayload(null);
       return;
     }
     const assets = ruleAssetsQuery.data?.items ?? [];
@@ -3465,6 +3492,9 @@ function GovernancePage() {
       setRulePublishVersion("");
       setRuleRollbackVersion("");
       setRuleApprovalVersion("");
+      setRuleDiffFromVersion("");
+      setRuleDiffToVersion("");
+      setRuleDiffPayload(null);
       return;
     }
     if (selected.latestVersion < 1) {
@@ -3472,9 +3502,16 @@ function GovernancePage() {
       setRulePublishVersion("");
       setRuleRollbackVersion("");
       setRuleApprovalVersion("");
+      setRuleDiffFromVersion("");
+      setRuleDiffToVersion("");
+      setRuleDiffPayload(null);
       return;
     }
     const latestVersionText = String(selected.latestVersion);
+    const defaultDiffFromVersion =
+      selected.latestVersion > 1 ? String(selected.latestVersion - 1) : "";
+    const defaultDiffToVersion =
+      selected.latestVersion > 1 ? latestVersionText : "";
     const switchedAsset =
       previousRuleAssetIdRef.current !== selectedRuleAssetId;
     previousRuleAssetIdRef.current = selectedRuleAssetId;
@@ -3482,6 +3519,9 @@ function GovernancePage() {
       setRulePublishVersion(latestVersionText);
       setRuleRollbackVersion(latestVersionText);
       setRuleApprovalVersion(latestVersionText);
+      setRuleDiffFromVersion(defaultDiffFromVersion);
+      setRuleDiffToVersion(defaultDiffToVersion);
+      setRuleDiffPayload(null);
       return;
     }
     setRulePublishVersion((prev) =>
@@ -3492,6 +3532,12 @@ function GovernancePage() {
     );
     setRuleApprovalVersion((prev) =>
       prev.trim().length > 0 ? prev : latestVersionText,
+    );
+    setRuleDiffFromVersion((prev) =>
+      prev.trim().length > 0 ? prev : defaultDiffFromVersion,
+    );
+    setRuleDiffToVersion((prev) =>
+      prev.trim().length > 0 ? prev : defaultDiffToVersion,
     );
   }, [ruleAssetsQuery.data, selectedRuleAssetId]);
 
@@ -3701,17 +3747,20 @@ function GovernancePage() {
     mutationFn: ({
       name,
       description,
+      requiredApprovals,
       scopeBinding,
     }: {
       name: string;
       description?: string;
+      requiredApprovals?: RuleAsset["requiredApprovals"];
       scopeBinding?: RuleAsset["scopeBinding"];
-    }) => createRuleAsset({ name, description, scopeBinding }),
+    }) => createRuleAsset({ name, description, requiredApprovals, scopeBinding }),
     onSuccess: async (asset) => {
       setRuleError(null);
       setRuleFeedback(`规则资产 ${asset.name} 已创建。`);
       setRuleName("");
       setRuleDescription("");
+      setRuleRequiredApprovals(1);
       setRuleScopeOrganizations("");
       setRuleScopeProjects("");
       setRuleScopeClients("");
@@ -3721,6 +3770,9 @@ function GovernancePage() {
       setRulePublishVersion(latestVersionText);
       setRuleRollbackVersion(latestVersionText);
       setRuleApprovalVersion(latestVersionText);
+      setRuleDiffFromVersion("");
+      setRuleDiffToVersion("");
+      setRuleDiffPayload(null);
       await queryClient.invalidateQueries({ queryKey: ["rules", "assets"] });
     },
     onError: (error) => {
@@ -3747,6 +3799,9 @@ function GovernancePage() {
       setRulePublishVersion(String(version.version));
       setRuleRollbackVersion(String(version.version));
       setRuleApprovalVersion(String(version.version));
+      setRuleDiffFromVersion(version.version > 1 ? String(version.version - 1) : "");
+      setRuleDiffToVersion(version.version > 1 ? String(version.version) : "");
+      setRuleDiffPayload(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["rules", "assets"] }),
         queryClient.invalidateQueries({
@@ -3834,6 +3889,27 @@ function GovernancePage() {
     onError: (error) => {
       setRuleFeedback(null);
       setRuleError(`提交审批失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const fetchRuleVersionDiffMutation = useMutation({
+    mutationFn: ({
+      assetId,
+      fromVersion,
+      toVersion,
+    }: {
+      assetId: string;
+      fromVersion: number;
+      toVersion: number;
+    }) => fetchRuleAssetVersionDiff(assetId, { fromVersion, toVersion }),
+    onSuccess: (diff) => {
+      setRuleError(null);
+      setRuleDiffPayload(diff);
+    },
+    onError: (error) => {
+      setRuleFeedback(null);
+      setRuleDiffPayload(null);
+      setRuleError(`加载版本 diff 失败：${toErrorMessage(error)}`);
     },
   });
 
@@ -4624,6 +4700,30 @@ function GovernancePage() {
     ruleVersionsQuery.data?.items ?? [];
   const ruleApprovalItems: RuleApproval[] =
     ruleApprovalsQuery.data?.items ?? [];
+  const ruleApprovalSummaryByVersion = useMemo(() => {
+    const summary = new Map<number, { approved: number; rejected: number }>();
+    for (const item of ruleApprovalItems) {
+      const current = summary.get(item.version) ?? {
+        approved: 0,
+        rejected: 0,
+      };
+      if (item.decision === "approved") {
+        current.approved += 1;
+      } else if (item.decision === "rejected") {
+        current.rejected += 1;
+      }
+      summary.set(item.version, current);
+    }
+    return summary;
+  }, [ruleApprovalItems]);
+  const currentPublishVersion = Number(rulePublishVersion);
+  const currentPublishApprovalSummary =
+    Number.isInteger(currentPublishVersion) && currentPublishVersion > 0
+      ? ruleApprovalSummaryByVersion.get(currentPublishVersion) ?? {
+          approved: 0,
+          rejected: 0,
+        }
+      : null;
   const mcpPolicyItems: McpToolPolicy[] = mcpPoliciesQuery.data?.items ?? [];
   const mcpApprovalItems: McpApprovalRequest[] =
     mcpApprovalsQuery.data?.items ?? [];
@@ -6560,6 +6660,22 @@ function GovernancePage() {
             />
           </label>
 
+          <label className="inline-field" htmlFor="rule-required-approvals">
+            审批要求
+            <select
+              id="rule-required-approvals"
+              value={String(ruleRequiredApprovals)}
+              onChange={(event) =>
+                setRuleRequiredApprovals(
+                  event.target.value === "2" ? 2 : 1,
+                )
+              }
+            >
+              <option value="1">单人审批</option>
+              <option value="2">双人审批</option>
+            </select>
+          </label>
+
           <label
             className="inline-field governance-wide-field"
             htmlFor="rule-scope-organizations"
@@ -6625,6 +6741,7 @@ function GovernancePage() {
               createRuleAssetMutation.mutate({
                 name,
                 description: ruleDescription.trim() || undefined,
+                requiredApprovals: ruleRequiredApprovals,
                 scopeBinding,
               });
             }}
@@ -6653,6 +6770,7 @@ function GovernancePage() {
                 <th>ID</th>
                 <th>名称</th>
                 <th>状态</th>
+                <th>审批要求</th>
                 <th>Scope Binding</th>
                 <th>最新版本</th>
                 <th>发布版本</th>
@@ -6663,7 +6781,7 @@ function GovernancePage() {
             <tbody>
               {ruleItems.length === 0 ? (
                 <tr>
-                  <td className="table-empty-cell" colSpan={8}>
+                  <td className="table-empty-cell" colSpan={9}>
                     暂无规则资产
                   </td>
                 </tr>
@@ -6678,6 +6796,7 @@ function GovernancePage() {
                       <td>{asset.id}</td>
                       <td>{asset.name}</td>
                       <td>{asset.status}</td>
+                      <td>{formatRuleRequiredApprovals(asset.requiredApprovals)}</td>
                       <td>{formatRuleScopeBinding(asset.scopeBinding)}</td>
                       <td>{asset.latestVersion}</td>
                       <td>{asset.publishedVersion ?? "--"}</td>
@@ -6718,6 +6837,13 @@ function GovernancePage() {
             <p className="feedback info">
               当前 Scope Binding：
               {formatRuleScopeBinding(selectedRuleAsset.scopeBinding)}
+            </p>
+            <p className="feedback info">
+              当前审批要求：
+              {formatRuleRequiredApprovals(selectedRuleAsset.requiredApprovals)}
+              {currentPublishApprovalSummary
+                ? `；发布版本 v${rulePublishVersion || "--"} 已批准 ${currentPublishApprovalSummary.approved} 人`
+                : ""}
             </p>
 
             <div className="filters-row governance-inline-grid">
@@ -6997,6 +7123,117 @@ function GovernancePage() {
                 </tbody>
               </table>
             </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="rule-diff-from-version">
+                Diff 起始版本
+                <input
+                  id="rule-diff-from-version"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={ruleDiffFromVersion}
+                  onChange={(event) => setRuleDiffFromVersion(event.target.value)}
+                  placeholder="例如：1"
+                />
+              </label>
+
+              <label className="inline-field" htmlFor="rule-diff-to-version">
+                Diff 目标版本
+                <input
+                  id="rule-diff-to-version"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={ruleDiffToVersion}
+                  onChange={(event) => setRuleDiffToVersion(event.target.value)}
+                  placeholder="例如：2"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={
+                  fetchRuleVersionDiffMutation.isPending ||
+                  selectedRuleAsset.latestVersion < 2
+                }
+                onClick={() => {
+                  const fromVersion = Number(ruleDiffFromVersion);
+                  const toVersion = Number(ruleDiffToVersion);
+                  if (
+                    !Number.isInteger(fromVersion) ||
+                    fromVersion < 1 ||
+                    !Number.isInteger(toVersion) ||
+                    toVersion < 1
+                  ) {
+                    setRuleFeedback(null);
+                    setRuleError("Diff 起始版本和目标版本必须是正整数。");
+                    return;
+                  }
+                  if (fromVersion === toVersion) {
+                    setRuleFeedback(null);
+                    setRuleError("Diff 起始版本和目标版本不能相同。");
+                    return;
+                  }
+                  setRuleFeedback(null);
+                  setRuleError(null);
+                  fetchRuleVersionDiffMutation.mutate({
+                    assetId: selectedRuleAsset.id,
+                    fromVersion,
+                    toVersion,
+                  });
+                }}
+              >
+                {fetchRuleVersionDiffMutation.isPending ? "比较中..." : "比较版本"}
+              </button>
+            </div>
+
+            {fetchRuleVersionDiffMutation.isPending ? (
+              <p className="feedback info">版本 diff 加载中...</p>
+            ) : null}
+            {selectedRuleAsset.latestVersion < 2 ? (
+              <p className="feedback info">
+                当前资产至少需要两个版本才可比较 diff。
+              </p>
+            ) : null}
+            {ruleDiffPayload ? (
+              <>
+                <p className="feedback info">
+                  {`版本 diff：v${ruleDiffPayload.fromVersion} -> v${ruleDiffPayload.toVersion}（+${ruleDiffPayload.summary.added} / -${ruleDiffPayload.summary.removed} / =${ruleDiffPayload.summary.unchanged}）`}
+                </p>
+                <div className="table-wrapper">
+                  <table className="session-table">
+                    <thead>
+                      <tr>
+                        <th>旧行号</th>
+                        <th>新行号</th>
+                        <th>类型</th>
+                        <th>内容</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ruleDiffPayload.lines.length === 0 ? (
+                        <tr>
+                          <td className="table-empty-cell" colSpan={4}>
+                            两个版本内容一致
+                          </td>
+                        </tr>
+                      ) : (
+                        ruleDiffPayload.lines.map((line, index) => (
+                          <tr key={`${line.type}-${index}-${line.oldLineNumber ?? "old"}-${line.newLineNumber ?? "new"}`}>
+                            <td>{line.oldLineNumber ?? "--"}</td>
+                            <td>{line.newLineNumber ?? "--"}</td>
+                            <td>{formatRuleDiffLineType(line.type)}</td>
+                            <td style={{ whiteSpace: "pre-wrap" }}>{line.content}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : null}
 
             <div className="table-wrapper">
               <table className="session-table">

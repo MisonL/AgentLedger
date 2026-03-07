@@ -12618,6 +12618,7 @@ describe("Control Plane API", () => {
       id: string;
       tenantId: string;
       status: string;
+      requiredApprovals: number;
       scopeBinding: {
         organizations?: string[];
         projects?: string[];
@@ -12626,6 +12627,7 @@ describe("Control Plane API", () => {
     };
     expect(asset.tenantId).toBe(tenantAId);
     expect(asset.status).toBe("draft");
+    expect(asset.requiredApprovals).toBe(1);
     expect(asset.scopeBinding).toEqual({
       organizations: [`org-${nonce}`],
       projects: [`project-${nonce}`],
@@ -12910,6 +12912,259 @@ describe("Control Plane API", () => {
       items: Array<{ id: string }>;
     };
     expect(listBBody.items.some((item) => item.id === asset.id)).toBe(false);
+  });
+
+  test("rule hub 路由：双人审批资产发布门槛与版本 diff", async () => {
+    const nonce = createNonce("rule-hub-dual-approval");
+    const owner = await registerAndLoginUser(`${nonce}-owner`);
+    const reviewer = await registerAndLoginUser(`${nonce}-reviewer`);
+    if (!owner.userId || !reviewer.userId) {
+      throw new Error("无法解析双人审批测试用户 ID。");
+    }
+
+    const tenantResult = await createTenantByAuth(
+      owner.accessToken,
+      {
+        name: `RuleHub Dual Tenant ${nonce}`,
+        slug: `rulehub-dual-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error("双人审批测试租户创建失败，缺少 tenantId。");
+    }
+
+    const addMaintainerResult = await addTenantMemberByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        userId: reviewer.userId,
+        tenantRole: "maintainer",
+      },
+      owner.userId,
+    );
+    assertApiStatus(addMaintainerResult, [200, 201]);
+
+    const ownerHeaders = await issueTenantScopedAuthHeaders(
+      tenantId,
+      owner.accessToken,
+      owner.userId,
+    );
+    const reviewerHeaders = await issueTenantScopedAuthHeaders(
+      tenantId,
+      reviewer.accessToken,
+      reviewer.userId,
+    );
+
+    const createAssetResponse = await app.request("/api/v1/rules/assets", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...ownerHeaders,
+      },
+      body: JSON.stringify({
+        name: `Dual approval asset ${nonce}`,
+        description: "验证双人审批发布门槛",
+        requiredApprovals: 2,
+      }),
+    });
+    expect(createAssetResponse.status).toBe(201);
+    const asset = (await createAssetResponse.json()) as {
+      id: string;
+      requiredApprovals: number;
+    };
+    expect(asset.requiredApprovals).toBe(2);
+
+    const createVersion1Response = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/versions`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          content: "allow tool=github.read_repo\nrequire tag=verified",
+          changelog: "v1",
+        }),
+      },
+    );
+    expect(createVersion1Response.status).toBe(201);
+
+    const createVersion2Response = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/versions`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          content: "deny tool=github.delete_repo\nrequire tag=verified",
+          changelog: "v2",
+        }),
+      },
+    );
+    expect(createVersion2Response.status).toBe(201);
+
+    const diffResponse = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/versions/diff?fromVersion=1&toVersion=2`,
+      {
+        headers: ownerHeaders,
+      },
+    );
+    expect(diffResponse.status).toBe(200);
+    const diffBody = (await diffResponse.json()) as {
+      assetId: string;
+      fromVersion: number;
+      toVersion: number;
+      lines: Array<{
+        type: string;
+        content: string;
+        oldLineNumber?: number;
+        newLineNumber?: number;
+      }>;
+      summary: {
+        added: number;
+        removed: number;
+        unchanged: number;
+        changed: boolean;
+      };
+    };
+    expect(diffBody.assetId).toBe(asset.id);
+    expect(diffBody.fromVersion).toBe(1);
+    expect(diffBody.toVersion).toBe(2);
+    expect(diffBody.summary).toEqual({
+      added: 1,
+      removed: 1,
+      unchanged: 1,
+      changed: true,
+    });
+    expect(
+      diffBody.lines.some(
+        (item) =>
+          item.type === "removed" &&
+          item.content === "allow tool=github.read_repo" &&
+          item.oldLineNumber === 1,
+      ),
+    ).toBe(true);
+    expect(
+      diffBody.lines.some(
+        (item) =>
+          item.type === "added" &&
+          item.content === "deny tool=github.delete_repo" &&
+          item.newLineNumber === 1,
+      ),
+    ).toBe(true);
+    expect(
+      diffBody.lines.some(
+        (item) =>
+          item.type === "unchanged" &&
+          item.content === "require tag=verified",
+      ),
+    ).toBe(true);
+
+    const publishWithoutApprovalsResponse = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/publish`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          version: 2,
+        }),
+      },
+    );
+    expect(publishWithoutApprovalsResponse.status).toBe(409);
+
+    const firstApprovalResponse = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/approvals`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          version: 2,
+          decision: "approved",
+          reason: "owner approved",
+        }),
+      },
+    );
+    expect(firstApprovalResponse.status).toBe(201);
+
+    const publishWithSingleApprovalResponse = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/publish`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          version: 2,
+        }),
+      },
+    );
+    expect(publishWithSingleApprovalResponse.status).toBe(409);
+
+    const secondApprovalResponse = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/approvals`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...reviewerHeaders,
+        },
+        body: JSON.stringify({
+          version: 2,
+          decision: "approved",
+          reason: "reviewer approved",
+        }),
+      },
+    );
+    expect(secondApprovalResponse.status).toBe(201);
+
+    const publishResponse = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/publish`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          version: 2,
+        }),
+      },
+    );
+    expect(publishResponse.status).toBe(200);
+    const publishedAsset = (await publishResponse.json()) as {
+      publishedVersion?: number;
+      status: string;
+    };
+    expect(publishedAsset.publishedVersion).toBe(2);
+    expect(publishedAsset.status).toBe("published");
+
+    const publishAudits = await queryAuditByActionWithHeaders(
+      "control_plane.rule_asset_published",
+      asset.id,
+      ownerHeaders,
+    );
+    const publishAudit = publishAudits.items.find(
+      (item) =>
+        item.action === "control_plane.rule_asset_published" &&
+        item.metadata.resourceId === asset.id &&
+        item.metadata.version === 2 &&
+        item.metadata.requiredApprovals === 2 &&
+        item.metadata.approvedApprovals === 2,
+    );
+    expect(publishAudit).toBeDefined();
   });
 
   test("mcp 路由：401/400/策略审批审计链路与租户隔离", async () => {

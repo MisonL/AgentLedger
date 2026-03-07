@@ -365,6 +365,11 @@ export interface RuleApprovalWriteResult {
   created: boolean;
 }
 
+export interface RuleApprovalSummary {
+  approved: number;
+  rejected: number;
+}
+
 export interface McpToolPolicyListResult {
   items: McpToolPolicy[];
   total: number;
@@ -2667,6 +2672,7 @@ function mapReplicationJobRow(row: DbRow): ReplicationJob {
 }
 
 function mapRuleAssetRow(row: DbRow): RuleAsset {
+  const requiredApprovals = Math.trunc(toNumber(row.required_approvals, 1));
   return {
     id: firstNonEmptyString(row.id) ?? "",
     tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
@@ -2675,6 +2681,8 @@ function mapRuleAssetRow(row: DbRow): RuleAsset {
     status: toRuleLifecycleStatus(row.status),
     latestVersion: Math.max(0, Math.trunc(toNumber(row.latest_version, 0))),
     publishedVersion: toOptionalNonNegativeInteger(row.published_version),
+    requiredApprovals:
+      requiredApprovals === 2 ? 2 : 1,
     scopeBinding: mapRuleScopeBinding(row.scope_binding),
     createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
     updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
@@ -8722,6 +8730,7 @@ class ControlPlaneRepository {
                 status,
                 latest_version,
                 published_version,
+                required_approvals,
                 scope_binding,
                 created_at,
                 updated_at
@@ -8763,6 +8772,7 @@ class ControlPlaneRepository {
                 status,
                 latest_version,
                 published_version,
+                required_approvals,
                 scope_binding,
                 created_at,
                 updated_at
@@ -8792,6 +8802,8 @@ class ControlPlaneRepository {
       status: "draft",
       latestVersion: 0,
       publishedVersion: undefined,
+      requiredApprovals:
+        Math.trunc(toNumber(input.requiredApprovals, 1)) === 2 ? 2 : 1,
       scopeBinding,
       createdAt: now,
       updatedAt: now,
@@ -8812,11 +8824,12 @@ class ControlPlaneRepository {
            status,
            latest_version,
            published_version,
+           required_approvals,
            scope_binding,
            created_at,
            updated_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, NULL, $7::jsonb, $8::timestamptz, $8::timestamptz)
+         VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8::jsonb, $9::timestamptz, $9::timestamptz)
          RETURNING id,
                    tenant_id,
                    name,
@@ -8824,6 +8837,7 @@ class ControlPlaneRepository {
                    status,
                    latest_version,
                    published_version,
+                   required_approvals,
                    scope_binding,
                    created_at,
                    updated_at`,
@@ -8834,6 +8848,7 @@ class ControlPlaneRepository {
           asset.description ?? null,
           asset.status,
           asset.latestVersion,
+          asset.requiredApprovals,
           safeStringifyJson(asset.scopeBinding),
           asset.createdAt,
         ]
@@ -8887,6 +8902,56 @@ class ControlPlaneRepository {
     } catch (error) {
       this.disableDb(error, "查询规则版本失败");
       return this.listRuleAssetVersionsFromMemory(normalizedTenantId, normalizedAssetId, normalizedLimit);
+    }
+  }
+
+  async getRuleAssetVersionByNumber(
+    tenantId: string,
+    assetId: string,
+    version: number
+  ): Promise<RuleAssetVersion | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAssetId = firstNonEmptyString(assetId);
+    if (!normalizedAssetId) {
+      return null;
+    }
+    const normalizedVersion = Math.max(1, Math.trunc(toNumber(version, 1)));
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getRuleAssetVersionByNumberFromMemory(
+        normalizedTenantId,
+        normalizedAssetId,
+        normalizedVersion
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                asset_id,
+                version,
+                content,
+                changelog,
+                created_by_user_id,
+                created_at
+         FROM rule_asset_versions
+         WHERE tenant_id = $1
+           AND asset_id = $2
+           AND version = $3
+         LIMIT 1`,
+        [normalizedTenantId, normalizedAssetId, normalizedVersion]
+      );
+      const row = result.rows[0];
+      return row ? mapRuleAssetVersionRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询指定规则版本失败");
+      return this.getRuleAssetVersionByNumberFromMemory(
+        normalizedTenantId,
+        normalizedAssetId,
+        normalizedVersion
+      );
     }
   }
 
@@ -9042,6 +9107,7 @@ class ControlPlaneRepository {
                    status,
                    latest_version,
                    published_version,
+                   required_approvals,
                    scope_binding,
                    created_at,
                    updated_at`,
@@ -9108,6 +9174,7 @@ class ControlPlaneRepository {
                    status,
                    latest_version,
                    published_version,
+                   required_approvals,
                    scope_binding,
                    created_at,
                    updated_at`,
@@ -9284,6 +9351,59 @@ class ControlPlaneRepository {
     } catch (error) {
       this.disableDb(error, "创建规则审批记录失败");
       return this.createRuleApprovalToMemory(approval);
+    }
+  }
+
+  async getRuleApprovalSummary(
+    tenantId: string,
+    assetId: string,
+    version: number
+  ): Promise<RuleApprovalSummary> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAssetId = firstNonEmptyString(assetId);
+    if (!normalizedAssetId) {
+      return { approved: 0, rejected: 0 };
+    }
+    const normalizedVersion = Math.max(1, Math.trunc(toNumber(version, 1)));
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getRuleApprovalSummaryFromMemory(
+        normalizedTenantId,
+        normalizedAssetId,
+        normalizedVersion
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT decision, COUNT(*)::int AS total
+         FROM rule_approvals
+         WHERE tenant_id = $1
+           AND asset_id = $2
+           AND version = $3
+         GROUP BY decision`,
+        [normalizedTenantId, normalizedAssetId, normalizedVersion]
+      );
+      let approved = 0;
+      let rejected = 0;
+      for (const row of result.rows) {
+        const decision = toRuleApprovalDecision(row.decision);
+        const total = Math.max(0, Math.trunc(toNumber(row.total, 0)));
+        if (decision === "approved") {
+          approved = total;
+        } else if (decision === "rejected") {
+          rejected = total;
+        }
+      }
+      return { approved, rejected };
+    } catch (error) {
+      this.disableDb(error, "统计规则审批结果失败");
+      return this.getRuleApprovalSummaryFromMemory(
+        normalizedTenantId,
+        normalizedAssetId,
+        normalizedVersion
+      );
     }
   }
 
@@ -15281,6 +15401,7 @@ class ControlPlaneRepository {
          status TEXT NOT NULL DEFAULT 'draft',
          latest_version INTEGER NOT NULL DEFAULT 0,
          published_version INTEGER,
+         required_approvals INTEGER NOT NULL DEFAULT 1,
          scope_binding JSONB NOT NULL DEFAULT '{}'::jsonb,
          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -15295,6 +15416,7 @@ class ControlPlaneRepository {
          ADD COLUMN IF NOT EXISTS status TEXT,
          ADD COLUMN IF NOT EXISTS latest_version INTEGER,
          ADD COLUMN IF NOT EXISTS published_version INTEGER,
+         ADD COLUMN IF NOT EXISTS required_approvals INTEGER,
          ADD COLUMN IF NOT EXISTS scope_binding JSONB,
          ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ,
          ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ`
@@ -15314,6 +15436,10 @@ class ControlPlaneRepository {
              WHEN published_version IS NULL THEN NULL
              ELSE GREATEST(published_version, 0)
            END,
+           required_approvals = CASE
+             WHEN required_approvals = 2 THEN 2
+             ELSE 1
+           END,
            scope_binding = CASE
              WHEN jsonb_typeof(scope_binding) = 'object' THEN scope_binding
              ELSE '{}'::jsonb
@@ -15329,6 +15455,8 @@ class ControlPlaneRepository {
           OR latest_version IS NULL
           OR latest_version < 0
           OR published_version < 0
+          OR required_approvals IS NULL
+          OR required_approvals NOT IN (1, 2)
           OR scope_binding IS NULL
           OR jsonb_typeof(scope_binding) <> 'object'
           OR created_at IS NULL
@@ -21193,6 +21321,20 @@ class ControlPlaneRepository {
       .map((item) => this.cloneRuleAssetVersion(item));
   }
 
+  private getRuleAssetVersionByNumberFromMemory(
+    tenantId: string,
+    assetId: string,
+    version: number
+  ): RuleAssetVersion | null {
+    const matched = this.memoryRuleAssetVersions.find(
+      (item) =>
+        item.tenantId === tenantId &&
+        item.assetId === assetId &&
+        item.version === version
+    );
+    return matched ? this.cloneRuleAssetVersion(matched) : null;
+  }
+
   private createRuleAssetVersionToMemory(
     tenantId: string,
     assetId: string,
@@ -21269,6 +21411,30 @@ class ControlPlaneRepository {
 
   private cloneRuleApproval(approval: RuleApproval): RuleApproval {
     return { ...approval };
+  }
+
+  private getRuleApprovalSummaryFromMemory(
+    tenantId: string,
+    assetId: string,
+    version: number
+  ): RuleApprovalSummary {
+    let approved = 0;
+    let rejected = 0;
+    for (const approval of this.memoryRuleApprovals) {
+      if (
+        approval.tenantId !== tenantId ||
+        approval.assetId !== assetId ||
+        approval.version !== version
+      ) {
+        continue;
+      }
+      if (approval.decision === "approved") {
+        approved += 1;
+      } else if (approval.decision === "rejected") {
+        rejected += 1;
+      }
+    }
+    return { approved, rejected };
   }
 
   private listRuleApprovalsFromMemory(

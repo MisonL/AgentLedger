@@ -61,6 +61,7 @@ type GovernanceRuleAssetFixture = {
   status: "draft" | "published" | "deprecated";
   latestVersion: number;
   publishedVersion: number | null;
+  requiredApprovals?: number;
   scopeBinding?: {
     organizations?: string[];
     projects?: string[];
@@ -115,6 +116,7 @@ function mockGovernancePageFetch({
       status: asset.status,
       latestVersion: asset.latestVersion,
       publishedVersion: asset.publishedVersion,
+      requiredApprovals: asset.requiredApprovals ?? 1,
       scopeBinding: asset.scopeBinding ?? {},
       createdAt: `2026-03-${String(index + 1).padStart(2, "0")}T08:00:00.000Z`,
       updatedAt: `2026-03-${String(index + 1).padStart(2, "0")}T09:00:00.000Z`,
@@ -1962,7 +1964,9 @@ describe("Web Console", () => {
     window.location.hash = originalHash;
   });
 
-  test("治理页展示告警工作台与导出中心", async () => {
+  test(
+    "治理页展示告警工作台与导出中心",
+    async () => {
     window.location.hash = "#/governance";
     setAuthTokens({
       accessToken: "access-token-governance-overview",
@@ -2013,9 +2017,14 @@ describe("Web Console", () => {
     expect(
       await screen.findByRole("heading", { name: "导出中心", level: 2 }),
     ).toBeInTheDocument();
-  });
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
 
-  test("治理页支持告警级别与状态筛选", async () => {
+  test(
+    "治理页支持告警级别与状态筛选",
+    { timeout: GOVERNANCE_HEAVY_TEST_TIMEOUT_MS },
+    async () => {
     window.location.hash = "#/governance";
     setAuthTokens({
       accessToken: "access-token-governance-filters",
@@ -2203,9 +2212,12 @@ describe("Web Console", () => {
         );
       }),
     ).toBe(true);
-  });
+    },
+  );
 
-  test("治理页支持 ACK 告警状态", async () => {
+  test(
+    "治理页支持 ACK 告警状态",
+    async () => {
     window.location.hash = "#/governance";
     setAuthTokens({
       accessToken: "access-token-governance-alert",
@@ -2311,9 +2323,13 @@ describe("Web Console", () => {
         (init as RequestInit | undefined)?.method === "PATCH",
     );
     expect(patchCall).toBeTruthy();
-  });
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
 
-  test("治理页支持 Resolve 告警状态并展示完成反馈", async () => {
+  test(
+    "治理页支持 Resolve 告警状态并展示完成反馈",
+    async () => {
     window.location.hash = "#/governance";
     setAuthTokens({
       accessToken: "access-token-governance-resolve",
@@ -2415,7 +2431,9 @@ describe("Web Console", () => {
         (init as RequestInit | undefined)?.method === "PATCH",
     );
     expect(patchCall).toBeTruthy();
-  });
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
 
   test(
     "治理页支持告警编排规则筛选、保存规范化、模拟与执行日志加载",
@@ -4834,6 +4852,7 @@ describe("Web Console", () => {
             const payload = JSON.parse(String(init?.body ?? "{}")) as {
               name?: string;
               description?: string;
+              requiredApprovals?: number;
               scopeBinding?: {
                 organizations?: string[];
                 projects?: string[];
@@ -4849,6 +4868,8 @@ describe("Web Console", () => {
               status: "draft" as const,
               latestVersion: 0,
               publishedVersion: null,
+              requiredApprovals:
+                payload.requiredApprovals === 2 ? 2 : 1,
               scopeBinding: payload.scopeBinding ?? {},
               createdAt: "2026-03-05T08:00:00.000Z",
               updatedAt: "2026-03-05T09:00:00.000Z",
@@ -4860,6 +4881,7 @@ describe("Web Console", () => {
               status: created.status,
               latestVersion: created.latestVersion,
               publishedVersion: created.publishedVersion,
+              requiredApprovals: created.requiredApprovals,
               scopeBinding: created.scopeBinding,
             });
 
@@ -4895,6 +4917,9 @@ describe("Web Console", () => {
       fireEvent.change(ruleHubScreen.getByLabelText("说明"), {
         target: { value: "验证 Rule Hub scopeBinding" },
       });
+      fireEvent.change(ruleHubScreen.getByLabelText("审批要求"), {
+        target: { value: "2" },
+      });
       fireEvent.change(
         ruleHubScreen.getByLabelText("Organizations（逗号分隔）"),
         {
@@ -4925,8 +4950,14 @@ describe("Web Console", () => {
         expect(createdRow).toBeDefined();
       });
       expect(createdRow).toHaveTextContent(
+        "2 人",
+      );
+      expect(createdRow).toHaveTextContent(
         "organizations: org-alpha, org-beta | projects: project-1 | clients: client-web, client-admin",
       );
+      expect(
+        await ruleHubScreen.findByText("当前审批要求：2 人"),
+      ).toBeInTheDocument();
       expect(
         await ruleHubScreen.findByText(
           "当前 Scope Binding：organizations: org-alpha, org-beta | projects: project-1 | clients: client-web, client-admin",
@@ -4945,12 +4976,254 @@ describe("Web Console", () => {
           String((postCall?.[1] as RequestInit | undefined)?.body ?? "{}"),
         ),
       ).toMatchObject({
+        requiredApprovals: 2,
         scopeBinding: {
           organizations: ["org-alpha", "org-beta"],
           projects: ["project-1"],
           clients: ["client-web", "client-admin"],
         },
       });
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "治理页 Rule Hub 支持创建双人审批资产并展示审批要求",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-rule-hub-dual-approval",
+        refreshToken: "refresh-token-governance-rule-hub-dual-approval",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const ruleAssets: GovernanceRuleAssetFixture[] = [];
+      const fetchSpy = mockGovernancePageFetch({
+        ruleAssets,
+        extraHandler: (_input, init, context) => {
+          if (
+            context.pathname === "/api/v1/rules/assets" &&
+            context.method === "POST"
+          ) {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as {
+              name?: string;
+              description?: string;
+              requiredApprovals?: number;
+            };
+            const created = {
+              id: "asset-dual-created",
+              tenantId: "default",
+              name: payload.name ?? "asset-dual-created",
+              description: payload.description ?? "",
+              status: "draft" as const,
+              latestVersion: 0,
+              publishedVersion: null,
+              requiredApprovals:
+                payload.requiredApprovals === 2 ? 2 : 1,
+              scopeBinding: {},
+              createdAt: "2026-03-05T10:00:00.000Z",
+              updatedAt: "2026-03-05T10:30:00.000Z",
+            };
+            ruleAssets.push({
+              id: created.id,
+              name: created.name,
+              status: created.status,
+              latestVersion: created.latestVersion,
+              publishedVersion: created.publishedVersion,
+              requiredApprovals: created.requiredApprovals,
+            });
+            return mockJsonResponse(created, 201);
+          }
+          return undefined;
+        },
+      });
+
+      render(<App />);
+
+      const ruleHubHeading = await screen.findByRole("heading", {
+        name: "Rule Hub 规则资产",
+        level: 2,
+      });
+      const ruleHubSection = ruleHubHeading.closest("section");
+      if (!(ruleHubSection instanceof HTMLElement)) {
+        throw new Error("未找到 Rule Hub 所在 section。");
+      }
+      const ruleHubScreen = within(ruleHubSection);
+
+      fireEvent.change(ruleHubScreen.getByLabelText("资产名称"), {
+        target: { value: "dual-approval-rule" },
+      });
+      fireEvent.change(ruleHubScreen.getByLabelText("审批要求"), {
+        target: { value: "2" },
+      });
+      fireEvent.click(
+        ruleHubScreen.getByRole("button", { name: "创建规则资产" }),
+      );
+
+      expect(
+        await ruleHubScreen.findByText("规则资产 dual-approval-rule 已创建。"),
+      ).toBeInTheDocument();
+      expect(ruleHubScreen.getByText("2 人")).toBeInTheDocument();
+      expect(
+        await ruleHubScreen.findByText("当前审批要求：2 人"),
+      ).toBeInTheDocument();
+
+      const postCall = fetchSpy.mock.calls.find(
+        ([url, init]) =>
+          new URL(toUrl(url), "http://localhost").pathname ===
+            "/api/v1/rules/assets" &&
+          (init as RequestInit | undefined)?.method === "POST",
+      );
+      expect(postCall).toBeTruthy();
+      expect(
+        JSON.parse(
+          String((postCall?.[1] as RequestInit | undefined)?.body ?? "{}"),
+        ),
+      ).toMatchObject({
+        requiredApprovals: 2,
+      });
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "治理页 Rule Hub 默认填充版本 diff 输入并支持加载",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-rule-hub-diff",
+        refreshToken: "refresh-token-governance-rule-hub-diff",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const fetchSpy = mockGovernancePageFetch({
+        ruleAssets: [
+          {
+            id: "asset-diff",
+            name: "asset-diff",
+            status: "published",
+            latestVersion: 2,
+            publishedVersion: 2,
+            requiredApprovals: 1,
+          },
+        ],
+        extraHandler: (_input, _init, context) => {
+          if (
+            context.pathname === "/api/v1/rules/assets/asset-diff/versions" &&
+            context.method === "GET"
+          ) {
+            return mockJsonResponse({
+              items: [
+                {
+                  id: "rule-version-2",
+                  tenantId: "default",
+                  assetId: "asset-diff",
+                  version: 2,
+                  content: "deny tool=github.delete_repo\nrequire tag=verified",
+                  changelog: "v2",
+                  createdAt: "2026-03-05T11:00:00.000Z",
+                },
+                {
+                  id: "rule-version-1",
+                  tenantId: "default",
+                  assetId: "asset-diff",
+                  version: 1,
+                  content: "allow tool=github.read_repo\nrequire tag=verified",
+                  changelog: "v1",
+                  createdAt: "2026-03-05T10:00:00.000Z",
+                },
+              ],
+              total: 2,
+            });
+          }
+          if (
+            context.pathname ===
+              "/api/v1/rules/assets/asset-diff/versions/diff" &&
+            context.method === "GET"
+          ) {
+            return mockJsonResponse({
+              assetId: "asset-diff",
+              fromVersion: 1,
+              toVersion: 2,
+              summary: {
+                added: 1,
+                removed: 1,
+                unchanged: 1,
+                changed: true,
+              },
+              lines: [
+                {
+                  type: "removed",
+                  content: "allow tool=github.read_repo",
+                  oldLineNumber: 1,
+                },
+                {
+                  type: "added",
+                  content: "deny tool=github.delete_repo",
+                  newLineNumber: 1,
+                },
+                {
+                  type: "unchanged",
+                  content: "require tag=verified",
+                  oldLineNumber: 2,
+                  newLineNumber: 2,
+                },
+              ],
+            });
+          }
+          return undefined;
+        },
+      });
+
+      render(<App />);
+
+      const ruleHubHeading = await screen.findByRole("heading", {
+        name: "Rule Hub 规则资产",
+        level: 2,
+      });
+      const ruleHubSection = ruleHubHeading.closest("section");
+      if (!(ruleHubSection instanceof HTMLElement)) {
+        throw new Error("未找到 Rule Hub 所在 section。");
+      }
+      const ruleHubScreen = within(ruleHubSection);
+
+      const fromVersionInput = (await ruleHubScreen.findByLabelText(
+        "Diff 起始版本",
+      )) as HTMLInputElement;
+      const toVersionInput = (await ruleHubScreen.findByLabelText(
+        "Diff 目标版本",
+      )) as HTMLInputElement;
+      expect(fromVersionInput.value).toBe("1");
+      expect(toVersionInput.value).toBe("2");
+
+      fireEvent.click(
+        ruleHubScreen.getByRole("button", { name: "比较版本" }),
+      );
+
+      await waitFor(() => {
+        expect((ruleHubSection as HTMLElement).textContent).toContain(
+          "版本 diff：v1 -> v2（+1 / -1 / =1）",
+        );
+      });
+      expect(
+        ruleHubScreen.getByText("allow tool=github.read_repo"),
+      ).toBeInTheDocument();
+      expect(
+        ruleHubScreen.getByText("deny tool=github.delete_repo"),
+      ).toBeInTheDocument();
+      expect(
+        ruleHubScreen.getByText("require tag=verified"),
+      ).toBeInTheDocument();
+
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url]) =>
+            new URL(toUrl(url), "http://localhost").pathname ===
+            "/api/v1/rules/assets/asset-diff/versions/diff",
+        ),
+      ).toBe(true);
     },
     GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
   );
@@ -5007,11 +5280,19 @@ describe("Web Console", () => {
       const approvalVersionInput = (await ruleHubScreen.findByLabelText(
         "审批版本",
       )) as HTMLInputElement;
+      const diffFromVersionInput = (await ruleHubScreen.findByLabelText(
+        "Diff 起始版本",
+      )) as HTMLInputElement;
+      const diffToVersionInput = (await ruleHubScreen.findByLabelText(
+        "Diff 目标版本",
+      )) as HTMLInputElement;
 
       await waitFor(() => {
         expect(publishVersionInput.value).toBe("3");
         expect(rollbackVersionInput.value).toBe("3");
         expect(approvalVersionInput.value).toBe("3");
+        expect(diffFromVersionInput.value).toBe("2");
+        expect(diffToVersionInput.value).toBe("3");
       });
 
       fireEvent.change(publishVersionInput, { target: { value: "1" } });
@@ -5033,6 +5314,8 @@ describe("Web Console", () => {
         expect(publishVersionInput.value).toBe("9");
         expect(rollbackVersionInput.value).toBe("9");
         expect(approvalVersionInput.value).toBe("9");
+        expect(diffFromVersionInput.value).toBe("8");
+        expect(diffToVersionInput.value).toBe("9");
       });
     },
     GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
@@ -5090,11 +5373,19 @@ describe("Web Console", () => {
       const approvalVersionInput = (await ruleHubScreen.findByLabelText(
         "审批版本",
       )) as HTMLInputElement;
+      const diffFromVersionInput = (await ruleHubScreen.findByLabelText(
+        "Diff 起始版本",
+      )) as HTMLInputElement;
+      const diffToVersionInput = (await ruleHubScreen.findByLabelText(
+        "Diff 目标版本",
+      )) as HTMLInputElement;
 
       await waitFor(() => {
         expect(publishVersionInput.value).toBe("4");
         expect(rollbackVersionInput.value).toBe("4");
         expect(approvalVersionInput.value).toBe("4");
+        expect(diffFromVersionInput.value).toBe("3");
+        expect(diffToVersionInput.value).toBe("4");
       });
 
       const emptyRow = (await ruleHubScreen.findAllByRole("row")).find((row) =>
@@ -5109,6 +5400,8 @@ describe("Web Console", () => {
         expect(publishVersionInput.value).toBe("");
         expect(rollbackVersionInput.value).toBe("");
         expect(approvalVersionInput.value).toBe("");
+        expect(diffFromVersionInput.value).toBe("");
+        expect(diffToVersionInput.value).toBe("");
       });
     },
     GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,

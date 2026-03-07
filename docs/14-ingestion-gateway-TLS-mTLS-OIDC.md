@@ -1,7 +1,7 @@
 # ingestion-gateway TLS/mTLS/OIDC 运行指引
 
 - 文档版本：v1.0
-- 更新时间：2026-03-02
+- 更新时间：2026-03-07
 - 适用组件：`services/ingestion-gateway`、`clients/agent`
 
 ## 1. OIDC 必填项（按场景）
@@ -94,6 +94,15 @@ GRPC_TLS_CLIENT_CA_FILE=/etc/agentledger/tls/client-ca.crt
   - endpoint 语法合法性；
   - 到 `host:port` 的 TCP 连通性。
 - 当前不会执行 gRPC TLS 握手与证书链校验探测。
+
+### 4.4 gRPC mTLS 端到端验证入口
+
+- 已有本地 Go 端到端测试：`go test ./clients/agent -run TestSendIngestRequestGRPC_MTLSEndToEnd -count=1 -v`
+- 该测试会临时生成 CA、服务端证书、客户端证书，启动要求 mTLS 的本地 gRPC server，并通过 `sendIngestRequestGRPC()` 验证：
+  - mTLS 握手成功；
+  - 服务端收到并校验客户端证书；
+  - `authorization` metadata 能透传；
+  - 请求能拿到 `PushBatchResponse` 响应。
 
 ## 5. 三平台命令示例
 
