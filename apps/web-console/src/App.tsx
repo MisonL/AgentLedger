@@ -278,7 +278,9 @@ const EMPTY_SESSION_SEARCH_FILTERS: SessionSearchFilters = {
   project: "",
 };
 
-const ALERT_STATUS_FILTER_OPTIONS: Array<{ value: ""; label: string } | { value: AlertStatus; label: string }> = [
+const ALERT_STATUS_FILTER_OPTIONS: Array<
+  { value: ""; label: string } | { value: AlertStatus; label: string }
+> = [
   { value: "", label: "全部状态" },
   { value: "open", label: "open" },
   { value: "acknowledged", label: "acknowledged" },
@@ -314,49 +316,61 @@ const ALERT_ORCHESTRATION_CHANNEL_OPTIONS: Array<{
   { value: "ticket", label: "ticket" },
 ];
 
-const ALERT_ORCHESTRATION_DISPATCH_MODE_OPTIONS: Array<{
-  value: "";
-  label: string;
-} | {
-  value: AlertOrchestrationDispatchMode;
-  label: string;
-}> = [
+const ALERT_ORCHESTRATION_DISPATCH_MODE_OPTIONS: Array<
+  | {
+      value: "";
+      label: string;
+    }
+  | {
+      value: AlertOrchestrationDispatchMode;
+      label: string;
+    }
+> = [
   { value: "", label: "全部模式" },
   { value: "rule", label: "rule" },
   { value: "fallback", label: "fallback" },
 ];
 
-const ALERT_ORCHESTRATION_ENABLED_FILTER_OPTIONS: Array<{
-  value: "";
-  label: string;
-} | {
-  value: "true" | "false";
-  label: string;
-}> = [
+const ALERT_ORCHESTRATION_ENABLED_FILTER_OPTIONS: Array<
+  | {
+      value: "";
+      label: string;
+    }
+  | {
+      value: "true" | "false";
+      label: string;
+    }
+> = [
   { value: "", label: "全部启用状态" },
   { value: "true", label: "enabled=true" },
   { value: "false", label: "enabled=false" },
 ];
 
-const BOOLEAN_FILTER_OPTIONS: Array<{
-  value: "";
-  label: string;
-} | {
-  value: "true" | "false";
-  label: string;
-}> = [
+const BOOLEAN_FILTER_OPTIONS: Array<
+  | {
+      value: "";
+      label: string;
+    }
+  | {
+      value: "true" | "false";
+      label: string;
+    }
+> = [
   { value: "", label: "全部" },
   { value: "true", label: "true" },
   { value: "false", label: "false" },
 ];
 
-const CONFLICT_FILTER_OPTIONS: Array<{
-  value: "";
-  label: string;
-} | {
-  value: "true" | "false";
-  label: string;
-}> = [
+const CONFLICT_FILTER_OPTIONS: Array<
+  | {
+      value: "";
+      label: string;
+    }
+  | {
+      value: "true" | "false";
+      label: string;
+    }
+> = [
   { value: "", label: "全部冲突状态" },
   { value: "true", label: "仅冲突" },
   { value: "false", label: "仅无冲突" },
@@ -367,7 +381,10 @@ const EXPORT_FORMAT_OPTIONS: Array<{ value: ExportFormat; label: string }> = [
   { value: "csv", label: "CSV" },
 ];
 
-const USAGE_EXPORT_DIMENSION_OPTIONS: Array<{ value: UsageExportDimension; label: string }> = [
+const USAGE_EXPORT_DIMENSION_OPTIONS: Array<{
+  value: UsageExportDimension;
+  label: string;
+}> = [
   { value: "daily", label: "daily" },
   { value: "weekly", label: "weekly" },
   { value: "monthly", label: "monthly" },
@@ -376,19 +393,26 @@ const USAGE_EXPORT_DIMENSION_OPTIONS: Array<{ value: UsageExportDimension; label
   { value: "heatmap", label: "heatmap" },
 ];
 
-const WEEKLY_SUMMARY_METRIC_OPTIONS: Array<{ value: MetricKey; label: string }> = [
+const WEEKLY_SUMMARY_METRIC_OPTIONS: Array<{
+  value: MetricKey;
+  label: string;
+}> = [
   { value: "tokens", label: "tokens" },
   { value: "cost", label: "cost" },
   { value: "sessions", label: "sessions" },
 ];
 
-const WEEKLY_SUMMARY_TIMEZONE_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "UTC", label: "UTC" },
-  { value: "Asia/Shanghai", label: "Asia/Shanghai" },
-  { value: "America/Los_Angeles", label: "America/Los_Angeles" },
-];
+const WEEKLY_SUMMARY_TIMEZONE_OPTIONS: Array<{ value: string; label: string }> =
+  [
+    { value: "UTC", label: "UTC" },
+    { value: "Asia/Shanghai", label: "Asia/Shanghai" },
+    { value: "America/Los_Angeles", label: "America/Los_Angeles" },
+  ];
 
-const DATA_RESIDENCY_MODE_OPTIONS: Array<{ value: DataResidencyMode; label: string }> = [
+const DATA_RESIDENCY_MODE_OPTIONS: Array<{
+  value: DataResidencyMode;
+  label: string;
+}> = [
   { value: "single_region", label: "single_region" },
   { value: "active_active", label: "active_active" },
 ];
@@ -434,7 +458,8 @@ const MCP_DECISION_OPTIONS: Array<{ value: McpToolDecision; label: string }> = [
 ];
 
 const MCP_APPROVAL_STATUS_FILTER_OPTIONS: Array<
-  { value: ""; label: string } | { value: McpApprovalRequest["status"]; label: string }
+  | { value: ""; label: string }
+  | { value: McpApprovalRequest["status"]; label: string }
 > = [
   { value: "", label: "全部状态" },
   { value: "pending", label: "pending" },
@@ -443,7 +468,8 @@ const MCP_APPROVAL_STATUS_FILTER_OPTIONS: Array<
 ];
 
 const OPEN_PLATFORM_API_KEY_STATUS_FILTER_OPTIONS: Array<
-  { value: ""; label: string } | { value: OpenPlatformApiKeyStatus; label: string }
+  | { value: ""; label: string }
+  | { value: OpenPlatformApiKeyStatus; label: string }
 > = [
   { value: "", label: "全部状态" },
   { value: "active", label: "active" },
@@ -458,7 +484,10 @@ const OPEN_PLATFORM_WEBHOOK_ENABLED_FILTER_OPTIONS: Array<
   { value: "false", label: "enabled=false" },
 ];
 
-const OPEN_PLATFORM_QUALITY_METRIC_OPTIONS: Array<{ value: string; label: string }> = [
+const OPEN_PLATFORM_QUALITY_METRIC_OPTIONS: Array<{
+  value: string;
+  label: string;
+}> = [
   { value: "", label: "全部指标" },
   { value: "accuracy", label: "accuracy" },
   { value: "consistency", label: "consistency" },
@@ -481,10 +510,13 @@ const OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS = [
   "replay.job.completed",
   "replay.job.failed",
 ] as const;
-const OPEN_PLATFORM_WEBHOOK_EVENT_OPTION_SET = new Set<string>(OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS);
+const OPEN_PLATFORM_WEBHOOK_EVENT_OPTION_SET = new Set<string>(
+  OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS,
+);
 
 const OPEN_PLATFORM_REPLAY_JOB_STATUS_FILTER_OPTIONS: Array<
-  { value: ""; label: string } | { value: OpenPlatformReplayJobStatus; label: string }
+  | { value: ""; label: string }
+  | { value: OpenPlatformReplayJobStatus; label: string }
 > = [
   { value: "", label: "全部任务状态" },
   { value: "pending", label: "pending" },
@@ -512,7 +544,10 @@ function readRouteFromHash(): ConsoleRoute {
     return DEFAULT_ROUTE;
   }
 
-  const normalized = window.location.hash.replace(/^#\/?/, "").trim().toLowerCase();
+  const normalized = window.location.hash
+    .replace(/^#\/?/, "")
+    .trim()
+    .toLowerCase();
   return isConsoleRoute(normalized) ? normalized : DEFAULT_ROUTE;
 }
 
@@ -546,11 +581,17 @@ function bytesToBase64Url(bytes: Uint8Array): string {
   for (let index = 0; index < bytes.length; index += 1) {
     binary += String.fromCharCode(bytes[index]);
   }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 function createCodeVerifier(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.getRandomValues === "function"
+  ) {
     const random = new Uint8Array(48);
     crypto.getRandomValues(random);
     return bytesToBase64Url(random);
@@ -566,7 +607,7 @@ async function createCodeChallenge(codeVerifier: string): Promise<string> {
   ) {
     const digest = await crypto.subtle.digest(
       "SHA-256",
-      new TextEncoder().encode(codeVerifier)
+      new TextEncoder().encode(codeVerifier),
     );
     return bytesToBase64Url(new Uint8Array(digest));
   }
@@ -581,7 +622,7 @@ function saveExternalAuthPendingState(state: ExternalAuthPendingState) {
   try {
     window.sessionStorage.setItem(
       AUTH_EXTERNAL_PENDING_STORAGE_KEY,
-      JSON.stringify(state)
+      JSON.stringify(state),
     );
   } catch {
     // ignore storage failures to keep login flow available
@@ -594,7 +635,9 @@ function readExternalAuthPendingState(): ExternalAuthPendingState | null {
   }
 
   try {
-    const raw = window.sessionStorage.getItem(AUTH_EXTERNAL_PENDING_STORAGE_KEY);
+    const raw = window.sessionStorage.getItem(
+      AUTH_EXTERNAL_PENDING_STORAGE_KEY,
+    );
     if (!raw) {
       return null;
     }
@@ -603,7 +646,8 @@ function readExternalAuthPendingState(): ExternalAuthPendingState | null {
       typeof parsed.providerId !== "string" ||
       typeof parsed.state !== "string" ||
       typeof parsed.redirectUri !== "string" ||
-      (parsed.codeVerifier !== undefined && typeof parsed.codeVerifier !== "string") ||
+      (parsed.codeVerifier !== undefined &&
+        typeof parsed.codeVerifier !== "string") ||
       typeof parsed.createdAt !== "number" ||
       !Number.isFinite(parsed.createdAt)
     ) {
@@ -642,7 +686,7 @@ interface AuthCallbackPayload {
 
 function parseAuthCallbackPayload(
   hash: string,
-  search: string
+  search: string,
 ): AuthCallbackPayload | null {
   const normalized = hash.replace(/^#/, "");
   const [path, query = ""] = normalized.split("?", 2);
@@ -668,8 +712,7 @@ function parseAuthCallbackPayload(
 
   const code = readParam("code") ?? "";
   const state = readParam("state");
-  const providerId =
-    readParam("providerId", "provider");
+  const providerId = readParam("providerId", "provider");
   const error = readParam("error");
   const errorDescription = readParam("error_description", "errorDescription");
 
@@ -686,7 +729,7 @@ function buildExternalAuthAuthorizeUrl(
   provider: AuthProviderItem,
   redirectUri: string,
   state: string,
-  codeChallenge?: string
+  codeChallenge?: string,
 ): string {
   if (!provider.authorizationUrl) {
     throw new Error("该登录提供方未配置 authorizationUrl。");
@@ -742,9 +785,13 @@ function formatOptionalDateTime(isoDate: string | null): string {
 function formatSourceFreshness(item: SessionSourceFreshness): string {
   const sourceLabel = item.sourceName ?? item.sourceId;
   const freshnessLabel =
-    item.freshnessMinutes === null ? "--" : `${item.freshnessMinutes.toLocaleString("zh-CN")} 分钟`;
+    item.freshnessMinutes === null
+      ? "--"
+      : `${item.freshnessMinutes.toLocaleString("zh-CN")} 分钟`;
   const latencyLabel =
-    item.avgLatencyMs === null ? "--" : `${Math.round(item.avgLatencyMs).toLocaleString("zh-CN")} ms`;
+    item.avgLatencyMs === null
+      ? "--"
+      : `${Math.round(item.avgLatencyMs).toLocaleString("zh-CN")} ms`;
 
   return [
     `${sourceLabel}（${item.accessMode}）`,
@@ -768,7 +815,9 @@ function formatCompactJson(value: Record<string, unknown> | undefined): string {
   if (!serialized) {
     return "--";
   }
-  return serialized.length > 120 ? `${serialized.slice(0, 117)}...` : serialized;
+  return serialized.length > 120
+    ? `${serialized.slice(0, 117)}...`
+    : serialized;
 }
 
 function formatPrettyJson(value: unknown): string {
@@ -804,7 +853,57 @@ function parseCommaSeparatedValues(value: string): string[] {
   return value
     .split(",")
     .map((item) => item.trim())
-    .filter((item, index, list) => item.length > 0 && list.indexOf(item) === index);
+    .filter(
+      (item, index, list) => item.length > 0 && list.indexOf(item) === index,
+    );
+}
+
+function buildRuleScopeBindingInput(input: {
+  organizations: string;
+  projects: string;
+  clients: string;
+}): RuleAsset["scopeBinding"] | undefined {
+  const organizations = parseCommaSeparatedValues(input.organizations);
+  const projects = parseCommaSeparatedValues(input.projects);
+  const clients = parseCommaSeparatedValues(input.clients);
+
+  if (
+    organizations.length === 0 &&
+    projects.length === 0 &&
+    clients.length === 0
+  ) {
+    return undefined;
+  }
+
+  return {
+    ...(organizations.length > 0 ? { organizations } : {}),
+    ...(projects.length > 0 ? { projects } : {}),
+    ...(clients.length > 0 ? { clients } : {}),
+  };
+}
+
+function formatRuleScopeBinding(
+  scopeBinding: RuleAsset["scopeBinding"],
+): string {
+  const segments: string[] = [];
+
+  if (
+    Array.isArray(scopeBinding.organizations) &&
+    scopeBinding.organizations.length > 0
+  ) {
+    segments.push(`organizations: ${scopeBinding.organizations.join(", ")}`);
+  }
+  if (
+    Array.isArray(scopeBinding.projects) &&
+    scopeBinding.projects.length > 0
+  ) {
+    segments.push(`projects: ${scopeBinding.projects.join(", ")}`);
+  }
+  if (Array.isArray(scopeBinding.clients) && scopeBinding.clients.length > 0) {
+    segments.push(`clients: ${scopeBinding.clients.join(", ")}`);
+  }
+
+  return segments.length > 0 ? segments.join(" | ") : "全局";
 }
 
 function isValidHttpUrl(value: string): boolean {
@@ -843,7 +942,10 @@ function toTimeMs(value: string | null): number | null {
   return Number.isNaN(timestamp) ? null : timestamp;
 }
 
-function getSourceHealthStatus(health: SourceHealth): { label: string; className: string } {
+function getSourceHealthStatus(health: SourceHealth): {
+  label: string;
+  className: string;
+} {
   const successTime = toTimeMs(health.lastSuccessAt);
   const failureTime = toTimeMs(health.lastFailureAt);
   const latestFailed =
@@ -888,7 +990,10 @@ function createDateSeries(days: number): string[] {
   return result;
 }
 
-function getMetricValue(cell: HeatmapCell | undefined, metric: MetricKey): number {
+function getMetricValue(
+  cell: HeatmapCell | undefined,
+  metric: MetricKey,
+): number {
   if (!cell) {
     return 0;
   }
@@ -1008,7 +1113,9 @@ function formatUsageCostModeLabel(mode: UsageCostMode | null): string | null {
   return null;
 }
 
-function resolveUsageCost(candidate: UsageCostCandidate): UsageCostPresentation {
+function resolveUsageCost(
+  candidate: UsageCostCandidate,
+): UsageCostPresentation {
   const contractRawCost = toFiniteNumber(candidate.costRaw);
   const contractEstimatedCost = toFiniteNumber(candidate.costEstimated);
   const legacyRawCost = toFiniteNumber(candidate.rawCost);
@@ -1021,7 +1128,9 @@ function resolveUsageCost(candidate: UsageCostCandidate): UsageCostPresentation 
   let estimatedCost = contractEstimatedCost ?? legacyEstimatedCost;
 
   const hasContractFields =
-    costMode !== null || contractRawCost !== null || contractEstimatedCost !== null;
+    costMode !== null ||
+    contractRawCost !== null ||
+    contractEstimatedCost !== null;
 
   if (hasContractFields && providedCost !== null) {
     if ((costMode === "raw" || costMode === "reported") && rawCost === null) {
@@ -1034,11 +1143,16 @@ function resolveUsageCost(candidate: UsageCostCandidate): UsageCostPresentation 
 
   const hasSplitCost = rawCost !== null || estimatedCost !== null;
   const totalCost = hasContractFields
-    ? providedCost ?? (rawCost ?? 0) + (estimatedCost ?? 0)
-    : legacyTotal ?? (hasSplitCost ? (rawCost ?? 0) + (estimatedCost ?? 0) : providedCost ?? 0);
+    ? (providedCost ?? (rawCost ?? 0) + (estimatedCost ?? 0))
+    : (legacyTotal ??
+      (hasSplitCost
+        ? (rawCost ?? 0) + (estimatedCost ?? 0)
+        : (providedCost ?? 0)));
 
   return {
-    rawCost: rawCost ?? (hasContractFields || hasSplitCost ? null : providedCost ?? 0),
+    rawCost:
+      rawCost ??
+      (hasContractFields || hasSplitCost ? null : (providedCost ?? 0)),
     estimatedCost,
     totalCost,
     label:
@@ -1049,7 +1163,11 @@ function resolveUsageCost(candidate: UsageCostCandidate): UsageCostPresentation 
 }
 
 function calculateChainRatio(current: number, previous: number): number | null {
-  if (!Number.isFinite(current) || !Number.isFinite(previous) || Math.abs(previous) < 0.000001) {
+  if (
+    !Number.isFinite(current) ||
+    !Number.isFinite(previous) ||
+    Math.abs(previous) < 0.000001
+  ) {
     return null;
   }
   return (current - previous) / Math.abs(previous);
@@ -1076,7 +1194,10 @@ function buildPolylinePath(points: Array<{ x: number; y: number }>): string {
     .join(" ");
 }
 
-function buildAreaPath(points: Array<{ x: number; y: number }>, baseY: number): string {
+function buildAreaPath(
+  points: Array<{ x: number; y: number }>,
+  baseY: number,
+): string {
   if (points.length === 0) {
     return "";
   }
@@ -1090,7 +1211,9 @@ function normalizeOptionalText(value: string): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function mapPricingEntryToForm(entry: PricingCatalogEntry): PricingEntryFormState {
+function mapPricingEntryToForm(
+  entry: PricingCatalogEntry,
+): PricingEntryFormState {
   return {
     model: entry.model,
     inputPer1k: String(entry.inputPer1k),
@@ -1100,8 +1223,10 @@ function mapPricingEntryToForm(entry: PricingCatalogEntry): PricingEntryFormStat
 }
 
 function normalizePricingForm(
-  rows: PricingEntryFormState[]
-): { success: true; entries: PricingCatalogEntry[] } | { success: false; message: string } {
+  rows: PricingEntryFormState[],
+):
+  | { success: true; entries: PricingCatalogEntry[] }
+  | { success: false; message: string } {
   const entries: PricingCatalogEntry[] = [];
 
   for (const row of rows) {
@@ -1154,15 +1279,21 @@ interface LoginPageProps {
 }
 
 function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
-  const [loginForm, setLoginForm] = useState<LoginFormState>(INITIAL_LOGIN_FORM);
+  const [loginForm, setLoginForm] =
+    useState<LoginFormState>(INITIAL_LOGIN_FORM);
   const [formError, setFormError] = useState<string | null>(null);
   const callbackHandledRef = useRef<string | null>(null);
-  const [authCallback, setAuthCallback] = useState<AuthCallbackPayload | null>(() => {
-    if (typeof window === "undefined") {
-      return null;
-    }
-    return parseAuthCallbackPayload(window.location.hash, window.location.search);
-  });
+  const [authCallback, setAuthCallback] = useState<AuthCallbackPayload | null>(
+    () => {
+      if (typeof window === "undefined") {
+        return null;
+      }
+      return parseAuthCallbackPayload(
+        window.location.hash,
+        window.location.search,
+      );
+    },
+  );
 
   const providersQuery = useQuery({
     queryKey: ["auth-providers"],
@@ -1177,14 +1308,14 @@ function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
   }, [providersQuery.data?.items]);
 
   const localProviderEnabled = providers.some(
-    (provider) => provider.id === "local" && provider.enabled
+    (provider) => provider.id === "local" && provider.enabled,
   );
   const externalProviders = providers.filter(
     (provider) =>
       provider.id !== "local" &&
       provider.enabled &&
       typeof provider.authorizationUrl === "string" &&
-      provider.authorizationUrl.trim().length > 0
+      provider.authorizationUrl.trim().length > 0,
   );
 
   const loginMutation = useMutation({
@@ -1231,7 +1362,7 @@ function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
 
     const handleHashChange = () => {
       setAuthCallback(
-        parseAuthCallbackPayload(window.location.hash, window.location.search)
+        parseAuthCallbackPayload(window.location.hash, window.location.search),
       );
     };
 
@@ -1280,7 +1411,11 @@ function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
       return;
     }
 
-    if (pending?.state && authCallback.state && pending.state !== authCallback.state) {
+    if (
+      pending?.state &&
+      authCallback.state &&
+      pending.state !== authCallback.state
+    ) {
       setFormError("外部登录 state 校验失败，请重新发起登录。");
       clearExternalAuthPendingState();
       return;
@@ -1315,7 +1450,7 @@ function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
         provider,
         redirectUri,
         state,
-        codeChallenge
+        codeChallenge,
       );
       window.location.assign(authorizeUrl);
     } catch (error) {
@@ -1359,7 +1494,9 @@ function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
 
         {authMessage ? <p className="feedback error">{authMessage}</p> : null}
 
-        {providersQuery.isLoading ? <p className="feedback info">正在加载登录方式...</p> : null}
+        {providersQuery.isLoading ? (
+          <p className="feedback info">正在加载登录方式...</p>
+        ) : null}
         {providersQuery.isError ? (
           <p className="feedback error">
             登录方式加载失败：{toErrorMessage(providersQuery.error)}
@@ -1401,13 +1538,17 @@ function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
             <button
               type="submit"
               className="submit-button"
-              disabled={loginMutation.isPending || externalExchangeMutation.isPending}
+              disabled={
+                loginMutation.isPending || externalExchangeMutation.isPending
+              }
             >
               {loginMutation.isPending ? "登录中..." : "登录"}
             </button>
           </form>
         ) : (
-          <p className="feedback info">当前环境未启用本地账号登录，请使用企业登录。</p>
+          <p className="feedback info">
+            当前环境未启用本地账号登录，请使用企业登录。
+          </p>
         )}
 
         {externalProviders.length > 0 ? (
@@ -1438,7 +1579,9 @@ function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
         ) : null}
         {formError ? <p className="feedback error">{formError}</p> : null}
         {loginMutation.isError ? (
-          <p className="feedback error">登录失败：{toErrorMessage(loginMutation.error)}</p>
+          <p className="feedback error">
+            登录失败：{toErrorMessage(loginMutation.error)}
+          </p>
         ) : null}
         {externalExchangeMutation.isError ? (
           <p className="feedback error">
@@ -1538,8 +1681,12 @@ function DashboardPage({ onDrilldownDate }: DashboardPageProps) {
           {defaultDate ? ` | 当前下钻日期：${defaultDate}` : ""}
         </p>
 
-        {heatmapQuery.isLoading ? <p className="feedback info">热力图加载中...</p> : null}
-        {heatmapQuery.isError ? <p className="feedback error">热力图加载失败，请稍后重试。</p> : null}
+        {heatmapQuery.isLoading ? (
+          <p className="feedback info">热力图加载中...</p>
+        ) : null}
+        {heatmapQuery.isError ? (
+          <p className="feedback error">热力图加载失败，请稍后重试。</p>
+        ) : null}
 
         <div className="heatmap-grid" role="grid" aria-label="使用热力图">
           {series.map((dateKey) => {
@@ -1587,12 +1734,16 @@ interface SessionsPageProps {
 
 function SessionsPage({ initialDateKey }: SessionsPageProps) {
   const [dateKey, setDateKey] = useState(() =>
-    isDateKey(initialDateKey) ? initialDateKey : todayDateKey()
+    isDateKey(initialDateKey) ? initialDateKey : todayDateKey(),
   );
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [filterForm, setFilterForm] = useState<SessionSearchFilters>(EMPTY_SESSION_SEARCH_FILTERS);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
+    null,
+  );
+  const [filterForm, setFilterForm] = useState<SessionSearchFilters>(
+    EMPTY_SESSION_SEARCH_FILTERS,
+  );
   const [appliedFilters, setAppliedFilters] = useState<SessionSearchFilters>(
-    EMPTY_SESSION_SEARCH_FILTERS
+    EMPTY_SESSION_SEARCH_FILTERS,
   );
 
   useEffect(() => {
@@ -1644,7 +1795,7 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
       limit: 50,
       ...normalizedFilters,
     }),
-    [dateKey, normalizedFilters]
+    [dateKey, normalizedFilters],
   );
 
   const hasAppliedFilters = Object.keys(normalizedFilters).length > 0;
@@ -1657,7 +1808,7 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
           ...sessionSearchInput,
           cursor: typeof pageParam === "string" ? pageParam : undefined,
         },
-        signal
+        signal,
       ),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
@@ -1666,7 +1817,7 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
 
   const sessions = useMemo(
     () => sessionsQuery.data?.pages.flatMap((page) => page.items) ?? [],
-    [sessionsQuery.data?.pages]
+    [sessionsQuery.data?.pages],
   );
   const sourceFreshness = sessionsQuery.data?.pages[0]?.sourceFreshness ?? [];
   const sourceFreshnessText =
@@ -1680,7 +1831,10 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
       return;
     }
 
-    if (!selectedSessionId || !sessions.some((item) => item.id === selectedSessionId)) {
+    if (
+      !selectedSessionId ||
+      !sessions.some((item) => item.id === selectedSessionId)
+    ) {
       setSelectedSessionId(sessions[0].id);
     }
   }, [selectedSessionId, sessions]);
@@ -1693,7 +1847,7 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
         selectedSessionId!,
         50,
         typeof pageParam === "string" ? pageParam : undefined,
-        signal
+        signal,
       ),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
@@ -1709,7 +1863,7 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
 
   const eventItems = useMemo(
     () => eventsQuery.data?.pages.flatMap((page) => page.items) ?? [],
-    [eventsQuery.data?.pages]
+    [eventsQuery.data?.pages],
   );
   const sessionDetail = detailQuery.data as SessionDetailResponse | undefined;
 
@@ -1770,7 +1924,9 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
                 type="text"
                 placeholder="例如：deploy failed"
                 value={filterForm.keyword}
-                onChange={(event) => updateFilterField("keyword", event.target.value)}
+                onChange={(event) =>
+                  updateFilterField("keyword", event.target.value)
+                }
               />
             </label>
 
@@ -1779,7 +1935,9 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
               <select
                 id="session-client-type"
                 value={filterForm.clientType}
-                onChange={(event) => updateFilterField("clientType", event.target.value)}
+                onChange={(event) =>
+                  updateFilterField("clientType", event.target.value)
+                }
               >
                 <option value="">全部</option>
                 <option value="cli">CLI</option>
@@ -1794,7 +1952,9 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
                 type="text"
                 placeholder="例如：Codex CLI"
                 value={filterForm.tool}
-                onChange={(event) => updateFilterField("tool", event.target.value)}
+                onChange={(event) =>
+                  updateFilterField("tool", event.target.value)
+                }
               />
             </label>
 
@@ -1805,7 +1965,9 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
                 type="text"
                 placeholder="例如：devbox-01"
                 value={filterForm.host}
-                onChange={(event) => updateFilterField("host", event.target.value)}
+                onChange={(event) =>
+                  updateFilterField("host", event.target.value)
+                }
               />
             </label>
 
@@ -1816,7 +1978,9 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
                 type="text"
                 placeholder="例如：gpt-5-codex"
                 value={filterForm.model}
-                onChange={(event) => updateFilterField("model", event.target.value)}
+                onChange={(event) =>
+                  updateFilterField("model", event.target.value)
+                }
               />
             </label>
 
@@ -1827,7 +1991,9 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
                 type="text"
                 placeholder="例如：agentledger"
                 value={filterForm.project}
-                onChange={(event) => updateFilterField("project", event.target.value)}
+                onChange={(event) =>
+                  updateFilterField("project", event.target.value)
+                }
               />
             </label>
           </div>
@@ -1846,9 +2012,13 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
           </div>
         </form>
 
-        {sessionsQuery.isLoading ? <p className="feedback info">会话加载中...</p> : null}
+        {sessionsQuery.isLoading ? (
+          <p className="feedback info">会话加载中...</p>
+        ) : null}
         {sessionsQuery.isError ? (
-          <p className="feedback error">会话加载失败：{toErrorMessage(sessionsQuery.error)}</p>
+          <p className="feedback error">
+            会话加载失败：{toErrorMessage(sessionsQuery.error)}
+          </p>
         ) : null}
 
         <div className="table-wrapper">
@@ -1875,7 +2045,9 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
                 sessions.map((session: Session) => (
                   <tr
                     key={session.id}
-                    className={selectedSessionId === session.id ? "is-selected-row" : ""}
+                    className={
+                      selectedSessionId === session.id ? "is-selected-row" : ""
+                    }
                   >
                     <td>{formatDateTime(session.startedAt)}</td>
                     <td>{session.tool}</td>
@@ -1915,12 +2087,20 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
       <section className="panel">
         <header>
           <h2>会话详情</h2>
-          <p>{selectedSessionId ? `sessionId: ${selectedSessionId}` : "请选择会话"}</p>
+          <p>
+            {selectedSessionId
+              ? `sessionId: ${selectedSessionId}`
+              : "请选择会话"}
+          </p>
         </header>
 
-        {detailQuery.isLoading ? <p className="feedback info">会话详情加载中...</p> : null}
+        {detailQuery.isLoading ? (
+          <p className="feedback info">会话详情加载中...</p>
+        ) : null}
         {detailQuery.isError ? (
-          <p className="feedback error">会话详情加载失败：{toErrorMessage(detailQuery.error)}</p>
+          <p className="feedback error">
+            会话详情加载失败：{toErrorMessage(detailQuery.error)}
+          </p>
         ) : null}
 
         {sessionDetail ? (
@@ -1929,31 +2109,68 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
               <h3>基础信息</h3>
               <p>工具：{sessionDetail.session?.tool ?? sessionDetail.tool}</p>
               <p>模型：{sessionDetail.session?.model ?? sessionDetail.model}</p>
-              <p>开始：{formatDateTime(sessionDetail.session?.startedAt ?? sessionDetail.startedAt)}</p>
+              <p>
+                开始：
+                {formatDateTime(
+                  sessionDetail.session?.startedAt ?? sessionDetail.startedAt,
+                )}
+              </p>
               <p>
                 结束：
-                {sessionDetail.session?.endedAt ?? sessionDetail.endedAt
-                  ? formatDateTime(sessionDetail.session?.endedAt ?? sessionDetail.endedAt ?? "")
+                {(sessionDetail.session?.endedAt ?? sessionDetail.endedAt)
+                  ? formatDateTime(
+                      sessionDetail.session?.endedAt ??
+                        sessionDetail.endedAt ??
+                        "",
+                    )
                   : "--"}
               </p>
-              <p>消息数：{sessionDetail.session?.messageCount ?? sessionDetail.messageCount}</p>
+              <p>
+                消息数：
+                {sessionDetail.session?.messageCount ??
+                  sessionDetail.messageCount}
+              </p>
             </div>
 
             <div className="session-detail-card">
               <h3>Token 分解</h3>
-              <p>input：{sessionDetail.tokenBreakdown.inputTokens.toLocaleString("zh-CN")}</p>
-              <p>output：{sessionDetail.tokenBreakdown.outputTokens.toLocaleString("zh-CN")}</p>
-              <p>cache read：{sessionDetail.tokenBreakdown.cacheReadTokens.toLocaleString("zh-CN")}</p>
+              <p>
+                input：
+                {sessionDetail.tokenBreakdown.inputTokens.toLocaleString(
+                  "zh-CN",
+                )}
+              </p>
+              <p>
+                output：
+                {sessionDetail.tokenBreakdown.outputTokens.toLocaleString(
+                  "zh-CN",
+                )}
+              </p>
+              <p>
+                cache read：
+                {sessionDetail.tokenBreakdown.cacheReadTokens.toLocaleString(
+                  "zh-CN",
+                )}
+              </p>
               <p>
                 cache write：
-                {sessionDetail.tokenBreakdown.cacheWriteTokens.toLocaleString("zh-CN")}
+                {sessionDetail.tokenBreakdown.cacheWriteTokens.toLocaleString(
+                  "zh-CN",
+                )}
               </p>
               <p>
                 reasoning：
-                {sessionDetail.tokenBreakdown.reasoningTokens.toLocaleString("zh-CN")}
+                {sessionDetail.tokenBreakdown.reasoningTokens.toLocaleString(
+                  "zh-CN",
+                )}
               </p>
               <p>
-                total：<strong>{sessionDetail.tokenBreakdown.totalTokens.toLocaleString("zh-CN")}</strong>
+                total：
+                <strong>
+                  {sessionDetail.tokenBreakdown.totalTokens.toLocaleString(
+                    "zh-CN",
+                  )}
+                </strong>
               </p>
             </div>
 
@@ -1971,12 +2188,20 @@ function SessionsPage({ initialDateKey }: SessionsPageProps) {
       <section className="panel">
         <header>
           <h2>Session 事件流</h2>
-          <p>{selectedSessionId ? `sessionId: ${selectedSessionId}` : "请选择会话"}</p>
+          <p>
+            {selectedSessionId
+              ? `sessionId: ${selectedSessionId}`
+              : "请选择会话"}
+          </p>
         </header>
 
-        {eventsQuery.isLoading ? <p className="feedback info">事件加载中...</p> : null}
+        {eventsQuery.isLoading ? (
+          <p className="feedback info">事件加载中...</p>
+        ) : null}
         {eventsQuery.isError ? (
-          <p className="feedback error">事件加载失败：{toErrorMessage(eventsQuery.error)}</p>
+          <p className="feedback error">
+            事件加载失败：{toErrorMessage(eventsQuery.error)}
+          </p>
         ) : null}
 
         <div className="table-wrapper">
@@ -2042,7 +2267,7 @@ function AnalyticsPage() {
       to: `${toDate}T23:59:59.999Z`,
       limit: 50,
     }),
-    [fromDate, toDate]
+    [fromDate, toDate],
   );
 
   const dailyQuery = useQuery({
@@ -2075,7 +2300,7 @@ function AnalyticsPage() {
 
   const dailyRows = useMemo(() => {
     const sorted = [...(dailyQuery.data?.items ?? [])].sort((left, right) =>
-      left.date.localeCompare(right.date)
+      left.date.localeCompare(right.date),
     );
 
     return sorted.map((item, index) => {
@@ -2095,7 +2320,10 @@ function AnalyticsPage() {
         totalCostRatio:
           previousCost === null
             ? null
-            : calculateChainRatio(currentCost.totalCost, previousCost.totalCost),
+            : calculateChainRatio(
+                currentCost.totalCost,
+                previousCost.totalCost,
+              ),
       };
     });
   }, [dailyQuery.data?.items]);
@@ -2110,7 +2338,7 @@ function AnalyticsPage() {
           item,
           cost: resolveUsageCost(item),
         })),
-    [monthlyQuery.data?.items]
+    [monthlyQuery.data?.items],
   );
 
   const monthlyTrend = useMemo(() => {
@@ -2133,9 +2361,12 @@ function AnalyticsPage() {
     const isFlatLine = span < 0.000001;
 
     const points = monthlyRows.map((row, index) => {
-      const ratio = monthlyRows.length === 1 ? 0.5 : index / (monthlyRows.length - 1);
+      const ratio =
+        monthlyRows.length === 1 ? 0.5 : index / (monthlyRows.length - 1);
       const x = paddingX + ratio * innerWidth;
-      const normalized = isFlatLine ? 0.5 : (row.cost.totalCost - minValue) / span;
+      const normalized = isFlatLine
+        ? 0.5
+        : (row.cost.totalCost - minValue) / span;
       const y = paddingY + (1 - normalized) * innerHeight;
       return {
         x,
@@ -2163,12 +2394,12 @@ function AnalyticsPage() {
         item,
         cost: resolveUsageCost(item),
       })),
-    [modelsQuery.data?.items]
+    [modelsQuery.data?.items],
   );
 
   const modelTotalCost = useMemo(
     () => modelRows.reduce((sum, row) => sum + row.cost.totalCost, 0),
-    [modelRows]
+    [modelRows],
   );
 
   const sessionRows = useMemo(
@@ -2177,7 +2408,7 @@ function AnalyticsPage() {
         item,
         cost: resolveUsageCost(item),
       })),
-    [sessionBreakdownQuery.data?.items]
+    [sessionBreakdownQuery.data?.items],
   );
 
   return (
@@ -2209,7 +2440,9 @@ function AnalyticsPage() {
           </label>
         </div>
 
-        {!rangeValid ? <p className="feedback error">开始日期不能晚于结束日期。</p> : null}
+        {!rangeValid ? (
+          <p className="feedback error">开始日期不能晚于结束日期。</p>
+        ) : null}
       </section>
 
       <section className="panel">
@@ -2217,9 +2450,13 @@ function AnalyticsPage() {
           <h2>日聚合（usage/daily）</h2>
           <p>共 {dailyQuery.data?.total ?? 0} 条</p>
         </header>
-        {dailyQuery.isLoading ? <p className="feedback info">daily 加载中...</p> : null}
+        {dailyQuery.isLoading ? (
+          <p className="feedback info">daily 加载中...</p>
+        ) : null}
         {dailyQuery.isError ? (
-          <p className="feedback error">daily 加载失败：{toErrorMessage(dailyQuery.error)}</p>
+          <p className="feedback error">
+            daily 加载失败：{toErrorMessage(dailyQuery.error)}
+          </p>
         ) : null}
 
         {latestDaily ? (
@@ -2227,21 +2464,29 @@ function AnalyticsPage() {
             <article className="analytics-kpi-card">
               <h3>最新日 Tokens</h3>
               <strong>{latestDaily.item.tokens.toLocaleString("zh-CN")}</strong>
-              <span className={`chain-badge ${chainRatioClass(latestDaily.tokensRatio)}`}>
+              <span
+                className={`chain-badge ${chainRatioClass(latestDaily.tokensRatio)}`}
+              >
                 环比 {formatChainRatio(latestDaily.tokensRatio)}
               </span>
             </article>
             <article className="analytics-kpi-card">
               <h3>最新日总成本</h3>
               <strong>${latestDaily.cost.totalCost.toFixed(4)}</strong>
-              <span className={`chain-badge ${chainRatioClass(latestDaily.totalCostRatio)}`}>
+              <span
+                className={`chain-badge ${chainRatioClass(latestDaily.totalCostRatio)}`}
+              >
                 环比 {formatChainRatio(latestDaily.totalCostRatio)}
               </span>
             </article>
             <article className="analytics-kpi-card">
               <h3>最新日 Sessions</h3>
-              <strong>{latestDaily.item.sessions.toLocaleString("zh-CN")}</strong>
-              <span className={`chain-badge ${chainRatioClass(latestDaily.sessionsRatio)}`}>
+              <strong>
+                {latestDaily.item.sessions.toLocaleString("zh-CN")}
+              </strong>
+              <span
+                className={`chain-badge ${chainRatioClass(latestDaily.sessionsRatio)}`}
+              >
                 环比 {formatChainRatio(latestDaily.sessionsRatio)}
               </span>
             </article>
@@ -2274,7 +2519,11 @@ function AnalyticsPage() {
                   <tr key={row.item.date}>
                     <td>{toDateKey(row.item.date)}</td>
                     <td>{row.item.tokens.toLocaleString("zh-CN")}</td>
-                    <td>{row.cost.rawCost === null ? "--" : `$${row.cost.rawCost.toFixed(4)}`}</td>
+                    <td>
+                      {row.cost.rawCost === null
+                        ? "--"
+                        : `$${row.cost.rawCost.toFixed(4)}`}
+                    </td>
                     <td>
                       {row.cost.estimatedCost === null
                         ? "--"
@@ -2282,7 +2531,9 @@ function AnalyticsPage() {
                     </td>
                     <td>${row.cost.totalCost.toFixed(4)}</td>
                     <td>
-                      <span className={`chain-badge ${chainRatioClass(row.totalCostRatio)}`}>
+                      <span
+                        className={`chain-badge ${chainRatioClass(row.totalCostRatio)}`}
+                      >
                         {formatChainRatio(row.totalCostRatio)}
                       </span>
                     </td>
@@ -2301,9 +2552,13 @@ function AnalyticsPage() {
           <h2>月度聚合（usage/monthly）</h2>
           <p>共 {monthlyQuery.data?.total ?? 0} 条</p>
         </header>
-        {monthlyQuery.isLoading ? <p className="feedback info">monthly 加载中...</p> : null}
+        {monthlyQuery.isLoading ? (
+          <p className="feedback info">monthly 加载中...</p>
+        ) : null}
         {monthlyQuery.isError ? (
-          <p className="feedback error">monthly 加载失败：{toErrorMessage(monthlyQuery.error)}</p>
+          <p className="feedback error">
+            monthly 加载失败：{toErrorMessage(monthlyQuery.error)}
+          </p>
         ) : null}
 
         {monthlyTrend ? (
@@ -2332,7 +2587,8 @@ function AnalyticsPage() {
               ))}
             </svg>
             <p className="trend-chart-meta">
-              区间最小 ${monthlyTrend.minValue.toFixed(4)} / 最大 ${monthlyTrend.maxValue.toFixed(4)}
+              区间最小 ${monthlyTrend.minValue.toFixed(4)} / 最大 $
+              {monthlyTrend.maxValue.toFixed(4)}
             </p>
           </figure>
         ) : null}
@@ -2362,7 +2618,11 @@ function AnalyticsPage() {
                   <tr key={row.item.month}>
                     <td>{row.item.month}</td>
                     <td>{row.item.tokens.toLocaleString("zh-CN")}</td>
-                    <td>{row.cost.rawCost === null ? "--" : `$${row.cost.rawCost.toFixed(4)}`}</td>
+                    <td>
+                      {row.cost.rawCost === null
+                        ? "--"
+                        : `$${row.cost.rawCost.toFixed(4)}`}
+                    </td>
                     <td>
                       {row.cost.estimatedCost === null
                         ? "--"
@@ -2384,9 +2644,13 @@ function AnalyticsPage() {
           <h2>模型排行（usage/models）</h2>
           <p>共 {modelsQuery.data?.total ?? 0} 条</p>
         </header>
-        {modelsQuery.isLoading ? <p className="feedback info">models 加载中...</p> : null}
+        {modelsQuery.isLoading ? (
+          <p className="feedback info">models 加载中...</p>
+        ) : null}
         {modelsQuery.isError ? (
-          <p className="feedback error">models 加载失败：{toErrorMessage(modelsQuery.error)}</p>
+          <p className="feedback error">
+            models 加载失败：{toErrorMessage(modelsQuery.error)}
+          </p>
         ) : null}
 
         <div className="table-wrapper">
@@ -2415,7 +2679,11 @@ function AnalyticsPage() {
                   <tr key={row.item.model}>
                     <td>{row.item.model}</td>
                     <td>{row.item.tokens.toLocaleString("zh-CN")}</td>
-                    <td>{row.cost.rawCost === null ? "--" : `$${row.cost.rawCost.toFixed(4)}`}</td>
+                    <td>
+                      {row.cost.rawCost === null
+                        ? "--"
+                        : `$${row.cost.rawCost.toFixed(4)}`}
+                    </td>
                     <td>
                       {row.cost.estimatedCost === null
                         ? "--"
@@ -2442,7 +2710,9 @@ function AnalyticsPage() {
           <h2>会话拆解（usage/sessions）</h2>
           <p>共 {sessionBreakdownQuery.data?.total ?? 0} 条</p>
         </header>
-        {sessionBreakdownQuery.isLoading ? <p className="feedback info">sessions 加载中...</p> : null}
+        {sessionBreakdownQuery.isLoading ? (
+          <p className="feedback info">sessions 加载中...</p>
+        ) : null}
         {sessionBreakdownQuery.isError ? (
           <p className="feedback error">
             sessions 加载失败：{toErrorMessage(sessionBreakdownQuery.error)}
@@ -2509,90 +2779,151 @@ function GovernancePage() {
   const [statusFilter, setStatusFilter] = useState<AlertStatus | "">("");
   const [severityFilter, setSeverityFilter] = useState<AlertSeverity | "">("");
   const [alertFeedback, setAlertFeedback] = useState<string | null>(null);
-  const [orchestrationRuleEventTypeFilter, setOrchestrationRuleEventTypeFilter] = useState<
-    AlertOrchestrationEventType | ""
-  >("");
-  const [orchestrationRuleEnabledFilter, setOrchestrationRuleEnabledFilter] = useState<
-    "" | "true" | "false"
-  >("");
-  const [orchestrationRuleSeverityFilter, setOrchestrationRuleSeverityFilter] = useState<
-    AlertSeverity | ""
-  >("");
-  const [orchestrationRuleSourceIdFilter, setOrchestrationRuleSourceIdFilter] = useState("");
+  const [
+    orchestrationRuleEventTypeFilter,
+    setOrchestrationRuleEventTypeFilter,
+  ] = useState<AlertOrchestrationEventType | "">("");
+  const [orchestrationRuleEnabledFilter, setOrchestrationRuleEnabledFilter] =
+    useState<"" | "true" | "false">("");
+  const [orchestrationRuleSeverityFilter, setOrchestrationRuleSeverityFilter] =
+    useState<AlertSeverity | "">("");
+  const [orchestrationRuleSourceIdFilter, setOrchestrationRuleSourceIdFilter] =
+    useState("");
   const [orchestrationRuleId, setOrchestrationRuleId] = useState("");
   const [orchestrationRuleName, setOrchestrationRuleName] = useState("");
-  const [orchestrationRuleEnabled, setOrchestrationRuleEnabled] = useState(true);
+  const [orchestrationRuleEnabled, setOrchestrationRuleEnabled] =
+    useState(true);
   const [orchestrationRuleEventType, setOrchestrationRuleEventType] =
     useState<AlertOrchestrationEventType>("alert");
-  const [orchestrationRuleSeverity, setOrchestrationRuleSeverity] = useState<AlertSeverity | "">("");
-  const [orchestrationRuleSourceId, setOrchestrationRuleSourceId] = useState("");
-  const [orchestrationRuleDedupeWindowSeconds, setOrchestrationRuleDedupeWindowSeconds] = useState("0");
-  const [orchestrationRuleSuppressionWindowSeconds, setOrchestrationRuleSuppressionWindowSeconds] =
-    useState("0");
-  const [orchestrationRuleMergeWindowSeconds, setOrchestrationRuleMergeWindowSeconds] = useState("0");
-  const [orchestrationRuleSlaMinutes, setOrchestrationRuleSlaMinutes] = useState("");
-  const [orchestrationRuleChannelsInput, setOrchestrationRuleChannelsInput] = useState(
-    "webhook,wecom"
-  );
-  const [orchestrationSimulateRuleId, setOrchestrationSimulateRuleId] = useState("");
+  const [orchestrationRuleSeverity, setOrchestrationRuleSeverity] = useState<
+    AlertSeverity | ""
+  >("");
+  const [orchestrationRuleSourceId, setOrchestrationRuleSourceId] =
+    useState("");
+  const [
+    orchestrationRuleDedupeWindowSeconds,
+    setOrchestrationRuleDedupeWindowSeconds,
+  ] = useState("0");
+  const [
+    orchestrationRuleSuppressionWindowSeconds,
+    setOrchestrationRuleSuppressionWindowSeconds,
+  ] = useState("0");
+  const [
+    orchestrationRuleMergeWindowSeconds,
+    setOrchestrationRuleMergeWindowSeconds,
+  ] = useState("0");
+  const [orchestrationRuleSlaMinutes, setOrchestrationRuleSlaMinutes] =
+    useState("");
+  const [orchestrationRuleChannelsInput, setOrchestrationRuleChannelsInput] =
+    useState("webhook,wecom");
+  const [orchestrationSimulateRuleId, setOrchestrationSimulateRuleId] =
+    useState("");
   const [orchestrationSimulateEventType, setOrchestrationSimulateEventType] =
     useState<AlertOrchestrationEventType>("alert");
-  const [orchestrationSimulateAlertId, setOrchestrationSimulateAlertId] = useState("");
-  const [orchestrationSimulateSeverity, setOrchestrationSimulateSeverity] = useState<
-    AlertSeverity | ""
-  >("");
-  const [orchestrationSimulateSourceId, setOrchestrationSimulateSourceId] = useState("");
-  const [orchestrationSimulateDedupeHit, setOrchestrationSimulateDedupeHit] = useState(false);
-  const [orchestrationSimulateSuppressed, setOrchestrationSimulateSuppressed] = useState(false);
-  const [orchestrationExecutionRuleIdFilter, setOrchestrationExecutionRuleIdFilter] = useState("");
-  const [orchestrationExecutionEventTypeFilter, setOrchestrationExecutionEventTypeFilter] =
-    useState<AlertOrchestrationEventType | "">("");
-  const [orchestrationExecutionSeverityFilter, setOrchestrationExecutionSeverityFilter] = useState<
-    AlertSeverity | ""
-  >("");
-  const [orchestrationExecutionSourceIdFilter, setOrchestrationExecutionSourceIdFilter] = useState("");
-  const [orchestrationExecutionDedupeHitFilter, setOrchestrationExecutionDedupeHitFilter] =
-    useState<"" | "true" | "false">("");
-  const [orchestrationExecutionSuppressedFilter, setOrchestrationExecutionSuppressedFilter] =
-    useState<"" | "true" | "false">("");
-  const [orchestrationExecutionDispatchModeFilter, setOrchestrationExecutionDispatchModeFilter] =
-    useState<AlertOrchestrationDispatchMode | "">("");
-  const [orchestrationExecutionConflictFilter, setOrchestrationExecutionConflictFilter] =
-    useState<"" | "true" | "false">("");
-  const [orchestrationExecutionSimulatedFilter, setOrchestrationExecutionSimulatedFilter] =
-    useState<"" | "true" | "false">("");
-  const [orchestrationExecutionFrom, setOrchestrationExecutionFrom] = useState("");
+  const [orchestrationSimulateAlertId, setOrchestrationSimulateAlertId] =
+    useState("");
+  const [orchestrationSimulateSeverity, setOrchestrationSimulateSeverity] =
+    useState<AlertSeverity | "">("");
+  const [orchestrationSimulateSourceId, setOrchestrationSimulateSourceId] =
+    useState("");
+  const [orchestrationSimulateDedupeHit, setOrchestrationSimulateDedupeHit] =
+    useState(false);
+  const [orchestrationSimulateSuppressed, setOrchestrationSimulateSuppressed] =
+    useState(false);
+  const [
+    orchestrationExecutionRuleIdFilter,
+    setOrchestrationExecutionRuleIdFilter,
+  ] = useState("");
+  const [
+    orchestrationExecutionEventTypeFilter,
+    setOrchestrationExecutionEventTypeFilter,
+  ] = useState<AlertOrchestrationEventType | "">("");
+  const [
+    orchestrationExecutionSeverityFilter,
+    setOrchestrationExecutionSeverityFilter,
+  ] = useState<AlertSeverity | "">("");
+  const [
+    orchestrationExecutionSourceIdFilter,
+    setOrchestrationExecutionSourceIdFilter,
+  ] = useState("");
+  const [
+    orchestrationExecutionDedupeHitFilter,
+    setOrchestrationExecutionDedupeHitFilter,
+  ] = useState<"" | "true" | "false">("");
+  const [
+    orchestrationExecutionSuppressedFilter,
+    setOrchestrationExecutionSuppressedFilter,
+  ] = useState<"" | "true" | "false">("");
+  const [
+    orchestrationExecutionDispatchModeFilter,
+    setOrchestrationExecutionDispatchModeFilter,
+  ] = useState<AlertOrchestrationDispatchMode | "">("");
+  const [
+    orchestrationExecutionConflictFilter,
+    setOrchestrationExecutionConflictFilter,
+  ] = useState<"" | "true" | "false">("");
+  const [
+    orchestrationExecutionSimulatedFilter,
+    setOrchestrationExecutionSimulatedFilter,
+  ] = useState<"" | "true" | "false">("");
+  const [orchestrationExecutionFrom, setOrchestrationExecutionFrom] =
+    useState("");
   const [orchestrationExecutionTo, setOrchestrationExecutionTo] = useState("");
-  const [orchestrationExecutionLimit, setOrchestrationExecutionLimit] = useState("50");
-  const [orchestrationRulesPayload, setOrchestrationRulesPayload] =
-    useState<{ items: AlertOrchestrationRule[]; total: number } | null>(null);
+  const [orchestrationExecutionLimit, setOrchestrationExecutionLimit] =
+    useState("50");
+  const [orchestrationRulesPayload, setOrchestrationRulesPayload] = useState<{
+    items: AlertOrchestrationRule[];
+    total: number;
+  } | null>(null);
   const [orchestrationExecutionsPayload, setOrchestrationExecutionsPayload] =
-    useState<{ items: AlertOrchestrationExecutionLog[]; total: number } | null>(null);
+    useState<{ items: AlertOrchestrationExecutionLog[]; total: number } | null>(
+      null,
+    );
   const [orchestrationSimulationResult, setOrchestrationSimulationResult] =
     useState<AlertOrchestrationSimulationResponse | null>(null);
-  const [orchestrationFeedback, setOrchestrationFeedback] = useState<string | null>(null);
-  const [orchestrationError, setOrchestrationError] = useState<string | null>(null);
-  const [hasLoadedOrchestrationRules, setHasLoadedOrchestrationRules] = useState(false);
-  const [hasLoadedOrchestrationExecutions, setHasLoadedOrchestrationExecutions] = useState(false);
+  const [orchestrationFeedback, setOrchestrationFeedback] = useState<
+    string | null
+  >(null);
+  const [orchestrationError, setOrchestrationError] = useState<string | null>(
+    null,
+  );
+  const [hasLoadedOrchestrationRules, setHasLoadedOrchestrationRules] =
+    useState(false);
+  const [
+    hasLoadedOrchestrationExecutions,
+    setHasLoadedOrchestrationExecutions,
+  ] = useState(false);
 
-  const [residencyMode, setResidencyMode] = useState<DataResidencyMode>("single_region");
+  const [residencyMode, setResidencyMode] =
+    useState<DataResidencyMode>("single_region");
   const [primaryRegion, setPrimaryRegion] = useState("");
   const [replicaRegionsInput, setReplicaRegionsInput] = useState("");
-  const [allowCrossRegionTransfer, setAllowCrossRegionTransfer] = useState(false);
+  const [allowCrossRegionTransfer, setAllowCrossRegionTransfer] =
+    useState(false);
   const [requireTransferApproval, setRequireTransferApproval] = useState(false);
-  const [replicationStatusFilter, setReplicationStatusFilter] =
-    useState<ReplicationJobStatus | "">("");
+  const [replicationStatusFilter, setReplicationStatusFilter] = useState<
+    ReplicationJobStatus | ""
+  >("");
   const [replicationSourceRegion, setReplicationSourceRegion] = useState("");
   const [replicationTargetRegion, setReplicationTargetRegion] = useState("");
   const [replicationReason, setReplicationReason] = useState("");
-  const [residencyFeedback, setResidencyFeedback] = useState<string | null>(null);
+  const [residencyFeedback, setResidencyFeedback] = useState<string | null>(
+    null,
+  );
   const [residencyError, setResidencyError] = useState<string | null>(null);
 
-  const [ruleStatusFilter, setRuleStatusFilter] = useState<RuleLifecycleStatus | "">("");
+  const [ruleStatusFilter, setRuleStatusFilter] = useState<
+    RuleLifecycleStatus | ""
+  >("");
   const [ruleKeyword, setRuleKeyword] = useState("");
   const [ruleName, setRuleName] = useState("");
   const [ruleDescription, setRuleDescription] = useState("");
-  const [selectedRuleAssetId, setSelectedRuleAssetId] = useState<string | null>(null);
+  const [ruleScopeOrganizations, setRuleScopeOrganizations] = useState("");
+  const [ruleScopeProjects, setRuleScopeProjects] = useState("");
+  const [ruleScopeClients, setRuleScopeClients] = useState("");
+  const [selectedRuleAssetId, setSelectedRuleAssetId] = useState<string | null>(
+    null,
+  );
   const [ruleVersionContent, setRuleVersionContent] = useState("");
   const [ruleVersionChangelog, setRuleVersionChangelog] = useState("");
   const [rulePublishVersion, setRulePublishVersion] = useState("");
@@ -2607,11 +2938,14 @@ function GovernancePage() {
 
   const [mcpPolicyKeyword, setMcpPolicyKeyword] = useState("");
   const [mcpPolicyToolId, setMcpPolicyToolId] = useState("");
-  const [mcpPolicyRiskLevel, setMcpPolicyRiskLevel] = useState<McpRiskLevel>("medium");
-  const [mcpPolicyDecision, setMcpPolicyDecision] = useState<McpToolDecision>("require_approval");
+  const [mcpPolicyRiskLevel, setMcpPolicyRiskLevel] =
+    useState<McpRiskLevel>("medium");
+  const [mcpPolicyDecision, setMcpPolicyDecision] =
+    useState<McpToolDecision>("require_approval");
   const [mcpPolicyReason, setMcpPolicyReason] = useState("");
-  const [mcpApprovalStatusFilter, setMcpApprovalStatusFilter] =
-    useState<McpApprovalRequest["status"] | "">("");
+  const [mcpApprovalStatusFilter, setMcpApprovalStatusFilter] = useState<
+    McpApprovalRequest["status"] | ""
+  >("");
   const [mcpApprovalToolId, setMcpApprovalToolId] = useState("");
   const [mcpApprovalReason, setMcpApprovalReason] = useState("");
   const [mcpReviewReason, setMcpReviewReason] = useState("");
@@ -2625,7 +2959,9 @@ function GovernancePage() {
   const [openApiError, setOpenApiError] = useState<string | null>(null);
   const [hasLoadedOpenApiSummary, setHasLoadedOpenApiSummary] = useState(false);
 
-  const [apiKeyStatusFilter, setApiKeyStatusFilter] = useState<OpenPlatformApiKeyStatus | "">("");
+  const [apiKeyStatusFilter, setApiKeyStatusFilter] = useState<
+    OpenPlatformApiKeyStatus | ""
+  >("");
   const [apiKeyKeyword, setApiKeyKeyword] = useState("");
   const [apiKeyId, setApiKeyId] = useState("");
   const [apiKeyName, setApiKeyName] = useState("");
@@ -2633,14 +2969,17 @@ function GovernancePage() {
   const [apiKeyExpiresAt, setApiKeyExpiresAt] = useState("");
   const [apiKeyEnabled, setApiKeyEnabled] = useState(true);
   const [apiKeyRevokeReason, setApiKeyRevokeReason] = useState("");
-  const [apiKeyPayload, setApiKeyPayload] = useState<{ items: OpenPlatformApiKey[]; total: number } | null>(
-    null
-  );
+  const [apiKeyPayload, setApiKeyPayload] = useState<{
+    items: OpenPlatformApiKey[];
+    total: number;
+  } | null>(null);
   const [apiKeyFeedback, setApiKeyFeedback] = useState<string | null>(null);
   const [apiKeyError, setApiKeyError] = useState<string | null>(null);
   const [hasLoadedApiKeys, setHasLoadedApiKeys] = useState(false);
 
-  const [webhookEnabledFilter, setWebhookEnabledFilter] = useState<"" | "true" | "false">("");
+  const [webhookEnabledFilter, setWebhookEnabledFilter] = useState<
+    "" | "true" | "false"
+  >("");
   const [webhookKeyword, setWebhookKeyword] = useState("");
   const [webhookId, setWebhookId] = useState("");
   const [webhookName, setWebhookName] = useState("");
@@ -2652,9 +2991,10 @@ function GovernancePage() {
   const [webhookReplayTo, setWebhookReplayTo] = useState("");
   const [webhookReplayLimit, setWebhookReplayLimit] = useState("100");
   const [webhookReplayDryRun, setWebhookReplayDryRun] = useState(true);
-  const [webhookPayload, setWebhookPayload] = useState<{ items: OpenPlatformWebhook[]; total: number } | null>(
-    null
-  );
+  const [webhookPayload, setWebhookPayload] = useState<{
+    items: OpenPlatformWebhook[];
+    total: number;
+  } | null>(null);
   const [webhookFeedback, setWebhookFeedback] = useState<string | null>(null);
   const [webhookError, setWebhookError] = useState<string | null>(null);
   const [hasLoadedWebhooks, setHasLoadedWebhooks] = useState(false);
@@ -2670,22 +3010,28 @@ function GovernancePage() {
   >("");
   const [qualityProjectTrendsFrom, setQualityProjectTrendsFrom] = useState("");
   const [qualityProjectTrendsTo, setQualityProjectTrendsTo] = useState("");
-  const [qualityProjectTrendsMetric, setQualityProjectTrendsMetric] = useState("");
-  const [qualityProjectTrendsProvider, setQualityProjectTrendsProvider] = useState("");
-  const [qualityProjectTrendsWorkflow, setQualityProjectTrendsWorkflow] = useState("");
-  const [qualityProjectTrendsIncludeUnknown, setQualityProjectTrendsIncludeUnknown] =
-    useState(false);
+  const [qualityProjectTrendsMetric, setQualityProjectTrendsMetric] =
+    useState("");
+  const [qualityProjectTrendsProvider, setQualityProjectTrendsProvider] =
+    useState("");
+  const [qualityProjectTrendsWorkflow, setQualityProjectTrendsWorkflow] =
+    useState("");
+  const [
+    qualityProjectTrendsIncludeUnknown,
+    setQualityProjectTrendsIncludeUnknown,
+  ] = useState(false);
   const [qualityScorecardTeam, setQualityScorecardTeam] = useState("");
   const [qualityDailyPayload, setQualityDailyPayload] = useState<{
     items: OpenPlatformQualityDailyItem[];
     total: number;
     groups?: NonNullable<OpenPlatformQualityDailyResponse["groups"]>;
   } | null>(null);
-  const [qualityProjectTrendsPayload, setQualityProjectTrendsPayload] = useState<{
-    items: OpenPlatformQualityProjectTrendItem[];
-    total: number;
-    summary: OpenPlatformQualityProjectTrendResponse["summary"];
-  } | null>(null);
+  const [qualityProjectTrendsPayload, setQualityProjectTrendsPayload] =
+    useState<{
+      items: OpenPlatformQualityProjectTrendItem[];
+      total: number;
+      summary: OpenPlatformQualityProjectTrendResponse["summary"];
+    } | null>(null);
   const [qualityScorecardPayload, setQualityScorecardPayload] = useState<{
     items: OpenPlatformQualityScorecard[];
     total: number;
@@ -2693,30 +3039,45 @@ function GovernancePage() {
   const [qualityFeedback, setQualityFeedback] = useState<string | null>(null);
   const [qualityError, setQualityError] = useState<string | null>(null);
   const [hasLoadedQualityDaily, setHasLoadedQualityDaily] = useState(false);
-  const [hasLoadedQualityProjectTrends, setHasLoadedQualityProjectTrends] = useState(false);
-  const [hasLoadedQualityScorecards, setHasLoadedQualityScorecards] = useState(false);
+  const [hasLoadedQualityProjectTrends, setHasLoadedQualityProjectTrends] =
+    useState(false);
+  const [hasLoadedQualityScorecards, setHasLoadedQualityScorecards] =
+    useState(false);
 
   const [replayCreateDatasetName, setReplayCreateDatasetName] = useState("");
   const [replayCreateDatasetRef, setReplayCreateDatasetRef] = useState("");
   const [replayCreateDatasetModel, setReplayCreateDatasetModel] = useState("");
-  const [replayCreateDatasetPromptVersion, setReplayCreateDatasetPromptVersion] = useState("");
-  const [replayCreateDatasetSampleCount, setReplayCreateDatasetSampleCount] = useState("50");
+  const [
+    replayCreateDatasetPromptVersion,
+    setReplayCreateDatasetPromptVersion,
+  ] = useState("");
+  const [replayCreateDatasetSampleCount, setReplayCreateDatasetSampleCount] =
+    useState("50");
   const [replayDatasetKeyword, setReplayDatasetKeyword] = useState("");
   const [replayCreateRunDatasetId, setReplayCreateRunDatasetId] = useState("");
-  const [replayCreateRunCandidateLabel, setReplayCreateRunCandidateLabel] = useState("");
-  const [replayCreateRunSampleLimit, setReplayCreateRunSampleLimit] = useState("50");
-  const [replayDatasetCasesDatasetId, setReplayDatasetCasesDatasetId] = useState("");
+  const [replayCreateRunCandidateLabel, setReplayCreateRunCandidateLabel] =
+    useState("");
+  const [replayCreateRunSampleLimit, setReplayCreateRunSampleLimit] =
+    useState("50");
+  const [replayDatasetCasesDatasetId, setReplayDatasetCasesDatasetId] =
+    useState("");
   const [replayDatasetCasesEditor, setReplayDatasetCasesEditor] = useState("");
-  const [replayMaterializeSessionIds, setReplayMaterializeSessionIds] = useState("");
+  const [replayMaterializeSessionIds, setReplayMaterializeSessionIds] =
+    useState("");
   const [replayMaterializeKeyword, setReplayMaterializeKeyword] = useState("");
   const [replayMaterializeTool, setReplayMaterializeTool] = useState("");
   const [replayMaterializeModel, setReplayMaterializeModel] = useState("");
   const [replayMaterializeFrom, setReplayMaterializeFrom] = useState("");
   const [replayMaterializeTo, setReplayMaterializeTo] = useState("");
-  const [replayMaterializeSampleLimit, setReplayMaterializeSampleLimit] = useState("20");
-  const [replayMaterializeSanitized, setReplayMaterializeSanitized] = useState(true);
-  const [replayRunsDatasetIdFilter, setReplayRunsDatasetIdFilter] = useState("");
-  const [replayRunsStatusFilter, setReplayRunsStatusFilter] = useState<OpenPlatformReplayJobStatus | "">("");
+  const [replayMaterializeSampleLimit, setReplayMaterializeSampleLimit] =
+    useState("20");
+  const [replayMaterializeSanitized, setReplayMaterializeSanitized] =
+    useState(true);
+  const [replayRunsDatasetIdFilter, setReplayRunsDatasetIdFilter] =
+    useState("");
+  const [replayRunsStatusFilter, setReplayRunsStatusFilter] = useState<
+    OpenPlatformReplayJobStatus | ""
+  >("");
   const [replayDiffDatasetId, setReplayDiffDatasetId] = useState("");
   const [replayDiffRunId, setReplayDiffRunId] = useState("");
   const [replayDiffKeyword, setReplayDiffKeyword] = useState("");
@@ -2749,13 +3110,17 @@ function GovernancePage() {
   const [replayFeedback, setReplayFeedback] = useState<string | null>(null);
   const [replayError, setReplayError] = useState<string | null>(null);
   const [hasLoadedReplayDatasets, setHasLoadedReplayDatasets] = useState(false);
-  const [hasLoadedReplayDatasetCases, setHasLoadedReplayDatasetCases] = useState(false);
+  const [hasLoadedReplayDatasetCases, setHasLoadedReplayDatasetCases] =
+    useState(false);
   const [hasLoadedReplayJobs, setHasLoadedReplayJobs] = useState(false);
   const [hasLoadedReplayDiff, setHasLoadedReplayDiff] = useState(false);
-  const [hasLoadedReplayArtifacts, setHasLoadedReplayArtifacts] = useState(false);
+  const [hasLoadedReplayArtifacts, setHasLoadedReplayArtifacts] =
+    useState(false);
 
-  const [sessionExportFormat, setSessionExportFormat] = useState<ExportFormat>("csv");
-  const [usageExportFormat, setUsageExportFormat] = useState<ExportFormat>("csv");
+  const [sessionExportFormat, setSessionExportFormat] =
+    useState<ExportFormat>("csv");
+  const [usageExportFormat, setUsageExportFormat] =
+    useState<ExportFormat>("csv");
   const [usageExportDimension, setUsageExportDimension] =
     useState<UsageExportDimension>("daily");
   const [exportFeedback, setExportFeedback] = useState<string | null>(null);
@@ -2769,7 +3134,7 @@ function GovernancePage() {
       ...(statusFilter ? { status: statusFilter } : {}),
       ...(severityFilter ? { severity: severityFilter } : {}),
     }),
-    [severityFilter, statusFilter]
+    [severityFilter, statusFilter],
   );
 
   const orchestrationRuleQueryInput = useMemo<AlertOrchestrationRuleListInput>(
@@ -2777,10 +3142,13 @@ function GovernancePage() {
       ...(orchestrationRuleEventTypeFilter
         ? { eventType: orchestrationRuleEventTypeFilter }
         : {}),
-      ...(typeof parseBooleanSelect(orchestrationRuleEnabledFilter) === "boolean"
+      ...(typeof parseBooleanSelect(orchestrationRuleEnabledFilter) ===
+      "boolean"
         ? { enabled: parseBooleanSelect(orchestrationRuleEnabledFilter) }
         : {}),
-      ...(orchestrationRuleSeverityFilter ? { severity: orchestrationRuleSeverityFilter } : {}),
+      ...(orchestrationRuleSeverityFilter
+        ? { severity: orchestrationRuleSeverityFilter }
+        : {}),
       ...(orchestrationRuleSourceIdFilter.trim().length > 0
         ? { sourceId: orchestrationRuleSourceIdFilter.trim() }
         : {}),
@@ -2790,70 +3158,98 @@ function GovernancePage() {
       orchestrationRuleEventTypeFilter,
       orchestrationRuleSeverityFilter,
       orchestrationRuleSourceIdFilter,
-    ]
+    ],
   );
 
-  const orchestrationExecutionQueryInput = useMemo<AlertOrchestrationExecutionListInput>(
-    () => ({
-      ...(orchestrationExecutionRuleIdFilter.trim().length > 0
-        ? { ruleId: orchestrationExecutionRuleIdFilter.trim() }
-        : {}),
-      ...(orchestrationExecutionEventTypeFilter
-        ? { eventType: orchestrationExecutionEventTypeFilter }
-        : {}),
-      ...(orchestrationExecutionSeverityFilter
-        ? { severity: orchestrationExecutionSeverityFilter }
-        : {}),
-      ...(orchestrationExecutionSourceIdFilter.trim().length > 0
-        ? { sourceId: orchestrationExecutionSourceIdFilter.trim() }
-        : {}),
-      ...(typeof parseBooleanSelect(orchestrationExecutionDedupeHitFilter) === "boolean"
-        ? { dedupeHit: parseBooleanSelect(orchestrationExecutionDedupeHitFilter) }
-        : {}),
-      ...(typeof parseBooleanSelect(orchestrationExecutionSuppressedFilter) === "boolean"
-        ? { suppressed: parseBooleanSelect(orchestrationExecutionSuppressedFilter) }
-        : {}),
-      ...(orchestrationExecutionDispatchModeFilter
-        ? { dispatchMode: orchestrationExecutionDispatchModeFilter }
-        : {}),
-      ...(typeof parseBooleanSelect(orchestrationExecutionConflictFilter) === "boolean"
-        ? { hasConflict: parseBooleanSelect(orchestrationExecutionConflictFilter) }
-        : {}),
-      ...(typeof parseBooleanSelect(orchestrationExecutionSimulatedFilter) === "boolean"
-        ? { simulated: parseBooleanSelect(orchestrationExecutionSimulatedFilter) }
-        : {}),
-      ...(orchestrationExecutionFrom.trim().length > 0
-        ? { from: orchestrationExecutionFrom.trim() }
-        : {}),
-      ...(orchestrationExecutionTo.trim().length > 0
-        ? { to: orchestrationExecutionTo.trim() }
-        : {}),
-      ...(typeof parseOptionalNonNegativeInteger(orchestrationExecutionLimit) === "number"
-        ? { limit: parseOptionalNonNegativeInteger(orchestrationExecutionLimit) }
-        : {}),
-    }),
-    [
-      orchestrationExecutionConflictFilter,
-      orchestrationExecutionDispatchModeFilter,
-      orchestrationExecutionDedupeHitFilter,
-      orchestrationExecutionEventTypeFilter,
-      orchestrationExecutionFrom,
-      orchestrationExecutionLimit,
-      orchestrationExecutionRuleIdFilter,
-      orchestrationExecutionSeverityFilter,
-      orchestrationExecutionSimulatedFilter,
-      orchestrationExecutionSourceIdFilter,
-      orchestrationExecutionSuppressedFilter,
-      orchestrationExecutionTo,
-    ]
-  );
+  const orchestrationExecutionQueryInput =
+    useMemo<AlertOrchestrationExecutionListInput>(
+      () => ({
+        ...(orchestrationExecutionRuleIdFilter.trim().length > 0
+          ? { ruleId: orchestrationExecutionRuleIdFilter.trim() }
+          : {}),
+        ...(orchestrationExecutionEventTypeFilter
+          ? { eventType: orchestrationExecutionEventTypeFilter }
+          : {}),
+        ...(orchestrationExecutionSeverityFilter
+          ? { severity: orchestrationExecutionSeverityFilter }
+          : {}),
+        ...(orchestrationExecutionSourceIdFilter.trim().length > 0
+          ? { sourceId: orchestrationExecutionSourceIdFilter.trim() }
+          : {}),
+        ...(typeof parseBooleanSelect(orchestrationExecutionDedupeHitFilter) ===
+        "boolean"
+          ? {
+              dedupeHit: parseBooleanSelect(
+                orchestrationExecutionDedupeHitFilter,
+              ),
+            }
+          : {}),
+        ...(typeof parseBooleanSelect(
+          orchestrationExecutionSuppressedFilter,
+        ) === "boolean"
+          ? {
+              suppressed: parseBooleanSelect(
+                orchestrationExecutionSuppressedFilter,
+              ),
+            }
+          : {}),
+        ...(orchestrationExecutionDispatchModeFilter
+          ? { dispatchMode: orchestrationExecutionDispatchModeFilter }
+          : {}),
+        ...(typeof parseBooleanSelect(orchestrationExecutionConflictFilter) ===
+        "boolean"
+          ? {
+              hasConflict: parseBooleanSelect(
+                orchestrationExecutionConflictFilter,
+              ),
+            }
+          : {}),
+        ...(typeof parseBooleanSelect(orchestrationExecutionSimulatedFilter) ===
+        "boolean"
+          ? {
+              simulated: parseBooleanSelect(
+                orchestrationExecutionSimulatedFilter,
+              ),
+            }
+          : {}),
+        ...(orchestrationExecutionFrom.trim().length > 0
+          ? { from: orchestrationExecutionFrom.trim() }
+          : {}),
+        ...(orchestrationExecutionTo.trim().length > 0
+          ? { to: orchestrationExecutionTo.trim() }
+          : {}),
+        ...(typeof parseOptionalNonNegativeInteger(
+          orchestrationExecutionLimit,
+        ) === "number"
+          ? {
+              limit: parseOptionalNonNegativeInteger(
+                orchestrationExecutionLimit,
+              ),
+            }
+          : {}),
+      }),
+      [
+        orchestrationExecutionConflictFilter,
+        orchestrationExecutionDispatchModeFilter,
+        orchestrationExecutionDedupeHitFilter,
+        orchestrationExecutionEventTypeFilter,
+        orchestrationExecutionFrom,
+        orchestrationExecutionLimit,
+        orchestrationExecutionRuleIdFilter,
+        orchestrationExecutionSeverityFilter,
+        orchestrationExecutionSimulatedFilter,
+        orchestrationExecutionSourceIdFilter,
+        orchestrationExecutionSuppressedFilter,
+        orchestrationExecutionTo,
+      ],
+    );
 
   const replicationJobQueryInput = useMemo(
     () => ({
       limit: 50,
       ...(replicationStatusFilter ? { status: replicationStatusFilter } : {}),
     }),
-    [replicationStatusFilter]
+    [replicationStatusFilter],
   );
 
   const ruleAssetQueryInput = useMemo(
@@ -2862,15 +3258,17 @@ function GovernancePage() {
       ...(ruleStatusFilter ? { status: ruleStatusFilter } : {}),
       ...(ruleKeyword.trim().length > 0 ? { keyword: ruleKeyword.trim() } : {}),
     }),
-    [ruleKeyword, ruleStatusFilter]
+    [ruleKeyword, ruleStatusFilter],
   );
 
   const mcpPolicyQueryInput = useMemo(
     () => ({
       limit: 50,
-      ...(mcpPolicyKeyword.trim().length > 0 ? { keyword: mcpPolicyKeyword.trim() } : {}),
+      ...(mcpPolicyKeyword.trim().length > 0
+        ? { keyword: mcpPolicyKeyword.trim() }
+        : {}),
     }),
-    [mcpPolicyKeyword]
+    [mcpPolicyKeyword],
   );
 
   const mcpApprovalQueryInput = useMemo(
@@ -2878,24 +3276,28 @@ function GovernancePage() {
       limit: 50,
       ...(mcpApprovalStatusFilter ? { status: mcpApprovalStatusFilter } : {}),
     }),
-    [mcpApprovalStatusFilter]
+    [mcpApprovalStatusFilter],
   );
 
   const mcpInvocationQueryInput = useMemo(
     () => ({
       limit: 50,
-      ...(mcpInvocationToolId.trim().length > 0 ? { toolId: mcpInvocationToolId.trim() } : {}),
+      ...(mcpInvocationToolId.trim().length > 0
+        ? { toolId: mcpInvocationToolId.trim() }
+        : {}),
     }),
-    [mcpInvocationToolId]
+    [mcpInvocationToolId],
   );
 
   const apiKeyQueryInput = useMemo(
     () => ({
       limit: 50,
       ...(apiKeyStatusFilter ? { status: apiKeyStatusFilter } : {}),
-      ...(apiKeyKeyword.trim().length > 0 ? { keyword: apiKeyKeyword.trim() } : {}),
+      ...(apiKeyKeyword.trim().length > 0
+        ? { keyword: apiKeyKeyword.trim() }
+        : {}),
     }),
-    [apiKeyKeyword, apiKeyStatusFilter]
+    [apiKeyKeyword, apiKeyStatusFilter],
   );
 
   const webhookQueryInput = useMemo(
@@ -2904,9 +3306,11 @@ function GovernancePage() {
       ...(typeof parseBooleanSelect(webhookEnabledFilter) === "boolean"
         ? { enabled: parseBooleanSelect(webhookEnabledFilter) }
         : {}),
-      ...(webhookKeyword.trim().length > 0 ? { keyword: webhookKeyword.trim() } : {}),
+      ...(webhookKeyword.trim().length > 0
+        ? { keyword: webhookKeyword.trim() }
+        : {}),
     }),
-    [webhookEnabledFilter, webhookKeyword]
+    [webhookEnabledFilter, webhookKeyword],
   );
 
   const alertsQuery = useQuery({
@@ -2923,7 +3327,7 @@ function GovernancePage() {
           metric: weeklyMetric,
           timezone: weeklyTimezone,
         },
-        signal
+        signal,
       ),
     staleTime: 60_000,
   });
@@ -2944,7 +3348,8 @@ function GovernancePage() {
 
   const replicationJobsQuery = useQuery({
     queryKey: ["residency", "jobs", replicationJobQueryInput],
-    queryFn: ({ signal }) => fetchReplicationJobs(replicationJobQueryInput, signal),
+    queryFn: ({ signal }) =>
+      fetchReplicationJobs(replicationJobQueryInput, signal),
     staleTime: 20_000,
   });
 
@@ -2957,14 +3362,16 @@ function GovernancePage() {
   const ruleVersionsQuery = useQuery({
     queryKey: ["rules", "assets", selectedRuleAssetId, "versions"],
     enabled: Boolean(selectedRuleAssetId),
-    queryFn: ({ signal }) => fetchRuleAssetVersions(selectedRuleAssetId!, 50, signal),
+    queryFn: ({ signal }) =>
+      fetchRuleAssetVersions(selectedRuleAssetId!, 50, signal),
     staleTime: 20_000,
   });
 
   const ruleApprovalsQuery = useQuery({
     queryKey: ["rules", "assets", selectedRuleAssetId, "approvals"],
     enabled: Boolean(selectedRuleAssetId),
-    queryFn: ({ signal }) => fetchRuleApprovals(selectedRuleAssetId!, { limit: 50 }, signal),
+    queryFn: ({ signal }) =>
+      fetchRuleApprovals(selectedRuleAssetId!, { limit: 50 }, signal),
     staleTime: 20_000,
   });
 
@@ -2982,7 +3389,8 @@ function GovernancePage() {
 
   const mcpInvocationsQuery = useQuery({
     queryKey: ["mcp", "invocations", mcpInvocationQueryInput],
-    queryFn: ({ signal }) => fetchMcpInvocations(mcpInvocationQueryInput, signal),
+    queryFn: ({ signal }) =>
+      fetchMcpInvocations(mcpInvocationQueryInput, signal),
     staleTime: 20_000,
   });
 
@@ -3034,7 +3442,10 @@ function GovernancePage() {
       setRuleApprovalVersion("");
       return;
     }
-    if (!selectedRuleAssetId || !assets.some((asset) => asset.id === selectedRuleAssetId)) {
+    if (
+      !selectedRuleAssetId ||
+      !assets.some((asset) => asset.id === selectedRuleAssetId)
+    ) {
       setSelectedRuleAssetId(assets[0].id);
     }
   }, [ruleAssetsQuery.data, selectedRuleAssetId]);
@@ -3042,15 +3453,30 @@ function GovernancePage() {
   useEffect(() => {
     if (!selectedRuleAssetId) {
       previousRuleAssetIdRef.current = null;
+      setRulePublishVersion("");
+      setRuleRollbackVersion("");
+      setRuleApprovalVersion("");
       return;
     }
     const assets = ruleAssetsQuery.data?.items ?? [];
     const selected = assets.find((asset) => asset.id === selectedRuleAssetId);
-    if (!selected || selected.latestVersion < 1) {
+    if (!selected) {
+      previousRuleAssetIdRef.current = null;
+      setRulePublishVersion("");
+      setRuleRollbackVersion("");
+      setRuleApprovalVersion("");
+      return;
+    }
+    if (selected.latestVersion < 1) {
+      previousRuleAssetIdRef.current = selectedRuleAssetId;
+      setRulePublishVersion("");
+      setRuleRollbackVersion("");
+      setRuleApprovalVersion("");
       return;
     }
     const latestVersionText = String(selected.latestVersion);
-    const switchedAsset = previousRuleAssetIdRef.current !== selectedRuleAssetId;
+    const switchedAsset =
+      previousRuleAssetIdRef.current !== selectedRuleAssetId;
     previousRuleAssetIdRef.current = selectedRuleAssetId;
     if (switchedAsset) {
       setRulePublishVersion(latestVersionText);
@@ -3058,14 +3484,25 @@ function GovernancePage() {
       setRuleApprovalVersion(latestVersionText);
       return;
     }
-    setRulePublishVersion((prev) => (prev.trim().length > 0 ? prev : latestVersionText));
-    setRuleRollbackVersion((prev) => (prev.trim().length > 0 ? prev : latestVersionText));
-    setRuleApprovalVersion((prev) => (prev.trim().length > 0 ? prev : latestVersionText));
+    setRulePublishVersion((prev) =>
+      prev.trim().length > 0 ? prev : latestVersionText,
+    );
+    setRuleRollbackVersion((prev) =>
+      prev.trim().length > 0 ? prev : latestVersionText,
+    );
+    setRuleApprovalVersion((prev) =>
+      prev.trim().length > 0 ? prev : latestVersionText,
+    );
   }, [ruleAssetsQuery.data, selectedRuleAssetId]);
 
   const updateAlertStatusMutation = useMutation({
-    mutationFn: ({ alertId, status }: { alertId: string; status: AlertMutableStatus }) =>
-      updateAlertStatus(alertId, status),
+    mutationFn: ({
+      alertId,
+      status,
+    }: {
+      alertId: string;
+      status: AlertMutableStatus;
+    }) => updateAlertStatus(alertId, status),
     onSuccess: async (alert) => {
       setAlertFeedback(`告警 ${alert.id} 已更新为 ${alert.status}。`);
       await queryClient.invalidateQueries({ queryKey: ["alerts"] });
@@ -3120,14 +3557,18 @@ function GovernancePage() {
       setOrchestrationRuleSeverity(rule.severity ?? "");
       setOrchestrationRuleSourceId(rule.sourceId ?? "");
       setOrchestrationRuleDedupeWindowSeconds(String(rule.dedupeWindowSeconds));
-      setOrchestrationRuleSuppressionWindowSeconds(String(rule.suppressionWindowSeconds));
+      setOrchestrationRuleSuppressionWindowSeconds(
+        String(rule.suppressionWindowSeconds),
+      );
       setOrchestrationRuleMergeWindowSeconds(String(rule.mergeWindowSeconds));
       setOrchestrationRuleSlaMinutes(
-        typeof rule.slaMinutes === "number" ? String(rule.slaMinutes) : ""
+        typeof rule.slaMinutes === "number" ? String(rule.slaMinutes) : "",
       );
       setOrchestrationRuleChannelsInput(rule.channels.join(","));
       try {
-        const payload = await fetchAlertOrchestrationRules(orchestrationRuleQueryInput);
+        const payload = await fetchAlertOrchestrationRules(
+          orchestrationRuleQueryInput,
+        );
         setHasLoadedOrchestrationRules(true);
         setOrchestrationRulesPayload({
           items: payload.items,
@@ -3135,7 +3576,7 @@ function GovernancePage() {
         });
       } catch (error) {
         setOrchestrationFeedback(
-          `编排规则 ${rule.id} 已保存，但规则列表刷新失败：${toErrorMessage(error)}`
+          `编排规则 ${rule.id} 已保存，但规则列表刷新失败：${toErrorMessage(error)}`,
         );
       }
     },
@@ -3152,7 +3593,7 @@ function GovernancePage() {
       setOrchestrationError(null);
       setOrchestrationSimulationResult(payload);
       setOrchestrationFeedback(
-        `模拟完成：命中 ${payload.matchedRules.length} 条规则，冲突 ${payload.conflictRuleIds.length} 条。`
+        `模拟完成：命中 ${payload.matchedRules.length} 条规则，冲突 ${payload.conflictRuleIds.length} 条。`,
       );
     },
     onError: (error) => {
@@ -3184,11 +3625,13 @@ function GovernancePage() {
     mutationFn: (
       input: Omit<TenantResidencyPolicy, "tenantId" | "updatedAt"> & {
         updatedAt?: string;
-      }
+      },
     ) => upsertResidencyPolicy(input),
     onSuccess: async (policy) => {
       setResidencyError(null);
-      setResidencyFeedback(`数据主权策略已保存，主地域：${policy.primaryRegion}`);
+      setResidencyFeedback(
+        `数据主权策略已保存，主地域：${policy.primaryRegion}`,
+      );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["residency", "policy"] }),
         queryClient.invalidateQueries({ queryKey: ["residency", "jobs"] }),
@@ -3212,7 +3655,9 @@ function GovernancePage() {
     }) => createReplicationJob({ sourceRegion, targetRegion, reason }),
     onSuccess: async (job) => {
       setResidencyError(null);
-      setResidencyFeedback(`复制任务 ${job.id} 已创建（${job.sourceRegion} -> ${job.targetRegion}）。`);
+      setResidencyFeedback(
+        `复制任务 ${job.id} 已创建（${job.sourceRegion} -> ${job.targetRegion}）。`,
+      );
       setReplicationReason("");
       await queryClient.invalidateQueries({ queryKey: ["residency", "jobs"] });
     },
@@ -3227,7 +3672,9 @@ function GovernancePage() {
       approveReplicationJob(jobId, reason ? { reason } : undefined),
     onSuccess: async (job) => {
       setResidencyError(null);
-      setResidencyFeedback(`复制任务 ${job.id} 已审批，当前状态 ${job.status}。`);
+      setResidencyFeedback(
+        `复制任务 ${job.id} 已审批，当前状态 ${job.status}。`,
+      );
       await queryClient.invalidateQueries({ queryKey: ["residency", "jobs"] });
     },
     onError: (error) => {
@@ -3251,13 +3698,23 @@ function GovernancePage() {
   });
 
   const createRuleAssetMutation = useMutation({
-    mutationFn: ({ name, description }: { name: string; description?: string }) =>
-      createRuleAsset({ name, description }),
+    mutationFn: ({
+      name,
+      description,
+      scopeBinding,
+    }: {
+      name: string;
+      description?: string;
+      scopeBinding?: RuleAsset["scopeBinding"];
+    }) => createRuleAsset({ name, description, scopeBinding }),
     onSuccess: async (asset) => {
       setRuleError(null);
       setRuleFeedback(`规则资产 ${asset.name} 已创建。`);
       setRuleName("");
       setRuleDescription("");
+      setRuleScopeOrganizations("");
+      setRuleScopeProjects("");
+      setRuleScopeClients("");
       setSelectedRuleAssetId(asset.id);
       const latestVersionText =
         asset.latestVersion > 0 ? String(asset.latestVersion) : "";
@@ -3308,10 +3765,14 @@ function GovernancePage() {
       publishRuleAsset(assetId, { version }),
     onSuccess: async (asset) => {
       setRuleError(null);
-      setRuleFeedback(`规则资产 ${asset.name} 已发布 v${asset.publishedVersion ?? "-"}.`);
+      setRuleFeedback(
+        `规则资产 ${asset.name} 已发布 v${asset.publishedVersion ?? "-"}.`,
+      );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["rules", "assets"] }),
-        queryClient.invalidateQueries({ queryKey: ["rules", "assets", asset.id, "versions"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["rules", "assets", asset.id, "versions"],
+        }),
       ]);
     },
     onError: (error) => {
@@ -3332,10 +3793,14 @@ function GovernancePage() {
     }) => rollbackRuleAsset(assetId, { version, reason }),
     onSuccess: async (asset) => {
       setRuleError(null);
-      setRuleFeedback(`规则资产 ${asset.name} 已回滚到 v${asset.publishedVersion ?? "-"}.`);
+      setRuleFeedback(
+        `规则资产 ${asset.name} 已回滚到 v${asset.publishedVersion ?? "-"}.`,
+      );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["rules", "assets"] }),
-        queryClient.invalidateQueries({ queryKey: ["rules", "assets", asset.id, "versions"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["rules", "assets", asset.id, "versions"],
+        }),
       ]);
     },
     onError: (error) => {
@@ -3358,7 +3823,9 @@ function GovernancePage() {
     }) => createRuleApproval(assetId, { version, decision, reason }),
     onSuccess: async (approval) => {
       setRuleError(null);
-      setRuleFeedback(`已提交审批：v${approval.version} -> ${approval.decision}。`);
+      setRuleFeedback(
+        `已提交审批：v${approval.version} -> ${approval.decision}。`,
+      );
       setRuleApprovalReason("");
       await queryClient.invalidateQueries({
         queryKey: ["rules", "assets", approval.assetId, "approvals"],
@@ -3449,8 +3916,11 @@ function GovernancePage() {
   });
 
   const loadApiKeysMutation = useMutation({
-    mutationFn: (input: { status?: OpenPlatformApiKeyStatus; keyword?: string; limit: number }) =>
-      fetchOpenPlatformApiKeys(input),
+    mutationFn: (input: {
+      status?: OpenPlatformApiKeyStatus;
+      keyword?: string;
+      limit: number;
+    }) => fetchOpenPlatformApiKeys(input),
     onSuccess: (payload) => {
       setApiKeyError(null);
       setHasLoadedApiKeys(true);
@@ -3490,7 +3960,9 @@ function GovernancePage() {
         setHasLoadedApiKeys(true);
         setApiKeyPayload({ items: payload.items, total: payload.total });
       } catch (error) {
-        setApiKeyFeedback(`API Key ${apiKey.id} 已保存，但列表刷新失败：${toErrorMessage(error)}`);
+        setApiKeyFeedback(
+          `API Key ${apiKey.id} 已保存，但列表刷新失败：${toErrorMessage(error)}`,
+        );
       }
     },
     onError: (error) => {
@@ -3513,7 +3985,9 @@ function GovernancePage() {
         setHasLoadedApiKeys(true);
         setApiKeyPayload({ items: payload.items, total: payload.total });
       } catch (error) {
-        setApiKeyFeedback(`API Key ${apiKey.id} 已吊销，但列表刷新失败：${toErrorMessage(error)}`);
+        setApiKeyFeedback(
+          `API Key ${apiKey.id} 已吊销，但列表刷新失败：${toErrorMessage(error)}`,
+        );
       }
     },
     onError: (error) => {
@@ -3523,8 +3997,11 @@ function GovernancePage() {
   });
 
   const loadWebhooksMutation = useMutation({
-    mutationFn: (input: { enabled?: boolean; keyword?: string; limit: number }) =>
-      fetchOpenPlatformWebhooks(input),
+    mutationFn: (input: {
+      enabled?: boolean;
+      keyword?: string;
+      limit: number;
+    }) => fetchOpenPlatformWebhooks(input),
     onSuccess: (payload) => {
       setWebhookError(null);
       setHasLoadedWebhooks(true);
@@ -3564,7 +4041,9 @@ function GovernancePage() {
         setHasLoadedWebhooks(true);
         setWebhookPayload({ items: payload.items, total: payload.total });
       } catch (error) {
-        setWebhookFeedback(`Webhook ${webhook.id} 已保存，但列表刷新失败：${toErrorMessage(error)}`);
+        setWebhookFeedback(
+          `Webhook ${webhook.id} 已保存，但列表刷新失败：${toErrorMessage(error)}`,
+        );
       }
     },
     onError: (error) => {
@@ -3592,7 +4071,7 @@ function GovernancePage() {
         setWebhookPayload({ items: payload.items, total: payload.total });
       } catch (error) {
         setWebhookFeedback(
-          `Webhook ${variables.webhookId} 已删除，但列表刷新失败：${toErrorMessage(error)}`
+          `Webhook ${variables.webhookId} 已删除，但列表刷新失败：${toErrorMessage(error)}`,
         );
       }
     },
@@ -3619,7 +4098,7 @@ function GovernancePage() {
     onSuccess: (result) => {
       setWebhookError(null);
       setWebhookFeedback(
-        `Webhook ${result.webhookId} 回放任务 ${result.id} 已排队（dryRun=${result.dryRun ? "true" : "false"}）。`
+        `Webhook ${result.webhookId} 回放任务 ${result.id} 已排队（dryRun=${result.dryRun ? "true" : "false"}）。`,
       );
     },
     onError: (error) => {
@@ -3638,8 +4117,7 @@ function GovernancePage() {
       runId?: string;
       groupBy?: "provider" | "repo" | "workflow" | "runId";
       limit: number;
-    }) =>
-      fetchOpenPlatformQualityDaily(input),
+    }) => fetchOpenPlatformQualityDaily(input),
     onSuccess: (payload) => {
       setQualityError(null);
       setHasLoadedQualityDaily(true);
@@ -3675,21 +4153,29 @@ function GovernancePage() {
         total: payload.total,
         summary: payload.summary,
       });
-      setQualityFeedback(`Quality project-trends 已加载，共 ${payload.total} 个项目。`);
+      setQualityFeedback(
+        `Quality project-trends 已加载，共 ${payload.total} 个项目。`,
+      );
     },
     onError: (error) => {
       setQualityFeedback(null);
       setHasLoadedQualityProjectTrends(true);
-      setQualityError(`Quality project-trends 加载失败：${toErrorMessage(error)}`);
+      setQualityError(
+        `Quality project-trends 加载失败：${toErrorMessage(error)}`,
+      );
     },
   });
 
   const loadQualityScorecardsMutation = useMutation({
-    mutationFn: (input: { team?: string; limit: number }) => fetchOpenPlatformQualityScorecards(input),
+    mutationFn: (input: { team?: string; limit: number }) =>
+      fetchOpenPlatformQualityScorecards(input),
     onSuccess: (payload) => {
       setQualityError(null);
       setHasLoadedQualityScorecards(true);
-      setQualityScorecardPayload({ items: payload.items, total: payload.total });
+      setQualityScorecardPayload({
+        items: payload.items,
+        total: payload.total,
+      });
       setQualityFeedback(`Quality scorecards 已加载，共 ${payload.total} 条。`);
     },
     onError: (error) => {
@@ -3700,7 +4186,8 @@ function GovernancePage() {
   });
 
   const loadReplayDatasetsMutation = useMutation({
-    mutationFn: (input: { keyword?: string; limit: number }) => fetchOpenPlatformReplayDatasets(input),
+    mutationFn: (input: { keyword?: string; limit: number }) =>
+      fetchOpenPlatformReplayDatasets(input),
     onSuccess: (payload) => {
       setReplayError(null);
       setHasLoadedReplayDatasets(true);
@@ -3740,10 +4227,13 @@ function GovernancePage() {
           limit: 50,
         });
         setHasLoadedReplayDatasets(true);
-        setReplayDatasetPayload({ items: refreshed.items, total: refreshed.total });
+        setReplayDatasetPayload({
+          items: refreshed.items,
+          total: refreshed.total,
+        });
       } catch (error) {
         setReplayFeedback(
-          `回放数据集 ${payload.datasetId} 已创建，但列表刷新失败：${toErrorMessage(error)}`
+          `回放数据集 ${payload.datasetId} 已创建，但列表刷新失败：${toErrorMessage(error)}`,
         );
       }
     },
@@ -3754,7 +4244,8 @@ function GovernancePage() {
   });
 
   const loadReplayDatasetCasesMutation = useMutation({
-    mutationFn: (datasetId: string) => fetchOpenPlatformReplayDatasetCases(datasetId),
+    mutationFn: (datasetId: string) =>
+      fetchOpenPlatformReplayDatasetCases(datasetId),
     onSuccess: (payload) => {
       setReplayError(null);
       setHasLoadedReplayDatasetCases(true);
@@ -3774,8 +4265,8 @@ function GovernancePage() {
             baselineOutput: item.baselineOutput,
             candidateInput: item.candidateInput,
             metadata: item.metadata,
-          }))
-        )
+          })),
+        ),
       );
       setReplayFeedback(`回放样本已加载，共 ${payload.total} 条。`);
     },
@@ -3821,8 +4312,8 @@ function GovernancePage() {
             baselineOutput: item.baselineOutput,
             candidateInput: item.candidateInput,
             metadata: item.metadata,
-          }))
-        )
+          })),
+        ),
       );
       setReplayFeedback(`回放样本已保存，共 ${payload.total} 条。`);
     },
@@ -3878,11 +4369,11 @@ function GovernancePage() {
             baselineOutput: item.baselineOutput,
             candidateInput: item.candidateInput,
             metadata: item.metadata,
-          }))
-        )
+          })),
+        ),
       );
       setReplayFeedback(
-        `已从历史会话物化 ${payload.materialized} 条样本，跳过 ${payload.skipped} 条。`
+        `已从历史会话物化 ${payload.materialized} 条样本，跳过 ${payload.skipped} 条。`,
       );
     },
     onError: (error) => {
@@ -3903,7 +4394,9 @@ function GovernancePage() {
       setReplayCreateRunSampleLimit("50");
       setReplayDiffRunId(payload.runId);
       setReplayArtifactRunId(payload.runId);
-      setReplayFeedback(`回放运行 ${payload.runId} 已创建，当前状态 ${payload.status}。`);
+      setReplayFeedback(
+        `回放运行 ${payload.runId} 已创建，当前状态 ${payload.status}。`,
+      );
       try {
         const refreshed = await fetchOpenPlatformReplayRuns({
           datasetId: replayRunsDatasetIdFilter.trim() || undefined,
@@ -3914,7 +4407,7 @@ function GovernancePage() {
         setReplayRunPayload({ items: refreshed.items, total: refreshed.total });
       } catch (error) {
         setReplayFeedback(
-          `回放运行 ${payload.runId} 已创建，但运行列表刷新失败：${toErrorMessage(error)}`
+          `回放运行 ${payload.runId} 已创建，但运行列表刷新失败：${toErrorMessage(error)}`,
         );
       }
     },
@@ -3953,7 +4446,11 @@ function GovernancePage() {
     onSuccess: (payload) => {
       setReplayError(null);
       setHasLoadedReplayDiff(true);
-      setReplayDiffPayload({ items: payload.items, total: payload.total, summary: payload.summary });
+      setReplayDiffPayload({
+        items: payload.items,
+        total: payload.total,
+        summary: payload.summary,
+      });
       setReplayFeedback(`回放差异已加载，共 ${payload.total} 条。`);
     },
     onError: (error) => {
@@ -3983,8 +4480,16 @@ function GovernancePage() {
   });
 
   const downloadReplayArtifactMutation = useMutation({
-    mutationFn: (input: { runId: string; artifactType: string; downloadName?: string }) =>
-      downloadOpenPlatformReplayArtifact(input.runId, input.artifactType, input.downloadName),
+    mutationFn: (input: {
+      runId: string;
+      artifactType: string;
+      downloadName?: string;
+    }) =>
+      downloadOpenPlatformReplayArtifact(
+        input.runId,
+        input.artifactType,
+        input.downloadName,
+      ),
     onSuccess: (file) => {
       setReplayError(null);
       setReplayFeedback(`回放工件下载成功：${file.filename}`);
@@ -3997,7 +4502,8 @@ function GovernancePage() {
   });
 
   const exportSessionsMutation = useMutation({
-    mutationFn: (format: ExportFormat) => exportSessions(format, { limit: 200 }),
+    mutationFn: (format: ExportFormat) =>
+      exportSessions(format, { limit: 200 }),
     onSuccess: (file) => {
       setExportError(null);
       setExportFeedback(`Sessions 导出成功：${file.filename}`);
@@ -4010,7 +4516,10 @@ function GovernancePage() {
   });
 
   const exportUsageMutation = useMutation({
-    mutationFn: (input: { format: ExportFormat; dimension: UsageExportDimension }) =>
+    mutationFn: (input: {
+      format: ExportFormat;
+      dimension: UsageExportDimension;
+    }) =>
       exportUsage(input.format, {
         dimension: input.dimension,
         limit: 200,
@@ -4030,24 +4539,32 @@ function GovernancePage() {
   const weeklyItems = weeklySummaryQuery.data?.weeks ?? [];
   const weeklyPeak = weeklySummaryQuery.data?.peakWeek;
   const orchestrationRuleItems = orchestrationRulesPayload?.items ?? [];
-  const orchestrationExecutionItems = orchestrationExecutionsPayload?.items ?? [];
-  const orchestrationSimulationExecutions = orchestrationSimulationResult?.executions ?? [];
+  const orchestrationExecutionItems =
+    orchestrationExecutionsPayload?.items ?? [];
+  const orchestrationSimulationExecutions =
+    orchestrationSimulationResult?.executions ?? [];
   const orchestrationExecutionSummary = useMemo(
     () => ({
       total: orchestrationExecutionItems.length,
-      ruleDispatches: orchestrationExecutionItems.filter((item) => item.dispatchMode === "rule")
-        .length,
+      ruleDispatches: orchestrationExecutionItems.filter(
+        (item) => item.dispatchMode === "rule",
+      ).length,
       fallbackDispatches: orchestrationExecutionItems.filter(
-        (item) => item.dispatchMode === "fallback"
+        (item) => item.dispatchMode === "fallback",
       ).length,
       conflictExecutions: orchestrationExecutionItems.filter(
-        (item) => item.conflictRuleIds.length > 0
+        (item) => item.conflictRuleIds.length > 0,
       ).length,
-      dedupeHits: orchestrationExecutionItems.filter((item) => item.dedupeHit).length,
-      suppressedExecutions: orchestrationExecutionItems.filter((item) => item.suppressed).length,
-      simulatedExecutions: orchestrationExecutionItems.filter((item) => item.simulated).length,
+      dedupeHits: orchestrationExecutionItems.filter((item) => item.dedupeHit)
+        .length,
+      suppressedExecutions: orchestrationExecutionItems.filter(
+        (item) => item.suppressed,
+      ).length,
+      simulatedExecutions: orchestrationExecutionItems.filter(
+        (item) => item.simulated,
+      ).length,
     }),
-    [orchestrationExecutionItems]
+    [orchestrationExecutionItems],
   );
   const knownOrchestrationRuleIds = useMemo(
     () =>
@@ -4055,9 +4572,9 @@ function GovernancePage() {
         new Set([
           ...orchestrationRuleItems.map((rule) => rule.id),
           ...orchestrationExecutionItems.map((execution) => execution.ruleId),
-        ])
+        ]),
       ).sort((left, right) => left.localeCompare(right)),
-    [orchestrationExecutionItems, orchestrationRuleItems]
+    [orchestrationExecutionItems, orchestrationRuleItems],
   );
   const knownOrchestrationSourceIds = useMemo(
     () =>
@@ -4065,15 +4582,17 @@ function GovernancePage() {
         new Set(
           [
             ...orchestrationRuleItems.map((rule) => rule.sourceId ?? ""),
-            ...orchestrationExecutionItems.map((execution) => execution.sourceId ?? ""),
-          ].filter((item) => item.trim().length > 0)
-        )
+            ...orchestrationExecutionItems.map(
+              (execution) => execution.sourceId ?? "",
+            ),
+          ].filter((item) => item.trim().length > 0),
+        ),
       ).sort((left, right) => left.localeCompare(right)),
-    [orchestrationExecutionItems, orchestrationRuleItems]
+    [orchestrationExecutionItems, orchestrationRuleItems],
   );
   const simulationConflictRuleSet = useMemo(
     () => new Set(orchestrationSimulationResult?.conflictRuleIds ?? []),
-    [orchestrationSimulationResult]
+    [orchestrationSimulationResult],
   );
   const simulationConflictRules = useMemo(() => {
     if (!orchestrationSimulationResult) {
@@ -4094,33 +4613,49 @@ function GovernancePage() {
       rule: mergedRuleById.get(ruleId) ?? null,
     }));
   }, [orchestrationRuleItems, orchestrationSimulationResult]);
-  const regionItems: RegionDescriptor[] = residencyRegionsQuery.data?.items ?? [];
-  const replicationItems: ReplicationJob[] = replicationJobsQuery.data?.items ?? [];
+  const regionItems: RegionDescriptor[] =
+    residencyRegionsQuery.data?.items ?? [];
+  const replicationItems: ReplicationJob[] =
+    replicationJobsQuery.data?.items ?? [];
   const ruleItems: RuleAsset[] = ruleAssetsQuery.data?.items ?? [];
   const selectedRuleAsset =
     ruleItems.find((asset) => asset.id === selectedRuleAssetId) ?? null;
-  const ruleVersionItems: RuleAssetVersion[] = ruleVersionsQuery.data?.items ?? [];
-  const ruleApprovalItems: RuleApproval[] = ruleApprovalsQuery.data?.items ?? [];
+  const ruleVersionItems: RuleAssetVersion[] =
+    ruleVersionsQuery.data?.items ?? [];
+  const ruleApprovalItems: RuleApproval[] =
+    ruleApprovalsQuery.data?.items ?? [];
   const mcpPolicyItems: McpToolPolicy[] = mcpPoliciesQuery.data?.items ?? [];
-  const mcpApprovalItems: McpApprovalRequest[] = mcpApprovalsQuery.data?.items ?? [];
-  const mcpInvocationItems: McpInvocationAudit[] = mcpInvocationsQuery.data?.items ?? [];
+  const mcpApprovalItems: McpApprovalRequest[] =
+    mcpApprovalsQuery.data?.items ?? [];
+  const mcpInvocationItems: McpInvocationAudit[] =
+    mcpInvocationsQuery.data?.items ?? [];
   const apiKeyItems: OpenPlatformApiKey[] = apiKeyPayload?.items ?? [];
   const webhookItems: OpenPlatformWebhook[] = webhookPayload?.items ?? [];
-  const qualityDailyItems: OpenPlatformQualityDailyItem[] = qualityDailyPayload?.items ?? [];
+  const qualityDailyItems: OpenPlatformQualityDailyItem[] =
+    qualityDailyPayload?.items ?? [];
   const qualityDailyGroups = qualityDailyPayload?.groups ?? [];
   const qualityProjectTrendItems: OpenPlatformQualityProjectTrendItem[] =
     qualityProjectTrendsPayload?.items ?? [];
-  const qualityProjectTrendSummary = qualityProjectTrendsPayload?.summary ?? null;
-  const qualityScorecardItems: OpenPlatformQualityScorecard[] = qualityScorecardPayload?.items ?? [];
-  const replayDatasetItems: OpenPlatformReplayDataset[] = replayDatasetPayload?.items ?? [];
+  const qualityProjectTrendSummary =
+    qualityProjectTrendsPayload?.summary ?? null;
+  const qualityScorecardItems: OpenPlatformQualityScorecard[] =
+    qualityScorecardPayload?.items ?? [];
+  const replayDatasetItems: OpenPlatformReplayDataset[] =
+    replayDatasetPayload?.items ?? [];
   const replayDatasetCaseItems: OpenPlatformReplayDatasetCase[] =
     replayDatasetCasesPayload?.items ?? [];
   const replayRunItems: OpenPlatformReplayRun[] = replayRunPayload?.items ?? [];
-  const replayDiffItems: OpenPlatformReplayDiffItem[] = replayDiffPayload?.items ?? [];
-  const replayArtifactItems: OpenPlatformReplayArtifact[] = replayArtifactPayload?.items ?? [];
+  const replayDiffItems: OpenPlatformReplayDiffItem[] =
+    replayDiffPayload?.items ?? [];
+  const replayArtifactItems: OpenPlatformReplayArtifact[] =
+    replayArtifactPayload?.items ?? [];
   const replaySelectedRunSummary = useMemo(() => {
     const diffSummary = replayDiffPayload?.summary;
-    if (diffSummary && typeof diffSummary === "object" && !Array.isArray(diffSummary)) {
+    if (
+      diffSummary &&
+      typeof diffSummary === "object" &&
+      !Array.isArray(diffSummary)
+    ) {
       return diffSummary;
     }
     const activeRunId = replayDiffRunId.trim() || replayArtifactRunId.trim();
@@ -4129,7 +4664,12 @@ function GovernancePage() {
     }
     const matched = replayRunItems.find((item) => item.runId === activeRunId);
     return matched?.summary ?? null;
-  }, [replayArtifactRunId, replayDiffPayload?.summary, replayDiffRunId, replayRunItems]);
+  }, [
+    replayArtifactRunId,
+    replayDiffPayload?.summary,
+    replayDiffRunId,
+    replayRunItems,
+  ]);
   const replaySelectedRunDigest =
     replaySelectedRunSummary &&
     typeof replaySelectedRunSummary.digest === "object" &&
@@ -4144,16 +4684,16 @@ function GovernancePage() {
           ...replayDatasetItems.map((item) => item.datasetId),
           ...replayDatasetCaseItems.map((item) => item.datasetId),
           ...replayRunItems.map((item) => item.datasetId),
-        ])
+        ]),
       ).sort((left, right) => left.localeCompare(right)),
-    [replayDatasetItems, replayDatasetCaseItems, replayRunItems]
+    [replayDatasetItems, replayDatasetCaseItems, replayRunItems],
   );
   const knownReplayRunIds = useMemo(
     () =>
-      Array.from(new Set(replayRunItems.map((item) => item.runId))).sort((left, right) =>
-        left.localeCompare(right)
+      Array.from(new Set(replayRunItems.map((item) => item.runId))).sort(
+        (left, right) => left.localeCompare(right),
       ),
-    [replayRunItems]
+    [replayRunItems],
   );
 
   return (
@@ -4170,7 +4710,9 @@ function GovernancePage() {
             <select
               id="weekly-summary-metric"
               value={weeklyMetric}
-              onChange={(event) => setWeeklyMetric(event.target.value as MetricKey)}
+              onChange={(event) =>
+                setWeeklyMetric(event.target.value as MetricKey)
+              }
             >
               {WEEKLY_SUMMARY_METRIC_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -4196,7 +4738,9 @@ function GovernancePage() {
           </label>
         </div>
 
-        {weeklySummaryQuery.isLoading ? <p className="feedback info">周报摘要加载中...</p> : null}
+        {weeklySummaryQuery.isLoading ? (
+          <p className="feedback info">周报摘要加载中...</p>
+        ) : null}
         {weeklySummaryQuery.isError ? (
           <p className="feedback error">
             周报摘要加载失败：{toErrorMessage(weeklySummaryQuery.error)}
@@ -4209,9 +4753,14 @@ function GovernancePage() {
               统计区间内总计：
               <strong>
                 {" "}
-                {weeklySummaryQuery.data.summary.tokens.toLocaleString("zh-CN")} tokens / $
-                {weeklySummaryQuery.data.summary.cost.toFixed(2)} /{" "}
-                {weeklySummaryQuery.data.summary.sessions.toLocaleString("zh-CN")} sessions
+                {weeklySummaryQuery.data.summary.tokens.toLocaleString(
+                  "zh-CN",
+                )}{" "}
+                tokens / ${weeklySummaryQuery.data.summary.cost.toFixed(2)} /{" "}
+                {weeklySummaryQuery.data.summary.sessions.toLocaleString(
+                  "zh-CN",
+                )}{" "}
+                sessions
               </strong>
             </p>
             <p>
@@ -4310,11 +4859,17 @@ function GovernancePage() {
           </label>
         </div>
 
-        {alertsQuery.isLoading ? <p className="feedback info">告警加载中...</p> : null}
-        {alertsQuery.isError ? (
-          <p className="feedback error">告警加载失败：{toErrorMessage(alertsQuery.error)}</p>
+        {alertsQuery.isLoading ? (
+          <p className="feedback info">告警加载中...</p>
         ) : null}
-        {alertFeedback ? <p className="feedback success">{alertFeedback}</p> : null}
+        {alertsQuery.isError ? (
+          <p className="feedback error">
+            告警加载失败：{toErrorMessage(alertsQuery.error)}
+          </p>
+        ) : null}
+        {alertFeedback ? (
+          <p className="feedback success">{alertFeedback}</p>
+        ) : null}
         {updateAlertStatusMutation.isError ? (
           <p className="feedback error">
             告警状态更新失败：{toErrorMessage(updateAlertStatusMutation.error)}
@@ -4385,7 +4940,9 @@ function GovernancePage() {
                               Resolve
                             </button>
                           ) : (
-                            <span className="tiny-feedback tiny-feedback-success">已完成</span>
+                            <span className="tiny-feedback tiny-feedback-success">
+                              已完成
+                            </span>
                           )}
                         </div>
                       </td>
@@ -4415,14 +4972,17 @@ function GovernancePage() {
         </datalist>
 
         <div className="filters-row governance-inline-grid">
-          <label className="inline-field" htmlFor="orchestration-rule-event-type-filter">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-rule-event-type-filter"
+          >
             事件类型
             <select
               id="orchestration-rule-event-type-filter"
               value={orchestrationRuleEventTypeFilter}
               onChange={(event) =>
                 setOrchestrationRuleEventTypeFilter(
-                  event.target.value as AlertOrchestrationEventType | ""
+                  event.target.value as AlertOrchestrationEventType | "",
                 )
               }
             >
@@ -4435,13 +4995,18 @@ function GovernancePage() {
             </select>
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-rule-enabled-filter">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-rule-enabled-filter"
+          >
             enabled
             <select
               id="orchestration-rule-enabled-filter"
               value={orchestrationRuleEnabledFilter}
               onChange={(event) =>
-                setOrchestrationRuleEnabledFilter(event.target.value as "" | "true" | "false")
+                setOrchestrationRuleEnabledFilter(
+                  event.target.value as "" | "true" | "false",
+                )
               }
             >
               {ALERT_ORCHESTRATION_ENABLED_FILTER_OPTIONS.map((option) => (
@@ -4452,15 +5017,24 @@ function GovernancePage() {
             </select>
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-rule-severity-filter">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-rule-severity-filter"
+          >
             级别（规则筛选）
             <select
               id="orchestration-rule-severity-filter"
               value={orchestrationRuleSeverityFilter}
-              onChange={(event) => setOrchestrationRuleSeverityFilter(event.target.value as AlertSeverity | "")}
+              onChange={(event) =>
+                setOrchestrationRuleSeverityFilter(
+                  event.target.value as AlertSeverity | "",
+                )
+              }
             >
               <option value="">全部</option>
-              {ALERT_SEVERITY_FILTER_OPTIONS.filter((option) => option.value !== "").map((option) => (
+              {ALERT_SEVERITY_FILTER_OPTIONS.filter(
+                (option) => option.value !== "",
+              ).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -4468,14 +5042,19 @@ function GovernancePage() {
             </select>
           </label>
 
-          <label className="inline-field governance-wide-field" htmlFor="orchestration-rule-source-filter">
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="orchestration-rule-source-filter"
+          >
             Source ID
             <input
               id="orchestration-rule-source-filter"
               type="text"
               list="orchestration-source-id-options"
               value={orchestrationRuleSourceIdFilter}
-              onChange={(event) => setOrchestrationRuleSourceIdFilter(event.target.value)}
+              onChange={(event) =>
+                setOrchestrationRuleSourceIdFilter(event.target.value)
+              }
               placeholder="可选"
             />
           </label>
@@ -4487,10 +5066,14 @@ function GovernancePage() {
             onClick={() => {
               setOrchestrationFeedback(null);
               setOrchestrationError(null);
-              loadOrchestrationRulesMutation.mutate(orchestrationRuleQueryInput);
+              loadOrchestrationRulesMutation.mutate(
+                orchestrationRuleQueryInput,
+              );
             }}
           >
-            {loadOrchestrationRulesMutation.isPending ? "加载中..." : "加载编排规则"}
+            {loadOrchestrationRulesMutation.isPending
+              ? "加载中..."
+              : "加载编排规则"}
           </button>
         </div>
 
@@ -4518,23 +5101,33 @@ function GovernancePage() {
             />
           </label>
 
-          <label className="checkbox-field" htmlFor="orchestration-rule-enabled">
+          <label
+            className="checkbox-field"
+            htmlFor="orchestration-rule-enabled"
+          >
             <input
               id="orchestration-rule-enabled"
               type="checkbox"
               checked={orchestrationRuleEnabled}
-              onChange={(event) => setOrchestrationRuleEnabled(event.target.checked)}
+              onChange={(event) =>
+                setOrchestrationRuleEnabled(event.target.checked)
+              }
             />
             enabled
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-rule-event-type">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-rule-event-type"
+          >
             事件类型
             <select
               id="orchestration-rule-event-type"
               value={orchestrationRuleEventType}
               onChange={(event) =>
-                setOrchestrationRuleEventType(event.target.value as AlertOrchestrationEventType)
+                setOrchestrationRuleEventType(
+                  event.target.value as AlertOrchestrationEventType,
+                )
               }
             >
               {ALERT_ORCHESTRATION_EVENT_TYPE_OPTIONS.map((option) => (
@@ -4550,10 +5143,16 @@ function GovernancePage() {
             <select
               id="orchestration-rule-severity"
               value={orchestrationRuleSeverity}
-              onChange={(event) => setOrchestrationRuleSeverity(event.target.value as AlertSeverity | "")}
+              onChange={(event) =>
+                setOrchestrationRuleSeverity(
+                  event.target.value as AlertSeverity | "",
+                )
+              }
             >
               <option value="">全部</option>
-              {ALERT_SEVERITY_FILTER_OPTIONS.filter((option) => option.value !== "").map((option) => (
+              {ALERT_SEVERITY_FILTER_OPTIONS.filter(
+                (option) => option.value !== "",
+              ).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -4561,21 +5160,29 @@ function GovernancePage() {
             </select>
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-rule-source-id">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-rule-source-id"
+          >
             Source ID
             <input
               id="orchestration-rule-source-id"
               type="text"
               list="orchestration-source-id-options"
               value={orchestrationRuleSourceId}
-              onChange={(event) => setOrchestrationRuleSourceId(event.target.value)}
+              onChange={(event) =>
+                setOrchestrationRuleSourceId(event.target.value)
+              }
               placeholder="可选"
             />
           </label>
         </div>
 
         <div className="filters-row governance-inline-grid">
-          <label className="inline-field" htmlFor="orchestration-rule-dedupe-window">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-rule-dedupe-window"
+          >
             去重窗口(s)
             <input
               id="orchestration-rule-dedupe-window"
@@ -4583,11 +5190,16 @@ function GovernancePage() {
               min={0}
               step={1}
               value={orchestrationRuleDedupeWindowSeconds}
-              onChange={(event) => setOrchestrationRuleDedupeWindowSeconds(event.target.value)}
+              onChange={(event) =>
+                setOrchestrationRuleDedupeWindowSeconds(event.target.value)
+              }
             />
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-rule-suppression-window">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-rule-suppression-window"
+          >
             抑制窗口(s)
             <input
               id="orchestration-rule-suppression-window"
@@ -4595,11 +5207,16 @@ function GovernancePage() {
               min={0}
               step={1}
               value={orchestrationRuleSuppressionWindowSeconds}
-              onChange={(event) => setOrchestrationRuleSuppressionWindowSeconds(event.target.value)}
+              onChange={(event) =>
+                setOrchestrationRuleSuppressionWindowSeconds(event.target.value)
+              }
             />
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-rule-merge-window">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-rule-merge-window"
+          >
             合并窗口(s)
             <input
               id="orchestration-rule-merge-window"
@@ -4607,7 +5224,9 @@ function GovernancePage() {
               min={0}
               step={1}
               value={orchestrationRuleMergeWindowSeconds}
-              onChange={(event) => setOrchestrationRuleMergeWindowSeconds(event.target.value)}
+              onChange={(event) =>
+                setOrchestrationRuleMergeWindowSeconds(event.target.value)
+              }
             />
           </label>
 
@@ -4619,19 +5238,28 @@ function GovernancePage() {
               min={0}
               step={1}
               value={orchestrationRuleSlaMinutes}
-              onChange={(event) => setOrchestrationRuleSlaMinutes(event.target.value)}
+              onChange={(event) =>
+                setOrchestrationRuleSlaMinutes(event.target.value)
+              }
               placeholder="可选"
             />
           </label>
 
-          <label className="inline-field governance-wide-field" htmlFor="orchestration-rule-channels">
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="orchestration-rule-channels"
+          >
             Channels（逗号分隔）
             <input
               id="orchestration-rule-channels"
               type="text"
               value={orchestrationRuleChannelsInput}
-              onChange={(event) => setOrchestrationRuleChannelsInput(event.target.value)}
-              placeholder={ALERT_ORCHESTRATION_CHANNEL_OPTIONS.map((option) => option.value).join(",")}
+              onChange={(event) =>
+                setOrchestrationRuleChannelsInput(event.target.value)
+              }
+              placeholder={ALERT_ORCHESTRATION_CHANNEL_OPTIONS.map(
+                (option) => option.value,
+              ).join(",")}
             />
           </label>
 
@@ -4643,15 +5271,17 @@ function GovernancePage() {
               const normalizedRuleId = orchestrationRuleId.trim();
               const normalizedName = orchestrationRuleName.trim();
               const dedupeWindowSeconds = parseOptionalNonNegativeInteger(
-                orchestrationRuleDedupeWindowSeconds
+                orchestrationRuleDedupeWindowSeconds,
               );
               const suppressionWindowSeconds = parseOptionalNonNegativeInteger(
-                orchestrationRuleSuppressionWindowSeconds
+                orchestrationRuleSuppressionWindowSeconds,
               );
               const mergeWindowSeconds = parseOptionalNonNegativeInteger(
-                orchestrationRuleMergeWindowSeconds
+                orchestrationRuleMergeWindowSeconds,
               );
-              const slaMinutes = parseOptionalNonNegativeInteger(orchestrationRuleSlaMinutes);
+              const slaMinutes = parseOptionalNonNegativeInteger(
+                orchestrationRuleSlaMinutes,
+              );
               if (!normalizedRuleId) {
                 setOrchestrationFeedback(null);
                 setOrchestrationError("Rule ID 不能为空。");
@@ -4674,20 +5304,28 @@ function GovernancePage() {
               const rawChannels = orchestrationRuleChannelsInput
                 .split(",")
                 .map((item) => item.trim().toLowerCase())
-                .filter((item, index, array) => item.length > 0 && array.indexOf(item) === index);
+                .filter(
+                  (item, index, array) =>
+                    item.length > 0 && array.indexOf(item) === index,
+                );
               const invalidChannels = rawChannels.filter(
                 (item) =>
-                  !ALERT_ORCHESTRATION_CHANNEL_OPTIONS.some((option) => option.value === item)
+                  !ALERT_ORCHESTRATION_CHANNEL_OPTIONS.some(
+                    (option) => option.value === item,
+                  ),
               );
-              const channels = rawChannels.filter((item): item is AlertOrchestrationChannel =>
-                ALERT_ORCHESTRATION_CHANNEL_OPTIONS.some((option) => option.value === item)
+              const channels = rawChannels.filter(
+                (item): item is AlertOrchestrationChannel =>
+                  ALERT_ORCHESTRATION_CHANNEL_OPTIONS.some(
+                    (option) => option.value === item,
+                  ),
               );
               if (invalidChannels.length > 0) {
                 setOrchestrationFeedback(null);
                 setOrchestrationError(
                   `存在不支持的 channels：${invalidChannels.join(",")}。可选值：${ALERT_ORCHESTRATION_CHANNEL_OPTIONS.map(
-                    (option) => option.value
-                  ).join(",")}`
+                    (option) => option.value,
+                  ).join(",")}`,
                 );
                 return;
               }
@@ -4715,30 +5353,42 @@ function GovernancePage() {
               });
             }}
           >
-            {upsertOrchestrationRuleMutation.isPending ? "保存中..." : "保存编排规则"}
+            {upsertOrchestrationRuleMutation.isPending
+              ? "保存中..."
+              : "保存编排规则"}
           </button>
         </div>
 
         <div className="filters-row governance-inline-grid">
-          <label className="inline-field" htmlFor="orchestration-simulate-rule-id">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-simulate-rule-id"
+          >
             指定 Rule ID（可选）
             <input
               id="orchestration-simulate-rule-id"
               type="text"
               list="orchestration-rule-id-options"
               value={orchestrationSimulateRuleId}
-              onChange={(event) => setOrchestrationSimulateRuleId(event.target.value)}
+              onChange={(event) =>
+                setOrchestrationSimulateRuleId(event.target.value)
+              }
               placeholder="可选"
             />
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-simulate-event-type">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-simulate-event-type"
+          >
             事件类型
             <select
               id="orchestration-simulate-event-type"
               value={orchestrationSimulateEventType}
               onChange={(event) =>
-                setOrchestrationSimulateEventType(event.target.value as AlertOrchestrationEventType)
+                setOrchestrationSimulateEventType(
+                  event.target.value as AlertOrchestrationEventType,
+                )
               }
             >
               {ALERT_ORCHESTRATION_EVENT_TYPE_OPTIONS.map((option) => (
@@ -4749,26 +5399,40 @@ function GovernancePage() {
             </select>
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-simulate-alert-id">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-simulate-alert-id"
+          >
             Alert ID
             <input
               id="orchestration-simulate-alert-id"
               type="text"
               value={orchestrationSimulateAlertId}
-              onChange={(event) => setOrchestrationSimulateAlertId(event.target.value)}
+              onChange={(event) =>
+                setOrchestrationSimulateAlertId(event.target.value)
+              }
               placeholder="可选"
             />
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-simulate-severity">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-simulate-severity"
+          >
             级别（模拟）
             <select
               id="orchestration-simulate-severity"
               value={orchestrationSimulateSeverity}
-              onChange={(event) => setOrchestrationSimulateSeverity(event.target.value as AlertSeverity | "")}
+              onChange={(event) =>
+                setOrchestrationSimulateSeverity(
+                  event.target.value as AlertSeverity | "",
+                )
+              }
             >
               <option value="">全部</option>
-              {ALERT_SEVERITY_FILTER_OPTIONS.filter((option) => option.value !== "").map((option) => (
+              {ALERT_SEVERITY_FILTER_OPTIONS.filter(
+                (option) => option.value !== "",
+              ).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -4776,34 +5440,49 @@ function GovernancePage() {
             </select>
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-simulate-source-id">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-simulate-source-id"
+          >
             Source ID
             <input
               id="orchestration-simulate-source-id"
               type="text"
               list="orchestration-source-id-options"
               value={orchestrationSimulateSourceId}
-              onChange={(event) => setOrchestrationSimulateSourceId(event.target.value)}
+              onChange={(event) =>
+                setOrchestrationSimulateSourceId(event.target.value)
+              }
               placeholder="可选"
             />
           </label>
 
-          <label className="checkbox-field" htmlFor="orchestration-simulate-dedupe-hit">
+          <label
+            className="checkbox-field"
+            htmlFor="orchestration-simulate-dedupe-hit"
+          >
             <input
               id="orchestration-simulate-dedupe-hit"
               type="checkbox"
               checked={orchestrationSimulateDedupeHit}
-              onChange={(event) => setOrchestrationSimulateDedupeHit(event.target.checked)}
+              onChange={(event) =>
+                setOrchestrationSimulateDedupeHit(event.target.checked)
+              }
             />
             dedupeHit
           </label>
 
-          <label className="checkbox-field" htmlFor="orchestration-simulate-suppressed">
+          <label
+            className="checkbox-field"
+            htmlFor="orchestration-simulate-suppressed"
+          >
             <input
               id="orchestration-simulate-suppressed"
               type="checkbox"
               checked={orchestrationSimulateSuppressed}
-              onChange={(event) => setOrchestrationSimulateSuppressed(event.target.checked)}
+              onChange={(event) =>
+                setOrchestrationSimulateSuppressed(event.target.checked)
+              }
             />
             suppressed
           </label>
@@ -4832,26 +5511,34 @@ function GovernancePage() {
         </div>
 
         <div className="filters-row governance-inline-grid">
-          <label className="inline-field" htmlFor="orchestration-execution-rule-id-filter">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-execution-rule-id-filter"
+          >
             Rule ID（日志）
             <input
               id="orchestration-execution-rule-id-filter"
               type="text"
               list="orchestration-rule-id-options"
               value={orchestrationExecutionRuleIdFilter}
-              onChange={(event) => setOrchestrationExecutionRuleIdFilter(event.target.value)}
+              onChange={(event) =>
+                setOrchestrationExecutionRuleIdFilter(event.target.value)
+              }
               placeholder="可选"
             />
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-execution-event-type-filter">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-execution-event-type-filter"
+          >
             事件类型
             <select
               id="orchestration-execution-event-type-filter"
               value={orchestrationExecutionEventTypeFilter}
               onChange={(event) =>
                 setOrchestrationExecutionEventTypeFilter(
-                  event.target.value as AlertOrchestrationEventType | ""
+                  event.target.value as AlertOrchestrationEventType | "",
                 )
               }
             >
@@ -4864,15 +5551,24 @@ function GovernancePage() {
             </select>
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-execution-severity-filter">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-execution-severity-filter"
+          >
             级别（日志）
             <select
               id="orchestration-execution-severity-filter"
               value={orchestrationExecutionSeverityFilter}
-              onChange={(event) => setOrchestrationExecutionSeverityFilter(event.target.value as AlertSeverity | "")}
+              onChange={(event) =>
+                setOrchestrationExecutionSeverityFilter(
+                  event.target.value as AlertSeverity | "",
+                )
+              }
             >
               <option value="">全部</option>
-              {ALERT_SEVERITY_FILTER_OPTIONS.filter((option) => option.value !== "").map((option) => (
+              {ALERT_SEVERITY_FILTER_OPTIONS.filter(
+                (option) => option.value !== "",
+              ).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -4880,25 +5576,35 @@ function GovernancePage() {
             </select>
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-execution-source-id-filter">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-execution-source-id-filter"
+          >
             Source ID
             <input
               id="orchestration-execution-source-id-filter"
               type="text"
               list="orchestration-source-id-options"
               value={orchestrationExecutionSourceIdFilter}
-              onChange={(event) => setOrchestrationExecutionSourceIdFilter(event.target.value)}
+              onChange={(event) =>
+                setOrchestrationExecutionSourceIdFilter(event.target.value)
+              }
               placeholder="可选"
             />
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-execution-dedupe-hit-filter">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-execution-dedupe-hit-filter"
+          >
             dedupeHit
             <select
               id="orchestration-execution-dedupe-hit-filter"
               value={orchestrationExecutionDedupeHitFilter}
               onChange={(event) =>
-                setOrchestrationExecutionDedupeHitFilter(event.target.value as "" | "true" | "false")
+                setOrchestrationExecutionDedupeHitFilter(
+                  event.target.value as "" | "true" | "false",
+                )
               }
             >
               {BOOLEAN_FILTER_OPTIONS.map((option) => (
@@ -4909,13 +5615,18 @@ function GovernancePage() {
             </select>
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-execution-suppressed-filter">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-execution-suppressed-filter"
+          >
             suppressed
             <select
               id="orchestration-execution-suppressed-filter"
               value={orchestrationExecutionSuppressedFilter}
               onChange={(event) =>
-                setOrchestrationExecutionSuppressedFilter(event.target.value as "" | "true" | "false")
+                setOrchestrationExecutionSuppressedFilter(
+                  event.target.value as "" | "true" | "false",
+                )
               }
             >
               {BOOLEAN_FILTER_OPTIONS.map((option) => (
@@ -4926,32 +5637,43 @@ function GovernancePage() {
             </select>
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-execution-dispatch-mode-filter">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-execution-dispatch-mode-filter"
+          >
             mode
             <select
               id="orchestration-execution-dispatch-mode-filter"
               value={orchestrationExecutionDispatchModeFilter}
               onChange={(event) =>
                 setOrchestrationExecutionDispatchModeFilter(
-                  event.target.value as AlertOrchestrationDispatchMode | ""
+                  event.target.value as AlertOrchestrationDispatchMode | "",
                 )
               }
             >
               {ALERT_ORCHESTRATION_DISPATCH_MODE_OPTIONS.map((option) => (
-                <option key={`dispatch-mode-${option.label}`} value={option.value}>
+                <option
+                  key={`dispatch-mode-${option.label}`}
+                  value={option.value}
+                >
                   {option.label}
                 </option>
               ))}
             </select>
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-execution-conflict-filter">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-execution-conflict-filter"
+          >
             conflict
             <select
               id="orchestration-execution-conflict-filter"
               value={orchestrationExecutionConflictFilter}
               onChange={(event) =>
-                setOrchestrationExecutionConflictFilter(event.target.value as "" | "true" | "false")
+                setOrchestrationExecutionConflictFilter(
+                  event.target.value as "" | "true" | "false",
+                )
               }
             >
               {CONFLICT_FILTER_OPTIONS.map((option) => (
@@ -4962,13 +5684,18 @@ function GovernancePage() {
             </select>
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-execution-simulated-filter">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-execution-simulated-filter"
+          >
             simulated
             <select
               id="orchestration-execution-simulated-filter"
               value={orchestrationExecutionSimulatedFilter}
               onChange={(event) =>
-                setOrchestrationExecutionSimulatedFilter(event.target.value as "" | "true" | "false")
+                setOrchestrationExecutionSimulatedFilter(
+                  event.target.value as "" | "true" | "false",
+                )
               }
             >
               {BOOLEAN_FILTER_OPTIONS.map((option) => (
@@ -4979,13 +5706,18 @@ function GovernancePage() {
             </select>
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-execution-from">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-execution-from"
+          >
             from
             <input
               id="orchestration-execution-from"
               type="datetime-local"
               value={orchestrationExecutionFrom}
-              onChange={(event) => setOrchestrationExecutionFrom(event.target.value)}
+              onChange={(event) =>
+                setOrchestrationExecutionFrom(event.target.value)
+              }
             />
           </label>
 
@@ -4995,11 +5727,16 @@ function GovernancePage() {
               id="orchestration-execution-to"
               type="datetime-local"
               value={orchestrationExecutionTo}
-              onChange={(event) => setOrchestrationExecutionTo(event.target.value)}
+              onChange={(event) =>
+                setOrchestrationExecutionTo(event.target.value)
+              }
             />
           </label>
 
-          <label className="inline-field" htmlFor="orchestration-execution-limit">
+          <label
+            className="inline-field"
+            htmlFor="orchestration-execution-limit"
+          >
             limit
             <input
               id="orchestration-execution-limit"
@@ -5007,7 +5744,9 @@ function GovernancePage() {
               min={1}
               step={1}
               value={orchestrationExecutionLimit}
-              onChange={(event) => setOrchestrationExecutionLimit(event.target.value)}
+              onChange={(event) =>
+                setOrchestrationExecutionLimit(event.target.value)
+              }
             />
           </label>
 
@@ -5019,7 +5758,9 @@ function GovernancePage() {
               const fromTimestamp = orchestrationExecutionFrom
                 ? Date.parse(orchestrationExecutionFrom)
                 : null;
-              const toTimestamp = orchestrationExecutionTo ? Date.parse(orchestrationExecutionTo) : null;
+              const toTimestamp = orchestrationExecutionTo
+                ? Date.parse(orchestrationExecutionTo)
+                : null;
               if (
                 fromTimestamp !== null &&
                 toTimestamp !== null &&
@@ -5028,22 +5769,35 @@ function GovernancePage() {
                 fromTimestamp > toTimestamp
               ) {
                 setOrchestrationFeedback(null);
-                setOrchestrationError("执行日志筛选时间范围非法：from 不能晚于 to。");
+                setOrchestrationError(
+                  "执行日志筛选时间范围非法：from 不能晚于 to。",
+                );
                 return;
               }
               setOrchestrationFeedback(null);
               setOrchestrationError(null);
-              loadOrchestrationExecutionsMutation.mutate(orchestrationExecutionQueryInput);
+              loadOrchestrationExecutionsMutation.mutate(
+                orchestrationExecutionQueryInput,
+              );
             }}
           >
-            {loadOrchestrationExecutionsMutation.isPending ? "加载中..." : "加载执行日志"}
+            {loadOrchestrationExecutionsMutation.isPending
+              ? "加载中..."
+              : "加载执行日志"}
           </button>
         </div>
 
-        {orchestrationFeedback ? <p className="feedback success">{orchestrationFeedback}</p> : null}
-        {orchestrationError ? <p className="feedback error">{orchestrationError}</p> : null}
+        {orchestrationFeedback ? (
+          <p className="feedback success">{orchestrationFeedback}</p>
+        ) : null}
+        {orchestrationError ? (
+          <p className="feedback error">{orchestrationError}</p>
+        ) : null}
         {hasLoadedOrchestrationExecutions ? (
-          <section className="analytics-kpi-grid" aria-label="执行日志当前结果统计">
+          <section
+            className="analytics-kpi-grid"
+            aria-label="执行日志当前结果统计"
+          >
             <article className="analytics-kpi-card">
               <h3>当前结果</h3>
               <strong>{orchestrationExecutionSummary.total}</strong>
@@ -5054,11 +5808,15 @@ function GovernancePage() {
             </article>
             <article className="analytics-kpi-card">
               <h3>fallback</h3>
-              <strong>{orchestrationExecutionSummary.fallbackDispatches}</strong>
+              <strong>
+                {orchestrationExecutionSummary.fallbackDispatches}
+              </strong>
             </article>
             <article className="analytics-kpi-card">
               <h3>冲突</h3>
-              <strong>{orchestrationExecutionSummary.conflictExecutions}</strong>
+              <strong>
+                {orchestrationExecutionSummary.conflictExecutions}
+              </strong>
             </article>
             <article className="analytics-kpi-card">
               <h3>dedupe</h3>
@@ -5066,11 +5824,15 @@ function GovernancePage() {
             </article>
             <article className="analytics-kpi-card">
               <h3>suppressed</h3>
-              <strong>{orchestrationExecutionSummary.suppressedExecutions}</strong>
+              <strong>
+                {orchestrationExecutionSummary.suppressedExecutions}
+              </strong>
             </article>
             <article className="analytics-kpi-card">
               <h3>simulated</h3>
-              <strong>{orchestrationExecutionSummary.simulatedExecutions}</strong>
+              <strong>
+                {orchestrationExecutionSummary.simulatedExecutions}
+              </strong>
             </article>
           </section>
         ) : null}
@@ -5111,9 +5873,12 @@ function GovernancePage() {
                     <td>{rule.enabled ? "true" : "false"}</td>
                     <td>{rule.channels.join(",")}</td>
                     <td>
-                      d={rule.dedupeWindowSeconds}s / s={rule.suppressionWindowSeconds}s / m=
+                      d={rule.dedupeWindowSeconds}s / s=
+                      {rule.suppressionWindowSeconds}s / m=
                       {rule.mergeWindowSeconds}s / sla=
-                      {typeof rule.slaMinutes === "number" ? `${rule.slaMinutes}m` : "--"}
+                      {typeof rule.slaMinutes === "number"
+                        ? `${rule.slaMinutes}m`
+                        : "--"}
                     </td>
                     <td>{formatDateTime(rule.updatedAt)}</td>
                     <td>
@@ -5128,15 +5893,23 @@ function GovernancePage() {
                           setOrchestrationRuleEventType(rule.eventType);
                           setOrchestrationRuleSeverity(rule.severity ?? "");
                           setOrchestrationRuleSourceId(rule.sourceId ?? "");
-                          setOrchestrationRuleDedupeWindowSeconds(String(rule.dedupeWindowSeconds));
+                          setOrchestrationRuleDedupeWindowSeconds(
+                            String(rule.dedupeWindowSeconds),
+                          );
                           setOrchestrationRuleSuppressionWindowSeconds(
-                            String(rule.suppressionWindowSeconds)
+                            String(rule.suppressionWindowSeconds),
                           );
-                          setOrchestrationRuleMergeWindowSeconds(String(rule.mergeWindowSeconds));
+                          setOrchestrationRuleMergeWindowSeconds(
+                            String(rule.mergeWindowSeconds),
+                          );
                           setOrchestrationRuleSlaMinutes(
-                            typeof rule.slaMinutes === "number" ? String(rule.slaMinutes) : ""
+                            typeof rule.slaMinutes === "number"
+                              ? String(rule.slaMinutes)
+                              : "",
                           );
-                          setOrchestrationRuleChannelsInput(rule.channels.join(","));
+                          setOrchestrationRuleChannelsInput(
+                            rule.channels.join(","),
+                          );
                         }}
                       >
                         载入
@@ -5168,7 +5941,9 @@ function GovernancePage() {
                     <td>冲突规则 ID</td>
                     <td>
                       {orchestrationSimulationResult.conflictRuleIds.length > 0
-                        ? orchestrationSimulationResult.conflictRuleIds.join(",")
+                        ? orchestrationSimulationResult.conflictRuleIds.join(
+                            ",",
+                          )
                         : "--"}
                     </td>
                   </tr>
@@ -5209,7 +5984,9 @@ function GovernancePage() {
                         <td>{rule.severity ?? "--"}</td>
                         <td>{rule.sourceId ?? "--"}</td>
                         <td>{rule.channels.join(",")}</td>
-                        <td>{simulationConflictRuleSet.has(rule.id) ? "是" : "否"}</td>
+                        <td>
+                          {simulationConflictRuleSet.has(rule.id) ? "是" : "否"}
+                        </td>
                       </tr>
                     ))
                   )}
@@ -5244,7 +6021,9 @@ function GovernancePage() {
                         <td>{item.rule?.eventType ?? "--"}</td>
                         <td>{item.rule?.severity ?? "--"}</td>
                         <td>{item.rule?.sourceId ?? "--"}</td>
-                        <td>{item.rule ? item.rule.channels.join(",") : "--"}</td>
+                        <td>
+                          {item.rule ? item.rule.channels.join(",") : "--"}
+                        </td>
                       </tr>
                     ))
                   )}
@@ -5331,7 +6110,11 @@ function GovernancePage() {
                     <td>{item.dedupeHit ? "true" : "false"}</td>
                     <td>{item.suppressed ? "true" : "false"}</td>
                     <td>{item.simulated ? "true" : "false"}</td>
-                    <td>{item.conflictRuleIds.length > 0 ? item.conflictRuleIds.join(",") : "--"}</td>
+                    <td>
+                      {item.conflictRuleIds.length > 0
+                        ? item.conflictRuleIds.join(",")
+                        : "--"}
+                    </td>
                     <td>{item.channels.join(",")}</td>
                     <td>{formatCompactJson(item.metadata)}</td>
                     <td>{formatDateTime(item.createdAt)}</td>
@@ -5355,7 +6138,9 @@ function GovernancePage() {
             <select
               id="residency-mode"
               value={residencyMode}
-              onChange={(event) => setResidencyMode(event.target.value as DataResidencyMode)}
+              onChange={(event) =>
+                setResidencyMode(event.target.value as DataResidencyMode)
+              }
             >
               {DATA_RESIDENCY_MODE_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -5383,7 +6168,10 @@ function GovernancePage() {
         </div>
 
         <div className="filters-row">
-          <label className="inline-field governance-wide-field" htmlFor="residency-replica-regions">
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="residency-replica-regions"
+          >
             副本地域（逗号分隔）
             <input
               id="residency-replica-regions"
@@ -5401,17 +6189,24 @@ function GovernancePage() {
               id="residency-cross-transfer"
               type="checkbox"
               checked={allowCrossRegionTransfer}
-              onChange={(event) => setAllowCrossRegionTransfer(event.target.checked)}
+              onChange={(event) =>
+                setAllowCrossRegionTransfer(event.target.checked)
+              }
             />
             允许跨地域传输
           </label>
 
-          <label className="checkbox-field" htmlFor="residency-transfer-approval">
+          <label
+            className="checkbox-field"
+            htmlFor="residency-transfer-approval"
+          >
             <input
               id="residency-transfer-approval"
               type="checkbox"
               checked={requireTransferApproval}
-              onChange={(event) => setRequireTransferApproval(event.target.checked)}
+              onChange={(event) =>
+                setRequireTransferApproval(event.target.checked)
+              }
             />
             传输必须审批
           </label>
@@ -5430,14 +6225,23 @@ function GovernancePage() {
               const replicaRegions = replicaRegionsInput
                 .split(",")
                 .map((region) => region.trim())
-                .filter((region, index, list) => region.length > 0 && list.indexOf(region) === index)
+                .filter(
+                  (region, index, list) =>
+                    region.length > 0 && list.indexOf(region) === index,
+                )
                 .filter((region) => region !== normalizedPrimaryRegion);
-              if (residencyMode === "active_active" && replicaRegions.length === 0) {
+              if (
+                residencyMode === "active_active" &&
+                replicaRegions.length === 0
+              ) {
                 setResidencyFeedback(null);
                 setResidencyError("active_active 模式至少需要一个副本地域。");
                 return;
               }
-              if (residencyMode === "single_region" && replicaRegions.length > 0) {
+              if (
+                residencyMode === "single_region" &&
+                replicaRegions.length > 0
+              ) {
                 setResidencyFeedback(null);
                 setResidencyError("single_region 模式不允许配置副本地域。");
                 return;
@@ -5461,13 +6265,21 @@ function GovernancePage() {
           <p className="feedback info">数据主权配置加载中...</p>
         ) : null}
         {residencyRegionsQuery.isError ? (
-          <p className="feedback error">地域列表加载失败：{toErrorMessage(residencyRegionsQuery.error)}</p>
+          <p className="feedback error">
+            地域列表加载失败：{toErrorMessage(residencyRegionsQuery.error)}
+          </p>
         ) : null}
         {residencyPolicyQuery.isError ? (
-          <p className="feedback error">主权策略加载失败：{toErrorMessage(residencyPolicyQuery.error)}</p>
+          <p className="feedback error">
+            主权策略加载失败：{toErrorMessage(residencyPolicyQuery.error)}
+          </p>
         ) : null}
-        {residencyFeedback ? <p className="feedback success">{residencyFeedback}</p> : null}
-        {residencyError ? <p className="feedback error">{residencyError}</p> : null}
+        {residencyFeedback ? (
+          <p className="feedback success">{residencyFeedback}</p>
+        ) : null}
+        {residencyError ? (
+          <p className="feedback error">{residencyError}</p>
+        ) : null}
 
         <div className="filters-row governance-inline-grid">
           <label className="inline-field" htmlFor="replication-source-region">
@@ -5475,7 +6287,9 @@ function GovernancePage() {
             <select
               id="replication-source-region"
               value={replicationSourceRegion}
-              onChange={(event) => setReplicationSourceRegion(event.target.value)}
+              onChange={(event) =>
+                setReplicationSourceRegion(event.target.value)
+              }
             >
               <option value="">请选择</option>
               {regionItems.map((region) => (
@@ -5491,7 +6305,9 @@ function GovernancePage() {
             <select
               id="replication-target-region"
               value={replicationTargetRegion}
-              onChange={(event) => setReplicationTargetRegion(event.target.value)}
+              onChange={(event) =>
+                setReplicationTargetRegion(event.target.value)
+              }
             >
               <option value="">请选择</option>
               {regionItems.map((region) => (
@@ -5539,7 +6355,9 @@ function GovernancePage() {
               });
             }}
           >
-            {createReplicationJobMutation.isPending ? "创建中..." : "创建复制任务"}
+            {createReplicationJobMutation.isPending
+              ? "创建中..."
+              : "创建复制任务"}
           </button>
         </div>
 
@@ -5550,7 +6368,9 @@ function GovernancePage() {
               id="replication-status-filter"
               value={replicationStatusFilter}
               onChange={(event) =>
-                setReplicationStatusFilter(event.target.value as ReplicationJobStatus | "")
+                setReplicationStatusFilter(
+                  event.target.value as ReplicationJobStatus | "",
+                )
               }
             >
               {REPLICATION_STATUS_FILTER_OPTIONS.map((option) => (
@@ -5562,7 +6382,9 @@ function GovernancePage() {
           </label>
         </div>
 
-        {replicationJobsQuery.isLoading ? <p className="feedback info">复制任务加载中...</p> : null}
+        {replicationJobsQuery.isLoading ? (
+          <p className="feedback info">复制任务加载中...</p>
+        ) : null}
         {replicationJobsQuery.isError ? (
           <p className="feedback error">
             复制任务加载失败：{toErrorMessage(replicationJobsQuery.error)}
@@ -5592,7 +6414,8 @@ function GovernancePage() {
               ) : (
                 replicationItems.map((job) => {
                   const canApprove = job.status === "pending";
-                  const canCancel = job.status === "pending" || job.status === "running";
+                  const canCancel =
+                    job.status === "pending" || job.status === "running";
                   const isApproving =
                     approveReplicationJobMutation.isPending &&
                     approveReplicationJobMutation.variables?.jobId === job.id;
@@ -5618,7 +6441,10 @@ function GovernancePage() {
                                 onClick={() => {
                                   const reason =
                                     typeof window !== "undefined"
-                                      ? window.prompt("审批原因（可选）", "") ?? ""
+                                      ? (window.prompt(
+                                          "审批原因（可选）",
+                                          "",
+                                        ) ?? "")
                                       : "";
                                   approveReplicationJobMutation.mutate({
                                     jobId: job.id,
@@ -5637,7 +6463,10 @@ function GovernancePage() {
                                 onClick={() => {
                                   const reason =
                                     typeof window !== "undefined"
-                                      ? window.prompt("取消原因（可选）", "") ?? ""
+                                      ? (window.prompt(
+                                          "取消原因（可选）",
+                                          "",
+                                        ) ?? "")
                                       : "";
                                   cancelReplicationJobMutation.mutate({
                                     jobId: job.id,
@@ -5650,7 +6479,9 @@ function GovernancePage() {
                             ) : null}
                           </>
                         ) : (
-                          <span className="tiny-feedback tiny-feedback-success">不可操作</span>
+                          <span className="tiny-feedback tiny-feedback-success">
+                            不可操作
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -5674,7 +6505,11 @@ function GovernancePage() {
             <select
               id="rule-status-filter"
               value={ruleStatusFilter}
-              onChange={(event) => setRuleStatusFilter(event.target.value as RuleLifecycleStatus | "")}
+              onChange={(event) =>
+                setRuleStatusFilter(
+                  event.target.value as RuleLifecycleStatus | "",
+                )
+              }
             >
               {RULE_STATUS_FILTER_OPTIONS.map((option) => (
                 <option key={option.value || "all"} value={option.value}>
@@ -5684,7 +6519,10 @@ function GovernancePage() {
             </select>
           </label>
 
-          <label className="inline-field governance-wide-field" htmlFor="rule-keyword">
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="rule-keyword"
+          >
             关键字
             <input
               id="rule-keyword"
@@ -5708,7 +6546,10 @@ function GovernancePage() {
             />
           </label>
 
-          <label className="inline-field governance-wide-field" htmlFor="rule-description">
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="rule-description"
+          >
             说明
             <input
               id="rule-description"
@@ -5719,12 +6560,61 @@ function GovernancePage() {
             />
           </label>
 
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="rule-scope-organizations"
+          >
+            Organizations（逗号分隔）
+            <input
+              id="rule-scope-organizations"
+              type="text"
+              value={ruleScopeOrganizations}
+              onChange={(event) =>
+                setRuleScopeOrganizations(event.target.value)
+              }
+              placeholder="可选"
+            />
+          </label>
+
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="rule-scope-projects"
+          >
+            Projects（逗号分隔）
+            <input
+              id="rule-scope-projects"
+              type="text"
+              value={ruleScopeProjects}
+              onChange={(event) => setRuleScopeProjects(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="rule-scope-clients"
+          >
+            Clients（逗号分隔）
+            <input
+              id="rule-scope-clients"
+              type="text"
+              value={ruleScopeClients}
+              onChange={(event) => setRuleScopeClients(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+
           <button
             type="button"
             className="submit-button"
             disabled={createRuleAssetMutation.isPending}
             onClick={() => {
               const name = ruleName.trim();
+              const scopeBinding = buildRuleScopeBindingInput({
+                organizations: ruleScopeOrganizations,
+                projects: ruleScopeProjects,
+                clients: ruleScopeClients,
+              });
               if (!name) {
                 setRuleFeedback(null);
                 setRuleError("资产名称不能为空。");
@@ -5735,6 +6625,7 @@ function GovernancePage() {
               createRuleAssetMutation.mutate({
                 name,
                 description: ruleDescription.trim() || undefined,
+                scopeBinding,
               });
             }}
           >
@@ -5742,11 +6633,17 @@ function GovernancePage() {
           </button>
         </div>
 
-        {ruleAssetsQuery.isLoading ? <p className="feedback info">规则资产加载中...</p> : null}
-        {ruleAssetsQuery.isError ? (
-          <p className="feedback error">规则资产加载失败：{toErrorMessage(ruleAssetsQuery.error)}</p>
+        {ruleAssetsQuery.isLoading ? (
+          <p className="feedback info">规则资产加载中...</p>
         ) : null}
-        {ruleFeedback ? <p className="feedback success">{ruleFeedback}</p> : null}
+        {ruleAssetsQuery.isError ? (
+          <p className="feedback error">
+            规则资产加载失败：{toErrorMessage(ruleAssetsQuery.error)}
+          </p>
+        ) : null}
+        {ruleFeedback ? (
+          <p className="feedback success">{ruleFeedback}</p>
+        ) : null}
         {ruleError ? <p className="feedback error">{ruleError}</p> : null}
 
         <div className="table-wrapper">
@@ -5756,6 +6653,7 @@ function GovernancePage() {
                 <th>ID</th>
                 <th>名称</th>
                 <th>状态</th>
+                <th>Scope Binding</th>
                 <th>最新版本</th>
                 <th>发布版本</th>
                 <th>更新时间</th>
@@ -5765,7 +6663,7 @@ function GovernancePage() {
             <tbody>
               {ruleItems.length === 0 ? (
                 <tr>
-                  <td className="table-empty-cell" colSpan={7}>
+                  <td className="table-empty-cell" colSpan={8}>
                     暂无规则资产
                   </td>
                 </tr>
@@ -5773,10 +6671,14 @@ function GovernancePage() {
                 ruleItems.map((asset) => {
                   const isSelected = selectedRuleAssetId === asset.id;
                   return (
-                    <tr key={asset.id} className={isSelected ? "is-selected-row" : ""}>
+                    <tr
+                      key={asset.id}
+                      className={isSelected ? "is-selected-row" : ""}
+                    >
                       <td>{asset.id}</td>
                       <td>{asset.name}</td>
                       <td>{asset.status}</td>
+                      <td>{formatRuleScopeBinding(asset.scopeBinding)}</td>
                       <td>{asset.latestVersion}</td>
                       <td>{asset.publishedVersion ?? "--"}</td>
                       <td>{formatDateTime(asset.updatedAt)}</td>
@@ -5787,11 +6689,17 @@ function GovernancePage() {
                           onClick={() => {
                             setSelectedRuleAssetId(asset.id);
                             if (asset.latestVersion > 0) {
-                              const latestVersionText = String(asset.latestVersion);
+                              const latestVersionText = String(
+                                asset.latestVersion,
+                              );
                               setRulePublishVersion(latestVersionText);
                               setRuleRollbackVersion(latestVersionText);
                               setRuleApprovalVersion(latestVersionText);
+                              return;
                             }
+                            setRulePublishVersion("");
+                            setRuleRollbackVersion("");
+                            setRuleApprovalVersion("");
                           }}
                         >
                           {isSelected ? "已选中" : "选中"}
@@ -5807,25 +6715,40 @@ function GovernancePage() {
 
         {selectedRuleAsset ? (
           <>
+            <p className="feedback info">
+              当前 Scope Binding：
+              {formatRuleScopeBinding(selectedRuleAsset.scopeBinding)}
+            </p>
+
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field governance-wide-field" htmlFor="rule-version-content">
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="rule-version-content"
+              >
                 新版本内容
                 <input
                   id="rule-version-content"
                   type="text"
                   value={ruleVersionContent}
-                  onChange={(event) => setRuleVersionContent(event.target.value)}
+                  onChange={(event) =>
+                    setRuleVersionContent(event.target.value)
+                  }
                   placeholder="例如：deny tool=github.delete_repo when risk=high"
                 />
               </label>
 
-              <label className="inline-field governance-wide-field" htmlFor="rule-version-changelog">
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="rule-version-changelog"
+              >
                 变更说明
                 <input
                   id="rule-version-changelog"
                   type="text"
                   value={ruleVersionChangelog}
-                  onChange={(event) => setRuleVersionChangelog(event.target.value)}
+                  onChange={(event) =>
+                    setRuleVersionChangelog(event.target.value)
+                  }
                   placeholder="可选"
                 />
               </label>
@@ -5850,7 +6773,9 @@ function GovernancePage() {
                   });
                 }}
               >
-                {createRuleAssetVersionMutation.isPending ? "创建中..." : "创建版本"}
+                {createRuleAssetVersionMutation.isPending
+                  ? "创建中..."
+                  : "创建版本"}
               </button>
             </div>
 
@@ -5863,7 +6788,9 @@ function GovernancePage() {
                   min={1}
                   step={1}
                   value={rulePublishVersion}
-                  onChange={(event) => setRulePublishVersion(event.target.value)}
+                  onChange={(event) =>
+                    setRulePublishVersion(event.target.value)
+                  }
                   placeholder="例如：1"
                 />
               </label>
@@ -5881,7 +6808,10 @@ function GovernancePage() {
                   }
                   setRuleFeedback(null);
                   setRuleError(null);
-                  publishRuleAssetMutation.mutate({ assetId: selectedRuleAsset.id, version });
+                  publishRuleAssetMutation.mutate({
+                    assetId: selectedRuleAsset.id,
+                    version,
+                  });
                 }}
               >
                 {publishRuleAssetMutation.isPending ? "发布中..." : "发布版本"}
@@ -5895,18 +6825,25 @@ function GovernancePage() {
                   min={1}
                   step={1}
                   value={ruleRollbackVersion}
-                  onChange={(event) => setRuleRollbackVersion(event.target.value)}
+                  onChange={(event) =>
+                    setRuleRollbackVersion(event.target.value)
+                  }
                   placeholder="例如：1"
                 />
               </label>
 
-              <label className="inline-field governance-wide-field" htmlFor="rule-rollback-reason">
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="rule-rollback-reason"
+              >
                 回滚原因
                 <input
                   id="rule-rollback-reason"
                   type="text"
                   value={ruleRollbackReason}
-                  onChange={(event) => setRuleRollbackReason(event.target.value)}
+                  onChange={(event) =>
+                    setRuleRollbackReason(event.target.value)
+                  }
                   placeholder="可选"
                 />
               </label>
@@ -5944,7 +6881,9 @@ function GovernancePage() {
                   min={1}
                   step={1}
                   value={ruleApprovalVersion}
-                  onChange={(event) => setRuleApprovalVersion(event.target.value)}
+                  onChange={(event) =>
+                    setRuleApprovalVersion(event.target.value)
+                  }
                   placeholder="例如：1"
                 />
               </label>
@@ -5955,7 +6894,9 @@ function GovernancePage() {
                   id="rule-approval-decision"
                   value={ruleApprovalDecision}
                   onChange={(event) =>
-                    setRuleApprovalDecision(event.target.value as RuleApprovalDecision)
+                    setRuleApprovalDecision(
+                      event.target.value as RuleApprovalDecision,
+                    )
                   }
                 >
                   {RULE_APPROVAL_DECISION_OPTIONS.map((option) => (
@@ -5966,13 +6907,18 @@ function GovernancePage() {
                 </select>
               </label>
 
-              <label className="inline-field governance-wide-field" htmlFor="rule-approval-reason">
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="rule-approval-reason"
+              >
                 审批意见
                 <input
                   id="rule-approval-reason"
                   type="text"
                   value={ruleApprovalReason}
-                  onChange={(event) => setRuleApprovalReason(event.target.value)}
+                  onChange={(event) =>
+                    setRuleApprovalReason(event.target.value)
+                  }
                   placeholder="可选"
                 />
               </label>
@@ -5998,17 +6944,27 @@ function GovernancePage() {
                   });
                 }}
               >
-                {createRuleApprovalMutation.isPending ? "提交中..." : "提交审批"}
+                {createRuleApprovalMutation.isPending
+                  ? "提交中..."
+                  : "提交审批"}
               </button>
             </div>
 
-            {ruleVersionsQuery.isLoading ? <p className="feedback info">版本列表加载中...</p> : null}
-            {ruleVersionsQuery.isError ? (
-              <p className="feedback error">版本列表加载失败：{toErrorMessage(ruleVersionsQuery.error)}</p>
+            {ruleVersionsQuery.isLoading ? (
+              <p className="feedback info">版本列表加载中...</p>
             ) : null}
-            {ruleApprovalsQuery.isLoading ? <p className="feedback info">审批记录加载中...</p> : null}
+            {ruleVersionsQuery.isError ? (
+              <p className="feedback error">
+                版本列表加载失败：{toErrorMessage(ruleVersionsQuery.error)}
+              </p>
+            ) : null}
+            {ruleApprovalsQuery.isLoading ? (
+              <p className="feedback info">审批记录加载中...</p>
+            ) : null}
             {ruleApprovalsQuery.isError ? (
-              <p className="feedback error">审批记录加载失败：{toErrorMessage(ruleApprovalsQuery.error)}</p>
+              <p className="feedback error">
+                审批记录加载失败：{toErrorMessage(ruleApprovalsQuery.error)}
+              </p>
             ) : null}
 
             <div className="table-wrapper">
@@ -6078,7 +7034,9 @@ function GovernancePage() {
             </div>
           </>
         ) : (
-          <p className="feedback empty">请选择一个规则资产查看版本与审批详情。</p>
+          <p className="feedback empty">
+            请选择一个规则资产查看版本与审批详情。
+          </p>
         )}
       </section>
 
@@ -6089,7 +7047,10 @@ function GovernancePage() {
         </header>
 
         <div className="filters-row">
-          <label className="inline-field governance-wide-field" htmlFor="mcp-policy-keyword">
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="mcp-policy-keyword"
+          >
             策略检索
             <input
               id="mcp-policy-keyword"
@@ -6118,7 +7079,9 @@ function GovernancePage() {
             <select
               id="mcp-policy-risk-level"
               value={mcpPolicyRiskLevel}
-              onChange={(event) => setMcpPolicyRiskLevel(event.target.value as McpRiskLevel)}
+              onChange={(event) =>
+                setMcpPolicyRiskLevel(event.target.value as McpRiskLevel)
+              }
             >
               {MCP_RISK_LEVEL_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -6133,7 +7096,9 @@ function GovernancePage() {
             <select
               id="mcp-policy-decision"
               value={mcpPolicyDecision}
-              onChange={(event) => setMcpPolicyDecision(event.target.value as McpToolDecision)}
+              onChange={(event) =>
+                setMcpPolicyDecision(event.target.value as McpToolDecision)
+              }
             >
               {MCP_DECISION_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -6143,7 +7108,10 @@ function GovernancePage() {
             </select>
           </label>
 
-          <label className="inline-field governance-wide-field" htmlFor="mcp-policy-reason">
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="mcp-policy-reason"
+          >
             策略说明
             <input
               id="mcp-policy-reason"
@@ -6219,7 +7187,9 @@ function GovernancePage() {
               id="mcp-approval-status-filter"
               value={mcpApprovalStatusFilter}
               onChange={(event) =>
-                setMcpApprovalStatusFilter(event.target.value as McpApprovalRequest["status"] | "")
+                setMcpApprovalStatusFilter(
+                  event.target.value as McpApprovalRequest["status"] | "",
+                )
               }
             >
               {MCP_APPROVAL_STATUS_FILTER_OPTIONS.map((option) => (
@@ -6241,7 +7211,10 @@ function GovernancePage() {
             />
           </label>
 
-          <label className="inline-field governance-wide-field" htmlFor="mcp-approval-reason">
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="mcp-approval-reason"
+          >
             申请原因
             <input
               id="mcp-approval-reason"
@@ -6276,7 +7249,10 @@ function GovernancePage() {
         </div>
 
         <div className="filters-row">
-          <label className="inline-field governance-wide-field" htmlFor="mcp-review-reason">
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="mcp-review-reason"
+          >
             审批操作说明（通过/拒绝时可选）
             <input
               id="mcp-review-reason"
@@ -6288,17 +7264,25 @@ function GovernancePage() {
           </label>
         </div>
 
-        {mcpPoliciesQuery.isLoading || mcpApprovalsQuery.isLoading || mcpInvocationsQuery.isLoading ? (
+        {mcpPoliciesQuery.isLoading ||
+        mcpApprovalsQuery.isLoading ||
+        mcpInvocationsQuery.isLoading ? (
           <p className="feedback info">MCP 数据加载中...</p>
         ) : null}
         {mcpPoliciesQuery.isError ? (
-          <p className="feedback error">MCP 策略加载失败：{toErrorMessage(mcpPoliciesQuery.error)}</p>
+          <p className="feedback error">
+            MCP 策略加载失败：{toErrorMessage(mcpPoliciesQuery.error)}
+          </p>
         ) : null}
         {mcpApprovalsQuery.isError ? (
-          <p className="feedback error">审批列表加载失败：{toErrorMessage(mcpApprovalsQuery.error)}</p>
+          <p className="feedback error">
+            审批列表加载失败：{toErrorMessage(mcpApprovalsQuery.error)}
+          </p>
         ) : null}
         {mcpInvocationsQuery.isError ? (
-          <p className="feedback error">调用审计加载失败：{toErrorMessage(mcpInvocationsQuery.error)}</p>
+          <p className="feedback error">
+            调用审计加载失败：{toErrorMessage(mcpInvocationsQuery.error)}
+          </p>
         ) : null}
         {mcpFeedback ? <p className="feedback success">{mcpFeedback}</p> : null}
         {mcpError ? <p className="feedback error">{mcpError}</p> : null}
@@ -6326,13 +7310,17 @@ function GovernancePage() {
                 mcpApprovalItems.map((approval) => {
                   const isMutating =
                     reviewMcpApprovalMutation.isPending &&
-                    reviewMcpApprovalMutation.variables?.approvalId === approval.id;
+                    reviewMcpApprovalMutation.variables?.approvalId ===
+                      approval.id;
                   return (
                     <tr key={approval.id}>
                       <td>{approval.id}</td>
                       <td>{approval.toolId}</td>
                       <td>{approval.status}</td>
-                      <td>{approval.requestedByEmail ?? approval.requestedByUserId}</td>
+                      <td>
+                        {approval.requestedByEmail ??
+                          approval.requestedByUserId}
+                      </td>
                       <td>{formatDateTime(approval.createdAt)}</td>
                       <td>
                         {approval.status === "pending" ? (
@@ -6367,7 +7355,9 @@ function GovernancePage() {
                             </button>
                           </div>
                         ) : (
-                          <span className="tiny-feedback tiny-feedback-success">已处理</span>
+                          <span className="tiny-feedback tiny-feedback-success">
+                            已处理
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -6379,7 +7369,10 @@ function GovernancePage() {
         </div>
 
         <div className="filters-row">
-          <label className="inline-field governance-wide-field" htmlFor="mcp-invocation-tool-id">
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="mcp-invocation-tool-id"
+          >
             调用审计 Tool ID
             <input
               id="mcp-invocation-tool-id"
@@ -6447,24 +7440,40 @@ function GovernancePage() {
                 loadOpenApiSummaryMutation.mutate();
               }}
             >
-              {loadOpenApiSummaryMutation.isPending ? "加载中..." : "加载 OpenAPI 摘要"}
+              {loadOpenApiSummaryMutation.isPending
+                ? "加载中..."
+                : "加载 OpenAPI 摘要"}
             </button>
-            {openApiFeedback ? <p className="feedback success">{openApiFeedback}</p> : null}
-            {openApiError ? <p className="feedback error">{openApiError}</p> : null}
+            {openApiFeedback ? (
+              <p className="feedback success">{openApiFeedback}</p>
+            ) : null}
+            {openApiError ? (
+              <p className="feedback error">{openApiError}</p>
+            ) : null}
             {openApiSummaryPayload ? (
               <div className="open-platform-summary-list">
                 <p>
                   version: <strong>{openApiSummaryPayload.version}</strong>
                 </p>
                 <p>
-                  paths: <strong>{openApiSummaryPayload.totalPaths.toLocaleString("zh-CN")}</strong>
+                  paths:{" "}
+                  <strong>
+                    {openApiSummaryPayload.totalPaths.toLocaleString("zh-CN")}
+                  </strong>
                 </p>
                 <p>
                   operations:{" "}
-                  <strong>{openApiSummaryPayload.totalOperations.toLocaleString("zh-CN")}</strong>
+                  <strong>
+                    {openApiSummaryPayload.totalOperations.toLocaleString(
+                      "zh-CN",
+                    )}
+                  </strong>
                 </p>
                 <p>
-                  generatedAt: <strong>{formatDateTime(openApiSummaryPayload.generatedAt)}</strong>
+                  generatedAt:{" "}
+                  <strong>
+                    {formatDateTime(openApiSummaryPayload.generatedAt)}
+                  </strong>
                 </p>
                 <div className="table-wrapper">
                   <table className="session-table">
@@ -6504,13 +7513,18 @@ function GovernancePage() {
             <h3>API Key 管理</h3>
             <p>支持列表查询与 API Key 更新。</p>
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field" htmlFor="open-platform-api-key-status-filter">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-api-key-status-filter"
+              >
                 状态（API Key）
                 <select
                   id="open-platform-api-key-status-filter"
                   value={apiKeyStatusFilter}
                   onChange={(event) =>
-                    setApiKeyStatusFilter(event.target.value as OpenPlatformApiKeyStatus | "")
+                    setApiKeyStatusFilter(
+                      event.target.value as OpenPlatformApiKeyStatus | "",
+                    )
                   }
                 >
                   {OPEN_PLATFORM_API_KEY_STATUS_FILTER_OPTIONS.map((option) => (
@@ -6521,7 +7535,10 @@ function GovernancePage() {
                 </select>
               </label>
 
-              <label className="inline-field governance-wide-field" htmlFor="open-platform-api-key-keyword">
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="open-platform-api-key-keyword"
+              >
                 关键字（API Key）
                 <input
                   id="open-platform-api-key-keyword"
@@ -6542,12 +7559,17 @@ function GovernancePage() {
                   loadApiKeysMutation.mutate(apiKeyQueryInput);
                 }}
               >
-                {loadApiKeysMutation.isPending ? "加载中..." : "加载 API Key 列表"}
+                {loadApiKeysMutation.isPending
+                  ? "加载中..."
+                  : "加载 API Key 列表"}
               </button>
             </div>
 
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field" htmlFor="open-platform-api-key-id">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-api-key-id"
+              >
                 API Key ID
                 <input
                   id="open-platform-api-key-id"
@@ -6558,7 +7580,10 @@ function GovernancePage() {
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-api-key-name">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-api-key-name"
+              >
                 API Key 名称
                 <input
                   id="open-platform-api-key-name"
@@ -6569,7 +7594,10 @@ function GovernancePage() {
                 />
               </label>
 
-              <label className="inline-field governance-wide-field" htmlFor="open-platform-api-key-scopes">
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="open-platform-api-key-scopes"
+              >
                 scopes（逗号分隔）
                 <input
                   id="open-platform-api-key-scopes"
@@ -6580,7 +7608,10 @@ function GovernancePage() {
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-api-key-expires-at">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-api-key-expires-at"
+              >
                 过期日期（可选）
                 <input
                   id="open-platform-api-key-expires-at"
@@ -6590,18 +7621,26 @@ function GovernancePage() {
                 />
               </label>
 
-              <label className="inline-field governance-wide-field" htmlFor="open-platform-api-key-revoke-reason">
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="open-platform-api-key-revoke-reason"
+              >
                 吊销原因（可选）
                 <input
                   id="open-platform-api-key-revoke-reason"
                   type="text"
                   value={apiKeyRevokeReason}
-                  onChange={(event) => setApiKeyRevokeReason(event.target.value)}
+                  onChange={(event) =>
+                    setApiKeyRevokeReason(event.target.value)
+                  }
                   placeholder="例如：密钥轮换"
                 />
               </label>
 
-              <label className="checkbox-field" htmlFor="open-platform-api-key-enabled">
+              <label
+                className="checkbox-field"
+                htmlFor="open-platform-api-key-enabled"
+              >
                 <input
                   id="open-platform-api-key-enabled"
                   type="checkbox"
@@ -6618,14 +7657,14 @@ function GovernancePage() {
                 onClick={() => {
                   const normalizedApiKeyId = apiKeyId.trim();
                   const normalizedName = apiKeyName.trim();
-                  const rawScopes = parseCommaSeparatedValues(apiKeyScopesInput).map((item) =>
-                    item.toLowerCase()
-                  );
+                  const rawScopes = parseCommaSeparatedValues(
+                    apiKeyScopesInput,
+                  ).map((item) => item.toLowerCase());
                   const invalidScopes = rawScopes.filter(
-                    (item) => !["read", "write", "admin"].includes(item)
+                    (item) => !["read", "write", "admin"].includes(item),
                   );
                   const scopes = rawScopes.filter((item) =>
-                    ["read", "write", "admin"].includes(item)
+                    ["read", "write", "admin"].includes(item),
                   );
                   const expiresAt = apiKeyExpiresAt.trim();
                   if (!normalizedApiKeyId) {
@@ -6646,7 +7685,7 @@ function GovernancePage() {
                   if (invalidScopes.length > 0) {
                     setApiKeyFeedback(null);
                     setApiKeyError(
-                      `存在不支持的 scope：${invalidScopes.join(",")}。可选值：read,write,admin`
+                      `存在不支持的 scope：${invalidScopes.join(",")}。可选值：read,write,admin`,
                     );
                     return;
                   }
@@ -6672,8 +7711,12 @@ function GovernancePage() {
               </button>
             </div>
 
-            {apiKeyFeedback ? <p className="feedback success">{apiKeyFeedback}</p> : null}
-            {apiKeyError ? <p className="feedback error">{apiKeyError}</p> : null}
+            {apiKeyFeedback ? (
+              <p className="feedback success">{apiKeyFeedback}</p>
+            ) : null}
+            {apiKeyError ? (
+              <p className="feedback error">{apiKeyError}</p>
+            ) : null}
 
             <div className="table-wrapper">
               <table className="session-table">
@@ -6704,8 +7747,16 @@ function GovernancePage() {
                         <td>{item.name}</td>
                         <td>{item.status}</td>
                         <td>{item.scopes.join(",")}</td>
-                        <td>{item.expiresAt ? formatDateTime(item.expiresAt) : "--"}</td>
-                        <td>{item.lastUsedAt ? formatDateTime(item.lastUsedAt) : "--"}</td>
+                        <td>
+                          {item.expiresAt
+                            ? formatDateTime(item.expiresAt)
+                            : "--"}
+                        </td>
+                        <td>
+                          {item.lastUsedAt
+                            ? formatDateTime(item.lastUsedAt)
+                            : "--"}
+                        </td>
                         <td>
                           <div className="governance-action-row">
                             <button
@@ -6716,7 +7767,11 @@ function GovernancePage() {
                                 setApiKeyName(item.name);
                                 setApiKeyScopesInput(item.scopes.join(","));
                                 setApiKeyEnabled(item.status === "active");
-                                setApiKeyExpiresAt(item.expiresAt ? item.expiresAt.slice(0, 10) : "");
+                                setApiKeyExpiresAt(
+                                  item.expiresAt
+                                    ? item.expiresAt.slice(0, 10)
+                                    : "",
+                                );
                               }}
                             >
                               载入
@@ -6727,24 +7782,29 @@ function GovernancePage() {
                                 className="table-action"
                                 disabled={
                                   revokeApiKeyMutation.isPending &&
-                                  revokeApiKeyMutation.variables?.keyId === item.id
+                                  revokeApiKeyMutation.variables?.keyId ===
+                                    item.id
                                 }
                                 onClick={() => {
                                   setApiKeyFeedback(null);
                                   setApiKeyError(null);
                                   revokeApiKeyMutation.mutate({
                                     keyId: item.id,
-                                    reason: apiKeyRevokeReason.trim() || undefined,
+                                    reason:
+                                      apiKeyRevokeReason.trim() || undefined,
                                   });
                                 }}
                               >
                                 {revokeApiKeyMutation.isPending &&
-                                revokeApiKeyMutation.variables?.keyId === item.id
+                                revokeApiKeyMutation.variables?.keyId ===
+                                  item.id
                                   ? "吊销中..."
                                   : "吊销"}
                               </button>
                             ) : (
-                              <span className="tiny-feedback tiny-feedback-success">已吊销</span>
+                              <span className="tiny-feedback tiny-feedback-success">
+                                已吊销
+                              </span>
                             )}
                           </div>
                         </td>
@@ -6760,24 +7820,34 @@ function GovernancePage() {
             <h3>Webhook 管理</h3>
             <p>支持 webhook 列表查询和配置更新。</p>
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field" htmlFor="open-platform-webhook-enabled-filter">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-webhook-enabled-filter"
+              >
                 启用状态（Webhook）
                 <select
                   id="open-platform-webhook-enabled-filter"
                   value={webhookEnabledFilter}
                   onChange={(event) =>
-                    setWebhookEnabledFilter(event.target.value as "" | "true" | "false")
+                    setWebhookEnabledFilter(
+                      event.target.value as "" | "true" | "false",
+                    )
                   }
                 >
-                  {OPEN_PLATFORM_WEBHOOK_ENABLED_FILTER_OPTIONS.map((option) => (
-                    <option key={option.value || "all"} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
+                  {OPEN_PLATFORM_WEBHOOK_ENABLED_FILTER_OPTIONS.map(
+                    (option) => (
+                      <option key={option.value || "all"} value={option.value}>
+                        {option.label}
+                      </option>
+                    ),
+                  )}
                 </select>
               </label>
 
-              <label className="inline-field governance-wide-field" htmlFor="open-platform-webhook-keyword">
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="open-platform-webhook-keyword"
+              >
                 关键字（Webhook）
                 <input
                   id="open-platform-webhook-keyword"
@@ -6798,12 +7868,17 @@ function GovernancePage() {
                   loadWebhooksMutation.mutate(webhookQueryInput);
                 }}
               >
-                {loadWebhooksMutation.isPending ? "加载中..." : "加载 Webhook 列表"}
+                {loadWebhooksMutation.isPending
+                  ? "加载中..."
+                  : "加载 Webhook 列表"}
               </button>
             </div>
 
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field" htmlFor="open-platform-webhook-id">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-webhook-id"
+              >
                 Webhook ID
                 <input
                   id="open-platform-webhook-id"
@@ -6814,7 +7889,10 @@ function GovernancePage() {
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-webhook-name">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-webhook-name"
+              >
                 Webhook 名称
                 <input
                   id="open-platform-webhook-name"
@@ -6825,7 +7903,10 @@ function GovernancePage() {
                 />
               </label>
 
-              <label className="inline-field governance-wide-field" htmlFor="open-platform-webhook-url">
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="open-platform-webhook-url"
+              >
                 回调 URL
                 <input
                   id="open-platform-webhook-url"
@@ -6836,19 +7917,27 @@ function GovernancePage() {
                 />
               </label>
 
-              <label className="inline-field governance-wide-field" htmlFor="open-platform-webhook-events">
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="open-platform-webhook-events"
+              >
                 events（逗号分隔）
                 <input
                   id="open-platform-webhook-events"
                   type="text"
                   list="open-platform-webhook-event-options"
                   value={webhookEventsInput}
-                  onChange={(event) => setWebhookEventsInput(event.target.value)}
+                  onChange={(event) =>
+                    setWebhookEventsInput(event.target.value)
+                  }
                   placeholder="replay.run.started,replay.run.completed"
                 />
               </label>
 
-              <label className="checkbox-field" htmlFor="open-platform-webhook-enabled">
+              <label
+                className="checkbox-field"
+                htmlFor="open-platform-webhook-enabled"
+              >
                 <input
                   id="open-platform-webhook-enabled"
                   type="checkbox"
@@ -6868,8 +7957,10 @@ function GovernancePage() {
                   const normalizedUrl = webhookUrl.trim();
                   const events = Array.from(
                     new Set(
-                      parseCommaSeparatedValues(webhookEventsInput).map((item) => item.toLowerCase())
-                    )
+                      parseCommaSeparatedValues(webhookEventsInput).map(
+                        (item) => item.toLowerCase(),
+                      ),
+                    ),
                   );
                   if (!normalizedWebhookId) {
                     setWebhookFeedback(null);
@@ -6892,12 +7983,12 @@ function GovernancePage() {
                     return;
                   }
                   const invalidEvents = events.filter(
-                    (item) => !OPEN_PLATFORM_WEBHOOK_EVENT_OPTION_SET.has(item)
+                    (item) => !OPEN_PLATFORM_WEBHOOK_EVENT_OPTION_SET.has(item),
                   );
                   if (invalidEvents.length > 0) {
                     setWebhookFeedback(null);
                     setWebhookError(
-                      `事件名不合法：${invalidEvents.join(",")}。推荐优先使用 replay.run.*；可选值：${OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS.join(",")}`
+                      `事件名不合法：${invalidEvents.join(",")}。推荐优先使用 replay.run.*；可选值：${OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS.join(",")}`,
                     );
                     return;
                   }
@@ -6925,19 +8016,27 @@ function GovernancePage() {
             </datalist>
 
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field" htmlFor="open-platform-webhook-replay-event-type">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-webhook-replay-event-type"
+              >
                 回放事件类型（可选）
                 <input
                   id="open-platform-webhook-replay-event-type"
                   type="text"
                   list="open-platform-webhook-event-options"
                   value={webhookReplayEventType}
-                  onChange={(event) => setWebhookReplayEventType(event.target.value)}
+                  onChange={(event) =>
+                    setWebhookReplayEventType(event.target.value)
+                  }
                   placeholder="例如：replay.run.completed"
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-webhook-replay-from">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-webhook-replay-from"
+              >
                 回放起始时间（可选）
                 <input
                   id="open-platform-webhook-replay-from"
@@ -6947,7 +8046,10 @@ function GovernancePage() {
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-webhook-replay-to">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-webhook-replay-to"
+              >
                 回放结束时间（可选）
                 <input
                   id="open-platform-webhook-replay-to"
@@ -6957,7 +8059,10 @@ function GovernancePage() {
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-webhook-replay-limit">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-webhook-replay-limit"
+              >
                 回放条数上限
                 <input
                   id="open-platform-webhook-replay-limit"
@@ -6965,16 +8070,23 @@ function GovernancePage() {
                   min={1}
                   step={1}
                   value={webhookReplayLimit}
-                  onChange={(event) => setWebhookReplayLimit(event.target.value)}
+                  onChange={(event) =>
+                    setWebhookReplayLimit(event.target.value)
+                  }
                 />
               </label>
 
-              <label className="checkbox-field" htmlFor="open-platform-webhook-replay-dry-run">
+              <label
+                className="checkbox-field"
+                htmlFor="open-platform-webhook-replay-dry-run"
+              >
                 <input
                   id="open-platform-webhook-replay-dry-run"
                   type="checkbox"
                   checked={webhookReplayDryRun}
-                  onChange={(event) => setWebhookReplayDryRun(event.target.checked)}
+                  onChange={(event) =>
+                    setWebhookReplayDryRun(event.target.checked)
+                  }
                 />
                 Dry Run
               </label>
@@ -6996,11 +8108,13 @@ function GovernancePage() {
                   }
                   if (
                     normalizedEventType &&
-                    !OPEN_PLATFORM_WEBHOOK_EVENT_OPTION_SET.has(normalizedEventType)
+                    !OPEN_PLATFORM_WEBHOOK_EVENT_OPTION_SET.has(
+                      normalizedEventType,
+                    )
                   ) {
                     setWebhookFeedback(null);
                     setWebhookError(
-                      `事件类型不合法：${normalizedEventType}。推荐优先使用 replay.run.*；可选值：${OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS.join(",")}`
+                      `事件类型不合法：${normalizedEventType}。推荐优先使用 replay.run.*；可选值：${OPEN_PLATFORM_WEBHOOK_EVENT_OPTIONS.join(",")}`,
                     );
                     return;
                   }
@@ -7009,7 +8123,9 @@ function GovernancePage() {
                     setWebhookError("回放条数上限必须是正整数。");
                     return;
                   }
-                  const fromTs = normalizedFrom ? Date.parse(normalizedFrom) : NaN;
+                  const fromTs = normalizedFrom
+                    ? Date.parse(normalizedFrom)
+                    : NaN;
                   const toTs = normalizedTo ? Date.parse(normalizedTo) : NaN;
                   if (normalizedFrom && Number.isNaN(fromTs)) {
                     setWebhookFeedback(null);
@@ -7021,9 +8137,15 @@ function GovernancePage() {
                     setWebhookError("回放结束时间格式不合法。");
                     return;
                   }
-                  if (!Number.isNaN(fromTs) && !Number.isNaN(toTs) && fromTs > toTs) {
+                  if (
+                    !Number.isNaN(fromTs) &&
+                    !Number.isNaN(toTs) &&
+                    fromTs > toTs
+                  ) {
                     setWebhookFeedback(null);
-                    setWebhookError("回放时间范围非法：起始时间不能晚于结束时间。");
+                    setWebhookError(
+                      "回放时间范围非法：起始时间不能晚于结束时间。",
+                    );
                     return;
                   }
                   setWebhookFeedback(null);
@@ -7032,8 +8154,12 @@ function GovernancePage() {
                     webhookId: normalizedWebhookId,
                     input: {
                       eventType: normalizedEventType || undefined,
-                      from: normalizedFrom ? new Date(fromTs).toISOString() : undefined,
-                      to: normalizedTo ? new Date(toTs).toISOString() : undefined,
+                      from: normalizedFrom
+                        ? new Date(fromTs).toISOString()
+                        : undefined,
+                      to: normalizedTo
+                        ? new Date(toTs).toISOString()
+                        : undefined,
                       limit: replayLimit,
                       dryRun: webhookReplayDryRun,
                     },
@@ -7044,8 +8170,12 @@ function GovernancePage() {
               </button>
             </div>
 
-            {webhookFeedback ? <p className="feedback success">{webhookFeedback}</p> : null}
-            {webhookError ? <p className="feedback error">{webhookError}</p> : null}
+            {webhookFeedback ? (
+              <p className="feedback success">{webhookFeedback}</p>
+            ) : null}
+            {webhookError ? (
+              <p className="feedback error">{webhookError}</p>
+            ) : null}
 
             <div className="table-wrapper">
               <table className="session-table">
@@ -7077,7 +8207,11 @@ function GovernancePage() {
                         <td>{item.url}</td>
                         <td>{item.events.join(",")}</td>
                         <td>{item.enabled ? "true" : "false"}</td>
-                        <td>{item.lastDeliveryAt ? formatDateTime(item.lastDeliveryAt) : "--"}</td>
+                        <td>
+                          {item.lastDeliveryAt
+                            ? formatDateTime(item.lastDeliveryAt)
+                            : "--"}
+                        </td>
                         <td>
                           <div className="governance-action-row">
                             <button
@@ -7098,7 +8232,8 @@ function GovernancePage() {
                               className="table-action"
                               disabled={
                                 deleteWebhookMutation.isPending &&
-                                deleteWebhookMutation.variables?.webhookId === item.id
+                                deleteWebhookMutation.variables?.webhookId ===
+                                  item.id
                               }
                               onClick={() => {
                                 setWebhookFeedback(null);
@@ -7109,7 +8244,8 @@ function GovernancePage() {
                               }}
                             >
                               {deleteWebhookMutation.isPending &&
-                              deleteWebhookMutation.variables?.webhookId === item.id
+                              deleteWebhookMutation.variables?.webhookId ===
+                                item.id
                                 ? "删除中..."
                                 : "删除"}
                             </button>
@@ -7125,9 +8261,14 @@ function GovernancePage() {
 
           <article className="open-platform-card">
             <h3>Quality（daily/project-trends/scorecards）</h3>
-            <p>按日查看质量指标，并拉通项目级质量、成本、tokens、sessions 趋势。</p>
+            <p>
+              按日查看质量指标，并拉通项目级质量、成本、tokens、sessions 趋势。
+            </p>
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field" htmlFor="open-platform-quality-daily-date">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-daily-date"
+              >
                 日期（Quality daily）
                 <input
                   id="open-platform-quality-daily-date"
@@ -7137,12 +8278,17 @@ function GovernancePage() {
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-quality-daily-metric">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-daily-metric"
+              >
                 指标（Quality daily）
                 <select
                   id="open-platform-quality-daily-metric"
                   value={qualityDailyMetric}
-                  onChange={(event) => setQualityDailyMetric(event.target.value)}
+                  onChange={(event) =>
+                    setQualityDailyMetric(event.target.value)
+                  }
                 >
                   {OPEN_PLATFORM_QUALITY_METRIC_OPTIONS.map((option) => (
                     <option key={option.label} value={option.value}>
@@ -7152,18 +8298,26 @@ function GovernancePage() {
                 </select>
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-quality-daily-provider">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-daily-provider"
+              >
                 provider
                 <input
                   id="open-platform-quality-daily-provider"
                   type="text"
                   value={qualityDailyProvider}
-                  onChange={(event) => setQualityDailyProvider(event.target.value)}
+                  onChange={(event) =>
+                    setQualityDailyProvider(event.target.value)
+                  }
                   placeholder="可选，例如：github"
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-quality-daily-repo">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-daily-repo"
+              >
                 repo
                 <input
                   id="open-platform-quality-daily-repo"
@@ -7174,18 +8328,26 @@ function GovernancePage() {
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-quality-daily-workflow">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-daily-workflow"
+              >
                 workflow
                 <input
                   id="open-platform-quality-daily-workflow"
                   type="text"
                   value={qualityDailyWorkflow}
-                  onChange={(event) => setQualityDailyWorkflow(event.target.value)}
+                  onChange={(event) =>
+                    setQualityDailyWorkflow(event.target.value)
+                  }
                   placeholder="可选"
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-quality-daily-run-id">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-daily-run-id"
+              >
                 runId
                 <input
                   id="open-platform-quality-daily-run-id"
@@ -7196,14 +8358,22 @@ function GovernancePage() {
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-quality-daily-group-by">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-daily-group-by"
+              >
                 groupBy
                 <select
                   id="open-platform-quality-daily-group-by"
                   value={qualityDailyGroupBy}
                   onChange={(event) =>
                     setQualityDailyGroupBy(
-                      (event.target.value as "" | "provider" | "repo" | "workflow" | "runId")
+                      event.target.value as
+                        | ""
+                        | "provider"
+                        | "repo"
+                        | "workflow"
+                        | "runId",
                     )
                   }
                 >
@@ -7220,7 +8390,10 @@ function GovernancePage() {
                 className="submit-button"
                 disabled={loadQualityDailyMutation.isPending}
                 onClick={() => {
-                  if (qualityDailyDate.trim() && Number.isNaN(Date.parse(qualityDailyDate))) {
+                  if (
+                    qualityDailyDate.trim() &&
+                    Number.isNaN(Date.parse(qualityDailyDate))
+                  ) {
                     setQualityFeedback(null);
                     setQualityError("Quality daily 日期格式不合法。");
                     return;
@@ -7239,74 +8412,109 @@ function GovernancePage() {
                   });
                 }}
               >
-                {loadQualityDailyMutation.isPending ? "查询中..." : "加载 Quality daily"}
+                {loadQualityDailyMutation.isPending
+                  ? "查询中..."
+                  : "加载 Quality daily"}
               </button>
             </div>
 
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field" htmlFor="open-platform-quality-project-trends-from">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-project-trends-from"
+              >
                 开始日期（project-trends）
                 <input
                   id="open-platform-quality-project-trends-from"
                   type="date"
                   value={qualityProjectTrendsFrom}
-                  onChange={(event) => setQualityProjectTrendsFrom(event.target.value)}
+                  onChange={(event) =>
+                    setQualityProjectTrendsFrom(event.target.value)
+                  }
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-quality-project-trends-to">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-project-trends-to"
+              >
                 结束日期（project-trends）
                 <input
                   id="open-platform-quality-project-trends-to"
                   type="date"
                   value={qualityProjectTrendsTo}
-                  onChange={(event) => setQualityProjectTrendsTo(event.target.value)}
+                  onChange={(event) =>
+                    setQualityProjectTrendsTo(event.target.value)
+                  }
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-quality-project-trends-metric">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-project-trends-metric"
+              >
                 指标（project-trends）
                 <select
                   id="open-platform-quality-project-trends-metric"
                   value={qualityProjectTrendsMetric}
-                  onChange={(event) => setQualityProjectTrendsMetric(event.target.value)}
+                  onChange={(event) =>
+                    setQualityProjectTrendsMetric(event.target.value)
+                  }
                 >
                   {OPEN_PLATFORM_QUALITY_METRIC_OPTIONS.map((option) => (
-                    <option key={`project-trend-${option.label}`} value={option.value}>
+                    <option
+                      key={`project-trend-${option.label}`}
+                      value={option.value}
+                    >
                       {option.label}
                     </option>
                   ))}
                 </select>
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-quality-project-trends-provider">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-project-trends-provider"
+              >
                 provider
                 <input
                   id="open-platform-quality-project-trends-provider"
                   type="text"
                   value={qualityProjectTrendsProvider}
-                  onChange={(event) => setQualityProjectTrendsProvider(event.target.value)}
+                  onChange={(event) =>
+                    setQualityProjectTrendsProvider(event.target.value)
+                  }
                   placeholder="可选"
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-quality-project-trends-workflow">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-project-trends-workflow"
+              >
                 workflow
                 <input
                   id="open-platform-quality-project-trends-workflow"
                   type="text"
                   value={qualityProjectTrendsWorkflow}
-                  onChange={(event) => setQualityProjectTrendsWorkflow(event.target.value)}
+                  onChange={(event) =>
+                    setQualityProjectTrendsWorkflow(event.target.value)
+                  }
                   placeholder="可选"
                 />
               </label>
 
-              <label className="checkbox-field" htmlFor="open-platform-quality-project-trends-include-unknown">
+              <label
+                className="checkbox-field"
+                htmlFor="open-platform-quality-project-trends-include-unknown"
+              >
                 <input
                   id="open-platform-quality-project-trends-include-unknown"
                   type="checkbox"
                   checked={qualityProjectTrendsIncludeUnknown}
-                  onChange={(event) => setQualityProjectTrendsIncludeUnknown(event.target.checked)}
+                  onChange={(event) =>
+                    setQualityProjectTrendsIncludeUnknown(event.target.checked)
+                  }
                 />
                 包含 unknown 项目
               </label>
@@ -7320,17 +8528,23 @@ function GovernancePage() {
                   const to = qualityProjectTrendsTo.trim();
                   if (from && Number.isNaN(Date.parse(from))) {
                     setQualityFeedback(null);
-                    setQualityError("Quality project-trends 开始日期格式不合法。");
+                    setQualityError(
+                      "Quality project-trends 开始日期格式不合法。",
+                    );
                     return;
                   }
                   if (to && Number.isNaN(Date.parse(to))) {
                     setQualityFeedback(null);
-                    setQualityError("Quality project-trends 结束日期格式不合法。");
+                    setQualityError(
+                      "Quality project-trends 结束日期格式不合法。",
+                    );
                     return;
                   }
                   if (from && to && Date.parse(from) > Date.parse(to)) {
                     setQualityFeedback(null);
-                    setQualityError("Quality project-trends 时间范围非法：开始日期不能晚于结束日期。");
+                    setQualityError(
+                      "Quality project-trends 时间范围非法：开始日期不能晚于结束日期。",
+                    );
                     return;
                   }
                   setQualityFeedback(null);
@@ -7353,13 +8567,18 @@ function GovernancePage() {
             </div>
 
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field" htmlFor="open-platform-quality-scorecard-team">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-scorecard-team"
+              >
                 指标（scorecards）
                 <input
                   id="open-platform-quality-scorecard-team"
                   type="text"
                   value={qualityScorecardTeam}
-                  onChange={(event) => setQualityScorecardTeam(event.target.value)}
+                  onChange={(event) =>
+                    setQualityScorecardTeam(event.target.value)
+                  }
                   placeholder="可选，例如：accuracy"
                 />
               </label>
@@ -7377,12 +8596,18 @@ function GovernancePage() {
                   });
                 }}
               >
-                {loadQualityScorecardsMutation.isPending ? "查询中..." : "加载 Quality scorecards"}
+                {loadQualityScorecardsMutation.isPending
+                  ? "查询中..."
+                  : "加载 Quality scorecards"}
               </button>
             </div>
 
-            {qualityFeedback ? <p className="feedback success">{qualityFeedback}</p> : null}
-            {qualityError ? <p className="feedback error">{qualityError}</p> : null}
+            {qualityFeedback ? (
+              <p className="feedback success">{qualityFeedback}</p>
+            ) : null}
+            {qualityError ? (
+              <p className="feedback error">{qualityError}</p>
+            ) : null}
 
             <div className="table-wrapper">
               <table className="session-table">
@@ -7553,7 +8778,10 @@ function GovernancePage() {
 
           <article className="open-platform-card">
             <h3>Replay（datasets/cases/runs/diff/artifacts）</h3>
-            <p>发起回放数据集与运行，维护样本集，查看差异结果并拉取 summary/diff/cases 工件。</p>
+            <p>
+              发起回放数据集与运行，维护样本集，查看差异结果并拉取
+              summary/diff/cases 工件。
+            </p>
             <datalist id="open-platform-replay-baseline-options">
               {knownReplayDatasetIds.map((datasetId) => (
                 <option key={datasetId} value={datasetId} />
@@ -7566,51 +8794,74 @@ function GovernancePage() {
             </datalist>
 
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field" htmlFor="open-platform-replay-create-dataset-name">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-create-dataset-name"
+              >
                 dataset 名称
                 <input
                   id="open-platform-replay-create-dataset-name"
                   type="text"
                   value={replayCreateDatasetName}
-                  onChange={(event) => setReplayCreateDatasetName(event.target.value)}
+                  onChange={(event) =>
+                    setReplayCreateDatasetName(event.target.value)
+                  }
                   placeholder="必填"
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-replay-create-dataset-id">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-create-dataset-id"
+              >
                 datasetRef
                 <input
                   id="open-platform-replay-create-dataset-id"
                   type="text"
                   value={replayCreateDatasetRef}
-                  onChange={(event) => setReplayCreateDatasetRef(event.target.value)}
+                  onChange={(event) =>
+                    setReplayCreateDatasetRef(event.target.value)
+                  }
                   placeholder="必填"
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-replay-create-dataset-model">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-create-dataset-model"
+              >
                 model
                 <input
                   id="open-platform-replay-create-dataset-model"
                   type="text"
                   value={replayCreateDatasetModel}
-                  onChange={(event) => setReplayCreateDatasetModel(event.target.value)}
+                  onChange={(event) =>
+                    setReplayCreateDatasetModel(event.target.value)
+                  }
                   placeholder="必填"
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-replay-create-dataset-prompt-version">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-create-dataset-prompt-version"
+              >
                 promptVersion
                 <input
                   id="open-platform-replay-create-dataset-prompt-version"
                   type="text"
                   value={replayCreateDatasetPromptVersion}
-                  onChange={(event) => setReplayCreateDatasetPromptVersion(event.target.value)}
+                  onChange={(event) =>
+                    setReplayCreateDatasetPromptVersion(event.target.value)
+                  }
                   placeholder="可选"
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-replay-create-dataset-sample-count">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-create-dataset-sample-count"
+              >
                 sampleCount
                 <input
                   id="open-platform-replay-create-dataset-sample-count"
@@ -7618,7 +8869,9 @@ function GovernancePage() {
                   min={0}
                   step={1}
                   value={replayCreateDatasetSampleCount}
-                  onChange={(event) => setReplayCreateDatasetSampleCount(event.target.value)}
+                  onChange={(event) =>
+                    setReplayCreateDatasetSampleCount(event.target.value)
+                  }
                 />
               </label>
 
@@ -7631,11 +8884,13 @@ function GovernancePage() {
                   const datasetRef = replayCreateDatasetRef.trim();
                   const model = replayCreateDatasetModel.trim();
                   const sampleCount = parseOptionalNonNegativeInteger(
-                    replayCreateDatasetSampleCount
+                    replayCreateDatasetSampleCount,
                   );
                   if (!name || !datasetRef || !model) {
                     setReplayFeedback(null);
-                    setReplayError("创建回放数据集前请填写 name、datasetRef、model。");
+                    setReplayError(
+                      "创建回放数据集前请填写 name、datasetRef、model。",
+                    );
                     return;
                   }
                   if (
@@ -7643,7 +8898,9 @@ function GovernancePage() {
                     sampleCount === undefined
                   ) {
                     setReplayFeedback(null);
-                    setReplayError("回放数据集的 sampleCount 必须是大于等于 0 的整数。");
+                    setReplayError(
+                      "回放数据集的 sampleCount 必须是大于等于 0 的整数。",
+                    );
                     return;
                   }
                   setReplayFeedback(null);
@@ -7652,23 +8909,31 @@ function GovernancePage() {
                     name,
                     datasetRef,
                     model,
-                    promptVersion: replayCreateDatasetPromptVersion.trim() || undefined,
+                    promptVersion:
+                      replayCreateDatasetPromptVersion.trim() || undefined,
                     sampleCount,
                   });
                 }}
               >
-                {createReplayDatasetMutation.isPending ? "创建中..." : "创建回放数据集"}
+                {createReplayDatasetMutation.isPending
+                  ? "创建中..."
+                  : "创建回放数据集"}
               </button>
             </div>
 
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field governance-wide-field" htmlFor="open-platform-replay-baseline-keyword">
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="open-platform-replay-baseline-keyword"
+              >
                 关键字（dataset）
                 <input
                   id="open-platform-replay-baseline-keyword"
                   type="text"
                   value={replayDatasetKeyword}
-                  onChange={(event) => setReplayDatasetKeyword(event.target.value)}
+                  onChange={(event) =>
+                    setReplayDatasetKeyword(event.target.value)
+                  }
                   placeholder="按 dataset 名称检索"
                 />
               </label>
@@ -7686,19 +8951,26 @@ function GovernancePage() {
                   });
                 }}
               >
-                {loadReplayDatasetsMutation.isPending ? "查询中..." : "加载回放数据集"}
+                {loadReplayDatasetsMutation.isPending
+                  ? "查询中..."
+                  : "加载回放数据集"}
               </button>
             </div>
 
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field" htmlFor="open-platform-replay-dataset-cases-dataset-id">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-dataset-cases-dataset-id"
+              >
                 datasetId（cases）
                 <input
                   id="open-platform-replay-dataset-cases-dataset-id"
                   type="text"
                   list="open-platform-replay-baseline-options"
                   value={replayDatasetCasesDatasetId}
-                  onChange={(event) => setReplayDatasetCasesDatasetId(event.target.value)}
+                  onChange={(event) =>
+                    setReplayDatasetCasesDatasetId(event.target.value)
+                  }
                   placeholder="必填"
                 />
               </label>
@@ -7719,7 +8991,9 @@ function GovernancePage() {
                   loadReplayDatasetCasesMutation.mutate(datasetId);
                 }}
               >
-                {loadReplayDatasetCasesMutation.isPending ? "查询中..." : "加载回放样本"}
+                {loadReplayDatasetCasesMutation.isPending
+                  ? "查询中..."
+                  : "加载回放样本"}
               </button>
 
               <button
@@ -7741,15 +9015,18 @@ function GovernancePage() {
                     setReplayError("回放样本编辑器内容必须是合法 JSON。");
                     return;
                   }
-                  const rawItems =
-                    Array.isArray(parsed)
-                      ? parsed
-                      : parsed && typeof parsed === "object" && Array.isArray((parsed as { items?: unknown }).items)
-                        ? (parsed as { items: unknown[] }).items
-                        : null;
+                  const rawItems = Array.isArray(parsed)
+                    ? parsed
+                    : parsed &&
+                        typeof parsed === "object" &&
+                        Array.isArray((parsed as { items?: unknown }).items)
+                      ? (parsed as { items: unknown[] }).items
+                      : null;
                   if (!rawItems) {
                     setReplayFeedback(null);
-                    setReplayError("回放样本必须是数组，或包含 items 数组的对象。");
+                    setReplayError(
+                      "回放样本必须是数组，或包含 items 数组的对象。",
+                    );
                     return;
                   }
                   const normalizedItems: Array<{
@@ -7768,7 +9045,10 @@ function GovernancePage() {
                       return;
                     }
                     const record = item as Record<string, unknown>;
-                    const input = typeof record.input === "string" ? record.input.trim() : "";
+                    const input =
+                      typeof record.input === "string"
+                        ? record.input.trim()
+                        : "";
                     if (!input) {
                       setReplayFeedback(null);
                       setReplayError("每条回放样本都必须包含非空 input。");
@@ -7776,28 +9056,35 @@ function GovernancePage() {
                     }
                     normalizedItems.push({
                       caseId:
-                        typeof record.caseId === "string" && record.caseId.trim().length > 0
+                        typeof record.caseId === "string" &&
+                        record.caseId.trim().length > 0
                           ? record.caseId.trim()
                           : undefined,
                       sortOrder:
-                        typeof record.sortOrder === "number" && Number.isInteger(record.sortOrder)
+                        typeof record.sortOrder === "number" &&
+                        Number.isInteger(record.sortOrder)
                           ? record.sortOrder
                           : undefined,
                       input,
                       expectedOutput:
-                        typeof record.expectedOutput === "string" && record.expectedOutput.trim().length > 0
+                        typeof record.expectedOutput === "string" &&
+                        record.expectedOutput.trim().length > 0
                           ? record.expectedOutput.trim()
                           : undefined,
                       baselineOutput:
-                        typeof record.baselineOutput === "string" && record.baselineOutput.trim().length > 0
+                        typeof record.baselineOutput === "string" &&
+                        record.baselineOutput.trim().length > 0
                           ? record.baselineOutput.trim()
                           : undefined,
                       candidateInput:
-                        typeof record.candidateInput === "string" && record.candidateInput.trim().length > 0
+                        typeof record.candidateInput === "string" &&
+                        record.candidateInput.trim().length > 0
                           ? record.candidateInput.trim()
                           : undefined,
                       metadata:
-                        record.metadata && typeof record.metadata === "object" && !Array.isArray(record.metadata)
+                        record.metadata &&
+                        typeof record.metadata === "object" &&
+                        !Array.isArray(record.metadata)
                           ? (record.metadata as Record<string, unknown>)
                           : undefined,
                     });
@@ -7810,87 +9097,127 @@ function GovernancePage() {
                   });
                 }}
               >
-                {saveReplayDatasetCasesMutation.isPending ? "保存中..." : "保存回放样本"}
+                {saveReplayDatasetCasesMutation.isPending
+                  ? "保存中..."
+                  : "保存回放样本"}
               </button>
             </div>
 
-            <label className="inline-field governance-wide-field" htmlFor="open-platform-replay-dataset-cases-editor">
+            <label
+              className="inline-field governance-wide-field"
+              htmlFor="open-platform-replay-dataset-cases-editor"
+            >
               样本编辑器（JSON）
               <textarea
                 id="open-platform-replay-dataset-cases-editor"
                 value={replayDatasetCasesEditor}
-                onChange={(event) => setReplayDatasetCasesEditor(event.target.value)}
+                onChange={(event) =>
+                  setReplayDatasetCasesEditor(event.target.value)
+                }
                 placeholder='[{"caseId":"case-1","sortOrder":0,"input":"示例问题","expectedOutput":"示例答案"}]'
                 rows={10}
               />
             </label>
 
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field governance-wide-field" htmlFor="open-platform-replay-materialize-session-ids">
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="open-platform-replay-materialize-session-ids"
+              >
                 sessionIds（可选，逗号分隔）
                 <input
                   id="open-platform-replay-materialize-session-ids"
                   type="text"
                   value={replayMaterializeSessionIds}
-                  onChange={(event) => setReplayMaterializeSessionIds(event.target.value)}
+                  onChange={(event) =>
+                    setReplayMaterializeSessionIds(event.target.value)
+                  }
                   placeholder="优先按指定 sessionId 物化"
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-replay-materialize-keyword">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-materialize-keyword"
+              >
                 keyword
                 <input
                   id="open-platform-replay-materialize-keyword"
                   type="text"
                   value={replayMaterializeKeyword}
-                  onChange={(event) => setReplayMaterializeKeyword(event.target.value)}
+                  onChange={(event) =>
+                    setReplayMaterializeKeyword(event.target.value)
+                  }
                   placeholder="按会话关键词过滤"
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-replay-materialize-tool">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-materialize-tool"
+              >
                 tool
                 <input
                   id="open-platform-replay-materialize-tool"
                   type="text"
                   value={replayMaterializeTool}
-                  onChange={(event) => setReplayMaterializeTool(event.target.value)}
+                  onChange={(event) =>
+                    setReplayMaterializeTool(event.target.value)
+                  }
                   placeholder="如 Codex CLI"
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-replay-materialize-model">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-materialize-model"
+              >
                 model
                 <input
                   id="open-platform-replay-materialize-model"
                   type="text"
                   value={replayMaterializeModel}
-                  onChange={(event) => setReplayMaterializeModel(event.target.value)}
+                  onChange={(event) =>
+                    setReplayMaterializeModel(event.target.value)
+                  }
                   placeholder="如 gpt-5-codex"
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-replay-materialize-from">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-materialize-from"
+              >
                 from
                 <input
                   id="open-platform-replay-materialize-from"
                   type="datetime-local"
                   value={replayMaterializeFrom}
-                  onChange={(event) => setReplayMaterializeFrom(event.target.value)}
+                  onChange={(event) =>
+                    setReplayMaterializeFrom(event.target.value)
+                  }
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-replay-materialize-to">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-materialize-to"
+              >
                 to
                 <input
                   id="open-platform-replay-materialize-to"
                   type="datetime-local"
                   value={replayMaterializeTo}
-                  onChange={(event) => setReplayMaterializeTo(event.target.value)}
+                  onChange={(event) =>
+                    setReplayMaterializeTo(event.target.value)
+                  }
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-replay-materialize-sample-limit">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-materialize-sample-limit"
+              >
                 sampleLimit（materialize）
                 <input
                   id="open-platform-replay-materialize-sample-limit"
@@ -7898,16 +9225,23 @@ function GovernancePage() {
                   min={1}
                   step={1}
                   value={replayMaterializeSampleLimit}
-                  onChange={(event) => setReplayMaterializeSampleLimit(event.target.value)}
+                  onChange={(event) =>
+                    setReplayMaterializeSampleLimit(event.target.value)
+                  }
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-replay-materialize-sanitized">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-materialize-sanitized"
+              >
                 sanitized
                 <select
                   id="open-platform-replay-materialize-sanitized"
                   value={replayMaterializeSanitized ? "true" : "false"}
-                  onChange={(event) => setReplayMaterializeSanitized(event.target.value === "true")}
+                  onChange={(event) =>
+                    setReplayMaterializeSanitized(event.target.value === "true")
+                  }
                 >
                   <option value="true">true</option>
                   <option value="false">false</option>
@@ -7942,8 +9276,12 @@ function GovernancePage() {
                     keyword: replayMaterializeKeyword.trim() || undefined,
                     tool: replayMaterializeTool.trim() || undefined,
                     model: replayMaterializeModel.trim() || undefined,
-                    from: replayMaterializeFrom ? new Date(replayMaterializeFrom).toISOString() : undefined,
-                    to: replayMaterializeTo ? new Date(replayMaterializeTo).toISOString() : undefined,
+                    from: replayMaterializeFrom
+                      ? new Date(replayMaterializeFrom).toISOString()
+                      : undefined,
+                    to: replayMaterializeTo
+                      ? new Date(replayMaterializeTo).toISOString()
+                      : undefined,
                   };
                   if (
                     sessionIds.length === 0 &&
@@ -7954,7 +9292,9 @@ function GovernancePage() {
                     !filters.to
                   ) {
                     setReplayFeedback(null);
-                    setReplayError("请提供 sessionIds，或至少一个会话筛选条件。");
+                    setReplayError(
+                      "请提供 sessionIds，或至少一个会话筛选条件。",
+                    );
                     return;
                   }
                   setReplayFeedback(null);
@@ -7964,12 +9304,16 @@ function GovernancePage() {
                     sessionIds: sessionIds.length > 0 ? sessionIds : undefined,
                     filters,
                     sampleLimit:
-                      replayMaterializeSampleLimit.trim().length > 0 ? sampleLimit : undefined,
+                      replayMaterializeSampleLimit.trim().length > 0
+                        ? sampleLimit
+                        : undefined,
                     sanitized: replayMaterializeSanitized,
                   });
                 }}
               >
-                {materializeReplayDatasetCasesMutation.isPending ? "物化中..." : "从历史会话物化样本"}
+                {materializeReplayDatasetCasesMutation.isPending
+                  ? "物化中..."
+                  : "从历史会话物化样本"}
               </button>
             </div>
 
@@ -7980,11 +9324,16 @@ function GovernancePage() {
                     <tr>
                       <th>最近物化</th>
                       <td>
-                        {replayMaterializePayload.sourceType} / materialized {replayMaterializePayload.materialized} /
-                        skipped {replayMaterializePayload.skipped}
+                        {replayMaterializePayload.sourceType} / materialized{" "}
+                        {replayMaterializePayload.materialized} / skipped{" "}
+                        {replayMaterializePayload.skipped}
                       </td>
                       <th>来源分布</th>
-                      <td>{formatCompactJson(replayMaterializePayload.sourceSummary)}</td>
+                      <td>
+                        {formatCompactJson(
+                          replayMaterializePayload.sourceSummary,
+                        )}
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -7992,30 +9341,43 @@ function GovernancePage() {
             ) : null}
 
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field" htmlFor="open-platform-replay-create-run-baseline-id">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-create-run-baseline-id"
+              >
                 datasetId（create run）
                 <input
                   id="open-platform-replay-create-run-baseline-id"
                   type="text"
                   list="open-platform-replay-baseline-options"
                   value={replayCreateRunDatasetId}
-                  onChange={(event) => setReplayCreateRunDatasetId(event.target.value)}
+                  onChange={(event) =>
+                    setReplayCreateRunDatasetId(event.target.value)
+                  }
                   placeholder="必填"
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-replay-create-run-candidate-label">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-create-run-candidate-label"
+              >
                 candidateLabel
                 <input
                   id="open-platform-replay-create-run-candidate-label"
                   type="text"
                   value={replayCreateRunCandidateLabel}
-                  onChange={(event) => setReplayCreateRunCandidateLabel(event.target.value)}
+                  onChange={(event) =>
+                    setReplayCreateRunCandidateLabel(event.target.value)
+                  }
                   placeholder="必填"
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-replay-create-run-sample-limit">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-create-run-sample-limit"
+              >
                 sampleLimit
                 <input
                   id="open-platform-replay-create-run-sample-limit"
@@ -8023,7 +9385,9 @@ function GovernancePage() {
                   min={1}
                   step={1}
                   value={replayCreateRunSampleLimit}
-                  onChange={(event) => setReplayCreateRunSampleLimit(event.target.value)}
+                  onChange={(event) =>
+                    setReplayCreateRunSampleLimit(event.target.value)
+                  }
                 />
               </label>
 
@@ -8037,7 +9401,9 @@ function GovernancePage() {
                   const sampleLimit = Number(replayCreateRunSampleLimit);
                   if (!datasetId || !candidateLabel) {
                     setReplayFeedback(null);
-                    setReplayError("创建回放运行前请填写 datasetId 与 candidateLabel。");
+                    setReplayError(
+                      "创建回放运行前请填写 datasetId 与 candidateLabel。",
+                    );
                     return;
                   }
                   if (
@@ -8054,41 +9420,57 @@ function GovernancePage() {
                     datasetId,
                     candidateLabel,
                     sampleLimit:
-                      replayCreateRunSampleLimit.trim().length > 0 ? sampleLimit : undefined,
+                      replayCreateRunSampleLimit.trim().length > 0
+                        ? sampleLimit
+                        : undefined,
                   });
                 }}
               >
-                {createReplayRunMutation.isPending ? "创建中..." : "创建回放运行"}
+                {createReplayRunMutation.isPending
+                  ? "创建中..."
+                  : "创建回放运行"}
               </button>
             </div>
 
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field" htmlFor="open-platform-replay-jobs-baseline-id">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-jobs-baseline-id"
+              >
                 datasetId（runs）
                 <input
                   id="open-platform-replay-jobs-baseline-id"
                   type="text"
                   list="open-platform-replay-baseline-options"
                   value={replayRunsDatasetIdFilter}
-                  onChange={(event) => setReplayRunsDatasetIdFilter(event.target.value)}
+                  onChange={(event) =>
+                    setReplayRunsDatasetIdFilter(event.target.value)
+                  }
                   placeholder="可选"
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-replay-jobs-status">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-jobs-status"
+              >
                 状态（runs）
                 <select
                   id="open-platform-replay-jobs-status"
                   value={replayRunsStatusFilter}
                   onChange={(event) =>
-                    setReplayRunsStatusFilter(event.target.value as OpenPlatformReplayJobStatus | "")
+                    setReplayRunsStatusFilter(
+                      event.target.value as OpenPlatformReplayJobStatus | "",
+                    )
                   }
                 >
-                  {OPEN_PLATFORM_REPLAY_JOB_STATUS_FILTER_OPTIONS.map((option) => (
-                    <option key={option.value || "all"} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
+                  {OPEN_PLATFORM_REPLAY_JOB_STATUS_FILTER_OPTIONS.map(
+                    (option) => (
+                      <option key={option.value || "all"} value={option.value}>
+                        {option.label}
+                      </option>
+                    ),
+                  )}
                 </select>
               </label>
 
@@ -8106,24 +9488,34 @@ function GovernancePage() {
                   });
                 }}
               >
-                {loadReplayRunsMutation.isPending ? "查询中..." : "加载回放运行"}
+                {loadReplayRunsMutation.isPending
+                  ? "查询中..."
+                  : "加载回放运行"}
               </button>
             </div>
 
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field" htmlFor="open-platform-replay-diff-baseline-id">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-diff-baseline-id"
+              >
                 datasetId（diff，可选校验）
                 <input
                   id="open-platform-replay-diff-baseline-id"
                   type="text"
                   list="open-platform-replay-baseline-options"
                   value={replayDiffDatasetId}
-                  onChange={(event) => setReplayDiffDatasetId(event.target.value)}
+                  onChange={(event) =>
+                    setReplayDiffDatasetId(event.target.value)
+                  }
                   placeholder="可选"
                 />
               </label>
 
-              <label className="inline-field" htmlFor="open-platform-replay-diff-job-id">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-diff-job-id"
+              >
                 runId（diff）
                 <input
                   id="open-platform-replay-diff-job-id"
@@ -8135,7 +9527,10 @@ function GovernancePage() {
                 />
               </label>
 
-              <label className="inline-field governance-wide-field" htmlFor="open-platform-replay-diff-keyword">
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="open-platform-replay-diff-keyword"
+              >
                 关键字（diff）
                 <input
                   id="open-platform-replay-diff-keyword"
@@ -8168,19 +9563,26 @@ function GovernancePage() {
                   });
                 }}
               >
-                {loadReplayDiffMutation.isPending ? "查询中..." : "加载回放差异"}
+                {loadReplayDiffMutation.isPending
+                  ? "查询中..."
+                  : "加载回放差异"}
               </button>
             </div>
 
             <div className="filters-row governance-inline-grid">
-              <label className="inline-field" htmlFor="open-platform-replay-artifact-job-id">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-artifact-job-id"
+              >
                 runId（artifacts）
                 <input
                   id="open-platform-replay-artifact-job-id"
                   type="text"
                   list="open-platform-replay-run-options"
                   value={replayArtifactRunId}
-                  onChange={(event) => setReplayArtifactRunId(event.target.value)}
+                  onChange={(event) =>
+                    setReplayArtifactRunId(event.target.value)
+                  }
                   placeholder="必填"
                 />
               </label>
@@ -8201,12 +9603,18 @@ function GovernancePage() {
                   loadReplayArtifactsMutation.mutate(runId);
                 }}
               >
-                {loadReplayArtifactsMutation.isPending ? "查询中..." : "加载回放工件"}
+                {loadReplayArtifactsMutation.isPending
+                  ? "查询中..."
+                  : "加载回放工件"}
               </button>
             </div>
 
-            {replayFeedback ? <p className="feedback success">{replayFeedback}</p> : null}
-            {replayError ? <p className="feedback error">{replayError}</p> : null}
+            {replayFeedback ? (
+              <p className="feedback success">{replayFeedback}</p>
+            ) : null}
+            {replayError ? (
+              <p className="feedback error">{replayError}</p>
+            ) : null}
 
             {replaySelectedRunSummary ? (
               <div className="table-wrapper">
@@ -8215,25 +9623,49 @@ function GovernancePage() {
                     <tr>
                       <th>运行摘要</th>
                       <td>
-                        total {String(replaySelectedRunSummary.totalCases ?? "--")} / processed{" "}
-                        {String(replaySelectedRunSummary.processedCases ?? "--")} / improved{" "}
-                        {String(replaySelectedRunSummary.improvedCases ?? "--")} / regressed{" "}
-                        {String(replaySelectedRunSummary.regressedCases ?? "--")}
+                        total{" "}
+                        {String(replaySelectedRunSummary.totalCases ?? "--")} /
+                        processed{" "}
+                        {String(
+                          replaySelectedRunSummary.processedCases ?? "--",
+                        )}{" "}
+                        / improved{" "}
+                        {String(replaySelectedRunSummary.improvedCases ?? "--")}{" "}
+                        / regressed{" "}
+                        {String(
+                          replaySelectedRunSummary.regressedCases ?? "--",
+                        )}
                       </td>
                       <th>执行来源</th>
-                      <td>{String(replaySelectedRunSummary.executionSource ?? "--")}</td>
+                      <td>
+                        {String(
+                          replaySelectedRunSummary.executionSource ?? "--",
+                        )}
+                      </td>
                     </tr>
                     <tr>
                       <th>样本来源</th>
-                      <td>{formatCompactJson(
-                        replaySelectedRunSummary.sourceSummary &&
-                          typeof replaySelectedRunSummary.sourceSummary === "object" &&
-                          !Array.isArray(replaySelectedRunSummary.sourceSummary)
-                          ? (replaySelectedRunSummary.sourceSummary as Record<string, unknown>)
-                          : undefined
-                      )}</td>
+                      <td>
+                        {formatCompactJson(
+                          replaySelectedRunSummary.sourceSummary &&
+                            typeof replaySelectedRunSummary.sourceSummary ===
+                              "object" &&
+                            !Array.isArray(
+                              replaySelectedRunSummary.sourceSummary,
+                            )
+                            ? (replaySelectedRunSummary.sourceSummary as Record<
+                                string,
+                                unknown
+                              >)
+                            : undefined,
+                        )}
+                      </td>
                       <th>digest</th>
-                      <td>{formatCompactJson(replaySelectedRunDigest ?? undefined)}</td>
+                      <td>
+                        {formatCompactJson(
+                          replaySelectedRunDigest ?? undefined,
+                        )}
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -8308,7 +9740,9 @@ function GovernancePage() {
                   {replayDatasetCaseItems.length === 0 ? (
                     <tr>
                       <td className="table-empty-cell" colSpan={5}>
-                        {hasLoadedReplayDatasetCases ? "无匹配样本。" : "尚未加载样本。"}
+                        {hasLoadedReplayDatasetCases
+                          ? "无匹配样本。"
+                          : "尚未加载样本。"}
                       </td>
                     </tr>
                   ) : (
@@ -8342,7 +9776,9 @@ function GovernancePage() {
                   {replayRunItems.length === 0 ? (
                     <tr>
                       <td className="table-empty-cell" colSpan={6}>
-                        {hasLoadedReplayJobs ? "无匹配 runs。" : "尚未加载 runs。"}
+                        {hasLoadedReplayJobs
+                          ? "无匹配 runs。"
+                          : "尚未加载 runs。"}
                       </td>
                     </tr>
                   ) : (
@@ -8352,12 +9788,17 @@ function GovernancePage() {
                         <td>{item.datasetId}</td>
                         <td>{item.status}</td>
                         <td>
-                          {item.passedCases}/{item.totalCases}（failed: {item.failedCases}）
+                          {item.passedCases}/{item.totalCases}（failed:{" "}
+                          {item.failedCases}）
                         </td>
                         <td>{formatDateTime(item.createdAt)}</td>
                         <td>
                           <div className="governance-action-row">
-                            <span>{item.finishedAt ? formatDateTime(item.finishedAt) : "--"}</span>
+                            <span>
+                              {item.finishedAt
+                                ? formatDateTime(item.finishedAt)
+                                : "--"}
+                            </span>
                             <button
                               type="button"
                               className="table-action"
@@ -8380,7 +9821,8 @@ function GovernancePage() {
                                 loadReplayDiffMutation.mutate({
                                   datasetId: item.datasetId,
                                   runId: item.runId,
-                                  keyword: replayDiffKeyword.trim() || undefined,
+                                  keyword:
+                                    replayDiffKeyword.trim() || undefined,
                                   limit: 50,
                                 });
                               }}
@@ -8423,7 +9865,9 @@ function GovernancePage() {
                   {replayDiffItems.length === 0 ? (
                     <tr>
                       <td className="table-empty-cell" colSpan={5}>
-                        {hasLoadedReplayDiff ? "无匹配 diff。" : "尚未加载 diff。"}
+                        {hasLoadedReplayDiff
+                          ? "无匹配 diff。"
+                          : "尚未加载 diff。"}
                       </td>
                     </tr>
                   ) : (
@@ -8458,17 +9902,29 @@ function GovernancePage() {
                   {replayArtifactItems.length === 0 ? (
                     <tr>
                       <td className="table-empty-cell" colSpan={7}>
-                        {hasLoadedReplayArtifacts ? "无匹配 artifacts。" : "尚未加载 artifacts。"}
+                        {hasLoadedReplayArtifacts
+                          ? "无匹配 artifacts。"
+                          : "尚未加载 artifacts。"}
                       </td>
                     </tr>
                   ) : (
                     replayArtifactItems.map((item) => (
-                      <tr key={`${replayArtifactPayload?.runId ?? "run"}:${item.type}`}>
+                      <tr
+                        key={`${replayArtifactPayload?.runId ?? "run"}:${item.type}`}
+                      >
                         <td>{item.type}</td>
                         <td>{item.name ?? item.downloadName ?? "--"}</td>
                         <td>{item.contentType}</td>
-                        <td>{typeof item.byteSize === "number" ? item.byteSize : "--"}</td>
-                        <td>{item.createdAt ? formatDateTime(item.createdAt) : "--"}</td>
+                        <td>
+                          {typeof item.byteSize === "number"
+                            ? item.byteSize
+                            : "--"}
+                        </td>
+                        <td>
+                          {item.createdAt
+                            ? formatDateTime(item.createdAt)
+                            : "--"}
+                        </td>
                         <td>{formatCompactJson(item.inline)}</td>
                         <td>
                           <button
@@ -8476,10 +9932,13 @@ function GovernancePage() {
                             className="table-action"
                             disabled={downloadReplayArtifactMutation.isPending}
                             onClick={() => {
-                              const runId = replayArtifactPayload?.runId?.trim();
+                              const runId =
+                                replayArtifactPayload?.runId?.trim();
                               if (!runId) {
                                 setReplayFeedback(null);
-                                setReplayError("下载回放工件前请先加载工件列表。");
+                                setReplayError(
+                                  "下载回放工件前请先加载工件列表。",
+                                );
                                 return;
                               }
                               downloadReplayArtifactMutation.mutate({
@@ -8489,7 +9948,9 @@ function GovernancePage() {
                               });
                             }}
                           >
-                            {downloadReplayArtifactMutation.isPending ? "下载中..." : "下载"}
+                            {downloadReplayArtifactMutation.isPending
+                              ? "下载中..."
+                              : "下载"}
                           </button>
                         </td>
                       </tr>
@@ -8516,7 +9977,9 @@ function GovernancePage() {
               <select
                 id="sessions-export-format"
                 value={sessionExportFormat}
-                onChange={(event) => setSessionExportFormat(event.target.value as ExportFormat)}
+                onChange={(event) =>
+                  setSessionExportFormat(event.target.value as ExportFormat)
+                }
               >
                 {EXPORT_FORMAT_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -8548,7 +10011,9 @@ function GovernancePage() {
                   id="usage-export-dimension"
                   value={usageExportDimension}
                   onChange={(event) =>
-                    setUsageExportDimension(event.target.value as UsageExportDimension)
+                    setUsageExportDimension(
+                      event.target.value as UsageExportDimension,
+                    )
                   }
                 >
                   {USAGE_EXPORT_DIMENSION_OPTIONS.map((option) => (
@@ -8564,7 +10029,9 @@ function GovernancePage() {
                 <select
                   id="usage-export-format"
                   value={usageExportFormat}
-                  onChange={(event) => setUsageExportFormat(event.target.value as ExportFormat)}
+                  onChange={(event) =>
+                    setUsageExportFormat(event.target.value as ExportFormat)
+                  }
                 >
                   {EXPORT_FORMAT_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -8592,7 +10059,9 @@ function GovernancePage() {
           </article>
         </div>
 
-        {exportFeedback ? <p className="feedback success">{exportFeedback}</p> : null}
+        {exportFeedback ? (
+          <p className="feedback success">{exportFeedback}</p>
+        ) : null}
         {exportError ? <p className="feedback error">{exportError}</p> : null}
       </section>
     </>
@@ -8600,7 +10069,8 @@ function GovernancePage() {
 }
 
 function SourcesPage() {
-  const [sourceForm, setSourceForm] = useState<SourceFormState>(INITIAL_SOURCE_FORM);
+  const [sourceForm, setSourceForm] =
+    useState<SourceFormState>(INITIAL_SOURCE_FORM);
   const [sourceFormError, setSourceFormError] = useState<string | null>(null);
   const [sourceFeedback, setSourceFeedback] = useState<string | null>(null);
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
@@ -8650,12 +10120,13 @@ function SourcesPage() {
   });
 
   const sourceRegionBackfillMutation = useMutation({
-    mutationFn: (input: { sourceIds?: string[] }) => backfillSourceRegions(input),
+    mutationFn: (input: { sourceIds?: string[] }) =>
+      backfillSourceRegions(input),
     onSuccess: async (result) => {
       setSourceFeedback(
         result.updated > 0
           ? `已按主区域回填 ${result.updated} 个 Source（${result.primaryRegion}）。`
-          : "当前没有可回填的缺失 sourceRegion。"
+          : "当前没有可回填的缺失 sourceRegion。",
       );
       await queryClient.invalidateQueries({ queryKey: ["sources"] });
     },
@@ -8684,11 +10155,14 @@ function SourcesPage() {
   });
 
   const sourceItems = sourcesQuery.data?.items ?? [];
-  const missingRegionCount = sourceItems.filter((item) => !item.sourceRegion?.trim()).length;
+  const missingRegionCount = sourceItems.filter(
+    (item) => !item.sourceRegion?.trim(),
+  ).length;
   const displayedSourceItems = showMissingRegionOnly
     ? sourceItems.filter((item) => !item.sourceRegion?.trim())
     : sourceItems;
-  const selectedSource = sourceItems.find((item) => item.id === selectedSourceId) ?? null;
+  const selectedSource =
+    sourceItems.find((item) => item.id === selectedSourceId) ?? null;
 
   useEffect(() => {
     if (displayedSourceItems.length === 0) {
@@ -8806,27 +10280,41 @@ function SourcesPage() {
       <div className="source-layout">
         <div className="source-list-block">
           <div className="filters-row">
-            <label className="checkbox-field" htmlFor="source-filter-missing-region">
+            <label
+              className="checkbox-field"
+              htmlFor="source-filter-missing-region"
+            >
               <input
                 id="source-filter-missing-region"
                 type="checkbox"
                 checked={showMissingRegionOnly}
-                onChange={(event) => setShowMissingRegionOnly(event.target.checked)}
+                onChange={(event) =>
+                  setShowMissingRegionOnly(event.target.checked)
+                }
               />
               仅看缺失 Region
             </label>
-            <span className="tiny-feedback">缺失 region：{missingRegionCount}</span>
+            <span className="tiny-feedback">
+              缺失 region：{missingRegionCount}
+            </span>
             <button
               type="button"
               className="table-action"
-              disabled={missingRegionCount === 0 || sourceRegionBackfillMutation.isPending}
+              disabled={
+                missingRegionCount === 0 ||
+                sourceRegionBackfillMutation.isPending
+              }
               onClick={() => handleBackfill()}
             >
-              {sourceRegionBackfillMutation.isPending ? "回填中..." : "按主区域批量回填"}
+              {sourceRegionBackfillMutation.isPending
+                ? "回填中..."
+                : "按主区域批量回填"}
             </button>
           </div>
 
-          {sourceFeedback ? <p className="feedback success">{sourceFeedback}</p> : null}
+          {sourceFeedback ? (
+            <p className="feedback success">{sourceFeedback}</p>
+          ) : null}
           {sourceRegionBackfillMutation.isError ? (
             <p className="feedback error">
               回填失败：{toErrorMessage(sourceRegionBackfillMutation.error)}
@@ -8834,12 +10322,16 @@ function SourcesPage() {
           ) : null}
 
           <h3>来源列表</h3>
-          {sourcesQuery.isLoading ? <p className="feedback info">Sources 加载中...</p> : null}
+          {sourcesQuery.isLoading ? (
+            <p className="feedback info">Sources 加载中...</p>
+          ) : null}
           {sourcesQuery.isFetching && !sourcesQuery.isLoading ? (
             <p className="feedback info">Sources 刷新中...</p>
           ) : null}
           {sourcesQuery.isError ? (
-            <p className="feedback error">Sources 加载失败：{toErrorMessage(sourcesQuery.error)}</p>
+            <p className="feedback error">
+              Sources 加载失败：{toErrorMessage(sourcesQuery.error)}
+            </p>
           ) : null}
 
           {!sourcesQuery.isLoading &&
@@ -8853,7 +10345,9 @@ function SourcesPage() {
           !sourcesQuery.isError &&
           displayedSourceItems.length === 0 &&
           sourceItems.length > 0 ? (
-            <p className="feedback empty">当前筛选下暂无缺失 region 的 Source。</p>
+            <p className="feedback empty">
+              当前筛选下暂无缺失 region 的 Source。
+            </p>
           ) : null}
 
           {!sourcesQuery.isError && displayedSourceItems.length > 0 ? (
@@ -8879,10 +10373,14 @@ function SourcesPage() {
                       testConnectionMutation.variables === source.id;
                     const isBackfilling =
                       sourceRegionBackfillMutation.isPending &&
-                      sourceRegionBackfillMutation.variables?.sourceIds?.[0] === source.id;
+                      sourceRegionBackfillMutation.variables?.sourceIds?.[0] ===
+                        source.id;
 
                     return (
-                      <tr key={source.id} className={isSelected ? "is-selected-row" : ""}>
+                      <tr
+                        key={source.id}
+                        className={isSelected ? "is-selected-row" : ""}
+                      >
                         <td>{source.name}</td>
                         <td>{source.type}</td>
                         <td>{source.location}</td>
@@ -8910,7 +10408,9 @@ function SourcesPage() {
                               type="button"
                               className="table-action"
                               disabled={isTesting}
-                              onClick={() => testConnectionMutation.mutate(source.id)}
+                              onClick={() =>
+                                testConnectionMutation.mutate(source.id)
+                              }
                             >
                               {isTesting ? "测试中..." : "测试连接"}
                             </button>
@@ -8928,7 +10428,9 @@ function SourcesPage() {
                           {latestResult ? (
                             <p
                               className={`tiny-feedback ${
-                                latestResult.success ? "tiny-feedback-success" : "tiny-feedback-error"
+                                latestResult.success
+                                  ? "tiny-feedback-success"
+                                  : "tiny-feedback-error"
                               }`}
                             >
                               {latestResult.message}
@@ -8944,22 +10446,32 @@ function SourcesPage() {
           ) : null}
 
           {!sourcesQuery.isLoading && !sourcesQuery.isError ? (
-            <section className="source-insight-panel" aria-label="Source 健康状态与解析失败">
+            <section
+              className="source-insight-panel"
+              aria-label="Source 健康状态与解析失败"
+            >
               <header className="source-insight-header">
                 <h3>健康状态与最近解析失败</h3>
-                <p>{selectedSource ? `当前 Source：${selectedSource.name}` : "请先选择 Source"}</p>
+                <p>
+                  {selectedSource
+                    ? `当前 Source：${selectedSource.name}`
+                    : "请先选择 Source"}
+                </p>
               </header>
 
               <div className="source-insight-grid">
                 <article className="source-insight-card">
                   <h4>健康状态</h4>
-                  {!selectedSourceId ? <p className="feedback empty">请先选中一个 Source。</p> : null}
+                  {!selectedSourceId ? (
+                    <p className="feedback empty">请先选中一个 Source。</p>
+                  ) : null}
                   {selectedSourceId && sourceHealthQuery.isLoading ? (
                     <p className="feedback info">健康状态加载中...</p>
                   ) : null}
                   {selectedSourceId && sourceHealthQuery.isError ? (
                     <p className="feedback error">
-                      健康状态加载失败：{toErrorMessage(sourceHealthQuery.error)}
+                      健康状态加载失败：
+                      {toErrorMessage(sourceHealthQuery.error)}
                     </p>
                   ) : null}
                   {selectedSourceId && sourceHealthQuery.data ? (
@@ -8967,7 +10479,9 @@ function SourcesPage() {
                       <div className="source-health-row">
                         <dt>健康状态</dt>
                         <dd>
-                          <span className={`source-health-status ${sourceHealthStatus?.className ?? ""}`}>
+                          <span
+                            className={`source-health-status ${sourceHealthStatus?.className ?? ""}`}
+                          >
                             {sourceHealthStatus?.label ?? "--"}
                           </span>
                         </dd>
@@ -8978,24 +10492,36 @@ function SourcesPage() {
                       </div>
                       <div className="source-health-row">
                         <dt>最近成功</dt>
-                        <dd>{formatOptionalDateTime(sourceHealthQuery.data.lastSuccessAt)}</dd>
+                        <dd>
+                          {formatOptionalDateTime(
+                            sourceHealthQuery.data.lastSuccessAt,
+                          )}
+                        </dd>
                       </div>
                       <div className="source-health-row">
                         <dt>最近失败</dt>
-                        <dd>{formatOptionalDateTime(sourceHealthQuery.data.lastFailureAt)}</dd>
+                        <dd>
+                          {formatOptionalDateTime(
+                            sourceHealthQuery.data.lastFailureAt,
+                          )}
+                        </dd>
                       </div>
                       <div className="source-health-row">
                         <dt>失败次数</dt>
-                        <dd>{sourceHealthQuery.data.failureCount.toLocaleString("zh-CN")}</dd>
+                        <dd>
+                          {sourceHealthQuery.data.failureCount.toLocaleString(
+                            "zh-CN",
+                          )}
+                        </dd>
                       </div>
                       <div className="source-health-row">
                         <dt>平均延迟</dt>
                         <dd>
                           {sourceHealthQuery.data.avgLatencyMs === null
                             ? "--"
-                            : `${Math.round(sourceHealthQuery.data.avgLatencyMs).toLocaleString(
-                                "zh-CN"
-                              )} ms`}
+                            : `${Math.round(
+                                sourceHealthQuery.data.avgLatencyMs,
+                              ).toLocaleString("zh-CN")} ms`}
                         </dd>
                       </div>
                       <div className="source-health-row">
@@ -9012,13 +10538,16 @@ function SourcesPage() {
 
                 <article className="source-insight-card">
                   <h4>最近解析失败</h4>
-                  {!selectedSourceId ? <p className="feedback empty">请先选中一个 Source。</p> : null}
+                  {!selectedSourceId ? (
+                    <p className="feedback empty">请先选中一个 Source。</p>
+                  ) : null}
                   {selectedSourceId && parseFailureQuery.isLoading ? (
                     <p className="feedback info">解析失败列表加载中...</p>
                   ) : null}
                   {selectedSourceId && parseFailureQuery.isError ? (
                     <p className="feedback error">
-                      解析失败列表加载失败：{toErrorMessage(parseFailureQuery.error)}
+                      解析失败列表加载失败：
+                      {toErrorMessage(parseFailureQuery.error)}
                     </p>
                   ) : null}
                   {selectedSourceId &&
@@ -9033,13 +10562,19 @@ function SourcesPage() {
                         <li key={item.id} className="source-failure-item">
                           <header>
                             <strong>{item.errorCode}</strong>
-                            <time dateTime={item.failedAt}>{formatDateTime(item.failedAt)}</time>
+                            <time dateTime={item.failedAt}>
+                              {formatDateTime(item.failedAt)}
+                            </time>
                           </header>
                           <p>{item.errorMessage}</p>
                           <p>
                             parser={item.parserKey}
-                            {item.sourcePath ? ` | path=${item.sourcePath}` : ""}
-                            {item.sourceOffset !== undefined ? ` | offset=${item.sourceOffset}` : ""}
+                            {item.sourcePath
+                              ? ` | path=${item.sourcePath}`
+                              : ""}
+                            {item.sourceOffset !== undefined
+                              ? ` | offset=${item.sourceOffset}`
+                              : ""}
                           </p>
                         </li>
                       ))}
@@ -9130,7 +10665,11 @@ function SourcesPage() {
           </label>
 
           <div className="source-action-row">
-            <button type="submit" className="submit-button" disabled={isSubmittingSource}>
+            <button
+              type="submit"
+              className="submit-button"
+              disabled={isSubmittingSource}
+            >
               {isSubmittingSource
                 ? "提交中..."
                 : editingSourceId
@@ -9149,12 +10688,18 @@ function SourcesPage() {
             ) : null}
           </div>
 
-          {sourceFormError ? <p className="feedback error">{sourceFormError}</p> : null}
+          {sourceFormError ? (
+            <p className="feedback error">{sourceFormError}</p>
+          ) : null}
           {!editingSourceId && createSourceMutation.isError ? (
-            <p className="feedback error">新增失败：{toErrorMessage(createSourceMutation.error)}</p>
+            <p className="feedback error">
+              新增失败：{toErrorMessage(createSourceMutation.error)}
+            </p>
           ) : null}
           {editingSourceId && updateSourceMutation.isError ? (
-            <p className="feedback error">更新失败：{toErrorMessage(updateSourceMutation.error)}</p>
+            <p className="feedback error">
+              更新失败：{toErrorMessage(updateSourceMutation.error)}
+            </p>
           ) : null}
         </form>
       </div>
@@ -9165,7 +10710,9 @@ function SourcesPage() {
 function PricingPage() {
   const queryClient = useQueryClient();
   const [note, setNote] = useState("");
-  const [entries, setEntries] = useState<PricingEntryFormState[]>([createEmptyPricingEntry()]);
+  const [entries, setEntries] = useState<PricingEntryFormState[]>([
+    createEmptyPricingEntry(),
+  ]);
   const [formError, setFormError] = useState<string | null>(null);
   const [loadedVersionId, setLoadedVersionId] = useState<string>("");
 
@@ -9201,8 +10748,10 @@ function PricingPage() {
       setNote(catalogQuery.data.version.note ?? "");
       setEntries(
         catalogQuery.data.entries.length > 0
-          ? catalogQuery.data.entries.map((entry) => mapPricingEntryToForm(entry))
-          : [createEmptyPricingEntry()]
+          ? catalogQuery.data.entries.map((entry) =>
+              mapPricingEntryToForm(entry),
+            )
+          : [createEmptyPricingEntry()],
       );
       return;
     }
@@ -9212,15 +10761,24 @@ function PricingPage() {
   }, [catalogQuery.data, loadedVersionId]);
 
   const saveMutation = useMutation({
-    mutationFn: (input: PricingCatalogUpsertInput) => upsertPricingCatalog(input),
+    mutationFn: (input: PricingCatalogUpsertInput) =>
+      upsertPricingCatalog(input),
     onSuccess: async () => {
       setFormError(null);
       await queryClient.invalidateQueries({ queryKey: ["pricing-catalog"] });
     },
   });
 
-  function updateEntry(index: number, key: keyof PricingEntryFormState, value: string) {
-    setEntries((prev) => prev.map((entry, idx) => (idx === index ? { ...entry, [key]: value } : entry)));
+  function updateEntry(
+    index: number,
+    key: keyof PricingEntryFormState,
+    value: string,
+  ) {
+    setEntries((prev) =>
+      prev.map((entry, idx) =>
+        idx === index ? { ...entry, [key]: value } : entry,
+      ),
+    );
   }
 
   function handleSave(event: FormEvent<HTMLFormElement>) {
@@ -9246,15 +10804,19 @@ function PricingPage() {
         <p>
           {catalogQuery.data
             ? `当前版本 v${catalogQuery.data.version.version} (${formatDateTime(
-                catalogQuery.data.version.createdAt
+                catalogQuery.data.version.createdAt,
               )})`
             : "当前租户尚未配置 catalog，可直接新建。"}
         </p>
       </header>
 
-      {catalogQuery.isLoading ? <p className="feedback info">pricing 加载中...</p> : null}
+      {catalogQuery.isLoading ? (
+        <p className="feedback info">pricing 加载中...</p>
+      ) : null}
       {catalogQuery.isError ? (
-        <p className="feedback error">pricing 加载失败：{toErrorMessage(catalogQuery.error)}</p>
+        <p className="feedback error">
+          pricing 加载失败：{toErrorMessage(catalogQuery.error)}
+        </p>
       ) : null}
 
       <form className="pricing-form" onSubmit={handleSave}>
@@ -9280,12 +10842,14 @@ function PricingPage() {
             </thead>
             <tbody>
               {entries.map((entry, index) => (
-                <tr key={`pricing-entry-${index}`}> 
+                <tr key={`pricing-entry-${index}`}>
                   <td>
                     <input
                       type="text"
                       value={entry.model}
-                      onChange={(event) => updateEntry(index, "model", event.target.value)}
+                      onChange={(event) =>
+                        updateEntry(index, "model", event.target.value)
+                      }
                       placeholder="gpt-5"
                     />
                   </td>
@@ -9293,7 +10857,9 @@ function PricingPage() {
                     <input
                       type="text"
                       value={entry.inputPer1k}
-                      onChange={(event) => updateEntry(index, "inputPer1k", event.target.value)}
+                      onChange={(event) =>
+                        updateEntry(index, "inputPer1k", event.target.value)
+                      }
                       placeholder="0.003"
                     />
                   </td>
@@ -9301,7 +10867,9 @@ function PricingPage() {
                     <input
                       type="text"
                       value={entry.outputPer1k}
-                      onChange={(event) => updateEntry(index, "outputPer1k", event.target.value)}
+                      onChange={(event) =>
+                        updateEntry(index, "outputPer1k", event.target.value)
+                      }
                       placeholder="0.012"
                     />
                   </td>
@@ -9309,7 +10877,9 @@ function PricingPage() {
                     <input
                       type="text"
                       value={entry.currency}
-                      onChange={(event) => updateEntry(index, "currency", event.target.value)}
+                      onChange={(event) =>
+                        updateEntry(index, "currency", event.target.value)
+                      }
                       placeholder="USD"
                     />
                   </td>
@@ -9321,7 +10891,7 @@ function PricingPage() {
                         setEntries((prev) =>
                           prev.length > 1
                             ? prev.filter((_, rowIndex) => rowIndex !== index)
-                            : [createEmptyPricingEntry()]
+                            : [createEmptyPricingEntry()],
                         )
                       }
                     >
@@ -9338,20 +10908,30 @@ function PricingPage() {
           <button
             type="button"
             className="submit-button secondary-button"
-            onClick={() => setEntries((prev) => [...prev, createEmptyPricingEntry()])}
+            onClick={() =>
+              setEntries((prev) => [...prev, createEmptyPricingEntry()])
+            }
           >
             新增条目
           </button>
-          <button type="submit" className="submit-button" disabled={saveMutation.isPending}>
+          <button
+            type="submit"
+            className="submit-button"
+            disabled={saveMutation.isPending}
+          >
             {saveMutation.isPending ? "保存中..." : "保存 Catalog"}
           </button>
         </div>
 
         {formError ? <p className="feedback error">{formError}</p> : null}
         {saveMutation.isError ? (
-          <p className="feedback error">保存失败：{toErrorMessage(saveMutation.error)}</p>
+          <p className="feedback error">
+            保存失败：{toErrorMessage(saveMutation.error)}
+          </p>
         ) : null}
-        {saveMutation.isSuccess ? <p className="feedback success">保存成功。</p> : null}
+        {saveMutation.isSuccess ? (
+          <p className="feedback success">保存成功。</p>
+        ) : null}
       </form>
     </section>
   );
@@ -9370,7 +10950,8 @@ function Workspace({
   sessionsDateKey,
   onDashboardDrilldownDate,
 }: WorkspaceProps) {
-  const activeRoute = ROUTE_ITEMS.find((item) => item.key === route) ?? ROUTE_ITEMS[0];
+  const activeRoute =
+    ROUTE_ITEMS.find((item) => item.key === route) ?? ROUTE_ITEMS[0];
 
   return (
     <main className="page-shell">
@@ -9397,7 +10978,9 @@ function Workspace({
       {route === "dashboard" ? (
         <DashboardPage onDrilldownDate={onDashboardDrilldownDate} />
       ) : null}
-      {route === "sessions" ? <SessionsPage initialDateKey={sessionsDateKey} /> : null}
+      {route === "sessions" ? (
+        <SessionsPage initialDateKey={sessionsDateKey} />
+      ) : null}
       {route === "analytics" ? <AnalyticsPage /> : null}
       {route === "governance" ? <GovernancePage /> : null}
       {route === "sources" ? <SourcesPage /> : null}
@@ -9408,7 +10991,9 @@ function Workspace({
 
 export default function App() {
   const [queryClient] = useState(() => new QueryClient());
-  const [isAuthenticated, setIsAuthenticated] = useState(() => hasAccessToken());
+  const [isAuthenticated, setIsAuthenticated] = useState(() =>
+    hasAccessToken(),
+  );
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [route, setRoute] = useState<ConsoleRoute>(() => readRouteFromHash());
   const [sessionsDateKey, setSessionsDateKey] = useState<string | null>(null);

@@ -55,7 +55,7 @@ import {
 import { verifyEvidenceBundle } from "../src/security/evidence-bundle";
 
 const replayArtifactTestRoot = await mkdtemp(
-  join(tmpdir(), "agentledger-control-plane-replay-artifacts-")
+  join(tmpdir(), "agentledger-control-plane-replay-artifacts-"),
 );
 const originalReplayStorageLocalRoot = Bun.env.REPLAY_STORAGE_LOCAL_ROOT;
 Bun.env.REPLAY_STORAGE_LOCAL_ROOT = replayArtifactTestRoot;
@@ -155,15 +155,18 @@ describe("Control Plane API", () => {
       createdAt: string;
       updatedAt: string;
     } | null>;
-    upsertTenantResidencyPolicy?: (tenantId: string, input: {
-      tenantId: string;
-      mode: "single_region" | "active_active";
-      primaryRegion: string;
-      replicaRegions: string[];
-      allowCrossRegionTransfer: boolean;
-      requireTransferApproval: boolean;
-      updatedAt: string;
-    }) => Promise<{
+    upsertTenantResidencyPolicy?: (
+      tenantId: string,
+      input: {
+        tenantId: string;
+        mode: "single_region" | "active_active";
+        primaryRegion: string;
+        replicaRegions: string[];
+        allowCrossRegionTransfer: boolean;
+        requireTransferApproval: boolean;
+        updatedAt: string;
+      },
+    ) => Promise<{
       tenantId: string;
       mode: "single_region" | "active_active";
       primaryRegion: string;
@@ -1063,6 +1066,58 @@ describe("Control Plane API", () => {
     return audits;
   }
 
+  async function queryAuditByActionWithHeaders(
+    action: string,
+    keyword: string,
+    headers: Record<string, string>,
+  ): Promise<{
+    items: Array<{
+      action: string;
+      level: string;
+      detail: string;
+      metadata: Record<string, unknown>;
+    }>;
+    total: number;
+    filters: AuditListInput & {
+      action?: string;
+      keyword?: string;
+      limit?: number;
+    };
+  }> {
+    const query = new URLSearchParams({
+      action,
+      keyword,
+      limit: "200",
+    });
+    const auditResponse = await app.request(
+      `/api/v1/audits?${query.toString()}`,
+      {
+        headers,
+      },
+    );
+    const audits = (await auditResponse.json()) as {
+      items: Array<{
+        action: string;
+        level: string;
+        detail: string;
+        metadata: Record<string, unknown>;
+      }>;
+      total: number;
+      filters: AuditListInput & {
+        action?: string;
+        keyword?: string;
+        limit?: number;
+      };
+    };
+
+    expect(auditResponse.status).toBe(200);
+    expect(Array.isArray(audits.items)).toBe(true);
+    expect(typeof audits.total).toBe("number");
+    expect(audits.filters.action).toBe(action);
+    expect(audits.filters.keyword).toBe(keyword);
+    return audits;
+  }
+
   function auditMatchesKeyword(
     item: {
       action: string;
@@ -1202,7 +1257,11 @@ describe("Control Plane API", () => {
       signature?: string;
     } = {},
   ): Promise<Response> {
-    const request = buildIntegrationCallbackSignedRequest(secret, payload, options);
+    const request = buildIntegrationCallbackSignedRequest(
+      secret,
+      payload,
+      options,
+    );
     return app.request("/api/v1/integrations/callbacks/alerts", request.init);
   }
 
@@ -2443,7 +2502,9 @@ describe("Control Plane API", () => {
       ) => Promise<Source>;
     };
     if (!repo.createSource) {
-      throw new Error("repository.createSource 不可用，无法准备 identity source 测试数据。");
+      throw new Error(
+        "repository.createSource 不可用，无法准备 identity source 测试数据。",
+      );
     }
 
     const source = await repo.createSource(input.tenantId, {
@@ -2756,7 +2817,7 @@ describe("Control Plane API", () => {
       expect(registerResult.response.status).toBe(403);
       if (isRecord(registerResult.payload)) {
         expect(pickString(registerResult.payload, ["message"])).toContain(
-          "本地账号登录已禁用"
+          "本地账号登录已禁用",
         );
       }
 
@@ -2767,7 +2828,7 @@ describe("Control Plane API", () => {
       expect(loginResult.response.status).toBe(403);
       if (isRecord(loginResult.payload)) {
         expect(pickString(loginResult.payload, ["message"])).toContain(
-          "本地账号登录已禁用"
+          "本地账号登录已禁用",
         );
       }
     } finally {
@@ -2896,21 +2957,26 @@ describe("Control Plane API", () => {
         basePayload.timestamp,
         basePayload.nonce,
       ].join("\n");
-      const signature = createHmac("sha256", secret).update(canonical).digest("hex");
+      const signature = createHmac("sha256", secret)
+        .update(canonical)
+        .digest("hex");
       const tamperedSignature = `${signature.slice(0, 63)}${
         signature.endsWith("0") ? "1" : "0"
       }`;
 
-      const badSignatureResponse = await app.request("/api/v1/auth/external/login", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
+      const badSignatureResponse = await app.request(
+        "/api/v1/auth/external/login",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            ...basePayload,
+            signature: tamperedSignature,
+          }),
         },
-        body: JSON.stringify({
-          ...basePayload,
-          signature: tamperedSignature,
-        }),
-      });
+      );
       expect(badSignatureResponse.status).toBe(401);
 
       const firstResponse = await app.request("/api/v1/auth/external/login", {
@@ -3040,7 +3106,9 @@ describe("Control Plane API", () => {
             },
           );
         }
-        throw new Error(`unexpected fetch url in external/exchange success test: ${url}`);
+        throw new Error(
+          `unexpected fetch url in external/exchange success test: ${url}`,
+        );
       }) as unknown as typeof fetch;
 
       const response = await app.request("/api/v1/auth/external/exchange", {
@@ -3194,7 +3262,9 @@ describe("Control Plane API", () => {
             tokenCalls += 1;
             if (scenario.tokenStatus >= 400) {
               return new Response(
-                JSON.stringify({ message: `token endpoint failed: ${scenario.name}` }),
+                JSON.stringify({
+                  message: `token endpoint failed: ${scenario.name}`,
+                }),
                 {
                   status: scenario.tokenStatus,
                   headers: {
@@ -3580,7 +3650,9 @@ describe("Control Plane API", () => {
     const nonce = createNonce("identity-binding-normal");
     const owner = await registerAndLoginUser(`${nonce}-owner`);
     if (!owner.userId) {
-      throw new Error("无法解析 owner userId，无法继续执行 identity 扩展正常流测试。");
+      throw new Error(
+        "无法解析 owner userId，无法继续执行 identity 扩展正常流测试。",
+      );
     }
 
     const createTenantResult = await createTenantByAuth(
@@ -3870,7 +3942,9 @@ describe("Control Plane API", () => {
       owner.accessToken,
       {
         tenantId,
-        ...(member.userId ? { userId: member.userId } : { email: member.email }),
+        ...(member.userId
+          ? { userId: member.userId }
+          : { email: member.email }),
         tenantRole: "member",
       },
       owner.userId,
@@ -4237,10 +4311,13 @@ describe("Control Plane API", () => {
       globalThis.fetch = (async (input: unknown) => {
         const url = input instanceof Request ? input.url : String(input);
         fetchCalls.push(url);
-        return new Response(JSON.stringify({ message: "invalid weekly query" }), {
-          status: 400,
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({ message: "invalid weekly query" }),
+          {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          },
+        );
       }) as unknown as typeof fetch;
 
       const response = await app.request(
@@ -6416,8 +6493,8 @@ describe("Control Plane API", () => {
     expect(listResponse.status).toBe(200);
     expect(
       listed.items.some(
-        (item) => item.id === created.id && item.sourceRegion === "cn-shanghai"
-      )
+        (item) => item.id === created.id && item.sourceRegion === "cn-shanghai",
+      ),
     ).toBe(true);
   });
 
@@ -6456,12 +6533,15 @@ describe("Control Plane API", () => {
     expect(updateResponse.status).toBe(200);
     expect(updated.sourceRegion).toBe("cn-hangzhou");
 
-    const audits = await queryAuditByAction("control_plane.source_updated", created.id);
+    const audits = await queryAuditByAction(
+      "control_plane.source_updated",
+      created.id,
+    );
     const targetAudit = audits.items.find(
       (item) =>
         item.action === "control_plane.source_updated" &&
         item.metadata.resourceId === created.id &&
-        item.metadata.sourceRegion === "cn-hangzhou"
+        item.metadata.sourceRegion === "cn-hangzhou",
     );
     expect(targetAudit).toBeDefined();
   });
@@ -6472,7 +6552,9 @@ describe("Control Plane API", () => {
     const nonce = createNonce("source-region-backfill");
 
     if (typeof repository.upsertTenantResidencyPolicy !== "function") {
-      throw new Error("repository.upsertTenantResidencyPolicy 不可用，无法验证 sourceRegion backfill。");
+      throw new Error(
+        "repository.upsertTenantResidencyPolicy 不可用，无法验证 sourceRegion backfill。",
+      );
     }
 
     await repository.upsertTenantResidencyPolicy(tenantId, {
@@ -6516,29 +6598,44 @@ describe("Control Plane API", () => {
     const presetSource = (await presetResponse.json()) as Source;
     expect(presetResponse.status).toBe(201);
 
-    const missingListResponse = await app.request("/api/v1/sources/missing-region", {
-      headers: authHeaders,
-    });
-    const missingList = (await missingListResponse.json()) as SourceListResponse;
-    expect(missingListResponse.status).toBe(200);
-    expect(missingList.items.some((item) => item.id === missingSource.id)).toBe(true);
-    expect(missingList.items.some((item) => item.id === presetSource.id)).toBe(false);
-
-    const dryRunResponse = await app.request("/api/v1/sources/source-region/backfill", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...authHeaders,
+    const missingListResponse = await app.request(
+      "/api/v1/sources/missing-region",
+      {
+        headers: authHeaders,
       },
-      body: JSON.stringify({
-        dryRun: true,
-        sourceIds: [missingSource.id],
-      }),
-    });
+    );
+    const missingList =
+      (await missingListResponse.json()) as SourceListResponse;
+    expect(missingListResponse.status).toBe(200);
+    expect(missingList.items.some((item) => item.id === missingSource.id)).toBe(
+      true,
+    );
+    expect(missingList.items.some((item) => item.id === presetSource.id)).toBe(
+      false,
+    );
+
+    const dryRunResponse = await app.request(
+      "/api/v1/sources/source-region/backfill",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          dryRun: true,
+          sourceIds: [missingSource.id],
+        }),
+      },
+    );
     const dryRunBody = (await dryRunResponse.json()) as {
       dryRun: boolean;
       updated: number;
-      items: Array<{ sourceId: string; status: string; appliedRegion?: string }>;
+      items: Array<{
+        sourceId: string;
+        status: string;
+        appliedRegion?: string;
+      }>;
     };
     expect(dryRunResponse.status).toBe(200);
     expect(dryRunBody.dryRun).toBe(true);
@@ -6550,22 +6647,31 @@ describe("Control Plane API", () => {
       appliedRegion: "cn-shanghai",
     });
 
-    const afterDryRunListResponse = await app.request("/api/v1/sources/missing-region", {
-      headers: authHeaders,
-    });
-    const afterDryRunList = (await afterDryRunListResponse.json()) as SourceListResponse;
-    expect(afterDryRunList.items.some((item) => item.id === missingSource.id)).toBe(true);
-
-    const applyResponse = await app.request("/api/v1/sources/source-region/backfill", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...authHeaders,
+    const afterDryRunListResponse = await app.request(
+      "/api/v1/sources/missing-region",
+      {
+        headers: authHeaders,
       },
-      body: JSON.stringify({
-        sourceIds: [missingSource.id],
-      }),
-    });
+    );
+    const afterDryRunList =
+      (await afterDryRunListResponse.json()) as SourceListResponse;
+    expect(
+      afterDryRunList.items.some((item) => item.id === missingSource.id),
+    ).toBe(true);
+
+    const applyResponse = await app.request(
+      "/api/v1/sources/source-region/backfill",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          sourceIds: [missingSource.id],
+        }),
+      },
+    );
     const applyBody = (await applyResponse.json()) as {
       dryRun: boolean;
       updated: number;
@@ -6582,18 +6688,20 @@ describe("Control Plane API", () => {
     const listed = (await listResponse.json()) as SourceListResponse & {
       items: Array<Source & { sourceRegion?: string }>;
     };
-    const updatedSource = listed.items.find((item) => item.id === missingSource.id);
+    const updatedSource = listed.items.find(
+      (item) => item.id === missingSource.id,
+    );
     expect(updatedSource?.sourceRegion).toBe("cn-shanghai");
 
     const backfillAudits = await queryAuditByAction(
       "control_plane.source_region_backfill_executed",
-      missingSource.id
+      missingSource.id,
     );
     const targetAudit = backfillAudits.items.find(
       (item) =>
         item.action === "control_plane.source_region_backfill_executed" &&
         Array.isArray(item.metadata.sourceIds) &&
-        item.metadata.sourceIds.includes(missingSource.id)
+        item.metadata.sourceIds.includes(missingSource.id),
     );
     expect(targetAudit).toBeDefined();
   });
@@ -6624,14 +6732,17 @@ describe("Control Plane API", () => {
       owner.userId,
     );
 
-    const response = await app.request("/api/v1/sources/source-region/backfill", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...authHeaders,
+    const response = await app.request(
+      "/api/v1/sources/source-region/backfill",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({ dryRun: true }),
       },
-      body: JSON.stringify({ dryRun: true }),
-    });
+    );
     const body = (await response.json()) as {
       message: string;
     };
@@ -7392,11 +7503,15 @@ describe("Control Plane API", () => {
           limit: 2,
         }),
       });
-      const firstPage = (await firstPageResponse.json()) as SessionSearchResponse;
+      const firstPage =
+        (await firstPageResponse.json()) as SessionSearchResponse;
 
       expect(firstPageResponse.status).toBe(200);
       expect(firstPage.total).toBe(3);
-      expect(firstPage.items.map((item) => item.id)).toEqual([first.id, second.id]);
+      expect(firstPage.items.map((item) => item.id)).toEqual([
+        first.id,
+        second.id,
+      ]);
       expect(typeof firstPage.nextCursor).toBe("string");
 
       const secondPageResponse = await app.request("/api/v1/sessions/search", {
@@ -7411,7 +7526,8 @@ describe("Control Plane API", () => {
           cursor: firstPage.nextCursor,
         }),
       });
-      const secondPage = (await secondPageResponse.json()) as SessionSearchResponse;
+      const secondPage =
+        (await secondPageResponse.json()) as SessionSearchResponse;
 
       expect(secondPageResponse.status).toBe(200);
       expect(secondPage.total).toBe(3);
@@ -9519,7 +9635,8 @@ describe("Control Plane API", () => {
           headers: authHeaders,
         },
       );
-      const pendingListPayload = await readResponseAsUnknown(pendingListResponse);
+      const pendingListPayload =
+        await readResponseAsUnknown(pendingListResponse);
       expect(pendingListResponse.status).toBe(200);
       const pendingItems = extractListItems(pendingListPayload);
       expect(pendingItems.length).toBe(1);
@@ -9550,7 +9667,8 @@ describe("Control Plane API", () => {
           headers: authHeaders,
         },
       );
-      const executedListPayload = await readResponseAsUnknown(executedListResponse);
+      const executedListPayload =
+        await readResponseAsUnknown(executedListResponse);
       expect(executedListResponse.status).toBe(200);
       const executedItems = extractListItems(executedListPayload);
       expect(
@@ -9952,12 +10070,15 @@ describe("Control Plane API", () => {
       Bun.env.INTEGRATION_CALLBACK_SECRET = callbackSecret;
       const sharedCallbackId = createNonce("cb-cross-tenant-shared");
 
-      const tenantAResponse = await postIntegrationAlertCallback(callbackSecret, {
-        callback_id: sharedCallbackId,
-        tenant_id: tenantAId,
-        action: "resolve",
-        alert_id: alertA.alert.id,
-      });
+      const tenantAResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
+          callback_id: sharedCallbackId,
+          tenant_id: tenantAId,
+          action: "resolve",
+          alert_id: alertA.alert.id,
+        },
+      );
       const tenantABody = (await tenantAResponse.json()) as {
         duplicate: boolean;
         result: {
@@ -9969,12 +10090,15 @@ describe("Control Plane API", () => {
       expect(tenantABody.result.alert?.id).toBe(alertA.alert.id);
       expect(tenantABody.result.alert?.tenantId).toBe(tenantAId);
 
-      const tenantBResponse = await postIntegrationAlertCallback(callbackSecret, {
-        callback_id: sharedCallbackId,
-        tenant_id: tenantBId,
-        action: "resolve",
-        alert_id: alertB.alert.id,
-      });
+      const tenantBResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
+          callback_id: sharedCallbackId,
+          tenant_id: tenantBId,
+          action: "resolve",
+          alert_id: alertB.alert.id,
+        },
+      );
       const tenantBBody = (await tenantBResponse.json()) as {
         duplicate: boolean;
         result: {
@@ -10348,12 +10472,16 @@ describe("Control Plane API", () => {
       expect(approveTwoResponse.status).toBe(200);
       expect(approveTwoBody.result.releaseRequest?.status).toBe("executed");
       expect(approveTwoBody.result.releaseRequest?.approvals.length).toBe(2);
-      const postApproveBudgetListResponse = await app.request("/api/v1/budgets", {
-        headers: authHeaders,
-      });
-      const postApproveBudgetList = (await postApproveBudgetListResponse.json()) as {
-        items: Budget[];
-      };
+      const postApproveBudgetListResponse = await app.request(
+        "/api/v1/budgets",
+        {
+          headers: authHeaders,
+        },
+      );
+      const postApproveBudgetList =
+        (await postApproveBudgetListResponse.json()) as {
+          items: Budget[];
+        };
       const postApproveBudget = postApproveBudgetList.items.find(
         (item) => item.id === budget.id,
       );
@@ -10431,16 +10559,19 @@ describe("Control Plane API", () => {
       const requestIdTwo = requestReleaseTwoBody.result.releaseRequest?.id;
       expect(typeof requestIdTwo).toBe("string");
 
-      const rejectResponse = await postIntegrationAlertCallback(callbackSecret, {
-        callback_id: createNonce("cb-reject-release-1"),
-        tenant_id: tenantId,
-        action: "reject_release",
-        budget_id: budget.id,
-        request_id: requestIdTwo,
-        actor_user_id: reviewerUserId,
-        actor_email: reviewer.email,
-        reason: "二审驳回，待人工复核。",
-      });
+      const rejectResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
+          callback_id: createNonce("cb-reject-release-1"),
+          tenant_id: tenantId,
+          action: "reject_release",
+          budget_id: budget.id,
+          request_id: requestIdTwo,
+          actor_user_id: reviewerUserId,
+          actor_email: reviewer.email,
+          reason: "二审驳回，待人工复核。",
+        },
+      );
       const rejectBody = (await rejectResponse.json()) as {
         result: {
           releaseRequest?: {
@@ -10488,9 +10619,9 @@ describe("Control Plane API", () => {
     expect(body.filters.from).toBe("2026-01-01T00:00:00.000Z");
     expect(body.filters.to).toBe("2026-12-31T23:59:59.999Z");
     expect(body.filters.limit).toBe(20);
-    expect(body.nextCursor === null || typeof body.nextCursor === "string").toBe(
-      true,
-    );
+    expect(
+      body.nextCursor === null || typeof body.nextCursor === "string",
+    ).toBe(true);
   });
 
   test("GET /api/v1/alerts 参数非法时返回 400", async () => {
@@ -10790,9 +10921,12 @@ describe("Control Plane API", () => {
 
   test("alerts/orchestration GET /api/v1/alerts/orchestration/rules 参数非法返回 400", async () => {
     const authHeaders = await resolveAuthHeaders();
-    const response = await app.request("/api/v1/alerts/orchestration/rules?enabled=invalid", {
-      headers: authHeaders,
-    });
+    const response = await app.request(
+      "/api/v1/alerts/orchestration/rules?enabled=invalid",
+      {
+        headers: authHeaders,
+      },
+    );
     const body = (await response.json()) as { message: string };
 
     expect(response.status).toBe(400);
@@ -10954,18 +11088,24 @@ describe("Control Plane API", () => {
     const upsertBody = (await upsertResponse.json()) as AlertOrchestrationRule;
     expect(upsertBody.tenantId).toBe(tenantAId);
 
-    const listAResponse = await app.request("/api/v1/alerts/orchestration/rules", {
-      headers: tenantAHeaders,
-    });
+    const listAResponse = await app.request(
+      "/api/v1/alerts/orchestration/rules",
+      {
+        headers: tenantAHeaders,
+      },
+    );
     expect(listAResponse.status).toBe(200);
     const listABody = (await listAResponse.json()) as {
       items: AlertOrchestrationRule[];
     };
     expect(listABody.items.some((item) => item.id === ruleId)).toBe(true);
 
-    const listBResponse = await app.request("/api/v1/alerts/orchestration/rules", {
-      headers: tenantBHeaders,
-    });
+    const listBResponse = await app.request(
+      "/api/v1/alerts/orchestration/rules",
+      {
+        headers: tenantBHeaders,
+      },
+    );
     expect(listBResponse.status).toBe(200);
     const listBBody = (await listBResponse.json()) as {
       items: AlertOrchestrationRule[];
@@ -10974,15 +11114,18 @@ describe("Control Plane API", () => {
   });
 
   test("alerts/orchestration POST /api/v1/alerts/orchestration/simulate 未认证返回 401", async () => {
-    const response = await app.request("/api/v1/alerts/orchestration/simulate", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
+    const response = await app.request(
+      "/api/v1/alerts/orchestration/simulate",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          eventType: "alert",
+        }),
       },
-      body: JSON.stringify({
-        eventType: "alert",
-      }),
-    });
+    );
     const body = (await response.json()) as { message: string };
 
     expect(response.status).toBe(401);
@@ -10991,16 +11134,19 @@ describe("Control Plane API", () => {
 
   test("alerts/orchestration POST /api/v1/alerts/orchestration/simulate 参数非法返回 400", async () => {
     const authHeaders = await resolveAuthHeaders();
-    const response = await app.request("/api/v1/alerts/orchestration/simulate", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...authHeaders,
+    const response = await app.request(
+      "/api/v1/alerts/orchestration/simulate",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          eventType: "unknown",
+        }),
       },
-      body: JSON.stringify({
-        eventType: "unknown",
-      }),
-    });
+    );
     const body = (await response.json()) as { message: string };
 
     expect(response.status).toBe(400);
@@ -11085,20 +11231,20 @@ describe("Control Plane API", () => {
       }>;
     };
     expect(simulateResponse.status).toBe(200);
-    expect(
-      simulateBody.matchedRules.some((item) => item.id === ruleAId),
-    ).toBe(true);
-    expect(
-      simulateBody.matchedRules.some((item) => item.id === ruleBId),
-    ).toBe(true);
+    expect(simulateBody.matchedRules.some((item) => item.id === ruleAId)).toBe(
+      true,
+    );
+    expect(simulateBody.matchedRules.some((item) => item.id === ruleBId)).toBe(
+      true,
+    );
     expect(new Set(simulateBody.conflictRuleIds)).toEqual(
       new Set([ruleAId, ruleBId]),
     );
     expect(simulateBody.executions).toHaveLength(2);
     expect(simulateBody.executions.every((item) => item.simulated)).toBe(true);
-    expect(simulateBody.executions.every((item) => item.dispatchMode === "rule")).toBe(
-      true,
-    );
+    expect(
+      simulateBody.executions.every((item) => item.dispatchMode === "rule"),
+    ).toBe(true);
     const executionForRuleA = simulateBody.executions.find(
       (item) => item.ruleId === ruleAId,
     );
@@ -11147,15 +11293,15 @@ describe("Control Plane API", () => {
     );
     expect(matchedExecutionLogs.length).toBe(2);
     expect(matchedExecutionLogs.every((item) => item.simulated)).toBe(true);
-    expect(matchedExecutionLogs.every((item) => item.dispatchMode === "rule")).toBe(
-      true,
-    );
-    expect(matchedExecutionLogs.every((item) => item.conflictRuleIds.length > 0)).toBe(
-      true,
-    );
-    expect(matchedExecutionLogs.every((item) => item.sourceId === sourceId)).toBe(
-      true,
-    );
+    expect(
+      matchedExecutionLogs.every((item) => item.dispatchMode === "rule"),
+    ).toBe(true);
+    expect(
+      matchedExecutionLogs.every((item) => item.conflictRuleIds.length > 0),
+    ).toBe(true);
+    expect(
+      matchedExecutionLogs.every((item) => item.sourceId === sourceId),
+    ).toBe(true);
     expect(executionListBody.total).toBeGreaterThanOrEqual(
       matchedExecutionLogs.length,
     );
@@ -11321,12 +11467,12 @@ describe("Control Plane API", () => {
     expect(listTenantABody.filters.limit).toBe(10);
     expect(listTenantABody.total).toBeGreaterThanOrEqual(1);
     expect(listTenantABody.items.length).toBeGreaterThanOrEqual(1);
-    expect(listTenantABody.items.every((item) => item.tenantId === tenantAId)).toBe(
-      true,
-    );
-    expect(listTenantABody.items.every((item) => item.ruleId === tenantARuleId)).toBe(
-      true,
-    );
+    expect(
+      listTenantABody.items.every((item) => item.tenantId === tenantAId),
+    ).toBe(true);
+    expect(
+      listTenantABody.items.every((item) => item.ruleId === tenantARuleId),
+    ).toBe(true);
     expect(
       listTenantABody.items.every((item) => item.sourceId === tenantASourceId),
     ).toBe(true);
@@ -11355,12 +11501,12 @@ describe("Control Plane API", () => {
     expect(listTenantBResponse.status).toBe(200);
     expect(listTenantBBody.total).toBeGreaterThanOrEqual(1);
     expect(listTenantBBody.items.length).toBeGreaterThanOrEqual(1);
-    expect(listTenantBBody.items.every((item) => item.tenantId === tenantBId)).toBe(
-      true,
-    );
-    expect(listTenantBBody.items.every((item) => item.ruleId === tenantBRuleId)).toBe(
-      true,
-    );
+    expect(
+      listTenantBBody.items.every((item) => item.tenantId === tenantBId),
+    ).toBe(true);
+    expect(
+      listTenantBBody.items.every((item) => item.ruleId === tenantBRuleId),
+    ).toBe(true);
     expect(
       listTenantBBody.items.some((item) => item.ruleId === tenantARuleId),
     ).toBe(false);
@@ -11379,9 +11525,9 @@ describe("Control Plane API", () => {
     expect(body.total).toBeGreaterThanOrEqual(body.items.length);
     expect(typeof body.filters).toBe("object");
     expect(body.filters).not.toBeNull();
-    expect(body.nextCursor === null || typeof body.nextCursor === "string").toBe(
-      true,
-    );
+    expect(
+      body.nextCursor === null || typeof body.nextCursor === "string",
+    ).toBe(true);
   });
 
   test("GET /api/v1/audits 查询成功会写入 audit.query 审计", async () => {
@@ -11487,9 +11633,9 @@ describe("Control Plane API", () => {
     expect(body.filters.from).toBe("2026-01-01T00:00:00.000Z");
     expect(body.filters.to).toBe("2026-12-31T23:59:59.999Z");
     expect(body.filters.limit).toBe(20);
-    expect(body.nextCursor === null || typeof body.nextCursor === "string").toBe(
-      true,
-    );
+    expect(
+      body.nextCursor === null || typeof body.nextCursor === "string",
+    ).toBe(true);
   });
 
   test("GET /api/v1/audits 参数非法（from 晚于 to）时返回 400", async () => {
@@ -11549,7 +11695,9 @@ describe("Control Plane API", () => {
       }) => Promise<unknown>;
     };
     if (typeof repositoryWithAudit.appendAuditLog !== "function") {
-      throw new Error("repository.appendAuditLog 不可用，无法验证 cursor 分页。");
+      throw new Error(
+        "repository.appendAuditLog 不可用，无法验证 cursor 分页。",
+      );
     }
 
     await repositoryWithAudit.appendAuditLog({
@@ -11637,8 +11785,8 @@ describe("Control Plane API", () => {
           syncRetentionDays: 14,
           enabled: true,
         },
-        authHeaders
-      )
+        authHeaders,
+      ),
     );
     expect(sourceResponse.status).toBe(201);
 
@@ -11657,8 +11805,8 @@ describe("Control Plane API", () => {
             critical: 1,
           },
         },
-        authHeaders
-      )
+        authHeaders,
+      ),
     );
     expect(budgetResponse.status).toBe(200);
 
@@ -11680,8 +11828,8 @@ describe("Control Plane API", () => {
             },
           ],
         },
-        authHeaders
-      )
+        authHeaders,
+      ),
     );
     expect(pricingResponse.status).toBe(200);
 
@@ -11706,32 +11854,33 @@ describe("Control Plane API", () => {
     expect(typeof payload.exportedAt).toBe("string");
     expect(
       payload.sources.some(
-        (item) => item.location.includes(nonce) && item.sourceRegion === "cn-shanghai"
-      )
+        (item) =>
+          item.location.includes(nonce) && item.sourceRegion === "cn-shanghai",
+      ),
     ).toBe(true);
     expect(
       payload.budgets.some(
         (item) =>
           item.scope === "global" &&
           item.tokenLimit === 120000 &&
-          item.costLimit === 120
-      )
+          item.costLimit === 120,
+      ),
     ).toBe(true);
     expect(payload.pricingCatalog?.note).toBe(`backup-note-${nonce}`);
     expect(
       payload.pricingCatalog?.entries.some(
-        (item) => item.model === `backup-model-${nonce}`
-      )
+        (item) => item.model === `backup-model-${nonce}`,
+      ),
     ).toBe(true);
 
     const audits = await queryAuditByAction(
       "control_plane.system_config_backup_exported",
-      nonce
+      nonce,
     );
     const targetAudit = audits.items.find(
       (item) =>
         item.action === "control_plane.system_config_backup_exported" &&
-        item.metadata.tenantId === tenantId
+        item.metadata.tenantId === tenantId,
     );
     expect(targetAudit).toBeDefined();
   });
@@ -11808,8 +11957,8 @@ describe("Control Plane API", () => {
           backup: backupPayload,
           dryRun: true,
         },
-        authHeaders
-      )
+        authHeaders,
+      ),
     );
     const dryRunBody = (await dryRunResponse.json()) as {
       tenantId: string;
@@ -11836,7 +11985,9 @@ describe("Control Plane API", () => {
     const sourceListAfterDryRunBody =
       (await sourceListAfterDryRun.json()) as SourceListResponse;
     expect(
-      sourceListAfterDryRunBody.items.some((item) => item.location.includes(nonce))
+      sourceListAfterDryRunBody.items.some((item) =>
+        item.location.includes(nonce),
+      ),
     ).toBe(false);
 
     const applyResponse = await app.request(
@@ -11846,8 +11997,8 @@ describe("Control Plane API", () => {
         {
           backup: backupPayload,
         },
-        authHeaders
-      )
+        authHeaders,
+      ),
     );
     const applyBody = (await applyResponse.json()) as {
       tenantId: string;
@@ -11873,27 +12024,32 @@ describe("Control Plane API", () => {
         items: Array<Source & { sourceRegion?: string }>;
       };
     expect(
-      sourceListAfterApplyBody.items.filter((item) => item.location.includes(nonce)).length
+      sourceListAfterApplyBody.items.filter((item) =>
+        item.location.includes(nonce),
+      ).length,
     ).toBe(2);
     expect(
       sourceListAfterApplyBody.items.some(
-        (item) => item.location.includes(nonce) && item.sourceRegion === "cn-shanghai"
-      )
+        (item) =>
+          item.location.includes(nonce) && item.sourceRegion === "cn-shanghai",
+      ),
     ).toBe(true);
     expect(
       sourceListAfterApplyBody.items.some(
-        (item) => item.location.includes(nonce) && item.sourceRegion === "ap-southeast-1"
-      )
+        (item) =>
+          item.location.includes(nonce) &&
+          item.sourceRegion === "ap-southeast-1",
+      ),
     ).toBe(true);
 
     const restoreAudits = await queryAuditByAction(
       "control_plane.system_config_restore_applied",
-      nonce
+      nonce,
     );
     const restoreAudit = restoreAudits.items.find(
       (item) =>
         item.action === "control_plane.system_config_restore_applied" &&
-        item.metadata.tenantId === tenantId
+        item.metadata.tenantId === tenantId,
     );
     expect(restoreAudit).toBeDefined();
 
@@ -11907,8 +12063,8 @@ describe("Control Plane API", () => {
             tenantId: `${tenantId}-other`,
           },
         },
-        authHeaders
-      )
+        authHeaders,
+      ),
     );
     expect(crossTenantResponse.status).toBe(403);
   });
@@ -11929,9 +12085,7 @@ describe("Control Plane API", () => {
     };
 
     if (typeof repositoryWithAudit.appendAuditLog !== "function") {
-      throw new Error(
-        "repository.appendAuditLog 不可用，无法验证审计导出。",
-      );
+      throw new Error("repository.appendAuditLog 不可用，无法验证审计导出。");
     }
 
     await repositoryWithAudit.appendAuditLog({
@@ -11948,16 +12102,18 @@ describe("Control Plane API", () => {
 
     const response = await app.request(
       `/api/v1/audits/export?format=csv&action=test.audit.exportable&keyword=${encodeURIComponent(
-        nonce
+        nonce,
       )}&limit=20`,
       {
         headers: authHeaders,
-      }
+      },
     );
     const body = await response.text();
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")?.includes("text/csv")).toBe(true);
+    expect(response.headers.get("content-type")?.includes("text/csv")).toBe(
+      true,
+    );
     expect(body).toContain("id,eventId,action,level,detail,createdAt,metadata");
     expect(body).toContain("test.audit.exportable");
     expect(body).toContain(nonce);
@@ -11966,7 +12122,7 @@ describe("Control Plane API", () => {
     const targetAudit = exportAudits.items.find(
       (item) =>
         item.action === "audit.export" &&
-        item.metadata.route === "/api/v1/audits/export"
+        item.metadata.route === "/api/v1/audits/export",
     );
     expect(targetAudit).toBeDefined();
   });
@@ -12056,11 +12212,11 @@ describe("Control Plane API", () => {
 
       const response = await app.request(
         `/api/v1/audits/evidence-bundle?action=test.audit.evidence_seed&keyword=${encodeURIComponent(
-          nonce
+          nonce,
         )}&limit=2`,
         {
           headers: authHeaders,
-        }
+        },
       );
       const body = (await response.json()) as {
         manifest: {
@@ -12079,7 +12235,9 @@ describe("Control Plane API", () => {
 
       expect(response.status).toBe(200);
       expect(
-        response.headers.get("content-disposition")?.includes("audit-evidence-bundle-")
+        response.headers
+          .get("content-disposition")
+          ?.includes("audit-evidence-bundle-"),
       ).toBe(true);
       expect(body.manifest.schemaVersion).toBe("evidence-bundle.v1");
       expect(body.manifest.tenantId).toBe(tenantId);
@@ -12104,7 +12262,7 @@ describe("Control Plane API", () => {
         (item) =>
           item.action === "audit.evidence_bundle.export" &&
           item.metadata.route === "/api/v1/audits/evidence-bundle" &&
-          item.metadata.tenantId === tenantId
+          item.metadata.tenantId === tenantId,
       );
       expect(targetAudit).toBeDefined();
     } finally {
@@ -12135,7 +12293,9 @@ describe("Control Plane API", () => {
       }) => Promise<unknown>;
     };
     if (typeof repositoryWithAudit.appendAuditLog !== "function") {
-      throw new Error("repository.appendAuditLog 不可用，无法验证审计写入失败场景。");
+      throw new Error(
+        "repository.appendAuditLog 不可用，无法验证审计写入失败场景。",
+      );
     }
 
     const rawAppendAuditLog = repositoryWithAudit.appendAuditLog;
@@ -12162,11 +12322,11 @@ describe("Control Plane API", () => {
 
       const response = await app.request(
         `/api/v1/audits/evidence-bundle?action=test.audit.evidence_seed&keyword=${encodeURIComponent(
-          nonce
+          nonce,
         )}&limit=20`,
         {
           headers: authHeaders,
-        }
+        },
       );
       const body = (await response.json()) as {
         message: string;
@@ -12196,7 +12356,7 @@ describe("Control Plane API", () => {
         name: `Residency Tenant A ${nonce}`,
         slug: `residency-a-${nonce}`,
       },
-      auth.userId
+      auth.userId,
     );
     assertApiStatus(tenantAResult, [201]);
     const tenantAId = extractEntityId(tenantAResult.payload);
@@ -12210,7 +12370,7 @@ describe("Control Plane API", () => {
         name: `Residency Tenant B ${nonce}`,
         slug: `residency-b-${nonce}`,
       },
-      auth.userId
+      auth.userId,
     );
     assertApiStatus(tenantBResult, [201]);
     const tenantBId = extractEntityId(tenantBResult.payload);
@@ -12221,12 +12381,12 @@ describe("Control Plane API", () => {
     const tenantAHeaders = await issueTenantScopedAuthHeaders(
       tenantAId,
       auth.accessToken,
-      auth.userId
+      auth.userId,
     );
     const tenantBHeaders = await issueTenantScopedAuthHeaders(
       tenantBId,
       auth.accessToken,
-      auth.userId
+      auth.userId,
     );
 
     const badPolicyResponse = await app.request("/api/v1/residency/policy", {
@@ -12265,18 +12425,21 @@ describe("Control Plane API", () => {
     expect(policyBody.mode).toBe("active_active");
     expect(policyBody.replicaRegions).toContain("cn-shanghai");
 
-    const createJobResponse = await app.request("/api/v1/residency/replication-jobs", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...tenantAHeaders,
+    const createJobResponse = await app.request(
+      "/api/v1/residency/replication-jobs",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          sourceRegion: "cn-hangzhou",
+          targetRegion: "cn-shanghai",
+          reason: "验证租户隔离",
+        }),
       },
-      body: JSON.stringify({
-        sourceRegion: "cn-hangzhou",
-        targetRegion: "cn-shanghai",
-        reason: "验证租户隔离",
-      }),
-    });
+    );
     expect(createJobResponse.status).toBe(201);
     const jobBody = (await createJobResponse.json()) as {
       id: string;
@@ -12297,7 +12460,7 @@ describe("Control Plane API", () => {
         body: JSON.stringify({
           reason: "审批通过用于跨区同步",
         }),
-      }
+      },
     );
     expect(approveJobResponse.status).toBe(200);
     const approvedJobBody = (await approveJobResponse.json()) as {
@@ -12318,7 +12481,7 @@ describe("Control Plane API", () => {
         body: JSON.stringify({
           reason: "重复审批",
         }),
-      }
+      },
     );
     expect(approveAgainResponse.status).toBe(409);
 
@@ -12333,7 +12496,7 @@ describe("Control Plane API", () => {
         body: JSON.stringify({
           reason: "停止测试任务",
         }),
-      }
+      },
     );
     expect(cancelJobResponse.status).toBe(200);
     const cancelledJobBody = (await cancelJobResponse.json()) as {
@@ -12352,22 +12515,28 @@ describe("Control Plane API", () => {
         body: JSON.stringify({
           reason: "重复取消",
         }),
-      }
+      },
     );
     expect(cancelAgainResponse.status).toBe(409);
 
-    const listAResponse = await app.request("/api/v1/residency/replication-jobs", {
-      headers: tenantAHeaders,
-    });
+    const listAResponse = await app.request(
+      "/api/v1/residency/replication-jobs",
+      {
+        headers: tenantAHeaders,
+      },
+    );
     expect(listAResponse.status).toBe(200);
     const listABody = (await listAResponse.json()) as {
       items: Array<{ id: string }>;
     };
     expect(listABody.items.some((item) => item.id === jobBody.id)).toBe(true);
 
-    const listBResponse = await app.request("/api/v1/residency/replication-jobs", {
-      headers: tenantBHeaders,
-    });
+    const listBResponse = await app.request(
+      "/api/v1/residency/replication-jobs",
+      {
+        headers: tenantBHeaders,
+      },
+    );
     expect(listBResponse.status).toBe(200);
     const listBBody = (await listBResponse.json()) as {
       items: Array<{ id: string }>;
@@ -12375,7 +12544,7 @@ describe("Control Plane API", () => {
     expect(listBBody.items.some((item) => item.id === jobBody.id)).toBe(false);
   });
 
-  test("rule hub 路由：400/创建资产版本发布审批与租户隔离", async () => {
+  test("rule hub 路由：400/创建资产版本发布回滚审批审计与租户隔离", async () => {
     const nonce = createNonce("rule-hub-routes");
     const auth = await getDefaultAuthContext();
 
@@ -12385,7 +12554,7 @@ describe("Control Plane API", () => {
         name: `RuleHub Tenant A ${nonce}`,
         slug: `rulehub-a-${nonce}`,
       },
-      auth.userId
+      auth.userId,
     );
     assertApiStatus(tenantAResult, [201]);
     const tenantAId = extractEntityId(tenantAResult.payload);
@@ -12399,7 +12568,7 @@ describe("Control Plane API", () => {
         name: `RuleHub Tenant B ${nonce}`,
         slug: `rulehub-b-${nonce}`,
       },
-      auth.userId
+      auth.userId,
     );
     assertApiStatus(tenantBResult, [201]);
     const tenantBId = extractEntityId(tenantBResult.payload);
@@ -12410,12 +12579,12 @@ describe("Control Plane API", () => {
     const tenantAHeaders = await issueTenantScopedAuthHeaders(
       tenantAId,
       auth.accessToken,
-      auth.userId
+      auth.userId,
     );
     const tenantBHeaders = await issueTenantScopedAuthHeaders(
       tenantBId,
       auth.accessToken,
-      auth.userId
+      auth.userId,
     );
 
     const badCreateResponse = await app.request("/api/v1/rules/assets", {
@@ -12437,6 +12606,11 @@ describe("Control Plane API", () => {
       body: JSON.stringify({
         name: `Prompt 审计规则 ${nonce}`,
         description: "用于验证规则资产闭环",
+        scopeBinding: {
+          organizations: [`org-${nonce}`],
+          projects: [`project-${nonce}`],
+          clients: [`client-${nonce}`],
+        },
       }),
     });
     expect(createAssetResponse.status).toBe(201);
@@ -12444,15 +12618,49 @@ describe("Control Plane API", () => {
       id: string;
       tenantId: string;
       status: string;
+      scopeBinding: {
+        organizations?: string[];
+        projects?: string[];
+        clients?: string[];
+      };
     };
     expect(asset.tenantId).toBe(tenantAId);
     expect(asset.status).toBe("draft");
+    expect(asset.scopeBinding).toEqual({
+      organizations: [`org-${nonce}`],
+      projects: [`project-${nonce}`],
+      clients: [`client-${nonce}`],
+    });
+
+    const listAResponse = await app.request("/api/v1/rules/assets", {
+      headers: tenantAHeaders,
+    });
+    expect(listAResponse.status).toBe(200);
+    const listABody = (await listAResponse.json()) as {
+      items: Array<{
+        id: string;
+        scopeBinding: {
+          organizations?: string[];
+          projects?: string[];
+          clients?: string[];
+        };
+      }>;
+    };
+    expect(
+      listABody.items.some(
+        (item) =>
+          item.id === asset.id &&
+          item.scopeBinding.organizations?.includes(`org-${nonce}`) &&
+          item.scopeBinding.projects?.includes(`project-${nonce}`) &&
+          item.scopeBinding.clients?.includes(`client-${nonce}`),
+      ),
+    ).toBe(true);
 
     const badVersionLimitResponse = await app.request(
       `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/versions?limit=0`,
       {
         headers: tenantAHeaders,
-      }
+      },
     );
     expect(badVersionLimitResponse.status).toBe(400);
 
@@ -12468,11 +12676,31 @@ describe("Control Plane API", () => {
           content: "deny tool=github.delete_repo when risk=high",
           changelog: "init version",
         }),
-      }
+      },
     );
     expect(createVersionResponse.status).toBe(201);
     const version = (await createVersionResponse.json()) as { version: number };
     expect(version.version).toBe(1);
+
+    const createSecondVersionResponse = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/versions`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          content: "allow tool=github.read_repo when risk=low",
+          changelog: "second version",
+        }),
+      },
+    );
+    expect(createSecondVersionResponse.status).toBe(201);
+    const secondVersion = (await createSecondVersionResponse.json()) as {
+      version: number;
+    };
+    expect(secondVersion.version).toBe(2);
 
     const publishResponse = await app.request(
       `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/publish`,
@@ -12483,17 +12711,32 @@ describe("Control Plane API", () => {
           ...tenantAHeaders,
         },
         body: JSON.stringify({
-          version: 1,
+          version: 2,
         }),
-      }
+      },
     );
     expect(publishResponse.status).toBe(200);
     const publishedAsset = (await publishResponse.json()) as {
       publishedVersion?: number;
       status: string;
     };
-    expect(publishedAsset.publishedVersion).toBe(1);
+    expect(publishedAsset.publishedVersion).toBe(2);
     expect(publishedAsset.status).toBe("published");
+
+    const publishAudits = await queryAuditByActionWithHeaders(
+      "control_plane.rule_asset_published",
+      asset.id,
+      tenantAHeaders,
+    );
+    const publishedAudit = publishAudits.items.find(
+      (item) =>
+        item.action === "control_plane.rule_asset_published" &&
+        item.metadata.resourceId === asset.id &&
+        item.metadata.version === 2 &&
+        item.metadata.publishedVersion === 2 &&
+        item.metadata.publishedByUserId === auth.userId,
+    );
+    expect(publishedAudit).toBeDefined();
 
     const publishMissingVersionResponse = await app.request(
       `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/publish`,
@@ -12506,9 +12749,47 @@ describe("Control Plane API", () => {
         body: JSON.stringify({
           version: 99,
         }),
-      }
+      },
     );
     expect(publishMissingVersionResponse.status).toBe(409);
+
+    const rollbackResponse = await app.request(
+      `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/rollback`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          version: 1,
+          reason: "回滚到已验证版本",
+        }),
+      },
+    );
+    expect(rollbackResponse.status).toBe(200);
+    const rolledBackAsset = (await rollbackResponse.json()) as {
+      publishedVersion?: number;
+      status: string;
+    };
+    expect(rolledBackAsset.publishedVersion).toBe(1);
+    expect(rolledBackAsset.status).toBe("published");
+
+    const rollbackAudits = await queryAuditByActionWithHeaders(
+      "control_plane.rule_asset_rolled_back",
+      asset.id,
+      tenantAHeaders,
+    );
+    const rolledBackAudit = rollbackAudits.items.find(
+      (item) =>
+        item.action === "control_plane.rule_asset_rolled_back" &&
+        item.metadata.resourceId === asset.id &&
+        item.metadata.version === 1 &&
+        item.metadata.publishedVersion === 1 &&
+        item.metadata.rolledBackByUserId === auth.userId &&
+        item.metadata.reason === "回滚到已验证版本",
+    );
+    expect(rolledBackAudit).toBeDefined();
 
     const createApprovalResponse = await app.request(
       `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/approvals`,
@@ -12523,22 +12804,47 @@ describe("Control Plane API", () => {
           decision: "approved",
           reason: "通过验证",
         }),
-      }
+      },
     );
     expect(createApprovalResponse.status).toBe(201);
+    const approval = (await createApprovalResponse.json()) as {
+      id: string;
+      version: number;
+      decision: string;
+    };
+    expect(approval.version).toBe(1);
+    expect(approval.decision).toBe("approved");
+
+    const approvalAudits = await queryAuditByActionWithHeaders(
+      "control_plane.rule_approval_created",
+      approval.id,
+      tenantAHeaders,
+    );
+    const approvalAudit = approvalAudits.items.find(
+      (item) =>
+        item.action === "control_plane.rule_approval_created" &&
+        item.metadata.resourceId === approval.id &&
+        item.metadata.assetId === asset.id &&
+        item.metadata.version === 1 &&
+        item.metadata.decision === "approved" &&
+        item.metadata.approverUserId === auth.userId,
+    );
+    expect(approvalAudit).toBeDefined();
 
     const listApprovalsResponse = await app.request(
       `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/approvals?version=1`,
       {
         headers: tenantAHeaders,
-      }
+      },
     );
     expect(listApprovalsResponse.status).toBe(200);
     const listApprovalsBody = (await listApprovalsResponse.json()) as {
       items: Array<{ version: number; decision: string }>;
     };
     expect(
-      listApprovalsBody.items.some((item) => item.version === 1 && item.decision === "approved")
+      listApprovalsBody.items.some(
+        (item) => item.version === 1 && item.decision === "approved",
+      ),
     ).toBe(true);
 
     const listBResponse = await app.request("/api/v1/rules/assets", {
@@ -12564,7 +12870,7 @@ describe("Control Plane API", () => {
         name: `MCP Tenant A ${nonce}`,
         slug: `mcp-a-${nonce}`,
       },
-      auth.userId
+      auth.userId,
     );
     assertApiStatus(tenantAResult, [201]);
     const tenantAId = extractEntityId(tenantAResult.payload);
@@ -12578,7 +12884,7 @@ describe("Control Plane API", () => {
         name: `MCP Tenant B ${nonce}`,
         slug: `mcp-b-${nonce}`,
       },
-      auth.userId
+      auth.userId,
     );
     assertApiStatus(tenantBResult, [201]);
     const tenantBId = extractEntityId(tenantBResult.payload);
@@ -12589,12 +12895,12 @@ describe("Control Plane API", () => {
     const tenantAHeaders = await issueTenantScopedAuthHeaders(
       tenantAId,
       auth.accessToken,
-      auth.userId
+      auth.userId,
     );
     const tenantBHeaders = await issueTenantScopedAuthHeaders(
       tenantBId,
       auth.accessToken,
-      auth.userId
+      auth.userId,
     );
 
     const badPolicyResponse = await app.request(
@@ -12609,7 +12915,7 @@ describe("Control Plane API", () => {
           riskLevel: "invalid",
           decision: "invalid",
         }),
-      }
+      },
     );
     expect(badPolicyResponse.status).toBe(400);
 
@@ -12626,7 +12932,7 @@ describe("Control Plane API", () => {
           decision: "require_approval",
           reason: "高风险工具需要审批",
         }),
-      }
+      },
     );
     expect(policyResponse.status).toBe(200);
 
@@ -12663,7 +12969,9 @@ describe("Control Plane API", () => {
     expect(evaluateBlocked.enforced).toBe(true);
     expect(evaluateBlocked.evaluatedDecision).toBe("require_approval");
     expect(evaluateBlocked.invocation.enforced).toBe(true);
-    expect(evaluateBlocked.invocation.evaluatedDecision).toBe("require_approval");
+    expect(evaluateBlocked.invocation.evaluatedDecision).toBe(
+      "require_approval",
+    );
 
     const approveEvaluateRequestResponse = await app.request(
       `/api/v1/mcp/approvals/${encodeURIComponent(evaluateBlocked.approvalRequestId as string)}/approve`,
@@ -12676,7 +12984,7 @@ describe("Control Plane API", () => {
         body: JSON.stringify({
           reason: "评估流审批通过",
         }),
-      }
+      },
     );
     expect(approveEvaluateRequestResponse.status).toBe(200);
 
@@ -12699,7 +13007,9 @@ describe("Control Plane API", () => {
       invocation: { result: string };
     };
     expect(evaluateApproved.result).toBe("approved");
-    expect(evaluateApproved.approvalRequestId).toBe(evaluateBlocked.approvalRequestId);
+    expect(evaluateApproved.approvalRequestId).toBe(
+      evaluateBlocked.approvalRequestId,
+    );
     expect(evaluateApproved.invocation.result).toBe("approved");
 
     const createApprovalResponse = await app.request("/api/v1/mcp/approvals", {
@@ -12731,7 +13041,7 @@ describe("Control Plane API", () => {
         body: JSON.stringify({
           reason: "审核通过",
         }),
-      }
+      },
     );
     expect(approveResponse.status).toBe(200);
     const approved = (await approveResponse.json()) as { status: string };
@@ -12748,23 +13058,26 @@ describe("Control Plane API", () => {
         body: JSON.stringify({
           reason: "重复审批应冲突",
         }),
-      }
+      },
     );
     expect(approveAgainResponse.status).toBe(409);
 
-    const badEnforcedInvocationResponse = await app.request("/api/v1/mcp/invocations", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...tenantAHeaders,
+    const badEnforcedInvocationResponse = await app.request(
+      "/api/v1/mcp/invocations",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          toolId: `tool-${nonce}`,
+          decision: "require_approval",
+          result: "blocked",
+          enforced: true,
+        }),
       },
-      body: JSON.stringify({
-        toolId: `tool-${nonce}`,
-        decision: "require_approval",
-        result: "blocked",
-        enforced: true,
-      }),
-    });
+    );
     expect(badEnforcedInvocationResponse.status).toBe(400);
 
     const invocationResponse = await app.request("/api/v1/mcp/invocations", {
@@ -12801,7 +13114,9 @@ describe("Control Plane API", () => {
     const listABody = (await listAResponse.json()) as {
       items: Array<{ id: string }>;
     };
-    expect(listABody.items.some((item) => item.id === invocation.id)).toBe(true);
+    expect(listABody.items.some((item) => item.id === invocation.id)).toBe(
+      true,
+    );
 
     const listBResponse = await app.request("/api/v1/mcp/invocations", {
       headers: tenantBHeaders,
@@ -12810,7 +13125,9 @@ describe("Control Plane API", () => {
     const listBBody = (await listBResponse.json()) as {
       items: Array<{ id: string }>;
     };
-    expect(listBBody.items.some((item) => item.id === invocation.id)).toBe(false);
+    expect(listBBody.items.some((item) => item.id === invocation.id)).toBe(
+      false,
+    );
   });
 
   test("open-platform 路由：401/403/400/主流程与租户隔离", async () => {
@@ -12880,50 +13197,65 @@ describe("Control Plane API", () => {
       auth.userId,
     );
     const replayRepository = repository as unknown as {
-      createReplayBaseline?: (inputTenantId: string, input: {
-        name: string;
-        datasetRef: string;
-        scenarioCount: number;
-        metadata?: Record<string, unknown>;
-      }) => Promise<{ id: string }>;
-      createReplayJob?: (inputTenantId: string, input: {
-        baselineId: string;
-        status: string;
-        parameters?: Record<string, unknown>;
-        summary?: Record<string, unknown>;
-        diff?: Record<string, unknown>;
-        error?: string | null;
-        startedAt?: string;
-        finishedAt?: string;
-        createdAt?: string;
-      }) => Promise<{ id: string }>;
-      updateReplayJob?: (inputTenantId: string, replayJobId: string, input: {
-        fromStatuses?: string[];
-        status?: string;
-        summary?: Record<string, unknown>;
-        diff?: Record<string, unknown>;
-        error?: string | null;
-        startedAt?: string | null;
-        finishedAt?: string | null;
-        updatedAt?: string;
-      }) => Promise<{ id: string } | null>;
+      createReplayBaseline?: (
+        inputTenantId: string,
+        input: {
+          name: string;
+          datasetRef: string;
+          scenarioCount: number;
+          metadata?: Record<string, unknown>;
+        },
+      ) => Promise<{ id: string }>;
+      createReplayJob?: (
+        inputTenantId: string,
+        input: {
+          baselineId: string;
+          status: string;
+          parameters?: Record<string, unknown>;
+          summary?: Record<string, unknown>;
+          diff?: Record<string, unknown>;
+          error?: string | null;
+          startedAt?: string;
+          finishedAt?: string;
+          createdAt?: string;
+        },
+      ) => Promise<{ id: string }>;
+      updateReplayJob?: (
+        inputTenantId: string,
+        replayJobId: string,
+        input: {
+          fromStatuses?: string[];
+          status?: string;
+          summary?: Record<string, unknown>;
+          diff?: Record<string, unknown>;
+          error?: string | null;
+          startedAt?: string | null;
+          finishedAt?: string | null;
+          updatedAt?: string;
+        },
+      ) => Promise<{ id: string } | null>;
     };
     if (
       typeof replayRepository.createReplayBaseline !== "function" ||
       typeof replayRepository.createReplayJob !== "function" ||
       typeof replayRepository.updateReplayJob !== "function"
     ) {
-      throw new Error("repository replay 方法不可用，无法准备 open-platform replay 测试数据。");
+      throw new Error(
+        "repository replay 方法不可用，无法准备 open-platform replay 测试数据。",
+      );
     }
 
-    const replayBaseline = await replayRepository.createReplayBaseline(tenantAId, {
-      name: `open-platform-replay-${nonce}`,
-      datasetRef: `dataset-open-platform-${nonce}`,
-      scenarioCount: 2,
-      metadata: {
-        model: "gpt-4.1",
+    const replayBaseline = await replayRepository.createReplayBaseline(
+      tenantAId,
+      {
+        name: `open-platform-replay-${nonce}`,
+        datasetRef: `dataset-open-platform-${nonce}`,
+        scenarioCount: 2,
+        metadata: {
+          model: "gpt-4.1",
+        },
       },
-    });
+    );
     const replayStartedAt = new Date().toISOString();
     const replayCompletedAt = new Date(Date.now() + 1_000).toISOString();
     const startedReplayJob = await replayRepository.createReplayJob(tenantAId, {
@@ -12943,17 +13275,20 @@ describe("Control Plane API", () => {
       startedAt: replayStartedAt,
       error: null,
     });
-    const cancelledReplayJob = await replayRepository.createReplayJob(tenantAId, {
-      baselineId: replayBaseline.id,
-      status: "pending",
-      parameters: {
-        candidateLabel: `candidate-cancelled-${nonce}`,
+    const cancelledReplayJob = await replayRepository.createReplayJob(
+      tenantAId,
+      {
+        baselineId: replayBaseline.id,
+        status: "pending",
+        parameters: {
+          candidateLabel: `candidate-cancelled-${nonce}`,
+        },
+        summary: {
+          totalCases: 2,
+          processedCases: 0,
+        },
       },
-      summary: {
-        totalCases: 2,
-        processedCases: 0,
-      },
-    });
+    );
     await replayRepository.updateReplayJob(tenantAId, cancelledReplayJob.id, {
       fromStatuses: ["pending"],
       status: "cancelled",
@@ -12973,33 +13308,41 @@ describe("Control Plane API", () => {
       };
     };
     expect(Boolean(openapiBody.paths?.["/api/v1/replay/jobs"])).toBe(true);
-    expect(Boolean(openapiBody.paths?.["/api/v1/webhooks/{id}/replay"])).toBe(true);
-    expect(Boolean(openapiBody.paths?.["/api/v1/webhooks/replay-tasks"])).toBe(true);
-    expect(Boolean(openapiBody.paths?.["/api/v1/webhooks/replay-tasks/{id}"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v1/webhooks/{id}/replay"])).toBe(
+      true,
+    );
+    expect(Boolean(openapiBody.paths?.["/api/v1/webhooks/replay-tasks"])).toBe(
+      true,
+    );
+    expect(
+      Boolean(openapiBody.paths?.["/api/v1/webhooks/replay-tasks/{id}"]),
+    ).toBe(true);
     const qualityEventsPath = openapiBody.paths?.["/api/v1/quality/events"] as
       | { post?: { deprecated?: boolean } }
       | undefined;
-    const qualityMetricsDailyPath = openapiBody.paths?.["/api/v1/quality/metrics/daily"] as
-      | { get?: { deprecated?: boolean } }
-      | undefined;
-    const qualityScorecardsPath = openapiBody.paths?.["/api/v1/quality/scorecards"] as
-      | { get?: { deprecated?: boolean } }
-      | undefined;
-    const qualityScorecardByIdPath = openapiBody.paths?.["/api/v1/quality/scorecards/{id}"] as
-      | { put?: { deprecated?: boolean } }
-      | undefined;
-    const replayBaselinesPath = openapiBody.paths?.["/api/v1/replay/baselines"] as
+    const qualityMetricsDailyPath = openapiBody.paths?.[
+      "/api/v1/quality/metrics/daily"
+    ] as { get?: { deprecated?: boolean } } | undefined;
+    const qualityScorecardsPath = openapiBody.paths?.[
+      "/api/v1/quality/scorecards"
+    ] as { get?: { deprecated?: boolean } } | undefined;
+    const qualityScorecardByIdPath = openapiBody.paths?.[
+      "/api/v1/quality/scorecards/{id}"
+    ] as { put?: { deprecated?: boolean } } | undefined;
+    const replayBaselinesPath = openapiBody.paths?.[
+      "/api/v1/replay/baselines"
+    ] as
       | { get?: { deprecated?: boolean }; post?: { deprecated?: boolean } }
       | undefined;
     const replayJobsPath = openapiBody.paths?.["/api/v1/replay/jobs"] as
       | { get?: { deprecated?: boolean }; post?: { deprecated?: boolean } }
       | undefined;
-    const replayJobByIdPath = openapiBody.paths?.["/api/v1/replay/jobs/{id}"] as
-      | { get?: { deprecated?: boolean } }
-      | undefined;
-    const replayDiffPath = openapiBody.paths?.["/api/v1/replay/jobs/{id}/diff"] as
-      | { get?: { deprecated?: boolean } }
-      | undefined;
+    const replayJobByIdPath = openapiBody.paths?.[
+      "/api/v1/replay/jobs/{id}"
+    ] as { get?: { deprecated?: boolean } } | undefined;
+    const replayDiffPath = openapiBody.paths?.[
+      "/api/v1/replay/jobs/{id}/diff"
+    ] as { get?: { deprecated?: boolean } } | undefined;
     expect(qualityEventsPath?.post?.deprecated).toBe(true);
     expect(qualityMetricsDailyPath?.get?.deprecated).toBe(true);
     expect(qualityScorecardsPath?.get?.deprecated).toBe(true);
@@ -13010,39 +13353,85 @@ describe("Control Plane API", () => {
     expect(replayJobsPath?.post?.deprecated).toBe(true);
     expect(replayJobByIdPath?.get?.deprecated).toBe(true);
     expect(replayDiffPath?.get?.deprecated).toBe(true);
-    expect(Boolean(openapiBody.components?.schemas?.["WebhookReplayTask"])).toBe(true);
-    expect(Boolean(openapiBody.components?.schemas?.["QualityDailyMetricsResponse"])).toBe(true);
-    expect(Boolean(openapiBody.paths?.["/api/v2/quality/evaluations"])).toBe(true);
+    expect(
+      Boolean(openapiBody.components?.schemas?.["WebhookReplayTask"]),
+    ).toBe(true);
+    expect(
+      Boolean(openapiBody.components?.schemas?.["QualityDailyMetricsResponse"]),
+    ).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/quality/evaluations"])).toBe(
+      true,
+    );
     expect(Boolean(openapiBody.paths?.["/api/v2/quality/metrics"])).toBe(true);
-    expect(Boolean(openapiBody.paths?.["/api/v2/quality/reports/cost-correlation"])).toBe(true);
-    expect(Boolean(openapiBody.paths?.["/api/v2/quality/reports/project-trends"])).toBe(true);
-    expect(Boolean(openapiBody.paths?.["/api/v2/quality/scorecards"])).toBe(true);
-    expect(Boolean(openapiBody.paths?.["/api/v2/quality/scorecards/{id}"])).toBe(true);
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/quality/reports/cost-correlation"]),
+    ).toBe(true);
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/quality/reports/project-trends"]),
+    ).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/quality/scorecards"])).toBe(
+      true,
+    );
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/quality/scorecards/{id}"]),
+    ).toBe(true);
     expect(Boolean(openapiBody.paths?.["/api/v2/replay/datasets"])).toBe(true);
-    expect(Boolean(openapiBody.paths?.["/api/v2/replay/datasets/{id}/cases"])).toBe(true);
-    expect(Boolean(openapiBody.paths?.["/api/v2/replay/datasets/{id}/materialize"])).toBe(true);
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/replay/datasets/{id}/cases"]),
+    ).toBe(true);
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/replay/datasets/{id}/materialize"]),
+    ).toBe(true);
     expect(Boolean(openapiBody.paths?.["/api/v2/replay/runs"])).toBe(true);
     expect(Boolean(openapiBody.paths?.["/api/v2/replay/runs/{id}"])).toBe(true);
-    expect(Boolean(openapiBody.paths?.["/api/v2/replay/runs/{id}/diffs"])).toBe(true);
-    expect(Boolean(openapiBody.paths?.["/api/v2/replay/runs/{id}/artifacts"])).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/replay/runs/{id}/diffs"])).toBe(
+      true,
+    );
     expect(
-      Boolean(openapiBody.paths?.["/api/v2/replay/runs/{id}/artifacts/{artifactType}/download"])
+      Boolean(openapiBody.paths?.["/api/v2/replay/runs/{id}/artifacts"]),
     ).toBe(true);
-    expect(Boolean(openapiBody.paths?.["/api/v2/residency/policies/current"])).toBe(true);
-    expect(Boolean(openapiBody.paths?.["/api/v2/residency/region-mappings"])).toBe(true);
-    expect(Boolean(openapiBody.paths?.["/api/v2/residency/replications"])).toBe(true);
-    expect(Boolean(openapiBody.paths?.["/api/v2/residency/replications/{id}/approvals"])).toBe(
+    expect(
+      Boolean(
+        openapiBody.paths?.[
+          "/api/v2/replay/runs/{id}/artifacts/{artifactType}/download"
+        ],
+      ),
+    ).toBe(true);
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/residency/policies/current"]),
+    ).toBe(true);
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/residency/region-mappings"]),
+    ).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/residency/replications"])).toBe(
       true,
     );
-    expect(Boolean(openapiBody.paths?.["/api/v2/residency/replications/{id}/cancel"])).toBe(true);
-    expect(Boolean(openapiBody.components?.schemas?.["QualityEvaluationInputV2"])).toBe(true);
-    expect(Boolean(openapiBody.components?.schemas?.["QualityMetricsResponseV2"])).toBe(true);
-    expect(Boolean(openapiBody.components?.schemas?.["QualityCostCorrelationResponseV2"])).toBe(
-      true,
-    );
-    expect(Boolean(openapiBody.components?.schemas?.["QualityProjectTrendResponseV2"])).toBe(
-      true,
-    );
+    expect(
+      Boolean(
+        openapiBody.paths?.["/api/v2/residency/replications/{id}/approvals"],
+      ),
+    ).toBe(true);
+    expect(
+      Boolean(
+        openapiBody.paths?.["/api/v2/residency/replications/{id}/cancel"],
+      ),
+    ).toBe(true);
+    expect(
+      Boolean(openapiBody.components?.schemas?.["QualityEvaluationInputV2"]),
+    ).toBe(true);
+    expect(
+      Boolean(openapiBody.components?.schemas?.["QualityMetricsResponseV2"]),
+    ).toBe(true);
+    expect(
+      Boolean(
+        openapiBody.components?.schemas?.["QualityCostCorrelationResponseV2"],
+      ),
+    ).toBe(true);
+    expect(
+      Boolean(
+        openapiBody.components?.schemas?.["QualityProjectTrendResponseV2"],
+      ),
+    ).toBe(true);
     const qualityProjectTrendsPath = openapiBody.paths?.[
       "/api/v2/quality/reports/project-trends"
     ] as
@@ -13062,7 +13451,9 @@ describe("Control Plane API", () => {
           };
         }
       | undefined;
-    const replayRunDiffsPath = openapiBody.paths?.["/api/v2/replay/runs/{id}/diffs"] as
+    const replayRunDiffsPath = openapiBody.paths?.[
+      "/api/v2/replay/runs/{id}/diffs"
+    ] as
       | {
           get?: {
             parameters?: Array<{ name?: string; in?: string }>;
@@ -13097,7 +13488,9 @@ describe("Control Plane API", () => {
           };
         }
       | undefined;
-    const replayDatasetInputV2 = openapiBody.components?.schemas?.["ReplayDatasetInputV2"] as
+    const replayDatasetInputV2 = openapiBody.components?.schemas?.[
+      "ReplayDatasetInputV2"
+    ] as
       | {
           required?: string[];
           properties?: Record<string, { description?: string }>;
@@ -13111,15 +13504,16 @@ describe("Control Plane API", () => {
           properties?: Record<string, { description?: string }>;
         }
       | undefined;
-    const replayDatasetMaterializeResponseV2 = openapiBody.components?.schemas?.[
-      "ReplayDatasetMaterializeResponseV2"
-    ] as
+    const replayDatasetMaterializeResponseV2 = openapiBody.components
+      ?.schemas?.["ReplayDatasetMaterializeResponseV2"] as
       | {
           required?: string[];
           properties?: Record<string, { $ref?: string }>;
         }
       | undefined;
-    const replayRunInputV2 = openapiBody.components?.schemas?.["ReplayRunInputV2"] as
+    const replayRunInputV2 = openapiBody.components?.schemas?.[
+      "ReplayRunInputV2"
+    ] as
       | {
           required?: string[];
           properties?: Record<string, { description?: string }>;
@@ -13131,7 +13525,9 @@ describe("Control Plane API", () => {
           properties?: Record<string, { description?: string; $ref?: string }>;
         }
       | undefined;
-    const replayRunDiffsSchemaV2 = openapiBody.components?.schemas?.["ReplayRunDiffsResponseV2"] as
+    const replayRunDiffsSchemaV2 = openapiBody.components?.schemas?.[
+      "ReplayRunDiffsResponseV2"
+    ] as
       | {
           properties?: Record<
             string,
@@ -13143,17 +13539,23 @@ describe("Control Plane API", () => {
           >;
         }
       | undefined;
-    const replayRunSummaryV2 = openapiBody.components?.schemas?.["ReplayRunSummaryV2"] as
+    const replayRunSummaryV2 = openapiBody.components?.schemas?.[
+      "ReplayRunSummaryV2"
+    ] as
       | {
           properties?: Record<string, { $ref?: string }>;
         }
       | undefined;
-    const replayRunSummaryDigestV2 = openapiBody.components?.schemas?.["ReplayRunSummaryDigestV2"] as
+    const replayRunSummaryDigestV2 = openapiBody.components?.schemas?.[
+      "ReplayRunSummaryDigestV2"
+    ] as
       | {
           properties?: Record<string, { $ref?: string }>;
         }
       | undefined;
-    const replayArtifactItemV2 = openapiBody.components?.schemas?.["ReplayArtifactItemV2"] as
+    const replayArtifactItemV2 = openapiBody.components?.schemas?.[
+      "ReplayArtifactItemV2"
+    ] as
       | {
           properties?: Record<string, { $ref?: string }>;
         }
@@ -13176,8 +13578,9 @@ describe("Control Plane API", () => {
         }
       | undefined;
     expect(
-      qualityProjectTrendsPath?.get?.responses?.["200"]?.content?.["application/json"]?.schema
-        ?.$ref
+      qualityProjectTrendsPath?.get?.responses?.["200"]?.content?.[
+        "application/json"
+      ]?.schema?.$ref,
     ).toBe("#/components/schemas/QualityProjectTrendResponseV2");
     expect(
       replayRunDiffsPath?.get?.parameters?.some(
@@ -13198,46 +13601,73 @@ describe("Control Plane API", () => {
       ),
     ).toBe(true);
     expect(
-      replayMaterializePath?.post?.requestBody?.content?.["application/json"]?.schema?.$ref,
+      replayMaterializePath?.post?.requestBody?.content?.["application/json"]
+        ?.schema?.$ref,
     ).toBe("#/components/schemas/ReplayDatasetMaterializeInputV2");
     expect(
-      replayMaterializePath?.post?.responses?.["200"]?.content?.["application/json"]?.schema?.$ref,
+      replayMaterializePath?.post?.responses?.["200"]?.content?.[
+        "application/json"
+      ]?.schema?.$ref,
     ).toBe("#/components/schemas/ReplayDatasetMaterializeResponseV2");
-    expect(Boolean(openapiBody.components?.schemas?.["ReplayDatasetCaseWriteInputV2"])).toBe(
-      true,
-    );
-    expect(Boolean(openapiBody.components?.schemas?.["ReplayDatasetCasesReplaceInputV2"])).toBe(
-      true,
-    );
-    expect(replayDatasetMaterializeInputV2?.anyOf?.some((item) => item.required?.includes("sessionIds"))).toBe(
-      true,
-    );
-    expect(replayDatasetMaterializeInputV2?.anyOf?.some((item) => item.required?.includes("filters"))).toBe(
-      true,
-    );
-    expect(replayDatasetMaterializeInputV2?.properties?.sanitized?.description).toContain("默认 true");
+    expect(
+      Boolean(
+        openapiBody.components?.schemas?.["ReplayDatasetCaseWriteInputV2"],
+      ),
+    ).toBe(true);
+    expect(
+      Boolean(
+        openapiBody.components?.schemas?.["ReplayDatasetCasesReplaceInputV2"],
+      ),
+    ).toBe(true);
+    expect(
+      replayDatasetMaterializeInputV2?.anyOf?.some((item) =>
+        item.required?.includes("sessionIds"),
+      ),
+    ).toBe(true);
+    expect(
+      replayDatasetMaterializeInputV2?.anyOf?.some((item) =>
+        item.required?.includes("filters"),
+      ),
+    ).toBe(true);
+    expect(
+      replayDatasetMaterializeInputV2?.properties?.sanitized?.description,
+    ).toContain("默认 true");
     expect(replayDatasetMaterializeResponseV2?.required).toContain("filters");
-    expect(replayDatasetMaterializeResponseV2?.properties?.sourceSummary?.$ref).toBe(
-      "#/components/schemas/ReplaySourceSummaryV2",
-    );
+    expect(
+      replayDatasetMaterializeResponseV2?.properties?.sourceSummary?.$ref,
+    ).toBe("#/components/schemas/ReplaySourceSummaryV2");
     expect(replayDatasetInputV2?.required).toContain("datasetRef");
     expect(replayDatasetInputV2?.required?.includes("datasetId")).toBe(false);
-    expect(replayDatasetInputV2?.properties?.datasetId?.description).toContain("兼容别名");
+    expect(replayDatasetInputV2?.properties?.datasetId?.description).toContain(
+      "兼容别名",
+    );
     expect(replayRunInputV2?.required).toContain("datasetId");
     expect(replayRunInputV2?.required?.includes("baselineId")).toBe(false);
-    expect(replayRunInputV2?.properties?.baselineId?.description).toContain("兼容别名");
+    expect(replayRunInputV2?.properties?.baselineId?.description).toContain(
+      "兼容别名",
+    );
     expect(replayRunV2?.required?.includes("baselineId")).toBe(false);
-    expect(replayRunV2?.properties?.baselineId?.description).toContain("兼容别名");
-    expect(replayRunV2?.properties?.summary?.$ref).toBe("#/components/schemas/ReplayRunSummaryV2");
+    expect(replayRunV2?.properties?.baselineId?.description).toContain(
+      "兼容别名",
+    );
+    expect(replayRunV2?.properties?.summary?.$ref).toBe(
+      "#/components/schemas/ReplayRunSummaryV2",
+    );
     expect(replayRunDiffFilters?.required).toContain("datasetId");
     expect(replayRunDiffFilters?.required?.includes("baselineId")).toBe(false);
     expect(replayRunDiffFilters?.properties?.runId?.description).toContain(
       "ReplayRunV2.id",
     );
-    expect(replayRunDiffFilters?.properties?.jobId?.description).toContain("兼容别名");
+    expect(replayRunDiffFilters?.properties?.jobId?.description).toContain(
+      "兼容别名",
+    );
     expect(replayRunDiffsProperties?.jobId?.description).toContain("兼容别名");
-    expect(replayRunDiffsProperties?.runId?.description).toContain("ReplayRunV2.id");
-    expect(replayRunDiffsProperties?.summary?.$ref).toBe("#/components/schemas/ReplayRunSummaryV2");
+    expect(replayRunDiffsProperties?.runId?.description).toContain(
+      "ReplayRunV2.id",
+    );
+    expect(replayRunDiffsProperties?.summary?.$ref).toBe(
+      "#/components/schemas/ReplayRunSummaryV2",
+    );
     expect(replayRunSummaryV2?.properties?.digest?.$ref).toBe(
       "#/components/schemas/ReplayRunSummaryDigestV2",
     );
@@ -13245,14 +13675,24 @@ describe("Control Plane API", () => {
       "#/components/schemas/ReplaySourceSummaryV2",
     );
     expect(replayRunArtifactsSchemaV2?.required).toContain("datasetId");
-    expect(replayRunArtifactsSchemaV2?.properties?.runId?.description).toContain("ReplayRunV2.id");
-    expect(replayRunArtifactsSchemaV2?.properties?.jobId?.description).toContain("兼容别名");
+    expect(
+      replayRunArtifactsSchemaV2?.properties?.runId?.description,
+    ).toContain("ReplayRunV2.id");
+    expect(
+      replayRunArtifactsSchemaV2?.properties?.jobId?.description,
+    ).toContain("兼容别名");
     expect(replayArtifactItemV2?.properties?.inline?.$ref).toBe(
       "#/components/schemas/ReplayArtifactInlinePreviewV2",
     );
-    expect(Boolean(openapiBody.components?.schemas?.["ReplayRunV2"])).toBe(true);
-    expect(Boolean(openapiBody.components?.schemas?.["TenantResidencyPolicyV2"])).toBe(true);
-    expect(Boolean(openapiBody.components?.schemas?.["ReplicationJobV2"])).toBe(true);
+    expect(Boolean(openapiBody.components?.schemas?.["ReplayRunV2"])).toBe(
+      true,
+    );
+    expect(
+      Boolean(openapiBody.components?.schemas?.["TenantResidencyPolicyV2"]),
+    ).toBe(true);
+    expect(Boolean(openapiBody.components?.schemas?.["ReplicationJobV2"])).toBe(
+      true,
+    );
 
     const forbiddenCreateKeyResponse = await app.request("/api/v1/api-keys", {
       method: "POST",
@@ -13301,7 +13741,9 @@ describe("Control Plane API", () => {
     const listKeysBody = (await listKeysResponse.json()) as {
       items: Array<{ id: string }>;
     };
-    expect(listKeysBody.items.some((item) => item.id === createdKey.id)).toBe(true);
+    expect(listKeysBody.items.some((item) => item.id === createdKey.id)).toBe(
+      true,
+    );
 
     const revokeResponse = await app.request(
       `/api/v1/api-keys/${encodeURIComponent(createdKey.id)}/revoke`,
@@ -13345,7 +13787,9 @@ describe("Control Plane API", () => {
       }),
     });
     expect(createWebhookResponse.status).toBe(201);
-    const createdWebhook = (await createWebhookResponse.json()) as { id: string };
+    const createdWebhook = (await createWebhookResponse.json()) as {
+      id: string;
+    };
 
     const forbiddenReplayResponse = await app.request(
       `/api/v1/webhooks/${encodeURIComponent(createdWebhook.id)}/replay`,
@@ -13450,8 +13894,12 @@ describe("Control Plane API", () => {
     expect(replayTaskDetailBody.id).toBe(replayBody.id);
     expect(replayTaskDetailBody.webhookId).toBe(createdWebhook.id);
     expect(replayTaskDetailBody.status).toBe("completed");
-    expect(replayTaskDetailBody.result?.["executor"]).toBe("builtin-webhook-replay");
-    expect(Number(replayTaskDetailBody.result?.["scannedEvents"] ?? 0)).toBeGreaterThanOrEqual(1);
+    expect(replayTaskDetailBody.result?.["executor"]).toBe(
+      "builtin-webhook-replay",
+    );
+    expect(
+      Number(replayTaskDetailBody.result?.["scannedEvents"] ?? 0),
+    ).toBeGreaterThanOrEqual(1);
     expect(replayTaskDetailBody.result?.["dispatchedEvents"]).toBe(0);
     expect(replayTaskDetailBody.result?.["failedEvents"]).toBe(0);
 
@@ -13466,7 +13914,9 @@ describe("Control Plane API", () => {
       items: Array<{ id: string }>;
       total: number;
     };
-    expect(replayTaskListBody.items.some((item) => item.id === replayBody.id)).toBe(true);
+    expect(
+      replayTaskListBody.items.some((item) => item.id === replayBody.id),
+    ).toBe(true);
     expect(replayTaskListBody.total).toBeGreaterThanOrEqual(1);
 
     const crossTenantReplayResponse = await app.request(
@@ -13512,11 +13962,14 @@ describe("Control Plane API", () => {
       headers: tenantBHeaders,
     });
     expect(listWebhookTenantBResponse.status).toBe(200);
-    const listWebhookTenantBBody = (await listWebhookTenantBResponse.json()) as {
-      items: Array<{ id: string }>;
-    };
+    const listWebhookTenantBBody =
+      (await listWebhookTenantBResponse.json()) as {
+        items: Array<{ id: string }>;
+      };
     expect(
-      listWebhookTenantBBody.items.some((item) => item.id === createdWebhook.id),
+      listWebhookTenantBBody.items.some(
+        (item) => item.id === createdWebhook.id,
+      ),
     ).toBe(false);
     resetWebhookReplayExecutionWorkerForTests();
   });
@@ -13572,7 +14025,9 @@ describe("Control Plane API", () => {
       }),
     });
     expect(createWebhookResponse.status).toBe(201);
-    const createdWebhook = (await createWebhookResponse.json()) as { id: string };
+    const createdWebhook = (await createWebhookResponse.json()) as {
+      id: string;
+    };
 
     const originalFetch = globalThis.fetch;
     const originalRetryMax = Bun.env.WEBHOOK_REPLAY_MAX_RETRIES;
@@ -13592,13 +14047,16 @@ describe("Control Plane API", () => {
       Bun.env.WEBHOOK_REPLAY_RETRY_MAX_DELAY_MS = "5";
 
       globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
-        const request = input instanceof Request ? input : new Request(String(input), init);
+        const request =
+          input instanceof Request ? input : new Request(String(input), init);
         const body = await request.text();
         observedRequests.push({
           body,
           signature: request.headers.get("x-agentledger-signature") ?? "",
-          timestamp: request.headers.get("x-agentledger-signature-timestamp") ?? "",
-          algorithm: request.headers.get("x-agentledger-signature-algorithm") ?? "",
+          timestamp:
+            request.headers.get("x-agentledger-signature-timestamp") ?? "",
+          algorithm:
+            request.headers.get("x-agentledger-signature-algorithm") ?? "",
         });
         dispatchAttemptCount += 1;
         if (dispatchAttemptCount === 1) {
@@ -13647,10 +14105,16 @@ describe("Control Plane API", () => {
         result?: Record<string, unknown>;
       };
       expect(replayTaskDetailBody.status).toBe("completed");
-      expect(Number(replayTaskDetailBody.result?.["dispatchedEvents"] ?? 0)).toBeGreaterThanOrEqual(1);
+      expect(
+        Number(replayTaskDetailBody.result?.["dispatchedEvents"] ?? 0),
+      ).toBeGreaterThanOrEqual(1);
       expect(replayTaskDetailBody.result?.["failedEvents"]).toBe(0);
-      expect(Number(replayTaskDetailBody.result?.["retryCount"] ?? 0)).toBeGreaterThanOrEqual(1);
-      expect(Number(replayTaskDetailBody.result?.["retriedEvents"] ?? 0)).toBeGreaterThanOrEqual(1);
+      expect(
+        Number(replayTaskDetailBody.result?.["retryCount"] ?? 0),
+      ).toBeGreaterThanOrEqual(1);
+      expect(
+        Number(replayTaskDetailBody.result?.["retriedEvents"] ?? 0),
+      ).toBeGreaterThanOrEqual(1);
       expect(replayTaskDetailBody.result?.["maxRetries"]).toBe(2);
 
       expect(dispatchAttemptCount).toBeGreaterThanOrEqual(2);
@@ -13755,35 +14219,41 @@ describe("Control Plane API", () => {
       }),
     });
     expect(createEventResponse.status).toBe(201);
-    const createExternalEventResponse = await app.request("/api/v1/quality/events", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...tenantAHeaders,
-      },
-      body: JSON.stringify({
-        replayJobId: `job-${nonce}`,
-        metric: "accuracy",
-        score: 91,
-        sampleCount: 8,
-        occurredAt: "2026-03-04T10:00:00.000Z",
-        externalSource: {
-          provider: "github",
-          repo: `agentledger/${nonce}`,
-          workflow: "ci-main",
-          runId: `run-${nonce}`,
+    const createExternalEventResponse = await app.request(
+      "/api/v1/quality/events",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
         },
-      }),
-    });
+        body: JSON.stringify({
+          replayJobId: `job-${nonce}`,
+          metric: "accuracy",
+          score: 91,
+          sampleCount: 8,
+          occurredAt: "2026-03-04T10:00:00.000Z",
+          externalSource: {
+            provider: "github",
+            repo: `agentledger/${nonce}`,
+            workflow: "ci-main",
+            runId: `run-${nonce}`,
+          },
+        }),
+      },
+    );
     expect(createExternalEventResponse.status).toBe(201);
-    const createExternalEventBody = (await createExternalEventResponse.json()) as {
-      externalSource?: {
-        provider?: string;
-        repo?: string;
+    const createExternalEventBody =
+      (await createExternalEventResponse.json()) as {
+        externalSource?: {
+          provider?: string;
+          repo?: string;
+        };
       };
-    };
     expect(createExternalEventBody.externalSource?.provider).toBe("github");
-    expect(createExternalEventBody.externalSource?.repo).toBe(`agentledger/${nonce}`);
+    expect(createExternalEventBody.externalSource?.repo).toBe(
+      `agentledger/${nonce}`,
+    );
 
     const badDailyMetricsResponse = await app.request(
       "/api/v1/quality/metrics/daily?from=2026-03-06&to=2026-03-01",
@@ -13851,23 +14321,33 @@ describe("Control Plane API", () => {
     );
     expect(upsertScorecardResponse.status).toBe(200);
 
-    const listScorecardsAResponse = await app.request("/api/v1/quality/scorecards", {
-      headers: tenantAHeaders,
-    });
+    const listScorecardsAResponse = await app.request(
+      "/api/v1/quality/scorecards",
+      {
+        headers: tenantAHeaders,
+      },
+    );
     expect(listScorecardsAResponse.status).toBe(200);
     const listScorecardsABody = (await listScorecardsAResponse.json()) as {
       items: Array<{ id: string }>;
     };
-    expect(listScorecardsABody.items.some((item) => item.id === scorecardId)).toBe(true);
+    expect(
+      listScorecardsABody.items.some((item) => item.id === scorecardId),
+    ).toBe(true);
 
-    const listScorecardsBResponse = await app.request("/api/v1/quality/scorecards", {
-      headers: tenantBHeaders,
-    });
+    const listScorecardsBResponse = await app.request(
+      "/api/v1/quality/scorecards",
+      {
+        headers: tenantBHeaders,
+      },
+    );
     expect(listScorecardsBResponse.status).toBe(200);
     const listScorecardsBBody = (await listScorecardsBResponse.json()) as {
       items: Array<{ id: string }>;
     };
-    expect(listScorecardsBBody.items.some((item) => item.id === scorecardId)).toBe(false);
+    expect(
+      listScorecardsBBody.items.some((item) => item.id === scorecardId),
+    ).toBe(false);
   });
 
   test("replay 路由：400/201/200 与租户隔离", async () => {
@@ -13924,19 +14404,22 @@ describe("Control Plane API", () => {
     });
     expect(badBaselineResponse.status).toBe(400);
 
-    const createBaselineResponse = await app.request("/api/v1/replay/baselines", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...tenantAHeaders,
+    const createBaselineResponse = await app.request(
+      "/api/v1/replay/baselines",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          name: `Regression Baseline ${nonce}`,
+          datasetId: "golden-set-v1",
+          model: "gpt-4.1",
+          sampleCount: 12,
+        }),
       },
-      body: JSON.stringify({
-        name: `Regression Baseline ${nonce}`,
-        datasetId: "golden-set-v1",
-        model: "gpt-4.1",
-        sampleCount: 12,
-      }),
-    });
+    );
     expect(createBaselineResponse.status).toBe(201);
     const baseline = (await createBaselineResponse.json()) as {
       id: string;
@@ -13944,18 +14427,21 @@ describe("Control Plane API", () => {
     };
     expect(baseline.tenantId).toBe(tenantAId);
 
-    const duplicateBaselineResponse = await app.request("/api/v1/replay/baselines", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...tenantAHeaders,
+    const duplicateBaselineResponse = await app.request(
+      "/api/v1/replay/baselines",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          name: `Regression Baseline ${nonce}`,
+          datasetId: "golden-set-v2",
+          model: "gpt-4.1",
+        }),
       },
-      body: JSON.stringify({
-        name: `Regression Baseline ${nonce}`,
-        datasetId: "golden-set-v2",
-        model: "gpt-4.1",
-      }),
-    });
+    );
     expect(duplicateBaselineResponse.status).toBe(409);
 
     const listBaselinesFilteredResponse = await app.request(
@@ -13965,15 +14451,16 @@ describe("Control Plane API", () => {
       },
     );
     expect(listBaselinesFilteredResponse.status).toBe(200);
-    const listBaselinesFilteredBody = (await listBaselinesFilteredResponse.json()) as {
-      items: Array<{ id: string }>;
-      total: number;
-      filters: {
-        model?: string;
-        datasetId?: string;
-        limit?: number;
+    const listBaselinesFilteredBody =
+      (await listBaselinesFilteredResponse.json()) as {
+        items: Array<{ id: string }>;
+        total: number;
+        filters: {
+          model?: string;
+          datasetId?: string;
+          limit?: number;
+        };
       };
-    };
     expect(listBaselinesFilteredBody.filters.model).toBe("gpt-4.1");
     expect(listBaselinesFilteredBody.filters.datasetId).toBe("golden-set-v1");
     expect(listBaselinesFilteredBody.filters.limit).toBe(10);
@@ -14004,18 +14491,21 @@ describe("Control Plane API", () => {
     });
     expect(badCreateJobResponse.status).toBe(400);
 
-    const missingBaselineJobResponse = await app.request("/api/v1/replay/jobs", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...tenantAHeaders,
+    const missingBaselineJobResponse = await app.request(
+      "/api/v1/replay/jobs",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          baselineId: "missing-baseline",
+          candidateLabel: "candidate-missing",
+          sampleLimit: 1,
+        }),
       },
-      body: JSON.stringify({
-        baselineId: "missing-baseline",
-        candidateLabel: "candidate-missing",
-        sampleLimit: 1,
-      }),
-    });
+    );
     expect(missingBaselineJobResponse.status).toBe(404);
 
     const createJobResponse = await app.request("/api/v1/replay/jobs", {
@@ -14076,7 +14566,9 @@ describe("Control Plane API", () => {
     const listJobsABody = (await listJobsAResponse.json()) as {
       items: Array<{ id: string }>;
     };
-    expect(listJobsABody.items.some((item) => item.id === replayJob.id)).toBe(true);
+    expect(listJobsABody.items.some((item) => item.id === replayJob.id)).toBe(
+      true,
+    );
 
     const listJobsCandidateFilterResponse = await app.request(
       "/api/v1/replay/jobs?candidateLabel=safety&metric=safety&limit=10",
@@ -14085,24 +14577,29 @@ describe("Control Plane API", () => {
       },
     );
     expect(listJobsCandidateFilterResponse.status).toBe(200);
-    const listJobsCandidateFilterBody = (await listJobsCandidateFilterResponse.json()) as {
-      items: Array<{ id: string }>;
-      total: number;
-      filters: {
-        candidateLabel?: string;
-        metric?: string;
-        limit?: number;
+    const listJobsCandidateFilterBody =
+      (await listJobsCandidateFilterResponse.json()) as {
+        items: Array<{ id: string }>;
+        total: number;
+        filters: {
+          candidateLabel?: string;
+          metric?: string;
+          limit?: number;
+        };
       };
-    };
     expect(listJobsCandidateFilterBody.filters.candidateLabel).toBe("safety");
     expect(listJobsCandidateFilterBody.filters.metric).toBe("safety");
     expect(listJobsCandidateFilterBody.filters.limit).toBe(10);
     expect(listJobsCandidateFilterBody.total).toBeGreaterThanOrEqual(1);
     expect(
-      listJobsCandidateFilterBody.items.some((item) => item.id === safetyReplayJob.id),
+      listJobsCandidateFilterBody.items.some(
+        (item) => item.id === safetyReplayJob.id,
+      ),
     ).toBe(true);
     expect(
-      listJobsCandidateFilterBody.items.some((item) => item.id === replayJob.id),
+      listJobsCandidateFilterBody.items.some(
+        (item) => item.id === replayJob.id,
+      ),
     ).toBe(false);
 
     const badMetricFilterResponse = await app.request(
@@ -14159,8 +14656,12 @@ describe("Control Plane API", () => {
     const listJobsBBody = (await listJobsBResponse.json()) as {
       items: Array<{ id: string }>;
     };
-    expect(listJobsBBody.items.some((item) => item.id === replayJob.id)).toBe(false);
-    expect(listJobsBBody.items.some((item) => item.id === safetyReplayJob.id)).toBe(false);
+    expect(listJobsBBody.items.some((item) => item.id === replayJob.id)).toBe(
+      false,
+    );
+    expect(
+      listJobsBBody.items.some((item) => item.id === safetyReplayJob.id),
+    ).toBe(false);
 
     const getJobBResponse = await app.request(
       `/api/v1/replay/jobs/${encodeURIComponent(replayJob.id)}`,
@@ -14215,55 +14716,64 @@ describe("Control Plane API", () => {
       auth.userId,
     );
 
-    const badEvaluationResponse = await app.request("/api/v2/quality/evaluations", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...tenantAHeaders,
+    const badEvaluationResponse = await app.request(
+      "/api/v2/quality/evaluations",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          metric: "accuracy",
+          score: 120,
+        }),
       },
-      body: JSON.stringify({
-        metric: "accuracy",
-        score: 120,
-      }),
-    });
+    );
     expect(badEvaluationResponse.status).toBe(400);
 
-    const createEvaluationResponse = await app.request("/api/v2/quality/evaluations", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...tenantAHeaders,
+    const createEvaluationResponse = await app.request(
+      "/api/v2/quality/evaluations",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          sessionId: `v2-sess-${nonce}`,
+          metric: "accuracy",
+          score: 88,
+          sampleCount: 16,
+          occurredAt: "2026-03-04T08:00:00.000Z",
+        }),
       },
-      body: JSON.stringify({
-        sessionId: `v2-sess-${nonce}`,
-        metric: "accuracy",
-        score: 88,
-        sampleCount: 16,
-        occurredAt: "2026-03-04T08:00:00.000Z",
-      }),
-    });
+    );
     expect(createEvaluationResponse.status).toBe(201);
 
-    const createExternalEvaluationResponse = await app.request("/api/v2/quality/evaluations", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...tenantAHeaders,
-      },
-      body: JSON.stringify({
-        replayRunId: `v2-run-${nonce}`,
-        metric: "safety",
-        score: 92,
-        sampleCount: 9,
-        occurredAt: "2026-03-04T10:00:00.000Z",
-        externalSource: {
-          provider: "github",
-          repo: `agentledger/${nonce}`,
-          workflow: "ci-main",
-          runId: `run-${nonce}`,
+    const createExternalEvaluationResponse = await app.request(
+      "/api/v2/quality/evaluations",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
         },
-      }),
-    });
+        body: JSON.stringify({
+          replayRunId: `v2-run-${nonce}`,
+          metric: "safety",
+          score: 92,
+          sampleCount: 9,
+          occurredAt: "2026-03-04T10:00:00.000Z",
+          externalSource: {
+            provider: "github",
+            repo: `agentledger/${nonce}`,
+            workflow: "ci-main",
+            runId: `run-${nonce}`,
+          },
+        }),
+      },
+    );
     expect(createExternalEvaluationResponse.status).toBe(201);
 
     const metricsResponse = await app.request(
@@ -14277,10 +14787,13 @@ describe("Control Plane API", () => {
       items: Array<{ date: string; totalEvents: number }>;
       groups?: Array<{ groupBy: string; value: string }>;
     };
-    expect(metricsBody.items.some((item) => item.date === "2026-03-04")).toBe(true);
+    expect(metricsBody.items.some((item) => item.date === "2026-03-04")).toBe(
+      true,
+    );
     expect(
       metricsBody.groups?.some(
-        (group) => group.groupBy === "repo" && group.value === `agentledger/${nonce}`,
+        (group) =>
+          group.groupBy === "repo" && group.value === `agentledger/${nonce}`,
       ),
     ).toBe(true);
 
@@ -14298,8 +14811,12 @@ describe("Control Plane API", () => {
       };
     };
     expect(correlationBody.summary.metric).toBe("all");
-    expect(correlationBody.items.some((item) => item.metric === "all")).toBe(true);
-    expect(correlationBody.items.some((item) => item.totalEvents >= 1)).toBe(true);
+    expect(correlationBody.items.some((item) => item.metric === "all")).toBe(
+      true,
+    );
+    expect(correlationBody.items.some((item) => item.totalEvents >= 1)).toBe(
+      true,
+    );
 
     const projectTrendsResponse = await app.request(
       "/api/v2/quality/reports/project-trends?from=2026-03-04&to=2026-03-04&provider=github&workflow=ci-main&limit=10",
@@ -14309,8 +14826,18 @@ describe("Control Plane API", () => {
     );
     expect(projectTrendsResponse.status).toBe(200);
     const projectTrendsBody = (await projectTrendsResponse.json()) as {
-      items: Array<{ project: string; metric: string; totalEvents: number; totalCost: number }>;
-      summary: { metric: string; totalEvents: number; from: string; to: string };
+      items: Array<{
+        project: string;
+        metric: string;
+        totalEvents: number;
+        totalCost: number;
+      }>;
+      summary: {
+        metric: string;
+        totalEvents: number;
+        from: string;
+        to: string;
+      };
       filters: {
         from: string | null;
         to: string | null;
@@ -14324,12 +14851,20 @@ describe("Control Plane API", () => {
     expect(projectTrendsBody.summary.metric).toBe("all");
     expect(projectTrendsBody.summary.from).toBe("2026-03-04T00:00:00.000Z");
     expect(projectTrendsBody.summary.to).toBe("2026-03-04T23:59:59.999Z");
-    expect(projectTrendsBody.items.some((item) => item.project === `agentledger/${nonce}`)).toBe(
+    expect(
+      projectTrendsBody.items.some(
+        (item) => item.project === `agentledger/${nonce}`,
+      ),
+    ).toBe(true);
+    expect(projectTrendsBody.items.some((item) => item.metric === "all")).toBe(
       true,
     );
-    expect(projectTrendsBody.items.some((item) => item.metric === "all")).toBe(true);
-    expect(projectTrendsBody.items.some((item) => item.totalEvents >= 1)).toBe(true);
-    expect(projectTrendsBody.items.every((item) => item.totalCost >= 0)).toBe(true);
+    expect(projectTrendsBody.items.some((item) => item.totalEvents >= 1)).toBe(
+      true,
+    );
+    expect(projectTrendsBody.items.every((item) => item.totalCost >= 0)).toBe(
+      true,
+    );
     expect(projectTrendsBody.filters).toEqual({
       from: "2026-03-04T00:00:00.000Z",
       to: "2026-03-04T23:59:59.999Z",
@@ -14347,9 +14882,10 @@ describe("Control Plane API", () => {
       },
     );
     expect(tenantBProjectTrendsResponse.status).toBe(200);
-    const tenantBProjectTrendsBody = (await tenantBProjectTrendsResponse.json()) as {
-      items: Array<{ project: string }>;
-    };
+    const tenantBProjectTrendsBody =
+      (await tenantBProjectTrendsResponse.json()) as {
+        items: Array<{ project: string }>;
+      };
     expect(tenantBProjectTrendsBody.items.length).toBe(0);
 
     const upsertScorecardResponse = await app.request(
@@ -14372,23 +14908,34 @@ describe("Control Plane API", () => {
     );
     expect(upsertScorecardResponse.status).toBe(200);
 
-    const listScorecardsResponse = await app.request("/api/v2/quality/scorecards", {
-      headers: tenantAHeaders,
-    });
+    const listScorecardsResponse = await app.request(
+      "/api/v2/quality/scorecards",
+      {
+        headers: tenantAHeaders,
+      },
+    );
     expect(listScorecardsResponse.status).toBe(200);
     const listScorecardsBody = (await listScorecardsResponse.json()) as {
       items: Array<{ id: string }>;
     };
-    expect(listScorecardsBody.items.some((item) => item.id === "accuracy")).toBe(true);
+    expect(
+      listScorecardsBody.items.some((item) => item.id === "accuracy"),
+    ).toBe(true);
 
-    const listTenantBScorecardsResponse = await app.request("/api/v2/quality/scorecards", {
-      headers: tenantBHeaders,
-    });
+    const listTenantBScorecardsResponse = await app.request(
+      "/api/v2/quality/scorecards",
+      {
+        headers: tenantBHeaders,
+      },
+    );
     expect(listTenantBScorecardsResponse.status).toBe(200);
-    const listTenantBScorecardsBody = (await listTenantBScorecardsResponse.json()) as {
-      items: Array<{ id: string }>;
-    };
-    expect(listTenantBScorecardsBody.items.some((item) => item.id === "accuracy")).toBe(false);
+    const listTenantBScorecardsBody =
+      (await listTenantBScorecardsResponse.json()) as {
+        items: Array<{ id: string }>;
+      };
+    expect(
+      listTenantBScorecardsBody.items.some((item) => item.id === "accuracy"),
+    ).toBe(false);
   });
 
   test("api-v2 replay 路由：数据集、运行、差异与工件链路", async () => {
@@ -14469,20 +15016,23 @@ describe("Control Plane API", () => {
         auth.userId,
       );
 
-      const createDatasetResponse = await app.request("/api/v2/replay/datasets", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...tenantAHeaders,
+      const createDatasetResponse = await app.request(
+        "/api/v2/replay/datasets",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...tenantAHeaders,
+          },
+          body: JSON.stringify({
+            name: `Replay Dataset ${nonce}`,
+            datasetRef: `dataset-${nonce}`,
+            model: "gpt-4.1",
+            promptVersion: "v2",
+            sampleCount: 14,
+          }),
         },
-        body: JSON.stringify({
-          name: `Replay Dataset ${nonce}`,
-          datasetRef: `dataset-${nonce}`,
-          model: "gpt-4.1",
-          promptVersion: "v2",
-          sampleCount: 14,
-        }),
-      });
+      );
       expect(createDatasetResponse.status).toBe(201);
       const dataset = (await createDatasetResponse.json()) as {
         id: string;
@@ -14494,32 +15044,40 @@ describe("Control Plane API", () => {
       expect(dataset.datasetId).toBe(dataset.id);
       expect(dataset.datasetRef).toBe(`dataset-${nonce}`);
 
-      const createLegacyDatasetResponse = await app.request("/api/v2/replay/datasets", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...tenantAHeaders,
+      const createLegacyDatasetResponse = await app.request(
+        "/api/v2/replay/datasets",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...tenantAHeaders,
+          },
+          body: JSON.stringify({
+            name: `Replay Dataset Legacy ${nonce}`,
+            datasetId: `legacy-dataset-${nonce}`,
+            model: "gpt-4.1",
+          }),
         },
-        body: JSON.stringify({
-          name: `Replay Dataset Legacy ${nonce}`,
-          datasetId: `legacy-dataset-${nonce}`,
-          model: "gpt-4.1",
-        }),
-      });
+      );
       expect(createLegacyDatasetResponse.status).toBe(201);
       const legacyDataset = (await createLegacyDatasetResponse.json()) as {
         datasetRef?: string | null;
       };
       expect(legacyDataset.datasetRef).toBe(`legacy-dataset-${nonce}`);
 
-      const listDatasetsResponse = await app.request("/api/v2/replay/datasets?limit=20", {
-        headers: tenantAHeaders,
-      });
+      const listDatasetsResponse = await app.request(
+        "/api/v2/replay/datasets?limit=20",
+        {
+          headers: tenantAHeaders,
+        },
+      );
       expect(listDatasetsResponse.status).toBe(200);
       const listDatasetsBody = (await listDatasetsResponse.json()) as {
         items: Array<{ id: string }>;
       };
-      expect(listDatasetsBody.items.some((item) => item.id === dataset.id)).toBe(true);
+      expect(
+        listDatasetsBody.items.some((item) => item.id === dataset.id),
+      ).toBe(true);
 
       const replaceCasesResponse = await app.request(
         `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/cases`,
@@ -14562,7 +15120,9 @@ describe("Control Plane API", () => {
       const listCasesBody = (await listCasesResponse.json()) as {
         items: Array<{ caseId: string }>;
       };
-      expect(listCasesBody.items.some((item) => item.caseId === "case-1")).toBe(true);
+      expect(listCasesBody.items.some((item) => item.caseId === "case-1")).toBe(
+        true,
+      );
 
       const createRunResponse = await app.request("/api/v2/replay/runs", {
         method: "POST",
@@ -14612,9 +15172,12 @@ describe("Control Plane API", () => {
 
       await flushReplayJobExecutionQueueForTests();
 
-      const getRunResponse = await app.request(`/api/v2/replay/runs/${encodeURIComponent(run.id)}`, {
-        headers: tenantAHeaders,
-      });
+      const getRunResponse = await app.request(
+        `/api/v2/replay/runs/${encodeURIComponent(run.id)}`,
+        {
+          headers: tenantAHeaders,
+        },
+      );
       expect(getRunResponse.status).toBe(200);
       const getRunBody = (await getRunResponse.json()) as {
         status: string;
@@ -14710,11 +15273,19 @@ describe("Control Plane API", () => {
       expect(artifactsBody.jobId).toBe(run.id);
       expect(artifactsBody.datasetId).toBe(dataset.id);
       expect(artifactsBody.total).toBe(3);
-      expect(artifactsBody.items.some((item) => item.type === "summary")).toBe(true);
-      expect(artifactsBody.items.some((item) => item.type === "diff")).toBe(true);
-      expect(artifactsBody.items.some((item) => item.type === "cases")).toBe(true);
+      expect(artifactsBody.items.some((item) => item.type === "summary")).toBe(
+        true,
+      );
+      expect(artifactsBody.items.some((item) => item.type === "diff")).toBe(
+        true,
+      );
+      expect(artifactsBody.items.some((item) => item.type === "cases")).toBe(
+        true,
+      );
       expect(
-        artifactsBody.items.find((item) => item.type === "summary")?.inline?.["totalCases"]
+        artifactsBody.items.find((item) => item.type === "summary")?.inline?.[
+          "totalCases"
+        ],
       ).toBe(2);
       expect(
         artifactsBody.items.every(
@@ -14733,8 +15304,12 @@ describe("Control Plane API", () => {
         },
       );
       expect(summaryDownloadResponse.status).toBe(200);
-      expect(summaryDownloadResponse.headers.get("content-type")).toContain("application/json");
-      expect(summaryDownloadResponse.headers.get("content-disposition")).toContain("summary.json");
+      expect(summaryDownloadResponse.headers.get("content-type")).toContain(
+        "application/json",
+      );
+      expect(
+        summaryDownloadResponse.headers.get("content-disposition"),
+      ).toContain("summary.json");
       const summaryDownloadBody = (await summaryDownloadResponse.json()) as {
         totalCases?: number;
         digest?: Record<string, unknown>;
@@ -14757,7 +15332,9 @@ describe("Control Plane API", () => {
       const listTenantBRunsBody = (await listTenantBRunsResponse.json()) as {
         items: Array<{ id: string }>;
       };
-      expect(listTenantBRunsBody.items.some((item) => item.id === run.id)).toBe(false);
+      expect(listTenantBRunsBody.items.some((item) => item.id === run.id)).toBe(
+        false,
+      );
     } finally {
       resetReplayJobExecutionWorkerForTests();
     }
@@ -14806,25 +15383,31 @@ describe("Control Plane API", () => {
       auth.userId,
     );
 
-    const upsertPolicyResponse = await app.request("/api/v2/residency/policies/current", {
-      method: "PUT",
-      headers: {
-        "content-type": "application/json",
-        ...tenantAHeaders,
+    const upsertPolicyResponse = await app.request(
+      "/api/v2/residency/policies/current",
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          mode: "active_active",
+          primaryRegion: "cn-hangzhou",
+          replicaRegions: ["cn-shanghai", "ap-southeast-1"],
+          allowCrossRegionTransfer: true,
+          requireTransferApproval: true,
+        }),
       },
-      body: JSON.stringify({
-        mode: "active_active",
-        primaryRegion: "cn-hangzhou",
-        replicaRegions: ["cn-shanghai", "ap-southeast-1"],
-        allowCrossRegionTransfer: true,
-        requireTransferApproval: true,
-      }),
-    });
+    );
     expect(upsertPolicyResponse.status).toBe(200);
 
-    const getPolicyResponse = await app.request("/api/v2/residency/policies/current", {
-      headers: tenantAHeaders,
-    });
+    const getPolicyResponse = await app.request(
+      "/api/v2/residency/policies/current",
+      {
+        headers: tenantAHeaders,
+      },
+    );
     expect(getPolicyResponse.status).toBe(200);
     const getPolicyBody = (await getPolicyResponse.json()) as {
       tenantId: string;
@@ -14835,32 +15418,42 @@ describe("Control Plane API", () => {
     expect(getPolicyBody.mode).toBe("active_active");
     expect(getPolicyBody.replicaRegions).toContain("cn-shanghai");
 
-    const mappingsResponse = await app.request("/api/v2/residency/region-mappings", {
-      headers: tenantAHeaders,
-    });
+    const mappingsResponse = await app.request(
+      "/api/v2/residency/region-mappings",
+      {
+        headers: tenantAHeaders,
+      },
+    );
     expect(mappingsResponse.status).toBe(200);
     const mappingsBody = (await mappingsResponse.json()) as {
       items: Array<{ regionId: string; role: string }>;
     };
     expect(
-      mappingsBody.items.some((item) => item.regionId === "cn-hangzhou" && item.role === "primary"),
+      mappingsBody.items.some(
+        (item) => item.regionId === "cn-hangzhou" && item.role === "primary",
+      ),
     ).toBe(true);
     expect(
-      mappingsBody.items.some((item) => item.regionId === "cn-shanghai" && item.role === "replica"),
+      mappingsBody.items.some(
+        (item) => item.regionId === "cn-shanghai" && item.role === "replica",
+      ),
     ).toBe(true);
 
-    const createReplicationResponse = await app.request("/api/v2/residency/replications", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...tenantAHeaders,
+    const createReplicationResponse = await app.request(
+      "/api/v2/residency/replications",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          sourceRegion: "cn-hangzhou",
+          targetRegion: "cn-shanghai",
+          reason: "v2 route integration",
+        }),
       },
-      body: JSON.stringify({
-        sourceRegion: "cn-hangzhou",
-        targetRegion: "cn-shanghai",
-        reason: "v2 route integration",
-      }),
-    });
+    );
     expect(createReplicationResponse.status).toBe(201);
     const replication = (await createReplicationResponse.json()) as {
       id: string;
@@ -14908,23 +15501,33 @@ describe("Control Plane API", () => {
     };
     expect(cancelledReplication.status).toBe("cancelled");
 
-    const listTenantAResponse = await app.request("/api/v2/residency/replications", {
-      headers: tenantAHeaders,
-    });
+    const listTenantAResponse = await app.request(
+      "/api/v2/residency/replications",
+      {
+        headers: tenantAHeaders,
+      },
+    );
     expect(listTenantAResponse.status).toBe(200);
     const listTenantABody = (await listTenantAResponse.json()) as {
       items: Array<{ id: string }>;
     };
-    expect(listTenantABody.items.some((item) => item.id === replication.id)).toBe(true);
+    expect(
+      listTenantABody.items.some((item) => item.id === replication.id),
+    ).toBe(true);
 
-    const listTenantBResponse = await app.request("/api/v2/residency/replications", {
-      headers: tenantBHeaders,
-    });
+    const listTenantBResponse = await app.request(
+      "/api/v2/residency/replications",
+      {
+        headers: tenantBHeaders,
+      },
+    );
     expect(listTenantBResponse.status).toBe(200);
     const listTenantBBody = (await listTenantBResponse.json()) as {
       items: Array<{ id: string }>;
     };
-    expect(listTenantBBody.items.some((item) => item.id === replication.id)).toBe(false);
+    expect(
+      listTenantBBody.items.some((item) => item.id === replication.id),
+    ).toBe(false);
   });
 
   test("api-v2 replay 支持从历史会话物化样本并产出真实执行摘要", async () => {
@@ -14982,18 +15585,21 @@ describe("Control Plane API", () => {
     });
 
     try {
-      const createDatasetResponse = await app.request("/api/v2/replay/datasets", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...headers,
+      const createDatasetResponse = await app.request(
+        "/api/v2/replay/datasets",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({
+            name: `Replay Materialize Dataset ${nonce}`,
+            datasetRef: `replay-materialize-dataset-${nonce}`,
+            model: "gpt-5-codex",
+          }),
         },
-        body: JSON.stringify({
-          name: `Replay Materialize Dataset ${nonce}`,
-          datasetRef: `replay-materialize-dataset-${nonce}`,
-          model: "gpt-5-codex",
-        }),
-      });
+      );
       expect(createDatasetResponse.status).toBe(201);
       const dataset = (await createDatasetResponse.json()) as { id: string };
 
@@ -15021,7 +15627,11 @@ describe("Control Plane API", () => {
       expect(materializeBody.materialized).toBe(2);
       expect(materializeBody.skipped).toBe(0);
       expect(materializeBody.sourceSummary?.["session"]).toBe(2);
-      expect(materializeBody.items.every((item) => item.metadata["sourceType"] === "session")).toBe(true);
+      expect(
+        materializeBody.items.every(
+          (item) => item.metadata["sourceType"] === "session",
+        ),
+      ).toBe(true);
 
       const createRunResponse = await app.request("/api/v2/replay/runs", {
         method: "POST",
@@ -15078,7 +15688,9 @@ describe("Control Plane API", () => {
         };
       };
       expect(diffBody.summary.executionSource).toBe("session_materialized");
-      expect(diffBody.summary.digest?.["executionSource"]).toBe("session_materialized");
+      expect(diffBody.summary.digest?.["executionSource"]).toBe(
+        "session_materialized",
+      );
     } finally {
       await insertedA.cleanup();
       await insertedB.cleanup();
@@ -15115,19 +15727,22 @@ describe("Control Plane API", () => {
         auth.userId,
       );
 
-      const createBaselineResponse = await app.request("/api/v1/replay/baselines", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...headers,
+      const createBaselineResponse = await app.request(
+        "/api/v1/replay/baselines",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({
+            name: `Worker Failed Baseline ${nonce}`,
+            datasetId: "worker-failed-dataset",
+            model: "gpt-4.1",
+            sampleCount: 6,
+          }),
         },
-        body: JSON.stringify({
-          name: `Worker Failed Baseline ${nonce}`,
-          datasetId: "worker-failed-dataset",
-          model: "gpt-4.1",
-          sampleCount: 6,
-        }),
-      });
+      );
       expect(createBaselineResponse.status).toBe(201);
       const baseline = (await createBaselineResponse.json()) as { id: string };
 
@@ -15168,9 +15783,12 @@ describe("Control Plane API", () => {
       expect(getJobBody.status).toBe("failed");
       expect(getJobBody.error).toContain("mock replay worker failure");
 
-      const failedListResponse = await app.request("/api/v1/replay/jobs?status=failed", {
-        headers,
-      });
+      const failedListResponse = await app.request(
+        "/api/v1/replay/jobs?status=failed",
+        {
+          headers,
+        },
+      );
       expect(failedListResponse.status).toBe(200);
       const failedListBody = (await failedListResponse.json()) as {
         items: Array<{ id: string; status: string }>;

@@ -31,7 +31,10 @@ function unauthorized(c: Context<AppEnv>) {
 
 function forbidden(c: Context<AppEnv>, mode: "read" | "write") {
   if (mode === "write") {
-    return c.json({ message: "无写入权限：仅 owner/maintainer 可执行写操作。" }, 403);
+    return c.json(
+      { message: "无写入权限：仅 owner/maintainer 可执行写操作。" },
+      403,
+    );
   }
   return c.json({ message: "无权访问该租户资源。" }, 403);
 }
@@ -53,7 +56,10 @@ async function requireTenantAccess(c: Context<AppEnv>, mode: "read" | "write") {
   if (auth instanceof Response) {
     return auth;
   }
-  const membership = await repository.getTenantMemberByUser(auth.tenantId, auth.userId);
+  const membership = await repository.getTenantMemberByUser(
+    auth.tenantId,
+    auth.userId,
+  );
   if (!membership) {
     return forbidden(c, mode);
   }
@@ -158,7 +164,11 @@ ruleRoutes.get("/rules/assets/:id/versions", async (c) => {
   if (limit === null) {
     return c.json({ message: "limit 必须是 1 到 200 的整数。" }, 400);
   }
-  const items = await repository.listRuleAssetVersions(auth.tenantId, assetId, limit);
+  const items = await repository.listRuleAssetVersions(
+    auth.tenantId,
+    assetId,
+    limit,
+  );
   return c.json({
     items,
     total: items.length,
@@ -180,9 +190,14 @@ ruleRoutes.post("/rules/assets/:id/versions", async (c) => {
     return c.json({ message: result.error }, 400);
   }
 
-  const version = await repository.createRuleAssetVersion(auth.tenantId, assetId, result.data, {
-    createdByUserId: auth.userId,
-  });
+  const version = await repository.createRuleAssetVersion(
+    auth.tenantId,
+    assetId,
+    result.data,
+    {
+      createdByUserId: auth.userId,
+    },
+  );
   if (!version) {
     return c.json({ message: `未找到规则资产 ${assetId}。` }, 404);
   }
@@ -218,13 +233,37 @@ ruleRoutes.post("/rules/assets/:id/publish", async (c) => {
     return c.json({ message: result.error }, 400);
   }
   const requestedVersion = result.data.version;
-  const asset = await repository.publishRuleAssetVersion(auth.tenantId, assetId, result.data);
+  const asset = await repository.publishRuleAssetVersion(
+    auth.tenantId,
+    assetId,
+    result.data,
+  );
   if (!asset) {
     return c.json({ message: `未找到规则资产 ${assetId}。` }, 404);
   }
   if (asset.publishedVersion !== requestedVersion) {
-    return c.json({ message: `规则版本 ${requestedVersion} 不存在，无法发布。` }, 409);
+    return c.json(
+      { message: `规则版本 ${requestedVersion} 不存在，无法发布。` },
+      409,
+    );
   }
+  const requestId = c.get("requestId");
+  await appendAuditLogSafely({
+    tenantId: auth.tenantId,
+    eventId: `cp:${requestId}`,
+    action: "control_plane.rule_asset_published",
+    level: "info",
+    detail: `Published rule asset ${asset.id} to version ${asset.publishedVersion}.`,
+    metadata: {
+      requestId,
+      tenantId: auth.tenantId,
+      resourceId: asset.id,
+      version: requestedVersion,
+      publishedVersion: asset.publishedVersion,
+      status: asset.status,
+      publishedByUserId: auth.userId,
+    },
+  });
   return c.json(asset);
 });
 
@@ -243,13 +282,38 @@ ruleRoutes.post("/rules/assets/:id/rollback", async (c) => {
     return c.json({ message: result.error }, 400);
   }
   const requestedVersion = result.data.version;
-  const asset = await repository.rollbackRuleAssetVersion(auth.tenantId, assetId, result.data);
+  const asset = await repository.rollbackRuleAssetVersion(
+    auth.tenantId,
+    assetId,
+    result.data,
+  );
   if (!asset) {
     return c.json({ message: `未找到规则资产 ${assetId}。` }, 404);
   }
   if (asset.publishedVersion !== requestedVersion) {
-    return c.json({ message: `规则版本 ${requestedVersion} 不存在，无法回滚。` }, 409);
+    return c.json(
+      { message: `规则版本 ${requestedVersion} 不存在，无法回滚。` },
+      409,
+    );
   }
+  const requestId = c.get("requestId");
+  await appendAuditLogSafely({
+    tenantId: auth.tenantId,
+    eventId: `cp:${requestId}`,
+    action: "control_plane.rule_asset_rolled_back",
+    level: "warning",
+    detail: `Rolled back rule asset ${asset.id} to version ${asset.publishedVersion}.`,
+    metadata: {
+      requestId,
+      tenantId: auth.tenantId,
+      resourceId: asset.id,
+      version: requestedVersion,
+      publishedVersion: asset.publishedVersion,
+      status: asset.status,
+      rolledBackByUserId: auth.userId,
+      reason: result.data.reason,
+    },
+  });
   return c.json(asset);
 });
 
@@ -266,7 +330,11 @@ ruleRoutes.get("/rules/assets/:id/approvals", async (c) => {
   if (!result.success) {
     return c.json({ message: result.error }, 400);
   }
-  const payload = await repository.listRuleApprovals(auth.tenantId, assetId, result.data);
+  const payload = await repository.listRuleApprovals(
+    auth.tenantId,
+    assetId,
+    result.data,
+  );
   return c.json({
     items: payload.items,
     total: payload.total,
@@ -288,12 +356,36 @@ ruleRoutes.post("/rules/assets/:id/approvals", async (c) => {
   if (!result.success) {
     return c.json({ message: result.error }, 400);
   }
-  const approval = await repository.createRuleApproval(auth.tenantId, assetId, result.data, {
-    approverUserId: auth.userId,
-    approverEmail: auth.email,
-  });
+  const approval = await repository.createRuleApproval(
+    auth.tenantId,
+    assetId,
+    result.data,
+    {
+      approverUserId: auth.userId,
+      approverEmail: auth.email,
+    },
+  );
   if (!approval) {
     return c.json({ message: "规则版本不存在，无法提交审批。" }, 404);
   }
+  const requestId = c.get("requestId");
+  await appendAuditLogSafely({
+    tenantId: auth.tenantId,
+    eventId: `cp:${requestId}`,
+    action: "control_plane.rule_approval_created",
+    level: "info",
+    detail: `Created rule approval ${approval.id} for asset ${assetId} version ${approval.version}.`,
+    metadata: {
+      requestId,
+      tenantId: auth.tenantId,
+      resourceId: approval.id,
+      assetId,
+      version: approval.version,
+      decision: approval.decision,
+      approverUserId: approval.approverUserId,
+      approverEmail: approval.approverEmail,
+      reason: approval.reason,
+    },
+  });
   return c.json(approval, 201);
 });
