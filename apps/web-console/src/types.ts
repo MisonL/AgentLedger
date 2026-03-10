@@ -1657,6 +1657,7 @@ export interface OpenPlatformAutomationPolicyUpsertInput {
   evaluationScoreThreshold?: number;
   triggerOnEvaluationFailure?: boolean;
   triggerOnReplayRegression?: boolean;
+  modelVersion?: string;
   strategyMatrix?: OpenPlatformAutomationStrategyRule[];
 }
 
@@ -1668,6 +1669,8 @@ export interface OpenPlatformAutomationStrategyRule {
   provider?: string;
   workflow?: string;
   projectPattern?: string;
+  minSampleCount?: number;
+  minPassRate?: number;
   minConfidence?: number;
   regressionProbabilityAtLeast?: number;
   replayRegressionAtLeast?: number;
@@ -1681,6 +1684,9 @@ export interface OpenPlatformAutomationPolicySimulationInput {
   metric: string;
   score: number;
   sampleCount?: number;
+  provider?: string;
+  workflow?: string;
+  project?: string;
   trendDirection?: "up" | "down" | "flat";
   confidence?: number;
   regressionProbability?: number;

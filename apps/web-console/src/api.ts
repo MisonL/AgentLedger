@@ -2689,6 +2689,22 @@ function isOpenPlatformAutomationStrategyRule(
       value.trendDirection === "up" ||
       value.trendDirection === "down" ||
       value.trendDirection === "flat") &&
+    (value.provider === undefined || value.provider === null || typeof value.provider === "string") &&
+    (value.workflow === undefined || value.workflow === null || typeof value.workflow === "string") &&
+    (value.projectPattern === undefined ||
+      value.projectPattern === null ||
+      typeof value.projectPattern === "string") &&
+    (value.minSampleCount === undefined ||
+      value.minSampleCount === null ||
+      (typeof value.minSampleCount === "number" &&
+        Number.isInteger(value.minSampleCount) &&
+        value.minSampleCount >= 0)) &&
+    (value.minPassRate === undefined ||
+      value.minPassRate === null ||
+      (typeof value.minPassRate === "number" &&
+        Number.isFinite(value.minPassRate) &&
+        value.minPassRate >= 0 &&
+        value.minPassRate <= 1)) &&
     (value.minConfidence === undefined ||
       value.minConfidence === null ||
       (typeof value.minConfidence === "number" && Number.isFinite(value.minConfidence))) &&

@@ -1618,6 +1618,22 @@ function parseQualityAutomationStrategyMatrixJson(
       }
       return { ok: true as const, value: parsedNumber };
     };
+    const minSampleCountResult = numericOrUndefined(record.minSampleCount, {
+      field: "minSampleCount",
+      integer: true,
+      min: 0,
+    });
+    if (!minSampleCountResult.ok) {
+      return { success: false, message: minSampleCountResult.message };
+    }
+    const minPassRateResult = numericOrUndefined(record.minPassRate, {
+      field: "minPassRate",
+      min: 0,
+      max: 1,
+    });
+    if (!minPassRateResult.ok) {
+      return { success: false, message: minPassRateResult.message };
+    }
     const minConfidenceResult = numericOrUndefined(record.minConfidence, {
       field: "minConfidence",
       min: 0,
@@ -1661,6 +1677,8 @@ function parseQualityAutomationStrategyMatrixJson(
       provider: providerResult.value,
       workflow: workflowResult.value,
       projectPattern: projectPatternResult.value,
+      minSampleCount: minSampleCountResult.value,
+      minPassRate: minPassRateResult.value,
       minConfidence: minConfidenceResult.value,
       regressionProbabilityAtLeast: regressionProbabilityResult.value,
       replayRegressionAtLeast: replayRegressionResult.value,
@@ -4344,6 +4362,12 @@ function GovernancePage() {
   const [qualityAutomationDecision, setQualityAutomationDecision] =
     useState<McpToolDecision>("allow");
   const [qualityAutomationReason, setQualityAutomationReason] = useState("");
+  type QualityAutomationModelVersion =
+    | ""
+    | "quality-heuristic-v2"
+    | "quality-timeseries-v1";
+  const [qualityAutomationModelVersion, setQualityAutomationModelVersion] =
+    useState<QualityAutomationModelVersion>("");
   const [
     qualityAutomationEvaluationScoreThreshold,
     setQualityAutomationEvaluationScoreThreshold,
@@ -4362,6 +4386,14 @@ function GovernancePage() {
     useState("accuracy");
   const [qualityAutomationSimulationScore, setQualityAutomationSimulationScore] =
     useState("72");
+  const [qualityAutomationSimulationSampleCount, setQualityAutomationSimulationSampleCount] =
+    useState("50");
+  const [qualityAutomationSimulationProvider, setQualityAutomationSimulationProvider] =
+    useState("");
+  const [qualityAutomationSimulationWorkflow, setQualityAutomationSimulationWorkflow] =
+    useState("");
+  const [qualityAutomationSimulationProject, setQualityAutomationSimulationProject] =
+    useState("");
   const [
     qualityAutomationSimulationTrendDirection,
     setQualityAutomationSimulationTrendDirection,
@@ -4929,6 +4961,12 @@ function GovernancePage() {
     setQualityAutomationRiskLevel(policy.riskLevel);
     setQualityAutomationDecision(policy.decision);
     setQualityAutomationReason(policy.reason ?? "");
+    setQualityAutomationModelVersion(
+      policy.modelVersion === "quality-timeseries-v1" ||
+        policy.modelVersion === "quality-heuristic-v2"
+        ? policy.modelVersion
+        : "",
+    );
     setQualityAutomationEvaluationScoreThreshold(
       String(policy.evaluationScoreThreshold),
     );
@@ -6524,6 +6562,7 @@ function GovernancePage() {
       evaluationScoreThreshold?: number;
       triggerOnEvaluationFailure?: boolean;
       triggerOnReplayRegression?: boolean;
+      modelVersion?: string;
       strategyMatrix?: OpenPlatformAutomationStrategyRule[];
     }) => upsertOpenPlatformAutomationPolicy(input),
     onSuccess: async (payload) => {
@@ -6532,6 +6571,12 @@ function GovernancePage() {
       setQualityAutomationRiskLevel(payload.riskLevel);
       setQualityAutomationDecision(payload.decision);
       setQualityAutomationReason(payload.reason ?? "");
+      setQualityAutomationModelVersion(
+        payload.modelVersion === "quality-timeseries-v1" ||
+          payload.modelVersion === "quality-heuristic-v2"
+          ? payload.modelVersion
+          : "",
+      );
       setQualityAutomationEvaluationScoreThreshold(
         String(payload.evaluationScoreThreshold),
       );
@@ -6560,6 +6605,9 @@ function GovernancePage() {
       metric: string;
       score: number;
       sampleCount?: number;
+      provider?: string;
+      workflow?: string;
+      project?: string;
       trendDirection?: "up" | "down" | "flat";
       confidence?: number;
       regressionProbability?: number;
@@ -7761,6 +7809,11 @@ function GovernancePage() {
   const qualityDailyGroups = qualityDailyPayload?.groups ?? [];
   const qualityForecastItems: OpenPlatformQualityForecastItem[] =
     qualityForecastPayload?.items ?? [];
+  const qualityAutomationModelVersionOptions = [
+    { value: "" as const, label: "默认（自动）" },
+    { value: "quality-heuristic-v2" as const, label: "quality-heuristic-v2" },
+    { value: "quality-timeseries-v1" as const, label: "quality-timeseries-v1" },
+  ];
   const qualityAdviceItems: OpenPlatformQualityAdviceItem[] =
     qualityAdvicePayload?.items ?? [];
   const qualityProjectTrendItems: OpenPlatformQualityProjectTrendItem[] =
@@ -15739,6 +15792,31 @@ function GovernancePage() {
               </label>
 
               <label
+                className="inline-field"
+                htmlFor="open-platform-quality-automation-model-version"
+              >
+                modelVersion（automation）
+                <select
+                  id="open-platform-quality-automation-model-version"
+                  value={qualityAutomationModelVersion}
+                  onChange={(event) =>
+                    setQualityAutomationModelVersion(
+                      event.target.value as QualityAutomationModelVersion,
+                    )
+                  }
+                >
+                  {qualityAutomationModelVersionOptions.map((item) => (
+                    <option
+                      key={`quality-automation-model-version-${item.value}`}
+                      value={item.value}
+                    >
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label
                 className="inline-field governance-wide-field"
                 htmlFor="open-platform-quality-automation-reason"
               >
@@ -15836,6 +15914,7 @@ function GovernancePage() {
                       qualityAutomationTriggerOnEvaluationFailure,
                     triggerOnReplayRegression:
                       qualityAutomationTriggerOnReplayRegression,
+                    modelVersion: qualityAutomationModelVersion || undefined,
                     strategyMatrix: strategyMatrixResult.data,
                   });
                 }}
@@ -15891,6 +15970,8 @@ function GovernancePage() {
                     <th>metric</th>
                     <th>severity</th>
                     <th>trend</th>
+                    <th>minSampleCount</th>
+                    <th>minPassRate</th>
                     <th>minConfidence</th>
                     <th>regressionProbability</th>
                     <th>replayRegression</th>
@@ -15903,7 +15984,7 @@ function GovernancePage() {
                 <tbody>
                   {(qualityAutomationPolicy?.strategyMatrix ?? []).length === 0 ? (
                     <tr>
-                      <td className="table-empty-cell" colSpan={11}>
+                      <td className="table-empty-cell" colSpan={13}>
                         当前未配置 strategyMatrix，默认沿用基础 automation policy。
                       </td>
                     </tr>
@@ -15914,6 +15995,8 @@ function GovernancePage() {
                         <td>{rule.metric ?? "--"}</td>
                         <td>{rule.severity ?? "--"}</td>
                         <td>{rule.trendDirection ?? "--"}</td>
+                        <td>{rule.minSampleCount ?? "--"}</td>
+                        <td>{rule.minPassRate ?? "--"}</td>
                         <td>{rule.minConfidence ?? "--"}</td>
                         <td>{rule.regressionProbabilityAtLeast ?? "--"}</td>
                         <td>{rule.replayRegressionAtLeast ?? "--"}</td>
@@ -15958,6 +16041,68 @@ function GovernancePage() {
                   onChange={(event) =>
                     setQualityAutomationSimulationScore(event.target.value)
                   }
+                />
+              </label>
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-automation-simulate-sample-count"
+              >
+                sampleCount（simulate）
+                <input
+                  id="open-platform-quality-automation-simulate-sample-count"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={qualityAutomationSimulationSampleCount}
+                  onChange={(event) =>
+                    setQualityAutomationSimulationSampleCount(event.target.value)
+                  }
+                  placeholder="例如 50"
+                />
+              </label>
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-automation-simulate-provider"
+              >
+                provider（simulate）
+                <input
+                  id="open-platform-quality-automation-simulate-provider"
+                  type="text"
+                  value={qualityAutomationSimulationProvider}
+                  onChange={(event) =>
+                    setQualityAutomationSimulationProvider(event.target.value)
+                  }
+                  placeholder="例如 github"
+                />
+              </label>
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-automation-simulate-workflow"
+              >
+                workflow（simulate）
+                <input
+                  id="open-platform-quality-automation-simulate-workflow"
+                  type="text"
+                  value={qualityAutomationSimulationWorkflow}
+                  onChange={(event) =>
+                    setQualityAutomationSimulationWorkflow(event.target.value)
+                  }
+                  placeholder="例如 ci-main"
+                />
+              </label>
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-automation-simulate-project"
+              >
+                project（simulate）
+                <input
+                  id="open-platform-quality-automation-simulate-project"
+                  type="text"
+                  value={qualityAutomationSimulationProject}
+                  onChange={(event) =>
+                    setQualityAutomationSimulationProject(event.target.value)
+                  }
+                  placeholder="例如 agentledger/main"
                 />
               </label>
               <label
@@ -16039,6 +16184,8 @@ function GovernancePage() {
                 disabled={simulateQualityAutomationPolicyMutation.isPending}
                 onClick={() => {
                   const score = Number(qualityAutomationSimulationScore);
+                  const sampleCountInput = qualityAutomationSimulationSampleCount.trim();
+                  const sampleCount = sampleCountInput.length > 0 ? Number(sampleCountInput) : undefined;
                   const confidence = Number(qualityAutomationSimulationConfidence);
                   const regressionProbability = Number(
                     qualityAutomationSimulationRegressionProbability,
@@ -16046,9 +16193,14 @@ function GovernancePage() {
                   const replayRegressionCount = Number(
                     qualityAutomationSimulationReplayRegressionCount,
                   );
+                  const provider = qualityAutomationSimulationProvider.trim() || undefined;
+                  const workflow = qualityAutomationSimulationWorkflow.trim() || undefined;
+                  const project = qualityAutomationSimulationProject.trim() || undefined;
                   if (
                     !qualityAutomationSimulationMetric.trim() ||
                     !Number.isFinite(score) ||
+                    (sampleCount !== undefined &&
+                      (!Number.isInteger(sampleCount) || sampleCount < 0)) ||
                     !Number.isFinite(confidence) ||
                     !Number.isFinite(regressionProbability) ||
                     !Number.isInteger(replayRegressionCount) ||
@@ -16063,6 +16215,10 @@ function GovernancePage() {
                   simulateQualityAutomationPolicyMutation.mutate({
                     metric: qualityAutomationSimulationMetric.trim(),
                     score,
+                    sampleCount,
+                    provider,
+                    workflow,
+                    project,
                     trendDirection: qualityAutomationSimulationTrendDirection,
                     confidence,
                     regressionProbability,
@@ -16103,6 +16259,18 @@ function GovernancePage() {
                       <td colSpan={3}>
                         {formatCompactJson(
                           {
+                            sampleCount:
+                              qualityAutomationSimulationSampleCount.trim() ||
+                              undefined,
+                            provider:
+                              qualityAutomationSimulationProvider.trim() ||
+                              undefined,
+                            workflow:
+                              qualityAutomationSimulationWorkflow.trim() ||
+                              undefined,
+                            project:
+                              qualityAutomationSimulationProject.trim() ||
+                              undefined,
                             confidence:
                               qualityAutomationSimulationPayload.confidence,
                             trendDirection:
