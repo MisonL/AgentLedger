@@ -65,6 +65,7 @@ import {
   fetchUsageWeeklySummary,
   getAccessToken,
   hasAccessToken,
+  patchOpenPlatformReplayExperiment,
   replayOpenPlatformWebhook,
   runOpenPlatformReplayExperiment,
   replaceOpenPlatformReplayDatasetCases,
@@ -2749,6 +2750,28 @@ describe("api mock fallback gate", () => {
           total: 1,
         });
       }
+      if (url.pathname === "/api/v2/replay/experiments/exp-1" && method === "PATCH") {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+          name: "Experiment Renamed",
+          candidateLabels: ["candidate-a", "candidate-b", "candidate-c"],
+        });
+        return mockJsonResponse({
+          id: "exp-1",
+          tenantId: "default",
+          name: "Experiment Renamed",
+          datasetId: "dataset-op-1",
+          baselineVersionId: "dataset-op-1:v2",
+          status: "queued",
+          triggerSource: "quality_advice",
+          executionMode: "automatic",
+          candidateLabels: ["candidate-a", "candidate-b", "candidate-c"],
+          runIds: ["run-1", "run-2"],
+          summary: {},
+          runs: [],
+          createdAt: "2026-03-08T10:00:00.000Z",
+          updatedAt: "2026-03-08T10:00:03.000Z",
+        });
+      }
       if (url.pathname === "/api/v2/replay/experiments/compare" && method === "GET") {
         expect(url.searchParams.get("experimentIds")).toBe("exp-1,exp-2");
         expect(url.searchParams.get("datasetId")).toBe("dataset-op-1");
@@ -3068,6 +3091,19 @@ describe("api mock fallback gate", () => {
         triggerSource: "quality_advice",
       }),
     ).resolves.toEqual(expect.objectContaining({ status: "queued" }));
+    await expect(
+      patchOpenPlatformReplayExperiment("exp-1", {
+        name: "Experiment Renamed",
+        baselineVersionId: "",
+        candidateLabels: ["candidate-a", "candidate-b", "candidate-c"],
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: "exp-1",
+        name: "Experiment Renamed",
+        candidateLabels: ["candidate-a", "candidate-b", "candidate-c"],
+      }),
+    );
     await expect(fetchOpenPlatformReplayExperiments()).resolves.toEqual(
       expect.objectContaining({ total: 1 }),
     );

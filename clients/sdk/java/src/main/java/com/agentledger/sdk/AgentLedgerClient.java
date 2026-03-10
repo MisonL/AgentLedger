@@ -481,6 +481,12 @@ public class AgentLedgerClient {
     return this.request("GET", "/api/v2/replay/experiments/{id}", resolved);
   }
 
+  // update_replay_experiment_v2 | PATCH /api/v2/replay/experiments/{id}
+  public String updateReplayExperimentV2(OperationRequest request) throws IOException, InterruptedException {
+    OperationRequest resolved = normalizeCompatibilityRequest("update_replay_experiment_v2", request == null ? new OperationRequest() : request);
+    return this.request("PATCH", "/api/v2/replay/experiments/{id}", resolved);
+  }
+
   // get_replay_experiment_artifacts_v2 | GET /api/v2/replay/experiments/{id}/artifacts
   public String getReplayExperimentArtifactsV2(OperationRequest request) throws IOException, InterruptedException {
     OperationRequest resolved = normalizeCompatibilityRequest("get_replay_experiment_artifacts_v2", request == null ? new OperationRequest() : request);

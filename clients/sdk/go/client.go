@@ -746,6 +746,15 @@ func (c *Client) GetReplayExperimentV2(ctx context.Context, req *OperationReques
 	return c.request(ctx, "GET", "/api/v2/replay/experiments/{id}", resolved)
 }
 
+// update_replay_experiment_v2 | PATCH /api/v2/replay/experiments/{id}
+func (c *Client) UpdateReplayExperimentV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
+	if req == nil {
+		req = &OperationRequest{}
+	}
+	resolved := c.normalizeCompatibilityRequest("update_replay_experiment_v2", req)
+	return c.request(ctx, "PATCH", "/api/v2/replay/experiments/{id}", resolved)
+}
+
 // get_replay_experiment_artifacts_v2 | GET /api/v2/replay/experiments/{id}/artifacts
 func (c *Client) GetReplayExperimentArtifactsV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
 	if req == nil {

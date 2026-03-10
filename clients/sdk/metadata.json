@@ -6,7 +6,7 @@
     "title": "AgentLedger Control Plane API",
     "version": "1.2.0",
     "specVersion": "3.0.3",
-    "digest": "fcfc683106d12835d9a35482758fdcc77be00477f175fd2dd7c75c8a630f72da"
+    "digest": "04e9313f86380e4b3e14746ecfe402011e96975ceba420a762cb85b7dc8b4eb4"
   },
   "operations": [
     {
@@ -676,6 +676,23 @@
       "queryParams": []
     },
     {
+      "id": "update_replay_experiment_v2",
+      "operationId": "updateReplayExperimentV2",
+      "method": "PATCH",
+      "path": "/api/v2/replay/experiments/{id}",
+      "methodNameCamel": "updateReplayExperimentV2",
+      "methodNameSnake": "update_replay_experiment_v2",
+      "methodNamePascal": "UpdateReplayExperimentV2",
+      "hasRequestBody": true,
+      "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": []
+    },
+    {
       "id": "get_replay_experiment_artifacts_v2",
       "operationId": "getReplayExperimentArtifactsV2",
       "method": "GET",
@@ -1081,7 +1098,7 @@
       "id": "typescript",
       "name": "TypeScript",
       "directory": "typescript",
-      "operationCount": 59,
+      "operationCount": 60,
       "generatedFiles": [
         "operations.json",
         "package.json",
@@ -1094,7 +1111,7 @@
       "id": "python",
       "name": "Python",
       "directory": "python",
-      "operationCount": 59,
+      "operationCount": 60,
       "generatedFiles": [
         "agentledger_sdk/__init__.py",
         "agentledger_sdk/client.py",
@@ -1107,7 +1124,7 @@
       "id": "go",
       "name": "Go",
       "directory": "go",
-      "operationCount": 59,
+      "operationCount": 60,
       "generatedFiles": [
         "client.go",
         "go.mod",
@@ -1119,7 +1136,7 @@
       "id": "java",
       "name": "Java",
       "directory": "java",
-      "operationCount": 59,
+      "operationCount": 60,
       "generatedFiles": [
         "operations.json",
         "pom.xml",
@@ -1131,7 +1148,7 @@
       "id": "csharp",
       "name": "C#",
       "directory": "csharp",
-      "operationCount": 59,
+      "operationCount": 60,
       "generatedFiles": [
         "AgentLedger.Sdk.csproj",
         "AgentLedgerClient.cs",
@@ -1143,7 +1160,7 @@
       "id": "php",
       "name": "PHP",
       "directory": "php",
-      "operationCount": 59,
+      "operationCount": 60,
       "generatedFiles": [
         "composer.json",
         "operations.json",
@@ -1155,7 +1172,7 @@
       "id": "ruby",
       "name": "Ruby",
       "directory": "ruby",
-      "operationCount": 59,
+      "operationCount": 60,
       "generatedFiles": [
         "agentledger-sdk.gemspec",
         "lib/agentledger_sdk.rb",
@@ -1168,7 +1185,7 @@
       "id": "swift",
       "name": "Swift",
       "directory": "swift",
-      "operationCount": 59,
+      "operationCount": 60,
       "generatedFiles": [
         "operations.json",
         "Package.swift",

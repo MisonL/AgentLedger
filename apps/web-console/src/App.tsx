@@ -107,6 +107,7 @@ import {
   publishRuleAsset,
   rejectMcpApproval,
   rollbackRuleAsset,
+  patchOpenPlatformReplayExperiment,
   runOpenPlatformReplayExperiment,
   retryAlertExternalLinkSync,
   retryAlertExternalLinkSyncBatch,
@@ -318,6 +319,15 @@ const DEFAULT_ROUTE: ConsoleRoute = "dashboard";
 const AUTH_CALLBACK_HASH_ROUTE = "/auth/callback";
 const AUTH_EXTERNAL_PENDING_STORAGE_KEY =
   "agentledger.web-console.auth.external.pending";
+
+export const externalNavigation = {
+  assign: (url: string) => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.location.assign(url);
+  },
+};
 const FALLBACK_LOCAL_PROVIDER: AuthProviderItem = {
   id: "local",
   type: "local",
@@ -2415,7 +2425,7 @@ function LoginPage({ authMessage, onLoggedIn }: LoginPageProps) {
         state,
         codeChallenge,
       );
-      window.location.assign(authorizeUrl);
+      externalNavigation.assign(authorizeUrl);
     } catch (error) {
       setFormError(`发起外部登录失败：${toErrorMessage(error)}`);
       clearExternalAuthPendingState();
@@ -4526,6 +4536,11 @@ function GovernancePage() {
   } | null>(null);
   const [replayExperimentDetailPayload, setReplayExperimentDetailPayload] =
     useState<OpenPlatformReplayExperiment | null>(null);
+  const [replayExperimentEditName, setReplayExperimentEditName] = useState("");
+  const [replayExperimentEditBaselineVersionId, setReplayExperimentEditBaselineVersionId] =
+    useState("");
+  const [replayExperimentEditCandidateLabels, setReplayExperimentEditCandidateLabels] =
+    useState("");
   const [replayExperimentComparePayload, setReplayExperimentComparePayload] =
     useState<OpenPlatformReplayExperimentCompareResponse | null>(null);
   const [replayExperimentBatchComparePayload, setReplayExperimentBatchComparePayload] =
@@ -6902,6 +6917,17 @@ function GovernancePage() {
     },
   });
 
+  useEffect(() => {
+    if (!replayExperimentDetailPayload) {
+      return;
+    }
+    setReplayExperimentEditName(replayExperimentDetailPayload.name);
+    setReplayExperimentEditBaselineVersionId(replayExperimentDetailPayload.baselineVersionId ?? "");
+    setReplayExperimentEditCandidateLabels(
+      replayExperimentDetailPayload.candidateLabels?.join(", ") ?? "",
+    );
+  }, [replayExperimentDetailPayload?.id]);
+
   const loadReplayExperimentCompareMutation = useMutation({
     mutationFn: (experimentId: string) => fetchOpenPlatformReplayExperimentCompare(experimentId),
     onSuccess: (payload) => {
@@ -6913,6 +6939,41 @@ function GovernancePage() {
     onError: (error) => {
       setReplayFeedback(null);
       setReplayError(`回放实验对比加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const patchReplayExperimentMutation = useMutation({
+    mutationFn: (input: {
+      experimentId: string;
+      patch: {
+        name?: string;
+        baselineVersionId?: string;
+        candidateLabels?: string[];
+      };
+    }) => patchOpenPlatformReplayExperiment(input.experimentId, input.patch),
+    onSuccess: async (payload) => {
+      setReplayError(null);
+      setReplayExperimentDetailPayload(payload);
+      setReplayExperimentComparePayload(null);
+      setReplayExperimentBatchComparePayload(null);
+      setReplayExperimentWorkflowPayload(null);
+      setReplayExperimentArtifactPayload(null);
+
+      if (replayExperimentPayload) {
+        setReplayExperimentPayload({
+          items: replayExperimentPayload.items.map((item) =>
+            item.id === payload.id ? payload : item,
+          ),
+          total: replayExperimentPayload.total,
+        });
+      }
+
+      setReplayFeedback(`回放实验 ${payload.name} 已更新。`);
+      await queryClient.invalidateQueries({ queryKey: ["replay", "experiments"] });
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setReplayError(`更新回放实验失败：${toErrorMessage(error)}`);
     },
   });
 
@@ -18091,6 +18152,149 @@ function GovernancePage() {
                     </tr>
                   </tbody>
                 </table>
+              </div>
+            ) : null}
+
+            {replayExperimentDetailPayload ? (
+              <div className="filters-row governance-inline-grid">
+                <label
+                  className="inline-field governance-wide-field"
+                  htmlFor="open-platform-replay-experiment-edit-name"
+                >
+                  编辑 experiment name
+                  <input
+                    id="open-platform-replay-experiment-edit-name"
+                    type="text"
+                    value={replayExperimentEditName}
+                    onChange={(event) => setReplayExperimentEditName(event.target.value)}
+                    placeholder="必填"
+                  />
+                </label>
+
+                <label
+                  className="inline-field governance-wide-field"
+                  htmlFor="open-platform-replay-experiment-edit-baseline-version-id"
+                >
+                  编辑 baselineVersionId（空表示不修改）
+                  <input
+                    id="open-platform-replay-experiment-edit-baseline-version-id"
+                    type="text"
+                    value={replayExperimentEditBaselineVersionId}
+                    onChange={(event) =>
+                      setReplayExperimentEditBaselineVersionId(event.target.value)
+                    }
+                    placeholder={replayExperimentDetailPayload.baselineVersionId ?? "可选"}
+                  />
+                </label>
+
+                <label
+                  className="inline-field governance-wide-field"
+                  htmlFor="open-platform-replay-experiment-edit-candidate-labels"
+                >
+                  编辑 candidateLabels（逗号分隔；留空表示清空）
+                  <input
+                    id="open-platform-replay-experiment-edit-candidate-labels"
+                    type="text"
+                    value={replayExperimentEditCandidateLabels}
+                    onChange={(event) =>
+                      setReplayExperimentEditCandidateLabels(event.target.value)
+                    }
+                    placeholder="如 candidate-a,candidate-b"
+                  />
+                </label>
+
+                <button
+                  type="button"
+                  className="submit-button"
+                  disabled={patchReplayExperimentMutation.isPending}
+                  onClick={() => {
+                    const experimentId = replayExperimentDetailPayload.id?.trim();
+                    if (!experimentId) {
+                      setReplayFeedback(null);
+                      setReplayError("实验 ID 缺失，无法更新。");
+                      return;
+                    }
+
+                    const nextName = replayExperimentEditName.trim();
+                    if (!nextName) {
+                      setReplayFeedback(null);
+                      setReplayError("experiment name 必须为非空字符串。");
+                      return;
+                    }
+
+                    const currentBaselineVersionId =
+                      replayExperimentDetailPayload.baselineVersionId ?? "";
+                    const nextBaselineVersionId =
+                      replayExperimentEditBaselineVersionId.trim();
+                    if (currentBaselineVersionId && !nextBaselineVersionId) {
+                      setReplayFeedback(null);
+                      setReplayError(
+                        "baselineVersionId 暂不支持清空（可留空表示不修改，或填写新的非空值）。",
+                      );
+                      return;
+                    }
+
+                    const currentCandidateLabels =
+                      replayExperimentDetailPayload.candidateLabels ?? [];
+                    const nextCandidateLabels = parseDistinctCommaSeparatedList(
+                      replayExperimentEditCandidateLabels,
+                    );
+
+                    const patch: {
+                      name?: string;
+                      baselineVersionId?: string;
+                      candidateLabels?: string[];
+                    } = {};
+
+                    if (nextName !== replayExperimentDetailPayload.name) {
+                      patch.name = nextName;
+                    }
+                    if (
+                      nextBaselineVersionId &&
+                      nextBaselineVersionId !== currentBaselineVersionId
+                    ) {
+                      patch.baselineVersionId = nextBaselineVersionId;
+                    }
+                    if (
+                      nextCandidateLabels.join(",") !== currentCandidateLabels.join(",")
+                    ) {
+                      patch.candidateLabels = nextCandidateLabels;
+                    }
+
+                    if (
+                      patch.name === undefined &&
+                      patch.baselineVersionId === undefined &&
+                      patch.candidateLabels === undefined
+                    ) {
+                      setReplayFeedback(null);
+                      setReplayError("未发现可保存的变更。");
+                      return;
+                    }
+
+                    setReplayFeedback(null);
+                    setReplayError(null);
+                    patchReplayExperimentMutation.mutate({ experimentId, patch });
+                  }}
+                >
+                  {patchReplayExperimentMutation.isPending ? "保存中..." : "保存实验"}
+                </button>
+
+                <button
+                  type="button"
+                  className="submit-button"
+                  disabled={patchReplayExperimentMutation.isPending}
+                  onClick={() => {
+                    setReplayExperimentEditName(replayExperimentDetailPayload.name);
+                    setReplayExperimentEditBaselineVersionId(
+                      replayExperimentDetailPayload.baselineVersionId ?? "",
+                    );
+                    setReplayExperimentEditCandidateLabels(
+                      replayExperimentDetailPayload.candidateLabels?.join(", ") ?? "",
+                    );
+                  }}
+                >
+                  重置编辑值
+                </button>
               </div>
             ) : null}
 

@@ -1303,6 +1303,20 @@ export interface ReplayExperimentCreateInput {
   runIds?: string[];
 }
 
+/**
+ * PATCH /api/v2/replay/experiments/:id
+ *
+ * 约定：
+ * - 仅支持部分字段更新；未提供的字段保持不变。
+ * - baselineVersionId：不支持显式传 null 清空；若提供则必须为非空字符串。
+ * - runIds/autoRun 不在更新范围内：runIds 由系统根据运行记录维护；触发执行请使用 /run 等接口。
+ */
+export interface ReplayExperimentUpdateInput {
+  name?: string;
+  baselineVersionId?: string;
+  candidateLabels?: string[];
+}
+
 export interface ReplayRunDiffItem {
   caseId: string;
   metric: QualityMetric;

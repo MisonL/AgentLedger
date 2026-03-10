@@ -666,6 +666,23 @@
     "queryParams": []
   },
   {
+    "id": "update_replay_experiment_v2",
+    "operationId": "updateReplayExperimentV2",
+    "method": "PATCH",
+    "path": "/api/v2/replay/experiments/{id}",
+    "methodNameCamel": "updateReplayExperimentV2",
+    "methodNameSnake": "update_replay_experiment_v2",
+    "methodNamePascal": "UpdateReplayExperimentV2",
+    "hasRequestBody": true,
+    "pathParams": [
+      "id"
+    ],
+    "wirePathParams": [
+      "id"
+    ],
+    "queryParams": []
+  },
+  {
     "id": "get_replay_experiment_artifacts_v2",
     "operationId": "getReplayExperimentArtifactsV2",
     "method": "GET",

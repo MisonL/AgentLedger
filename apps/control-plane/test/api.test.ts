@@ -17271,6 +17271,19 @@ describe("Control Plane API", () => {
     );
     expect(updatedApprovalAudit).toBeDefined();
 
+    const approvalAuditsAfterUpdate = await queryAuditByActionWithHeaders(
+      "control_plane.rule_approval_created",
+      approval.id,
+      tenantAHeaders,
+    );
+    expect(
+      approvalAuditsAfterUpdate.items.filter(
+        (item) =>
+          item.action === "control_plane.rule_approval_created" &&
+          item.metadata.resourceId === approval.id,
+      ),
+    ).toHaveLength(1);
+
     const listApprovalsResponse = await app.request(
       `/api/v1/rules/assets/${encodeURIComponent(asset.id)}/approvals?version=1`,
       {
@@ -19647,6 +19660,28 @@ describe("Control Plane API", () => {
               };
             };
           };
+          patch?: {
+            requestBody?: {
+              content?: {
+                [contentType: string]: {
+                  schema?: {
+                    $ref?: string;
+                  };
+                };
+              };
+            };
+            responses?: {
+              [status: string]: {
+                content?: {
+                  [contentType: string]: {
+                    schema?: {
+                      $ref?: string;
+                    };
+                  };
+                };
+              };
+            };
+          };
         }
       | undefined;
     const replayExperimentComparePath = openapiBody.paths?.[
@@ -19740,6 +19775,14 @@ describe("Control Plane API", () => {
       | undefined;
     const replayExperimentInputV2 = openapiBody.components?.schemas?.[
       "ReplayExperimentInputV2"
+    ] as
+      | {
+          required?: string[];
+          properties?: Record<string, { description?: string }>;
+        }
+      | undefined;
+    const replayExperimentPatchInputV2 = openapiBody.components?.schemas?.[
+      "ReplayExperimentPatchInputV2"
     ] as
       | {
           required?: string[];
@@ -20037,6 +20080,19 @@ describe("Control Plane API", () => {
       replayExperimentInputV2?.properties?.baselineVersionId?.description,
     ).toContain("数据集版本");
     expect(replayExperimentV2?.required).toContain("baselineVersionId");
+    expect(
+      replayExperimentByIdPath?.patch?.requestBody?.content?.["application/json"]
+        ?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayExperimentPatchInputV2");
+    expect(
+      replayExperimentByIdPath?.patch?.responses?.["200"]?.content?.[
+        "application/json"
+      ]?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayExperimentV2");
+    expect(replayExperimentPatchInputV2?.required ?? []).toEqual([]);
+    expect(
+      replayExperimentPatchInputV2?.properties?.baselineVersionId?.description,
+    ).toContain("dataset version");
     expect(replayExperimentV2?.properties?.metadata?.$ref).toBe(
       "#/components/schemas/ReplayExperimentMetadataV2",
     );
@@ -23401,6 +23457,37 @@ describe("Control Plane API", () => {
       expect(getExperimentBody.runs.some((item) => item.id === replayRun.id)).toBe(
         true,
       );
+
+      const patchExperimentResponse = await app.request(
+        `/api/v2/replay/experiments/${encodeURIComponent(experiment.id)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({
+            name: `Experiment Updated ${nonce}`,
+            baselineVersionId: "baseline-version-exp-2",
+            candidateLabels: ["candidate-a", " candidate-b ", "candidate-a"],
+          }),
+        },
+      );
+      expect(patchExperimentResponse.status).toBe(200);
+      const patchExperimentBody = (await patchExperimentResponse.json()) as {
+        id: string;
+        name: string;
+        baselineVersionId?: string | null;
+        metadata?: {
+          baselineVersionId?: string | null;
+        };
+        candidateLabels?: string[];
+      };
+      expect(patchExperimentBody.id).toBe(experiment.id);
+      expect(patchExperimentBody.name).toBe(`Experiment Updated ${nonce}`);
+      expect(patchExperimentBody.baselineVersionId).toBe("baseline-version-exp-2");
+      expect(patchExperimentBody.metadata?.baselineVersionId).toBe("baseline-version-exp-2");
+      expect(patchExperimentBody.candidateLabels).toEqual(["candidate-a", "candidate-b"]);
     } finally {
       resetReplayJobExecutionWorkerForTests();
     }

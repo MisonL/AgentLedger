@@ -9378,6 +9378,39 @@ export async function fetchOpenPlatformReplayExperiment(
   return result;
 }
 
+export async function patchOpenPlatformReplayExperiment(
+  experimentId: string,
+  patch: {
+    name?: string;
+    baselineVersionId?: string;
+    candidateLabels?: string[];
+  },
+  signal?: AbortSignal,
+): Promise<OpenPlatformReplayExperiment> {
+  const normalizedExperimentId = experimentId.trim();
+  if (!normalizedExperimentId) {
+    throw new Error("experimentId 不能为空。");
+  }
+  const { baselineVersionId, ...rest } = patch;
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/experiments/${encodeURIComponent(normalizedExperimentId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        ...rest,
+        ...(baselineVersionId?.trim()
+          ? { baselineVersionId: baselineVersionId.trim() }
+          : {}),
+      }),
+    },
+    signal,
+  );
+  if (!isOpenPlatformReplayExperiment(result)) {
+    throw new Error("replay.experiment.patch 返回结构不合法");
+  }
+  return result;
+}
+
 export async function runOpenPlatformReplayExperiment(
   experimentId: string,
   signal?: AbortSignal,

@@ -468,6 +468,11 @@ export class AgentLedgerClient {
     return this.request("GET", "/api/v2/replay/experiments/{id}", this.normalizeCompatibilityRequest("get_replay_experiment_v2", request));
   }
 
+  /** update_replay_experiment_v2 | PATCH /api/v2/replay/experiments/{id} */
+  async updateReplayExperimentV2(request: OperationRequest = {}): Promise<unknown> {
+    return this.request("PATCH", "/api/v2/replay/experiments/{id}", this.normalizeCompatibilityRequest("update_replay_experiment_v2", request));
+  }
+
   /** get_replay_experiment_artifacts_v2 | GET /api/v2/replay/experiments/{id}/artifacts */
   async getReplayExperimentArtifactsV2(request: OperationRequest = {}): Promise<unknown> {
     return this.request("GET", "/api/v2/replay/experiments/{id}/artifacts", this.normalizeCompatibilityRequest("get_replay_experiment_artifacts_v2", request));

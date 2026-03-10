@@ -9,6 +9,7 @@ import {
   validateReplayDatasetVersionCreateInput,
   validateReplayDatasetVersionPromoteInput,
   validateReplayExperimentCreateInput,
+  validateReplayExperimentUpdateInput,
   validateReplayRunCreateInput,
   validateReplicationJobApproveInput,
   validateReplicationJobCancelInput,
@@ -4220,6 +4221,77 @@ apiV2Routes.get("/replay/experiments/:id", async (c) => {
     return c.json({ message: `未找到回放实验：${experimentId}` }, 404);
   }
   return c.json(await mapReplayExperimentWithRuns(auth.tenantId, record));
+});
+
+apiV2Routes.patch("/replay/experiments/:id", async (c) => {
+  const auth = await requireTenantAccess(c, "write");
+  if (auth instanceof Response) {
+    return auth;
+  }
+  const experimentId = c.req.param("id")?.trim();
+  if (!experimentId) {
+    return c.json({ message: "id 必须为非空字符串。" }, 400);
+  }
+  const record = await getReplayExperimentById(auth.tenantId, experimentId);
+  if (!record) {
+    return c.json({ message: `未找到回放实验：${experimentId}` }, 404);
+  }
+
+  const validation = validateReplayExperimentUpdateInput({
+    ...normalizeRecord(await c.req.json().catch(() => undefined)),
+    tenantId: auth.tenantId,
+    experimentId,
+  });
+  if (!validation.success) {
+    return c.json({ message: validation.error }, 400);
+  }
+
+  const now = new Date().toISOString();
+  const updatedFields: string[] = [];
+  let updatedRecord = record;
+  if (validation.data.name !== undefined) {
+    updatedFields.push("name");
+    updatedRecord = {
+      ...updatedRecord,
+      name: validation.data.name,
+    };
+  }
+  if (validation.data.baselineVersionId !== undefined) {
+    updatedFields.push("baselineVersionId");
+    updatedRecord = {
+      ...updatedRecord,
+      baselineVersionId: validation.data.baselineVersionId,
+    };
+    rememberReplayExperimentBaselineVersionId(auth.tenantId, experimentId, validation.data.baselineVersionId);
+  }
+  if (validation.data.candidateLabels !== undefined) {
+    updatedFields.push("candidateLabels");
+    updatedRecord = {
+      ...updatedRecord,
+      candidateLabels: validation.data.candidateLabels,
+    };
+  }
+  updatedRecord = await saveReplayExperiment({
+    ...updatedRecord,
+    updatedAt: now,
+  });
+
+  const requestId = c.get("requestId");
+  await appendAuditLogSafely({
+    tenantId: auth.tenantId,
+    eventId: `cp:${requestId}`,
+    action: "control_plane.v2.replay.experiment_updated",
+    level: "info",
+    detail: `Updated replay experiment ${experimentId}.`,
+    metadata: {
+      requestId,
+      tenantId: auth.tenantId,
+      experimentId,
+      updatedFields,
+    },
+  });
+
+  return c.json(await mapReplayExperimentWithRuns(auth.tenantId, updatedRecord));
 });
 
 apiV2Routes.post("/replay/experiments/:id/run", async (c) => {

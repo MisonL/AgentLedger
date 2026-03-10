@@ -527,6 +527,12 @@ public final class AgentLedgerClient {
         return try await self.request(method: "GET", pathTemplate: "/api/v2/replay/experiments/{id}", request: normalizedRequest)
     }
 
+    // update_replay_experiment_v2 | PATCH /api/v2/replay/experiments/{id}
+    public func updateReplayExperimentV2(request: OperationRequest = OperationRequest()) async throws -> Any {
+        let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "update_replay_experiment_v2", request: request)
+        return try await self.request(method: "PATCH", pathTemplate: "/api/v2/replay/experiments/{id}", request: normalizedRequest)
+    }
+
     // get_replay_experiment_artifacts_v2 | GET /api/v2/replay/experiments/{id}/artifacts
     public func getReplayExperimentArtifactsV2(request: OperationRequest = OperationRequest()) async throws -> Any {
         let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "get_replay_experiment_artifacts_v2", request: request)

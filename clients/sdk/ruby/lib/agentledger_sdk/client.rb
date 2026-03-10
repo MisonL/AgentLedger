@@ -487,6 +487,12 @@ JSON
       request_api("GET", "/api/v2/replay/experiments/{id}", normalized_request)
     end
 
+    # update_replay_experiment_v2 | PATCH /api/v2/replay/experiments/{id}
+    def update_replay_experiment_v2(request = {})
+      normalized_request = normalize_compatibility_request("update_replay_experiment_v2", request)
+      request_api("PATCH", "/api/v2/replay/experiments/{id}", normalized_request)
+    end
+
     # get_replay_experiment_artifacts_v2 | GET /api/v2/replay/experiments/{id}/artifacts
     def get_replay_experiment_artifacts_v2(request = {})
       normalized_request = normalize_compatibility_request("get_replay_experiment_artifacts_v2", request)

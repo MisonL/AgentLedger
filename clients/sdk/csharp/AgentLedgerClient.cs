@@ -616,6 +616,13 @@ public sealed class AgentLedgerClient
         return this.RequestAsync("GET", "/api/v2/replay/experiments/{id}", request, cancellationToken);
     }
 
+    // update_replay_experiment_v2 | PATCH /api/v2/replay/experiments/{id}
+    public Task<string> UpdateReplayExperimentV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
+    {
+        request = this.NormalizeCompatibilityRequest("update_replay_experiment_v2", request ?? new OperationRequest());
+        return this.RequestAsync("PATCH", "/api/v2/replay/experiments/{id}", request, cancellationToken);
+    }
+
     // get_replay_experiment_artifacts_v2 | GET /api/v2/replay/experiments/{id}/artifacts
     public Task<string> GetReplayExperimentArtifactsV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
     {

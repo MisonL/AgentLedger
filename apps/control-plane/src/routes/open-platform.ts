@@ -2555,6 +2555,42 @@ export function buildOpenApiDocument() {
             "500": { $ref: "#/components/responses/InternalServerError" },
           },
         },
+        patch: {
+          summary: "更新回放实验（v2）",
+          operationId: "updateReplayExperimentV2",
+          tags: ["replay"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ReplayExperimentPatchInputV2" },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "更新后的回放实验",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayExperimentV2" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
       },
       "/api/v2/replay/experiments/{id}/run": {
         post: {
@@ -4442,6 +4478,24 @@ export function buildOpenApiDocument() {
             candidateLabels: { type: "array", items: { type: "string" } },
             sourceAdviceId: { type: "string" },
             runIds: { type: "array", items: { type: "string" } },
+          },
+        },
+        ReplayExperimentPatchInputV2: {
+          type: "object",
+          description:
+            "用于部分更新回放实验配置。注意：更新只影响后续 run 的默认行为，不会回写或重算既有 runs 的参数与结果。",
+          properties: {
+            name: { type: "string", minLength: 1 },
+            baselineVersionId: {
+              type: "string",
+              minLength: 1,
+              description: "可选：更新实验绑定的 dataset version ID，用于后续 run 的 baselineVersionId 透传。",
+            },
+            candidateLabels: {
+              type: "array",
+              description: "可选：更新候选标签列表。若为空数组，后续 run 将回退到默认 candidate。",
+              items: { type: "string", minLength: 1 },
+            },
           },
         },
         ReplayExperimentStatusSummaryV2: {

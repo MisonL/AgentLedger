@@ -416,6 +416,11 @@ class AgentLedgerClient:
         req = self._normalize_compatibility_request("get_replay_experiment_v2", request or OperationRequest())
         return self._request("GET", "/api/v2/replay/experiments/{id}", req)
 
+    # update_replay_experiment_v2 | PATCH /api/v2/replay/experiments/{id}
+    def update_replay_experiment_v2(self, request: Optional[OperationRequest] = None) -> Any:
+        req = self._normalize_compatibility_request("update_replay_experiment_v2", request or OperationRequest())
+        return self._request("PATCH", "/api/v2/replay/experiments/{id}", req)
+
     # get_replay_experiment_artifacts_v2 | GET /api/v2/replay/experiments/{id}/artifacts
     def get_replay_experiment_artifacts_v2(self, request: Optional[OperationRequest] = None) -> Any:
         req = self._normalize_compatibility_request("get_replay_experiment_artifacts_v2", request or OperationRequest())

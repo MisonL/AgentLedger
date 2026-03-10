@@ -5,8 +5,8 @@
 - OpenAPI 标题：AgentLedger Control Plane API
 - OpenAPI 版本：1.2.0
 - OpenAPI Spec：3.0.3
-- 文档摘要：fcfc683106d12835d9a35482758fdcc77be00477f175fd2dd7c75c8a630f72da
-- operation 数量：59
+- 文档摘要：04e9313f86380e4b3e14746ecfe402011e96975ceba420a762cb85b7dc8b4eb4
+- operation 数量：60
 
 Replay v2 canonical：
 

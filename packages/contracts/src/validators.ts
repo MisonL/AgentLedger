@@ -179,6 +179,7 @@ import type {
   ReplayDatasetVersionCreateInput,
   ReplayDatasetVersionPromoteInput,
   ReplayExperimentCreateInput,
+  ReplayExperimentUpdateInput,
   ReplayJobCreateInput,
   ReplayJobStatus,
   ReplayRunCreateInput,
@@ -4461,6 +4462,57 @@ export function validateReplayExperimentCreateInput(
           : undefined,
       sourceAdviceId,
       runIds: runIds && runIds.length > 0 ? Array.from(new Set(runIds)) : undefined,
+    },
+  };
+}
+
+export function validateReplayExperimentUpdateInput(
+  input: unknown
+): ValidationResult<ReplayExperimentUpdateInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const name = normalizeString(input.name);
+  const baselineVersionId =
+    normalizeString(input.baselineVersionId) ?? normalizeString(input.baseline_version_id);
+  const candidateLabels = normalizeStringArray(input.candidateLabels);
+  const hasPatchField =
+    input.name !== undefined ||
+    input.baselineVersionId !== undefined ||
+    input.baseline_version_id !== undefined ||
+    input.candidateLabels !== undefined;
+
+  if (!hasPatchField) {
+    return {
+      success: false,
+      error: "至少提供一个可更新字段：name/baselineVersionId/candidateLabels。",
+    };
+  }
+  if (input.name !== undefined && !name) {
+    return { success: false, error: "name 必须为非空字符串。" };
+  }
+  if (
+    (input.baselineVersionId !== undefined || input.baseline_version_id !== undefined) &&
+    !baselineVersionId
+  ) {
+    return { success: false, error: "baselineVersionId 必须为非空字符串。" };
+  }
+  if (input.candidateLabels !== undefined) {
+    if (candidateLabels === undefined || candidateLabels === "invalid") {
+      return { success: false, error: "candidateLabels 必须是字符串数组。" };
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      name,
+      baselineVersionId,
+      candidateLabels:
+        candidateLabels && candidateLabels !== "invalid"
+          ? Array.from(new Set(candidateLabels))
+          : undefined,
     },
   };
 }

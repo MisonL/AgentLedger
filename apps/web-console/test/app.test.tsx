@@ -7,9 +7,9 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { clearAuthTokens, setAuthTokens } from "../src/api";
-import App from "../src/App";
+import App, { externalNavigation } from "../src/App";
 
-const GOVERNANCE_HEAVY_TEST_TIMEOUT_MS = 120_000;
+const GOVERNANCE_HEAVY_TEST_TIMEOUT_MS = 180_000;
 
 function toUrl(input: Parameters<typeof fetch>[0]): string {
   if (typeof input === "string") {
@@ -1895,72 +1895,65 @@ describe("Web Console", () => {
   });
 
   test("登录页支持发起外部登录并携带 PKCE 参数", async () => {
-    const assignSpy = vi.fn();
-    vi.stubGlobal("location", {
-      ...window.location,
-      assign: assignSpy,
-    } as unknown as Location);
+    const assignSpy = vi
+      .spyOn(externalNavigation, "assign")
+      .mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
 
-    try {
-      vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-        const url = toUrl(input);
-        const method = (init?.method ?? "GET").toUpperCase();
+      if (url.endsWith("/api/v1/auth/providers") && method === "GET") {
+        return mockAuthProvidersResponse();
+      }
 
-        if (url.endsWith("/api/v1/auth/providers") && method === "GET") {
-          return mockAuthProvidersResponse();
-        }
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
 
-        throw new Error(`unexpected call: ${method} ${url}`);
-      });
+    render(<App />);
 
-      render(<App />);
+    expect(
+      await screen.findByRole("heading", { name: "登录控制台" }),
+    ).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "企业 OIDC" }));
 
-      expect(
-        await screen.findByRole("heading", { name: "登录控制台" }),
-      ).toBeInTheDocument();
-      fireEvent.click(await screen.findByRole("button", { name: "企业 OIDC" }));
+    await waitFor(() => {
+      expect(assignSpy).toHaveBeenCalledTimes(1);
+    });
 
-      await waitFor(() => {
-        expect(assignSpy).toHaveBeenCalledTimes(1);
-      });
+    const assignedUrl = new URL(String(assignSpy.mock.calls[0]?.[0]));
+    const redirectUri = assignedUrl.searchParams.get("redirect_uri");
+    const state = assignedUrl.searchParams.get("state");
+    const codeChallenge = assignedUrl.searchParams.get("code_challenge");
+    const codeChallengeMethod = assignedUrl.searchParams.get(
+      "code_challenge_method",
+    );
 
-      const assignedUrl = new URL(String(assignSpy.mock.calls[0]?.[0]));
-      const redirectUri = assignedUrl.searchParams.get("redirect_uri");
-      const state = assignedUrl.searchParams.get("state");
-      const codeChallenge = assignedUrl.searchParams.get("code_challenge");
-      const codeChallengeMethod = assignedUrl.searchParams.get(
-        "code_challenge_method",
-      );
+    expect(`${assignedUrl.origin}${assignedUrl.pathname}`).toBe(
+      "https://idp.example.com/oauth/authorize",
+    );
+    expect(assignedUrl.searchParams.get("response_type")).toBe("code");
+    expect(assignedUrl.searchParams.get("provider")).toBe("corp-oidc");
+    expect(redirectUri).toContain("#/auth/callback");
+    expect(state).toMatch(/^corp-oidc:/);
+    expect(codeChallenge).toBeTruthy();
+    expect(codeChallengeMethod).toBe("S256");
 
-      expect(`${assignedUrl.origin}${assignedUrl.pathname}`).toBe(
-        "https://idp.example.com/oauth/authorize",
-      );
-      expect(assignedUrl.searchParams.get("response_type")).toBe("code");
-      expect(assignedUrl.searchParams.get("provider")).toBe("corp-oidc");
-      expect(redirectUri).toContain("#/auth/callback");
-      expect(state).toMatch(/^corp-oidc:/);
-      expect(codeChallenge).toBeTruthy();
-      expect(codeChallengeMethod).toBe("S256");
-
-      const pendingRaw = window.sessionStorage.getItem(
-        "agentledger.web-console.auth.external.pending",
-      );
-      expect(pendingRaw).toBeTruthy();
-      const pending = JSON.parse(String(pendingRaw)) as {
-        providerId: string;
-        state: string;
-        redirectUri: string;
-        codeVerifier: string;
-        createdAt: number;
-      };
-      expect(pending.providerId).toBe("corp-oidc");
-      expect(pending.state).toBe(state);
-      expect(pending.redirectUri).toContain("#/auth/callback");
-      expect(pending.codeVerifier.length).toBeGreaterThan(10);
-      expect(pending.createdAt).toBeGreaterThan(0);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    const pendingRaw = window.sessionStorage.getItem(
+      "agentledger.web-console.auth.external.pending",
+    );
+    expect(pendingRaw).toBeTruthy();
+    const pending = JSON.parse(String(pendingRaw)) as {
+      providerId: string;
+      state: string;
+      redirectUri: string;
+      codeVerifier: string;
+      createdAt: number;
+    };
+    expect(pending.providerId).toBe("corp-oidc");
+    expect(pending.state).toBe(state);
+    expect(pending.redirectUri).toContain("#/auth/callback");
+    expect(pending.codeVerifier.length).toBeGreaterThan(10);
+    expect(pending.createdAt).toBeGreaterThan(0);
   });
 
   test("token 失效返回 401 时会提示重新登录，且可再次登录", async () => {
@@ -5462,12 +5455,17 @@ describe("Web Console", () => {
         datasetId: string;
         baselineId?: string | null;
         baselineVersionId?: string | null;
+        candidateLabels?: string[] | null;
+        status?: "draft" | "queued" | "running" | "completed" | "failed" | "cancelled" | null;
+        triggerSource?: "manual" | "quality_advice" | "automatic" | null;
+        executionMode?: "manual" | "automatic" | null;
         runIds: string[];
         summary: Record<string, unknown>;
         runs: Array<Record<string, unknown>>;
         createdAt: string;
         updatedAt: string;
       }> = [];
+      const replayExperimentPatchBodies: unknown[] = [];
 
       const fetchSpy = mockGovernancePageFetch({
         extraHandler: async (_input, init, { method, pathname, url }) => {
@@ -6256,6 +6254,7 @@ describe("Web Console", () => {
               datasetId?: string;
               baselineVersionId?: string;
               runIds?: string[];
+              candidateLabels?: string[];
             };
             const created = {
               id: `exp-ui-${replayExperiments.length + 1}`,
@@ -6264,6 +6263,10 @@ describe("Web Console", () => {
               datasetId: payload.datasetId ?? "baseline-ui-1",
               baselineId: payload.datasetId ?? "baseline-ui-1",
               baselineVersionId: payload.baselineVersionId ?? null,
+              candidateLabels: payload.candidateLabels ?? ["candidate-a"],
+              status: "draft" as const,
+              triggerSource: "manual" as const,
+              executionMode: "manual" as const,
               runIds: payload.runIds ?? [],
               summary: {
                 totalRuns: payload.runIds?.length ?? 0,
@@ -6282,6 +6285,74 @@ describe("Web Console", () => {
             return mockJsonResponse({
               items: replayExperiments,
               total: replayExperiments.length,
+            });
+          }
+
+          const replayExperimentResultsMatch = pathname.match(
+            /^\/api\/v2\/replay\/experiments\/([^/]+)\/results$/,
+          );
+          if (replayExperimentResultsMatch && method === "GET") {
+            const experimentId = decodeURIComponent(replayExperimentResultsMatch[1] ?? "");
+            const experiment =
+              replayExperiments.find((item) => item.id === experimentId) ?? null;
+            if (!experiment) {
+              return mockJsonResponse({ message: "未找到 experiment" }, 404);
+            }
+            return mockJsonResponse({
+              ...experiment,
+              metadata: {},
+              runStatusSummary: experiment.summary,
+              aggregateSummary: experiment.summary,
+              sourceAdviceId: null,
+              startedAt: null,
+              finishedAt: null,
+              lastError: null,
+            });
+          }
+
+          const replayExperimentPatchMatch = pathname.match(
+            /^\/api\/v2\/replay\/experiments\/([^/]+)$/,
+          );
+          if (replayExperimentPatchMatch && method === "PATCH") {
+            const experimentId = decodeURIComponent(replayExperimentPatchMatch[1] ?? "");
+            const experimentIndex = replayExperiments.findIndex(
+              (item) => item.id === experimentId,
+            );
+            if (experimentIndex < 0) {
+              return mockJsonResponse({ message: "未找到 experiment" }, 404);
+            }
+            const patchPayload = JSON.parse(String(init?.body ?? "{}")) as {
+              name?: string;
+              baselineVersionId?: string;
+              candidateLabels?: string[];
+            };
+            replayExperimentPatchBodies.push(patchPayload);
+
+            const existing = replayExperiments[experimentIndex];
+            if (!existing) {
+              return mockJsonResponse({ message: "未找到 experiment" }, 404);
+            }
+            const updated = {
+              ...existing,
+              ...(patchPayload.name !== undefined ? { name: patchPayload.name } : {}),
+              ...(patchPayload.baselineVersionId !== undefined
+                ? { baselineVersionId: patchPayload.baselineVersionId }
+                : {}),
+              ...(patchPayload.candidateLabels !== undefined
+                ? { candidateLabels: patchPayload.candidateLabels }
+                : {}),
+              updatedAt: "2026-03-03T12:26:30.000Z",
+            };
+            replayExperiments.splice(experimentIndex, 1, updated);
+            return mockJsonResponse({
+              ...updated,
+              metadata: {},
+              runStatusSummary: updated.summary,
+              aggregateSummary: updated.summary,
+              sourceAdviceId: null,
+              startedAt: null,
+              finishedAt: null,
+              lastError: null,
             });
           }
 
@@ -7018,6 +7089,18 @@ describe("Web Console", () => {
           target: { value: "job-ui-1" },
         },
       );
+      fireEvent.change(
+        byId<HTMLInputElement>("open-platform-replay-experiment-baseline-version-id"),
+        {
+          target: { value: "baseline-ui-1:v1" },
+        },
+      );
+      fireEvent.change(
+        byId<HTMLInputElement>("open-platform-replay-experiment-candidate-labels"),
+        {
+          target: { value: "candidate-a,candidate-b" },
+        },
+      );
       fireEvent.click(
         sectionScreen.getByRole("button", { name: "创建回放实验" }),
       );
@@ -7028,6 +7111,74 @@ describe("Web Console", () => {
         sectionScreen.getByRole("button", { name: "加载回放实验" }),
       );
       expect(await sectionScreen.findByText("exp smoke")).toBeInTheDocument();
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "详情" }),
+      );
+      const experimentDetailHeader = await sectionScreen.findByText("实验详情");
+      const experimentDetailTable = experimentDetailHeader.closest("table");
+      expect(experimentDetailTable).not.toBeNull();
+      expect(
+        within(experimentDetailTable as HTMLElement).getByText("candidates"),
+      ).toBeInTheDocument();
+      expect(
+        within(experimentDetailTable as HTMLElement).getByText("candidate-a, candidate-b"),
+      ).toBeInTheDocument();
+
+      fireEvent.change(
+        byId<HTMLInputElement>("open-platform-replay-experiment-edit-name"),
+        {
+          target: { value: "exp smoke renamed" },
+        },
+      );
+      fireEvent.click(sectionScreen.getByRole("button", { name: "保存实验" }));
+      expect(
+        await sectionScreen.findByText("回放实验 exp smoke renamed 已更新。"),
+      ).toBeInTheDocument();
+
+      fireEvent.change(
+        byId<HTMLInputElement>(
+          "open-platform-replay-experiment-edit-baseline-version-id",
+        ),
+        {
+          target: { value: "baseline-ui-1:v2" },
+        },
+      );
+      fireEvent.click(sectionScreen.getByRole("button", { name: "保存实验" }));
+      await waitFor(() => {
+        const header = sectionScreen.getByText("实验详情");
+        const table = header.closest("table");
+        expect(table).not.toBeNull();
+        expect(
+          within(table as HTMLElement).getByText("baseline-ui-1:v2"),
+        ).toBeInTheDocument();
+      });
+
+      fireEvent.change(
+        byId<HTMLInputElement>(
+          "open-platform-replay-experiment-edit-candidate-labels",
+        ),
+        {
+          target: { value: "" },
+        },
+      );
+      fireEvent.click(sectionScreen.getByRole("button", { name: "保存实验" }));
+      await waitFor(() => {
+        const updatedHeader = sectionScreen.getByText("实验详情");
+        const updatedTable = updatedHeader.closest("table");
+        expect(updatedTable).not.toBeNull();
+        const candidatesRow = within(updatedTable as HTMLElement)
+          .getByText("candidates")
+          .closest("tr");
+        expect(candidatesRow).not.toBeNull();
+        expect(
+          within(candidatesRow as HTMLElement).getByText("--"),
+        ).toBeInTheDocument();
+      });
+      expect(replayExperimentPatchBodies).toEqual([
+        { name: "exp smoke renamed" },
+        { baselineVersionId: "baseline-ui-1:v2" },
+        { candidateLabels: [] },
+      ]);
       fireEvent.change(
         byId<HTMLInputElement>("open-platform-replay-experiment-compare-ids"),
         {

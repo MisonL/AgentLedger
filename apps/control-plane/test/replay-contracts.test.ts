@@ -3,6 +3,7 @@ import {
   validateReplayDatasetCasesReplaceInput,
   validateReplayDatasetCreateInput,
   validateReplayDatasetMaterializeInput,
+  validateReplayExperimentUpdateInput,
   validateReplayRunCreateInput,
 } from "../src/contracts";
 
@@ -124,5 +125,29 @@ describe("Replay v2 Contracts", () => {
     }
     expect(byFilters.data.filters?.tool).toBe("codex");
     expect(byFilters.data.sanitized).toBe(true);
+  });
+
+  test("回放实验更新校验：候选标签去重/trim，并拒绝空更新与无效 baselineVersionId", () => {
+    const empty = validateReplayExperimentUpdateInput({});
+    expect(empty.success).toBe(false);
+
+    const invalidBaseline = validateReplayExperimentUpdateInput({
+      baselineVersionId: null,
+    });
+    expect(invalidBaseline.success).toBe(false);
+    if (!invalidBaseline.success) {
+      expect(invalidBaseline.error).toBe("baselineVersionId 必须为非空字符串。");
+    }
+
+    const normalized = validateReplayExperimentUpdateInput({
+      candidateLabels: ["  candidate-a  ", "candidate-a", "candidate-b"],
+      baseline_version_id: " baseline-v1 ",
+    });
+    expect(normalized.success).toBe(true);
+    if (!normalized.success) {
+      return;
+    }
+    expect(normalized.data.candidateLabels).toEqual(["candidate-a", "candidate-b"]);
+    expect(normalized.data.baselineVersionId).toBe("baseline-v1");
   });
 });

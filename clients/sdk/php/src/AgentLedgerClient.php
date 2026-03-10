@@ -583,6 +583,13 @@ JSON;
         return $this->request('GET', '/api/v2/replay/experiments/{id}', $normalizedRequest);
     }
 
+    // update_replay_experiment_v2 | PATCH /api/v2/replay/experiments/{id}
+    public function updateReplayExperimentV2(array $request = []): mixed
+    {
+        $normalizedRequest = $this->normalizeCompatibilityRequest('update_replay_experiment_v2', $request);
+        return $this->request('PATCH', '/api/v2/replay/experiments/{id}', $normalizedRequest);
+    }
+
     // get_replay_experiment_artifacts_v2 | GET /api/v2/replay/experiments/{id}/artifacts
     public function getReplayExperimentArtifactsV2(array $request = []): mixed
     {
