@@ -227,6 +227,62 @@ func TestBuildAlertDedupeFingerprint(t *testing.T) {
 	}
 }
 
+func TestBuildExternalLinkCallbackPayloadForIncident(t *testing.T) {
+	t.Parallel()
+
+	payload := []byte(`{"alert_id":"alert-incident-1","tenant_id":"tenant-incident-1","severity":"critical"}`)
+	responseBody := []byte(`{"incidentId":"incident-42","state":"acknowledged"}`)
+
+	raw, ok := buildExternalLinkCallbackPayload(channelIncident, payload, responseBody)
+	if !ok {
+		t.Fatal("expected incident response to produce external link callback payload")
+	}
+
+	var callback struct {
+		CallbackID     string         `json:"callback_id"`
+		TenantID       string         `json:"tenant_id"`
+		Action         string         `json:"action"`
+		AlertID        string         `json:"alert_id"`
+		ExternalType   string         `json:"external_type"`
+		ExternalSystem string         `json:"external_system"`
+		ExternalID     string         `json:"external_id"`
+		ExternalStatus string         `json:"external_status"`
+		Metadata       map[string]any `json:"metadata"`
+	}
+	if err := json.Unmarshal(raw, &callback); err != nil {
+		t.Fatalf("unmarshal external link callback payload failed: %v", err)
+	}
+
+	if callback.CallbackID != "extlink:alert-incident-1:incident:incident-42" {
+		t.Fatalf("callback id mismatch: got %q", callback.CallbackID)
+	}
+	if callback.TenantID != "tenant-incident-1" {
+		t.Fatalf("tenant id mismatch: got %q", callback.TenantID)
+	}
+	if callback.Action != "upsert_external_link" {
+		t.Fatalf("action mismatch: got %q want %q", callback.Action, "upsert_external_link")
+	}
+	if callback.AlertID != "alert-incident-1" {
+		t.Fatalf("alert id mismatch: got %q want %q", callback.AlertID, "alert-incident-1")
+	}
+	if callback.ExternalType != "incident" || callback.ExternalSystem != "incident" {
+		t.Fatalf("external type/system mismatch: got %q/%q", callback.ExternalType, callback.ExternalSystem)
+	}
+	if callback.ExternalID != "incident-42" {
+		t.Fatalf("external id mismatch: got %q want %q", callback.ExternalID, "incident-42")
+	}
+	if callback.ExternalStatus != "acknowledged" {
+		t.Fatalf("external status mismatch: got %q want %q", callback.ExternalStatus, "acknowledged")
+	}
+	responseRecord, ok := callback.Metadata["response"].(map[string]any)
+	if !ok {
+		t.Fatalf("response metadata mismatch: %+v", callback.Metadata)
+	}
+	if responseRecord["incidentId"] != "incident-42" {
+		t.Fatalf("response incident id mismatch: %+v", responseRecord)
+	}
+}
+
 func TestAlertDedupeStoreRememberOrSuppress(t *testing.T) {
 	t.Parallel()
 

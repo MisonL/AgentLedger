@@ -13,32 +13,63 @@ import {
   ApiError,
   cancelReplicationJob,
   backfillSourceRegions,
+  fetchAlertExternalLinkFailures,
+  fetchAlertExternalLinkOps,
   fetchAlertOrchestrationExecutions,
   fetchAlertOrchestrationRules,
+  fetchAgentRuntimeConfig,
+  fetchAgentRuntimeViews,
+  fetchAgentReleaseCheckBatchPreview,
+  fetchAgentReleaseCheckPreview,
+  fetchAgentReleases,
   createMcpApproval,
   createReplicationJob,
   createRuleApproval,
+  createSystemConfigPackage,
+  createSystemConfigPackageApproval,
   createRuleAsset,
   createRuleAssetVersion,
   createSource,
   createOpenPlatformReplayDataset,
+  createOpenPlatformReplayDatasetVersion,
+  createOpenPlatformReplayExperiment,
   createOpenPlatformReplayRun,
+  executeOpenPlatformQualityAdvice,
+  createIntegrationDlqRecoveryJob,
   downloadOpenPlatformReplayArtifact,
+  evaluateMcpTool,
   exportSessions,
   exportUsage,
   exchangeExternalAuthCode,
   fetchAlerts,
   fetchAuthProviders,
+  fetchIntegrationAlertFailureReport,
+  fetchIntegrationAlertFailureTrends,
+  fetchIntegrationDlqRecoveryJobDetail,
+  fetchIntegrationDlqRecoveryJobs,
+  fetchIntegrationDlqMessages,
   fetchMcpApprovals,
   fetchMcpInvocations,
   fetchMcpPolicies,
+  fetchOpenPlatformAutomationPolicy,
   fetchOpenPlatformApiKeys,
   fetchOpenPlatformOpenApiSummary,
   fetchOpenPlatformQualityDaily,
+  fetchOpenPlatformQualityForecast,
+  fetchOpenPlatformQualityAdvice,
+  fetchOpenPlatformQualityAdviceExecutions,
   fetchOpenPlatformQualityProjectTrends,
   fetchOpenPlatformQualityScorecards,
   fetchOpenPlatformReplayArtifacts,
+  fetchOpenPlatformReplayDatasetVersionCases,
+  fetchOpenPlatformReplayExperimentArtifacts,
+  fetchOpenPlatformReplayExperimentCompare,
+  fetchOpenPlatformReplayExperimentsBatchCompare,
+  fetchOpenPlatformReplayExperimentResults,
+  fetchOpenPlatformReplayExperiments,
+  fetchOpenPlatformReplayExperimentWorkflow,
   fetchOpenPlatformReplayDatasetCases,
+  fetchOpenPlatformReplayDatasetVersions,
   fetchOpenPlatformReplayDatasets,
   fetchOpenPlatformReplayDiffs,
   fetchOpenPlatformReplayRuns,
@@ -46,11 +77,16 @@ import {
   fetchOpenPlatformWebhooks,
   fetchReplicationJobs,
   fetchResidencyPolicy,
+  fetchResidencyKmsKeyMappings,
   fetchResidencyRegions,
+  fetchResidencyArchiveRegionPolicies,
   fetchRuleApprovals,
   fetchRuleAssetVersions,
   fetchRuleAssetVersionDiff,
   fetchRuleAssets,
+  fetchSystemConfigPackageApprovals,
+  fetchSystemConfigPackages,
+  fetchSystemConfigWatchLatest,
   fetchTokenPulseRuntimeEvents,
   fetchUsageWeeklySummary,
   fetchSourceHealth,
@@ -69,26 +105,47 @@ import {
   publishRuleAsset,
   rejectMcpApproval,
   rollbackRuleAsset,
+  runOpenPlatformReplayExperiment,
+  retryAlertExternalLinkSync,
+  retryAlertExternalLinkSyncBatch,
   revokeOpenPlatformApiKey,
   replaceOpenPlatformReplayDatasetCases,
+  promoteOpenPlatformReplayDatasetVersion,
+  cancelOpenPlatformQualityAdviceExecution,
+  cancelOpenPlatformReplayExperiment,
   searchSessions,
   setUnauthorizedHandler,
   testSourceConnection,
   simulateAlertOrchestration,
   replayOpenPlatformWebhook,
   deleteOpenPlatformWebhook,
+  OPEN_PLATFORM_QUALITY_AUTOMATION_TOOL_ID,
+  publishSystemConfigPackage,
+  simulateOpenPlatformAutomationPolicy,
+  upsertOpenPlatformAutomationPolicy,
   upsertOpenPlatformApiKey,
   upsertOpenPlatformWebhook,
   upsertMcpPolicy,
   upsertAlertOrchestrationRule,
   upsertResidencyPolicy,
+  upsertResidencyKmsKeyMappings,
+  upsertResidencyArchiveRegionPolicies,
   updateAlertStatus,
   updateSource,
   upsertPricingCatalog,
 } from "./api";
 import type {
+  AlertExternalLinkBatchRetryResponse,
+  AlertExternalLinkFailureResponse,
+  AlertExternalLinkOpsResponse,
+  IntegrationAlertFailureReportResponse,
+  IntegrationAlertFailureTrendResponse,
+  IntegrationDlqMessageListResponse,
+  IntegrationDlqRecoveryJob,
+  IntegrationDlqRecoveryJobListResponse,
   AlertOrchestrationChannel,
   AlertOrchestrationDispatchMode,
+  AlertOrchestrationEscalationReason,
   AlertOrchestrationEventType,
   AlertOrchestrationExecutionListInput,
   AlertOrchestrationExecutionLog,
@@ -100,6 +157,14 @@ import type {
   AlertMutableStatus,
   AlertSeverity,
   AlertStatus,
+  AgentRelease,
+  AgentRuntimeConfigResponse,
+  AgentRuntimeView,
+  AgentReleaseArtifact,
+  AgentReleaseCheckBatchPreviewResponse,
+  AgentReleaseBatchCheckSampleInput,
+  AgentReleaseChannel,
+  AgentReleaseCheckPreviewResponse,
   AuthProviderItem,
   AuthLoginInput,
   CreateSourceInput,
@@ -107,6 +172,15 @@ import type {
   ExportFormat,
   HeatmapCell,
   McpApprovalRequest,
+  McpApprovalConfig,
+  McpApprovalMode,
+  McpApprovalStage,
+  McpApprovalWorkflowCondition,
+  McpApprovalWorkflow,
+  McpApprovalWorkflowNode,
+  McpApprovalWorkflowNodeSnapshot,
+  McpApprovalWorkflowTransition,
+  McpApprovalWorkflowTransitionPreview,
   McpInvocationAudit,
   McpRiskLevel,
   McpToolDecision,
@@ -116,8 +190,14 @@ import type {
   PricingCatalogUpsertInput,
   OpenPlatformApiKey,
   OpenPlatformApiKeyStatus,
+  OpenPlatformAutomationPolicy,
+  OpenPlatformAutomationPolicySimulationResponse,
+  OpenPlatformAutomationStrategyRule,
   OpenPlatformOpenApiSummary,
+  OpenPlatformQualityAdviceItem,
+  OpenPlatformQualityAdviceExecution,
   OpenPlatformQualityDailyItem,
+  OpenPlatformQualityForecastItem,
   OpenPlatformQualityProjectTrendItem,
   OpenPlatformQualityProjectTrendResponse,
   OpenPlatformQualityDailyResponse,
@@ -125,12 +205,19 @@ import type {
   OpenPlatformReplayArtifact,
   OpenPlatformReplayDataset,
   OpenPlatformReplayDatasetCase,
+  OpenPlatformReplayDatasetVersion,
   OpenPlatformReplayDiffItem,
   OpenPlatformReplayDatasetMaterializeResponse,
+  OpenPlatformReplayExperiment,
+  OpenPlatformReplayExperimentBatchCompareResponse,
+  OpenPlatformReplayExperimentCompareResponse,
   OpenPlatformReplayRun,
   OpenPlatformReplayJobStatus,
+  OpenPlatformReplayExperimentWorkflowResponse,
   OpenPlatformWebhook,
   RegionDescriptor,
+  ResidencyArchiveRegionPolicy,
+  ResidencyKmsKeyMapping,
   ReplicationJob,
   ReplicationJobStatus,
   RuleApproval,
@@ -139,6 +226,10 @@ import type {
   RuleAssetVersionDiffResponse,
   RuleAssetVersion,
   RuleLifecycleStatus,
+  SystemConfigPackage,
+  SystemConfigPackageCreateInput,
+  SystemConfigPackageApproval,
+  SystemConfigPackageApprovalDecision,
   TokenPulseRuntimeEvent,
   TokenPulseRuntimeEventStatus,
   Session,
@@ -166,6 +257,7 @@ type ConsoleRoute =
   | "sessions"
   | "analytics"
   | "governance"
+  | "agents"
   | "sources"
   | "pricing";
 
@@ -198,6 +290,12 @@ const ROUTE_ITEMS: Array<{
     label: "Governance",
     title: "治理中心",
     subtitle: "告警工作台与导出入口。",
+  },
+  {
+    key: "agents",
+    label: "Agents",
+    title: "Agent 守护视图",
+    subtitle: "查看守护状态、最近心跳与运行时配置。",
   },
   {
     key: "sources",
@@ -318,6 +416,7 @@ const ALERT_ORCHESTRATION_CHANNEL_OPTIONS: Array<{
   { value: "feishu", label: "feishu" },
   { value: "email", label: "email" },
   { value: "email_webhook", label: "email_webhook" },
+  { value: "incident", label: "incident" },
   { value: "ticket", label: "ticket" },
 ];
 
@@ -335,6 +434,10 @@ const ALERT_ORCHESTRATION_DISPATCH_MODE_OPTIONS: Array<
   { value: "rule", label: "rule" },
   { value: "fallback", label: "fallback" },
 ];
+
+const ALERT_ORCHESTRATION_ESCALATION_REASON_OPTIONS: Array<
+  { value: ""; label: string } | { value: AlertOrchestrationEscalationReason; label: string }
+> = [{ value: "", label: "全部升级原因" }, { value: "sla_timeout", label: "sla_timeout" }];
 
 const ALERT_ORCHESTRATION_ENABLED_FILTER_OPTIONS: Array<
   | {
@@ -470,6 +573,12 @@ const MCP_DECISION_OPTIONS: Array<{ value: McpToolDecision; label: string }> = [
   { value: "allow", label: "allow" },
   { value: "deny", label: "deny" },
   { value: "require_approval", label: "require_approval" },
+];
+
+const MCP_APPROVAL_MODE_OPTIONS: Array<{ value: McpApprovalMode; label: string }> = [
+  { value: "single_stage", label: "single_stage" },
+  { value: "two_stage", label: "two_stage" },
+  { value: "multi_stage", label: "multi_stage" },
 ];
 
 const MCP_APPROVAL_STATUS_FILTER_OPTIONS: Array<
@@ -797,6 +906,21 @@ function formatOptionalDateTime(isoDate: string | null): string {
   return isoDate ? formatDateTime(isoDate) : "--";
 }
 
+function formatAgentRuntimeStatus(
+  status: AgentRuntimeView["runtimeStatus"],
+): string {
+  switch (status) {
+    case "online":
+      return "在线";
+    case "stale":
+      return "陈旧";
+    case "never_seen":
+      return "未上报";
+    default:
+      return status;
+  }
+}
+
 function formatSourceFreshness(item: SessionSourceFreshness): string {
   const sourceLabel = item.sourceName ?? item.sourceId;
   const freshnessLabel =
@@ -853,6 +977,93 @@ function parseBooleanSelect(value: "" | "true" | "false"): boolean | undefined {
   return undefined;
 }
 
+function buildResidencyPolicyHydrationSignature(policy: {
+  mode: DataResidencyMode;
+  primaryRegion: string;
+  replicaRegions: string[];
+  allowCrossRegionTransfer: boolean;
+  requireTransferApproval: boolean;
+  updatedAt: string;
+}): string {
+  return JSON.stringify({
+    mode: policy.mode,
+    primaryRegion: policy.primaryRegion,
+    replicaRegions: [...policy.replicaRegions].sort(),
+    allowCrossRegionTransfer: policy.allowCrossRegionTransfer,
+    requireTransferApproval: policy.requireTransferApproval,
+    updatedAt: policy.updatedAt,
+  });
+}
+
+function parseDistinctCommaSeparatedList(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item, index, items) => item.length > 0 && items.indexOf(item) === index);
+}
+
+function formatAlertExternalLinks(
+  externalLinks: AlertItem["externalLinks"],
+): string {
+  if (!Array.isArray(externalLinks) || externalLinks.length === 0) {
+    return "--";
+  }
+  return externalLinks
+    .map((item) => {
+      const parts = [`${item.externalType}:${item.externalId}`];
+      if (item.externalStatus) {
+        parts.push(`status=${item.externalStatus}`);
+      }
+      if (item.pendingExternalStatus) {
+        parts.push(`pending=${item.pendingExternalStatus}`);
+      }
+      if (item.publishStatus) {
+        parts.push(`publish=${item.publishStatus}`);
+      }
+      if (item.publishError) {
+        parts.push(`publishError=${item.publishError}`);
+      }
+      if (item.lastSyncResult) {
+        parts.push(`sync=${item.lastSyncResult}`);
+      }
+      if (item.lastSyncError) {
+        parts.push(`error=${item.lastSyncError}`);
+      }
+      if (item.lastSyncFailureStage) {
+        parts.push(`stage=${item.lastSyncFailureStage}`);
+      }
+      if (item.lastSyncFailureCode) {
+        parts.push(`code=${item.lastSyncFailureCode}`);
+      }
+      return parts.join(" ");
+    })
+    .join(" | ");
+}
+
+type AlertExternalLinkItem = NonNullable<AlertItem["externalLinks"]>[number];
+
+function resolveAlertExternalLinkDesiredStatus(
+  alertStatus: AlertStatus,
+  link: AlertExternalLinkItem,
+): string {
+  const pending = link.pendingExternalStatus?.trim();
+  if (pending) {
+    return pending;
+  }
+  return alertStatus;
+}
+
+function isAlertExternalLinkRetryable(
+  alertStatus: AlertStatus,
+  link: AlertExternalLinkItem,
+): boolean {
+  if (link.publishStatus === "failed" || link.lastSyncResult === "failed") {
+    return true;
+  }
+  return resolveAlertExternalLinkDesiredStatus(alertStatus, link) !==
+    (link.externalStatus ?? "");
+}
+
 function parseOptionalNonNegativeInteger(value: string): number | undefined {
   if (value.trim().length === 0) {
     return undefined;
@@ -897,6 +1108,673 @@ function buildRuleScopeBindingInput(input: {
   };
 }
 
+type McpWorkflowNodeDraft = {
+  nodeId: string;
+  label: string;
+  stage: string;
+  requiredApprovals: string;
+  roles: string;
+};
+
+type McpWorkflowTransitionDraft = {
+  fromNodeId: string;
+  toNodeId: string;
+  mode: "default" | "conditional";
+  riskLevelAtLeast: "" | McpRiskLevel;
+  toolIds: string;
+  tenantRoles: string;
+  timeWindowTimezone: string;
+  timeWindowWeekdays: string;
+  timeWindowStartTime: string;
+  timeWindowEndTime: string;
+};
+
+function createDefaultMcpWorkflowNodeDraft(index: number): McpWorkflowNodeDraft {
+  return {
+    nodeId: `stage${index + 1}-node`,
+    label: `Stage ${index + 1}`,
+    stage: `stage${index + 1}`,
+    requiredApprovals: "1",
+    roles: index === 0 ? "owner,maintainer" : "owner",
+  };
+}
+
+function createDefaultMcpWorkflowDraftState(): {
+  entryNodeId: string;
+  nodes: McpWorkflowNodeDraft[];
+  transitions: McpWorkflowTransitionDraft[];
+} {
+  const firstNode = createDefaultMcpWorkflowNodeDraft(0);
+  return {
+    entryNodeId: firstNode.nodeId,
+    nodes: [firstNode],
+    transitions: [
+      {
+        fromNodeId: firstNode.nodeId,
+        toNodeId: "approved",
+        mode: "default",
+        riskLevelAtLeast: "",
+        toolIds: "",
+        tenantRoles: "",
+        timeWindowTimezone: "",
+        timeWindowWeekdays: "",
+        timeWindowStartTime: "",
+        timeWindowEndTime: "",
+      },
+    ],
+  };
+}
+
+function buildMcpWorkflowFromDraft(input: {
+  entryNodeId: string;
+  nodes: McpWorkflowNodeDraft[];
+  transitions: McpWorkflowTransitionDraft[];
+}): { success: true; data: McpApprovalWorkflow } | { success: false; message: string } {
+  if (input.nodes.length === 0) {
+    return { success: false, message: "至少需要一个审批节点。" };
+  }
+  const nodes: McpApprovalWorkflowNode[] = [];
+  const nodeIds = new Set<string>();
+  for (const [index, node] of input.nodes.entries()) {
+    const nodeId = node.nodeId.trim();
+    const stage = node.stage.trim();
+    const requiredApprovals = Number(node.requiredApprovals);
+    const roles = parseDistinctCommaSeparatedList(node.roles);
+    if (
+      !nodeId ||
+      !stage ||
+      !/^stage[1-9]\d*$/.test(stage) ||
+      nodeIds.has(nodeId) ||
+      !Number.isInteger(requiredApprovals) ||
+      requiredApprovals < 1 ||
+      roles.length === 0
+    ) {
+      return { success: false, message: `审批节点 ${index + 1} 配置非法。` };
+    }
+    nodeIds.add(nodeId);
+    nodes.push({
+      nodeId,
+      kind: "approval",
+      label: node.label.trim() || undefined,
+      stage: stage as McpApprovalStage,
+      requiredApprovals,
+      roles,
+    });
+  }
+  if (!nodeIds.has(input.entryNodeId)) {
+    return { success: false, message: "入口节点必须命中一个审批节点。" };
+  }
+  const terminalNodeIds = new Set(["approved", "rejected"]);
+  const transitions: McpApprovalWorkflowTransition[] = [];
+  for (const [index, transition] of input.transitions.entries()) {
+    const fromNodeId = transition.fromNodeId.trim();
+    const toNodeId = transition.toNodeId.trim();
+    if (
+      !fromNodeId ||
+      !toNodeId ||
+      !nodeIds.has(fromNodeId) ||
+      (!nodeIds.has(toNodeId) && !terminalNodeIds.has(toNodeId))
+    ) {
+      return { success: false, message: `转移 ${index + 1} 非法。` };
+    }
+    const condition =
+      transition.mode === "default"
+        ? { default: true }
+        : (() => {
+            const timeWindowTimezone = transition.timeWindowTimezone.trim();
+            const timeWindowStartTime = transition.timeWindowStartTime.trim();
+            const timeWindowEndTime = transition.timeWindowEndTime.trim();
+            const timeWindowWeekdays = transition.timeWindowWeekdays
+              .split(",")
+              .map((item) => item.trim())
+              .filter((item) => item.length > 0)
+              .map((item) => Number(item));
+            if (
+              [timeWindowTimezone, timeWindowStartTime, timeWindowEndTime].some(
+                (item) => item.length > 0,
+              ) &&
+              (!timeWindowTimezone ||
+                !timeWindowStartTime ||
+                !timeWindowEndTime ||
+                !/^\d{2}:\d{2}$/.test(timeWindowStartTime) ||
+                !/^\d{2}:\d{2}$/.test(timeWindowEndTime) ||
+                timeWindowWeekdays.some(
+                  (item) =>
+                    !Number.isInteger(item) || item < 1 || item > 7,
+                ))
+            ) {
+              return "invalid" as const;
+            }
+            return {
+              ...(transition.riskLevelAtLeast
+                ? { riskLevelAtLeast: transition.riskLevelAtLeast }
+                : {}),
+              ...(parseDistinctCommaSeparatedList(transition.toolIds).length > 0
+                ? { toolIds: parseDistinctCommaSeparatedList(transition.toolIds) }
+                : {}),
+              ...(parseDistinctCommaSeparatedList(transition.tenantRoles).length > 0
+                ? { tenantRoles: parseDistinctCommaSeparatedList(transition.tenantRoles) }
+                : {}),
+              ...(timeWindowTimezone &&
+              timeWindowStartTime &&
+              timeWindowEndTime
+                ? {
+                    timeWindow: {
+                      timezone: timeWindowTimezone,
+                      ...(timeWindowWeekdays.length > 0
+                        ? {
+                            weekdays: Array.from(new Set(timeWindowWeekdays)),
+                          }
+                        : {}),
+                      startTime: timeWindowStartTime,
+                      endTime: timeWindowEndTime,
+                    },
+                  }
+                : {}),
+            };
+          })();
+    if (condition === "invalid") {
+      return { success: false, message: `转移 ${index + 1} 的 timeWindow 配置非法。` };
+    }
+    transitions.push({
+      fromNodeId,
+      toNodeId,
+      condition,
+    });
+  }
+  for (const node of nodes) {
+    const outgoing = transitions.filter((item) => item.fromNodeId === node.nodeId);
+    if (outgoing.length === 0) {
+      return { success: false, message: `审批节点 ${node.nodeId} 缺少转移。` };
+    }
+    if (outgoing.filter((item) => item.condition?.default === true).length !== 1) {
+      return { success: false, message: `审批节点 ${node.nodeId} 必须且仅能有一条 default 转移。` };
+    }
+  }
+  return {
+    success: true,
+    data: {
+      entryNodeId: input.entryNodeId,
+      nodes: [
+        ...nodes,
+        { nodeId: "approved", kind: "terminal_approved", label: "Approved" },
+        { nodeId: "rejected", kind: "terminal_rejected", label: "Rejected" },
+      ],
+      transitions,
+    },
+  };
+}
+
+function buildMcpWorkflowDraftFromWorkflow(
+  workflow?: McpApprovalWorkflow,
+): {
+  entryNodeId: string;
+  nodes: McpWorkflowNodeDraft[];
+  transitions: McpWorkflowTransitionDraft[];
+} {
+  if (!workflow) {
+    return createDefaultMcpWorkflowDraftState();
+  }
+  const nodes = workflow.nodes
+    .filter((node) => node.kind === "approval")
+    .map((node, index) => ({
+      nodeId: node.nodeId,
+      label: node.label ?? "",
+      stage: node.stage ?? `stage${index + 1}`,
+      requiredApprovals: String(node.requiredApprovals ?? 1),
+      roles: (node.roles ?? []).join(","),
+    }));
+  const transitions = workflow.transitions
+    .filter((item) => item.fromNodeId !== "approved" && item.fromNodeId !== "rejected")
+    .map((transition) => ({
+      fromNodeId: transition.fromNodeId,
+      toNodeId: transition.toNodeId,
+      mode: (transition.condition?.default === true ? "default" : "conditional") as
+        | "default"
+        | "conditional",
+      riskLevelAtLeast: (transition.condition?.riskLevelAtLeast ?? "") as "" | McpRiskLevel,
+      toolIds: (transition.condition?.toolIds ?? []).join(","),
+      tenantRoles: (transition.condition?.tenantRoles ?? []).join(","),
+      timeWindowTimezone: transition.condition?.timeWindow?.timezone ?? "",
+      timeWindowWeekdays: (transition.condition?.timeWindow?.weekdays ?? []).join(","),
+      timeWindowStartTime: transition.condition?.timeWindow?.startTime ?? "",
+      timeWindowEndTime: transition.condition?.timeWindow?.endTime ?? "",
+    }));
+  return {
+    entryNodeId: workflow.entryNodeId,
+    nodes: nodes.length > 0 ? nodes : createDefaultMcpWorkflowDraftState().nodes,
+    transitions:
+      transitions.length > 0 ? transitions : createDefaultMcpWorkflowDraftState().transitions,
+  };
+}
+
+function buildStaticMcpApprovalStages(
+  mode: McpApprovalMode,
+  stage1RequiredApprovals: number | undefined,
+  stage2RequiredApprovals: number | undefined,
+  stage1Roles: string[],
+  stage2Roles: string[],
+): Array<{
+  stage: McpApprovalStage;
+  requiredApprovals: number;
+  roles: string[];
+}> {
+  return [
+    {
+      stage: "stage1",
+      requiredApprovals: stage1RequiredApprovals ?? 1,
+      roles:
+        stage1Roles.length > 0 ? stage1Roles : ["owner", "maintainer"],
+    },
+    ...(mode === "two_stage"
+      ? [
+          {
+            stage: "stage2" as McpApprovalStage,
+            requiredApprovals: stage2RequiredApprovals ?? 1,
+            roles: stage2Roles.length > 0 ? stage2Roles : ["owner"],
+          },
+        ]
+      : []),
+  ];
+}
+
+function stringifyStaticMcpApprovalStages(
+  mode: McpApprovalMode,
+  stage1RequiredApprovals: number | undefined,
+  stage2RequiredApprovals: number | undefined,
+  stage1Roles: string[],
+  stage2Roles: string[],
+): string {
+  return JSON.stringify(
+    buildStaticMcpApprovalStages(
+      mode,
+      stage1RequiredApprovals,
+      stage2RequiredApprovals,
+      stage1Roles,
+      stage2Roles,
+    ),
+    null,
+    2,
+  );
+}
+
+function parseMcpApprovalStagesJson(
+  rawValue: string,
+): { success: true; data: Array<{
+  nodeId?: string;
+  stage: McpApprovalStage;
+  label?: string;
+  requiredApprovals: number;
+  roles: string[];
+}> } | { success: false; message: string } {
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return { success: false, message: "approvalStages JSON 不能为空。" };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return { success: false, message: "approvalStages JSON 不是合法 JSON。" };
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    return { success: false, message: "approvalStages JSON 必须是非空数组。" };
+  }
+  const stages: Array<{
+    nodeId?: string;
+    stage: McpApprovalStage;
+    label?: string;
+    requiredApprovals: number;
+    roles: string[];
+  }> = [];
+  const seenStages = new Set<string>();
+  for (const [index, item] of parsed.entries()) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return { success: false, message: `approvalStages[${index}] 必须是对象。` };
+    }
+    const record = item as Record<string, unknown>;
+    const stageValue =
+      typeof record.stage === "string" && record.stage.trim().length > 0
+        ? record.stage.trim()
+        : `stage${index + 1}`;
+    if (!/^stage[1-9]\d*$/.test(stageValue) || seenStages.has(stageValue)) {
+      return { success: false, message: `approvalStages[${index}].stage 非法或重复。` };
+    }
+    const requiredApprovals = Number(record.requiredApprovals);
+    const roles =
+      Array.isArray(record.roles) &&
+      record.roles.every((role) => typeof role === "string" && role.trim().length > 0)
+        ? Array.from(
+            new Set(record.roles.map((role) => String(role).trim())),
+          )
+        : null;
+    if (!Number.isInteger(requiredApprovals) || requiredApprovals < 1 || !roles || roles.length === 0) {
+      return {
+        success: false,
+        message: `approvalStages[${index}] 的 requiredApprovals/roles 非法。`,
+      };
+    }
+    seenStages.add(stageValue);
+    const nodeId =
+      typeof record.nodeId === "string" && record.nodeId.trim().length > 0
+        ? record.nodeId.trim()
+        : undefined;
+    const label =
+      typeof record.label === "string" && record.label.trim().length > 0
+        ? record.label.trim()
+        : undefined;
+    stages.push({
+      nodeId,
+      stage: stageValue as McpApprovalStage,
+      label,
+      requiredApprovals,
+      roles,
+    });
+  }
+  return { success: true, data: stages };
+}
+
+function parseQualityAutomationStrategyMatrixJson(
+  rawValue: string,
+): { success: true; data: OpenPlatformAutomationStrategyRule[] } | { success: false; message: string } {
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return { success: true, data: [] };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return { success: false, message: "strategyMatrix JSON 不是合法 JSON。" };
+  }
+  if (!Array.isArray(parsed)) {
+    return { success: false, message: "strategyMatrix JSON 必须是数组。" };
+  }
+  const metricSet = new Set(["accuracy", "consistency", "groundedness", "safety", "latency"]);
+  const severitySet = new Set(["info", "warn", "critical"]);
+  const trendDirectionSet = new Set(["up", "down", "flat"]);
+  const rules: OpenPlatformAutomationStrategyRule[] = [];
+  for (const [index, item] of parsed.entries()) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return { success: false, message: `strategyMatrix[${index}] 必须是对象。` };
+    }
+    const record = item as Record<string, unknown>;
+    const id =
+      typeof record.id === "string" && record.id.trim().length > 0
+        ? record.id.trim()
+        : `rule-${index + 1}`;
+    const actionType =
+      record.actionType === "scorecard_adjustment" ||
+      record.actionType === "replay_experiment"
+        ? record.actionType
+        : null;
+    const requiresApproval =
+      typeof record.requiresApproval === "boolean" ? record.requiresApproval : null;
+    const reason =
+      typeof record.reason === "string" && record.reason.trim().length > 0
+        ? record.reason.trim()
+        : null;
+    if (!actionType || requiresApproval === null || !reason) {
+      return {
+        success: false,
+        message: `strategyMatrix[${index}] 的 actionType/requiresApproval/reason 非法。`,
+      };
+    }
+    const metric =
+      record.metric === undefined
+        ? undefined
+        : typeof record.metric === "string" && metricSet.has(record.metric.trim())
+          ? record.metric.trim()
+          : null;
+    if (metric === null) {
+      return {
+        success: false,
+        message: `strategyMatrix[${index}] 的 metric 非法。`,
+      };
+    }
+    const severity =
+      record.severity === undefined
+        ? undefined
+        : typeof record.severity === "string" && severitySet.has(record.severity)
+          ? (record.severity as "info" | "warn" | "critical")
+          : null;
+    if (severity === null) {
+      return {
+        success: false,
+        message: `strategyMatrix[${index}] 的 severity 非法。`,
+      };
+    }
+    const trendDirection =
+      record.trendDirection === undefined
+        ? undefined
+        : typeof record.trendDirection === "string" && trendDirectionSet.has(record.trendDirection)
+          ? (record.trendDirection as "up" | "down" | "flat")
+          : null;
+    if (trendDirection === null) {
+      return {
+        success: false,
+        message: `strategyMatrix[${index}] 的 trendDirection 非法。`,
+      };
+    }
+    const stringFieldOrUndefined = (value: unknown, field: string) => {
+      if (value === undefined || value === null) {
+        return { ok: true as const, value: undefined };
+      }
+      if (typeof value !== "string" || value.trim().length === 0) {
+        return { ok: false as const, message: `strategyMatrix[${index}] 的 ${field} 不能为空字符串。` };
+      }
+      return { ok: true as const, value: value.trim() };
+    };
+    const providerResult = stringFieldOrUndefined(record.provider, "provider");
+    if (!providerResult.ok) {
+      return { success: false, message: providerResult.message };
+    }
+    const workflowResult = stringFieldOrUndefined(record.workflow, "workflow");
+    if (!workflowResult.ok) {
+      return { success: false, message: workflowResult.message };
+    }
+    const projectPatternResult = stringFieldOrUndefined(record.projectPattern, "projectPattern");
+    if (!projectPatternResult.ok) {
+      return { success: false, message: projectPatternResult.message };
+    }
+    const numericOrUndefined = (
+      value: unknown,
+      options: { field: string; integer?: boolean; min?: number; max?: number },
+    ) => {
+      if (value === undefined || value === null || value === "") {
+        return { ok: true as const, value: undefined };
+      }
+      const parsedNumber = Number(value);
+      if (!Number.isFinite(parsedNumber)) {
+        return { ok: false as const, message: `strategyMatrix[${index}].${options.field} 必须是数字。` };
+      }
+      if (options.integer && !Number.isInteger(parsedNumber)) {
+        return { ok: false as const, message: `strategyMatrix[${index}].${options.field} 必须是非负整数。` };
+      }
+      if (options.min !== undefined && parsedNumber < options.min) {
+        return { ok: false as const, message: `strategyMatrix[${index}].${options.field} 必须大于等于 ${options.min}。` };
+      }
+      if (options.max !== undefined && parsedNumber > options.max) {
+        return { ok: false as const, message: `strategyMatrix[${index}].${options.field} 必须小于等于 ${options.max}。` };
+      }
+      return { ok: true as const, value: parsedNumber };
+    };
+    const minConfidenceResult = numericOrUndefined(record.minConfidence, {
+      field: "minConfidence",
+      min: 0,
+      max: 1,
+    });
+    if (!minConfidenceResult.ok) {
+      return { success: false, message: minConfidenceResult.message };
+    }
+    const regressionProbabilityResult = numericOrUndefined(
+      record.regressionProbabilityAtLeast,
+      {
+        field: "regressionProbabilityAtLeast",
+        min: 0,
+        max: 1,
+      },
+    );
+    if (!regressionProbabilityResult.ok) {
+      return { success: false, message: regressionProbabilityResult.message };
+    }
+    const replayRegressionResult = numericOrUndefined(record.replayRegressionAtLeast, {
+      field: "replayRegressionAtLeast",
+      integer: true,
+      min: 0,
+    });
+    if (!replayRegressionResult.ok) {
+      return { success: false, message: replayRegressionResult.message };
+    }
+    const cooldownResult = numericOrUndefined(record.cooldownMinutes, {
+      field: "cooldownMinutes",
+      integer: true,
+      min: 0,
+    });
+    if (!cooldownResult.ok) {
+      return { success: false, message: cooldownResult.message };
+    }
+    rules.push({
+      id,
+      metric,
+      severity,
+      trendDirection,
+      provider: providerResult.value,
+      workflow: workflowResult.value,
+      projectPattern: projectPatternResult.value,
+      minConfidence: minConfidenceResult.value,
+      regressionProbabilityAtLeast: regressionProbabilityResult.value,
+      replayRegressionAtLeast: replayRegressionResult.value,
+      actionType,
+      requiresApproval,
+      cooldownMinutes: cooldownResult.value,
+      reason,
+    });
+  }
+  return { success: true, data: rules };
+}
+
+function resolveMcpStaticApprovalConfig(input: {
+  mode: McpApprovalMode;
+  approvalStagesJson: string;
+  approvalStagesJsonTouched: boolean;
+  stage1RequiredApprovals: number | undefined;
+  stage2RequiredApprovals: number | undefined;
+  stage1Roles: string[];
+  stage2Roles: string[];
+}): { success: true; approvalStages: Array<{
+  nodeId?: string;
+  stage: McpApprovalStage;
+  label?: string;
+  requiredApprovals: number;
+  roles: string[];
+}> } | { success: false; message: string } {
+  if (!input.approvalStagesJsonTouched) {
+    return {
+      success: true,
+      approvalStages: buildStaticMcpApprovalStages(
+        input.mode,
+        input.stage1RequiredApprovals,
+        input.stage2RequiredApprovals,
+        input.stage1Roles,
+        input.stage2Roles,
+      ),
+    };
+  }
+  const parsed = parseMcpApprovalStagesJson(input.approvalStagesJson);
+  if (!parsed.success) {
+    return parsed;
+  }
+  const expectedStageCount = input.mode === "two_stage" ? 2 : 1;
+  if (parsed.data.length !== expectedStageCount) {
+    return {
+      success: false,
+      message: `approvalStages JSON 与 ${input.mode} 阶段数不一致。`,
+    };
+  }
+  return {
+    success: true,
+    approvalStages: parsed.data,
+  };
+}
+
+function formatMcpApprovalWorkflowSummary(workflow?: McpApprovalWorkflow): string {
+  if (!workflow) {
+    return "--";
+  }
+  const nodes = workflow.nodes
+    .filter((node) => node.kind === "approval")
+    .map((node) => `${node.stage ?? node.nodeId}:${node.requiredApprovals ?? 1}`);
+  return `${workflow.entryNodeId} / ${nodes.join(" -> ")}`;
+}
+
+function formatMcpPathHistory(pathHistory?: string[]): string {
+  return Array.isArray(pathHistory) && pathHistory.length > 0
+    ? pathHistory.join(" -> ")
+    : "--";
+}
+
+function formatMcpWorkflowCondition(
+  condition?: McpApprovalWorkflowCondition,
+): string {
+  if (!condition) {
+    return "--";
+  }
+  if (condition.default === true) {
+    return "default";
+  }
+  const parts: string[] = [];
+  if (condition.riskLevelAtLeast) {
+    parts.push(`risk>=${condition.riskLevelAtLeast}`);
+  }
+  if (condition.toolIds && condition.toolIds.length > 0) {
+    parts.push(`tools=${condition.toolIds.join(",")}`);
+  }
+  if (condition.tenantRoles && condition.tenantRoles.length > 0) {
+    parts.push(`roles=${condition.tenantRoles.join(",")}`);
+  }
+  if (condition.timeWindow) {
+    parts.push(
+      `time=${condition.timeWindow.timezone} ${condition.timeWindow.startTime}-${condition.timeWindow.endTime}${
+        condition.timeWindow.weekdays && condition.timeWindow.weekdays.length > 0
+          ? ` [${condition.timeWindow.weekdays.join(",")}]`
+          : ""
+      }`,
+    );
+  }
+  return parts.length > 0 ? parts.join(" | ") : "--";
+}
+
+function formatMcpTransitionPreview(
+  preview?: McpApprovalWorkflowTransitionPreview,
+): string {
+  if (!preview) {
+    return "--";
+  }
+  return `${preview.fromNodeId} -> ${preview.toNodeId ?? "--"} / ${
+    preview.matched ? preview.matchedBy ?? "condition" : "unmatched"
+  } / ${formatMcpWorkflowCondition(preview.condition)}`;
+}
+
+function formatMcpApprovalStages(
+  stages:
+    | Array<{
+        stage?: string;
+        requiredApprovals: number;
+        roles: string[];
+      }>
+    | undefined,
+): string {
+  if (!Array.isArray(stages) || stages.length === 0) {
+    return "--";
+  }
+  return stages
+    .map((stage, index) =>
+      `${stage.stage ?? `stage${index + 1}`}:${stage.requiredApprovals}(${stage.roles.join(",")})`,
+    )
+    .join(" | ");
+}
+
 function formatRuleScopeBinding(
   scopeBinding: RuleAsset["scopeBinding"],
 ): string {
@@ -920,6 +1798,50 @@ function formatRuleScopeBinding(
 
   return segments.length > 0 ? segments.join(" | ") : "全局";
 }
+
+function formatSystemConfigTargetSelectors(
+  selectors: SystemConfigPackage["targetSelectors"],
+): string {
+  const segments: string[] = [];
+  if (Array.isArray(selectors.agentIds) && selectors.agentIds.length > 0) {
+    segments.push(`agentIds: ${selectors.agentIds.join(", ")}`);
+  }
+  if (Array.isArray(selectors.deviceIds) && selectors.deviceIds.length > 0) {
+    segments.push(`deviceIds: ${selectors.deviceIds.join(", ")}`);
+  }
+  if (Array.isArray(selectors.channels) && selectors.channels.length > 0) {
+    segments.push(`channels: ${selectors.channels.join(", ")}`);
+  }
+  if (Array.isArray(selectors.hostnames) && selectors.hostnames.length > 0) {
+    segments.push(`hostnames: ${selectors.hostnames.join(", ")}`);
+  }
+  return segments.length > 0 ? segments.join(" | ") : "全量";
+}
+
+function formatAgentReleaseArtifactSummary(
+  artifact: AgentRelease["artifacts"][number],
+): string {
+  const segments = [`${artifact.os}/${artifact.arch}`];
+  if (artifact.rolloutRing) {
+    segments.push(`ring=${artifact.rolloutRing}`);
+  }
+  if (typeof artifact.rolloutPercentage === "number") {
+    segments.push(`pct=${artifact.rolloutPercentage}`);
+  }
+  if (artifact.minAgentVersion) {
+    segments.push(`min=${artifact.minAgentVersion}`);
+  }
+  if (artifact.signatureAlgorithm) {
+    segments.push(`sig=${artifact.signatureAlgorithm}`);
+  }
+  return segments.join(" | ");
+}
+
+type SystemConfigCreateFormSource = {
+  packageId: string;
+  version: string;
+  mode: "loaded" | "clone";
+};
 
 function formatRuleRequiredApprovals(
   requiredApprovals: RuleAsset["requiredApprovals"],
@@ -2577,6 +3499,7 @@ function AnalyticsPage() {
             </tbody>
           </table>
         </div>
+
       </section>
 
       <section className="panel">
@@ -2669,6 +3592,7 @@ function AnalyticsPage() {
             </tbody>
           </table>
         </div>
+
       </section>
 
       <section className="panel">
@@ -2811,6 +3735,88 @@ function GovernancePage() {
   const [statusFilter, setStatusFilter] = useState<AlertStatus | "">("");
   const [severityFilter, setSeverityFilter] = useState<AlertSeverity | "">("");
   const [alertFeedback, setAlertFeedback] = useState<string | null>(null);
+  const [selectedAlertOpsAlertId, setSelectedAlertOpsAlertId] = useState<string | null>(
+    null,
+  );
+  const [alertOpsOnlyFailed, setAlertOpsOnlyFailed] = useState(true);
+  const [alertOpsExternalType, setAlertOpsExternalType] = useState<
+    "" | "ticket" | "case" | "incident"
+  >("");
+  const [alertOpsPayload, setAlertOpsPayload] =
+    useState<AlertExternalLinkOpsResponse | null>(null);
+  const [alertOpsError, setAlertOpsError] = useState<string | null>(null);
+  const [alertFailureAlertIdFilter, setAlertFailureAlertIdFilter] = useState("");
+  const [alertFailureExternalSystemFilter, setAlertFailureExternalSystemFilter] =
+    useState("");
+  const [alertFailureSyncStateFilter, setAlertFailureSyncStateFilter] = useState<
+    "" | "synced" | "pending" | "failed"
+  >("failed");
+  const [alertFailureLimit, setAlertFailureLimit] = useState("20");
+  const [alertFailurePayload, setAlertFailurePayload] =
+    useState<AlertExternalLinkFailureResponse | null>(null);
+  const [alertFailureError, setAlertFailureError] = useState<string | null>(null);
+  const [failureReportFrom, setFailureReportFrom] = useState("");
+  const [failureReportTo, setFailureReportTo] = useState("");
+  const [failureReportExternalSystem, setFailureReportExternalSystem] = useState("");
+  const [failureReportStage, setFailureReportStage] = useState("");
+  const [failureReportActionType, setFailureReportActionType] = useState<
+    | ""
+    | "retry_requested"
+    | "retry_completed"
+    | "retry_failed"
+    | "dlq_queried"
+    | "dlq_replayed"
+    | "recovery_job_created"
+    | "recovery_job_completed"
+    | "recovery_job_failed"
+  >("");
+  const [failureReportLimit, setFailureReportLimit] = useState("50");
+  const [failureReportPayload, setFailureReportPayload] =
+    useState<IntegrationAlertFailureReportResponse | null>(null);
+  const [failureReportError, setFailureReportError] = useState<string | null>(null);
+  const [failureTrendFrom, setFailureTrendFrom] = useState("");
+  const [failureTrendTo, setFailureTrendTo] = useState("");
+  const [failureTrendExternalSystem, setFailureTrendExternalSystem] = useState("");
+  const [failureTrendStage, setFailureTrendStage] = useState("");
+  const [failureTrendActionType, setFailureTrendActionType] = useState<
+    | ""
+    | "retry_requested"
+    | "retry_completed"
+    | "retry_failed"
+    | "dlq_queried"
+    | "dlq_replayed"
+    | "recovery_job_created"
+    | "recovery_job_completed"
+    | "recovery_job_failed"
+  >("");
+  const [failureTrendTop, setFailureTrendTop] = useState("5");
+  const [failureTrendPayload, setFailureTrendPayload] =
+    useState<IntegrationAlertFailureTrendResponse | null>(null);
+  const [failureTrendError, setFailureTrendError] = useState<string | null>(null);
+  const [integrationDlqEventTypeFilter, setIntegrationDlqEventTypeFilter] =
+    useState("");
+  const [integrationDlqChannelFilter, setIntegrationDlqChannelFilter] =
+    useState("");
+  const [integrationDlqAlertIdFilter, setIntegrationDlqAlertIdFilter] =
+    useState("");
+  const [integrationDlqCallbackIdFilter, setIntegrationDlqCallbackIdFilter] =
+    useState("");
+  const [integrationDlqLimit, setIntegrationDlqLimit] = useState("20");
+  const [integrationDlqPayload, setIntegrationDlqPayload] =
+    useState<IntegrationDlqMessageListResponse | null>(null);
+  const [integrationDlqError, setIntegrationDlqError] = useState<string | null>(
+    null,
+  );
+  const [selectedIntegrationDlqMessageIds, setSelectedIntegrationDlqMessageIds] =
+    useState<string[]>([]);
+  const [integrationDlqRecoveryJobsPayload, setIntegrationDlqRecoveryJobsPayload] =
+    useState<IntegrationDlqRecoveryJobListResponse | null>(null);
+  const [integrationDlqRecoveryJobDetail, setIntegrationDlqRecoveryJobDetail] =
+    useState<IntegrationDlqRecoveryJob | null>(null);
+  const [integrationDlqRecoveryJobId, setIntegrationDlqRecoveryJobId] =
+    useState("");
+  const [integrationDlqRecoveryError, setIntegrationDlqRecoveryError] =
+    useState<string | null>(null);
   const [
     orchestrationRuleEventTypeFilter,
     setOrchestrationRuleEventTypeFilter,
@@ -2898,6 +3904,14 @@ function GovernancePage() {
     orchestrationExecutionSimulatedFilter,
     setOrchestrationExecutionSimulatedFilter,
   ] = useState<"" | "true" | "false">("");
+  const [
+    orchestrationExecutionEscalatedFilter,
+    setOrchestrationExecutionEscalatedFilter,
+  ] = useState<"" | "true" | "false">("");
+  const [
+    orchestrationExecutionEscalationReasonFilter,
+    setOrchestrationExecutionEscalationReasonFilter,
+  ] = useState<AlertOrchestrationEscalationReason | "">("");
   const [orchestrationExecutionFrom, setOrchestrationExecutionFrom] =
     useState("");
   const [orchestrationExecutionTo, setOrchestrationExecutionTo] = useState("");
@@ -2943,6 +3957,119 @@ function GovernancePage() {
     null,
   );
   const [residencyError, setResidencyError] = useState<string | null>(null);
+  const [residencyKmsDrafts, setResidencyKmsDrafts] = useState<
+    ResidencyKmsKeyMapping[]
+  >([]);
+  const [residencyKmsRegionId, setResidencyKmsRegionId] = useState("");
+  const [residencyKmsProvider, setResidencyKmsProvider] = useState("");
+  const [residencyKmsKeyRef, setResidencyKmsKeyRef] = useState("");
+  const [residencyKmsEnabled, setResidencyKmsEnabled] = useState(true);
+  const [residencyKmsFeedback, setResidencyKmsFeedback] = useState<string | null>(
+    null,
+  );
+  const [residencyKmsError, setResidencyKmsError] = useState<string | null>(null);
+  const [residencyArchiveDrafts, setResidencyArchiveDrafts] = useState<
+    ResidencyArchiveRegionPolicy[]
+  >([]);
+  const [residencyArchiveSourceRegion, setResidencyArchiveSourceRegion] =
+    useState("");
+  const [residencyArchiveTargetRegion, setResidencyArchiveTargetRegion] =
+    useState("");
+  const [residencyArchiveClass, setResidencyArchiveClass] = useState("");
+  const [residencyArchiveEnabled, setResidencyArchiveEnabled] = useState(true);
+  const [residencyArchiveFeedback, setResidencyArchiveFeedback] = useState<
+    string | null
+  >(null);
+  const [residencyArchiveError, setResidencyArchiveError] = useState<string | null>(
+    null,
+  );
+
+  const [selectedSystemConfigPackageId, setSelectedSystemConfigPackageId] =
+    useState<string | null>(null);
+  const [systemConfigCreateVersion, setSystemConfigCreateVersion] = useState("");
+  const [systemConfigCreateIssuedAt, setSystemConfigCreateIssuedAt] = useState("");
+  const [systemConfigCreateSignatureStatus, setSystemConfigCreateSignatureStatus] =
+    useState("unknown");
+  const [systemConfigCreateRequiresApproval, setSystemConfigCreateRequiresApproval] =
+    useState(false);
+  const [systemConfigCreateRequiredApprovals, setSystemConfigCreateRequiredApprovals] =
+    useState<SystemConfigPackage["requiredApprovals"]>(0);
+  const [systemConfigCreateAgentIds, setSystemConfigCreateAgentIds] = useState("");
+  const [systemConfigCreateDeviceIds, setSystemConfigCreateDeviceIds] = useState("");
+  const [systemConfigCreateChannels, setSystemConfigCreateChannels] = useState("");
+  const [systemConfigCreateHostnames, setSystemConfigCreateHostnames] = useState("");
+  const [systemConfigCreatePayloadJson, setSystemConfigCreatePayloadJson] =
+    useState("{}");
+  const [systemConfigCreateFormSource, setSystemConfigCreateFormSource] =
+    useState<SystemConfigCreateFormSource | null>(null);
+  const [systemConfigApprovalDecision, setSystemConfigApprovalDecision] =
+    useState<SystemConfigPackageApprovalDecision>("approved");
+  const [systemConfigApprovalComment, setSystemConfigApprovalComment] =
+    useState("");
+  const [systemConfigWatchAgentId, setSystemConfigWatchAgentId] = useState("");
+  const [systemConfigWatchDeviceId, setSystemConfigWatchDeviceId] = useState("");
+  const [systemConfigWatchChannel, setSystemConfigWatchChannel] = useState("");
+  const [systemConfigWatchHostname, setSystemConfigWatchHostname] = useState("");
+  const [systemConfigWatchResult, setSystemConfigWatchResult] =
+    useState<SystemConfigPackage | null>(null);
+  const [systemConfigFeedback, setSystemConfigFeedback] = useState<string | null>(
+    null,
+  );
+  const [systemConfigError, setSystemConfigError] = useState<string | null>(null);
+  const [hasLoadedSystemConfigWatch, setHasLoadedSystemConfigWatch] =
+    useState(false);
+
+  const [agentReleaseChannelFilter, setAgentReleaseChannelFilter] =
+    useState<AgentReleaseChannel>("stable");
+  const [selectedAgentReleaseId, setSelectedAgentReleaseId] =
+    useState<string | null>(null);
+  const [agentReleasePreviewCurrentVersion, setAgentReleasePreviewCurrentVersion] =
+    useState("");
+  const [agentReleasePreviewOs, setAgentReleasePreviewOs] = useState("darwin");
+  const [agentReleasePreviewArch, setAgentReleasePreviewArch] = useState("amd64");
+  const [agentReleasePreviewAgentId, setAgentReleasePreviewAgentId] = useState("");
+  const [agentReleasePreviewDeviceId, setAgentReleasePreviewDeviceId] =
+    useState("");
+  const [agentReleasePreviewHostname, setAgentReleasePreviewHostname] =
+    useState("");
+  const [agentReleasePreviewRing, setAgentReleasePreviewRing] =
+    useState("stable");
+  const [agentReleasePreviewPayload, setAgentReleasePreviewPayload] =
+    useState<AgentReleaseCheckPreviewResponse | null>(null);
+  const [agentReleaseBatchOs, setAgentReleaseBatchOs] = useState("darwin");
+  const [agentReleaseBatchArch, setAgentReleaseBatchArch] = useState("amd64");
+  const [agentReleaseBatchSamplesJson, setAgentReleaseBatchSamplesJson] = useState(
+    JSON.stringify(
+      [
+        {
+          label: "stable-default",
+          currentVersion: "1.0.0",
+          agentId: "agent-stable-1",
+          deviceId: "device-stable-1",
+          hostname: "host-stable-1",
+          ring: "stable",
+        },
+        {
+          label: "beta-ring-1",
+          currentVersion: "1.0.0",
+          agentId: "agent-beta-1",
+          deviceId: "device-beta-1",
+          hostname: "host-beta-1",
+          ring: "beta-ring",
+        },
+      ],
+      null,
+      2,
+    ),
+  );
+  const [agentReleaseBatchPreviewPayload, setAgentReleaseBatchPreviewPayload] =
+    useState<AgentReleaseCheckBatchPreviewResponse | null>(null);
+  const [agentReleaseFeedback, setAgentReleaseFeedback] = useState<string | null>(
+    null,
+  );
+  const [agentReleaseError, setAgentReleaseError] = useState<string | null>(null);
+  const [hasLoadedAgentReleasePreview, setHasLoadedAgentReleasePreview] =
+    useState(false);
 
   const [ruleStatusFilter, setRuleStatusFilter] = useState<
     RuleLifecycleStatus | ""
@@ -2995,6 +4122,32 @@ function GovernancePage() {
     useState<McpRiskLevel>("medium");
   const [mcpPolicyDecision, setMcpPolicyDecision] =
     useState<McpToolDecision>("require_approval");
+  const [mcpPolicyApprovalMode, setMcpPolicyApprovalMode] =
+    useState<McpApprovalMode>("single_stage");
+  const [mcpPolicyStage1RequiredApprovals, setMcpPolicyStage1RequiredApprovals] =
+    useState("1");
+  const [mcpPolicyStage2RequiredApprovals, setMcpPolicyStage2RequiredApprovals] =
+    useState("1");
+  const [mcpPolicyStage1Roles, setMcpPolicyStage1Roles] = useState("");
+  const [mcpPolicyStage2Roles, setMcpPolicyStage2Roles] = useState("");
+  const [mcpPolicyApprovalStagesJson, setMcpPolicyApprovalStagesJson] =
+    useState('[{"stage":"stage1","requiredApprovals":1,"roles":["owner","maintainer"]}]');
+  const [mcpPolicyApprovalStagesJsonTouched, setMcpPolicyApprovalStagesJsonTouched] =
+    useState(false);
+  const [mcpWorkflowEntryNodeId, setMcpWorkflowEntryNodeId] = useState(
+    createDefaultMcpWorkflowDraftState().entryNodeId,
+  );
+  const [mcpWorkflowNodes, setMcpWorkflowNodes] = useState<McpWorkflowNodeDraft[]>(
+    createDefaultMcpWorkflowDraftState().nodes,
+  );
+  const [mcpWorkflowTransitions, setMcpWorkflowTransitions] = useState<
+    McpWorkflowTransitionDraft[]
+  >(createDefaultMcpWorkflowDraftState().transitions);
+  const [mcpPolicyConditionRiskLevel, setMcpPolicyConditionRiskLevel] =
+    useState<McpRiskLevel | "">("");
+  const [mcpPolicyConditionToolIds, setMcpPolicyConditionToolIds] = useState("");
+  const [mcpPolicyConditionTenantRoles, setMcpPolicyConditionTenantRoles] =
+    useState("");
   const [mcpPolicyReason, setMcpPolicyReason] = useState("");
   const [mcpApprovalStatusFilter, setMcpApprovalStatusFilter] = useState<
     McpApprovalRequest["status"] | ""
@@ -3002,9 +4155,102 @@ function GovernancePage() {
   const [mcpApprovalToolId, setMcpApprovalToolId] = useState("");
   const [mcpApprovalReason, setMcpApprovalReason] = useState("");
   const [mcpReviewReason, setMcpReviewReason] = useState("");
+  const [mcpEvaluateToolId, setMcpEvaluateToolId] = useState("");
+  const [mcpEvaluateApprovalRequestId, setMcpEvaluateApprovalRequestId] =
+    useState("");
+  const [mcpEvaluateReason, setMcpEvaluateReason] = useState("");
+  const [mcpEvaluateTimestamp, setMcpEvaluateTimestamp] = useState("");
+  const [mcpEvaluateResultPayload, setMcpEvaluateResultPayload] = useState<{
+    toolId: string;
+    decision: McpToolDecision;
+    result: "allowed" | "blocked" | "approved";
+    approvalRequestId?: string;
+    approvalRequired?: boolean;
+    approvalMode?: McpApprovalMode;
+    currentNodeId?: string;
+    currentStage?: McpApprovalStage;
+    approvalWorkflow?: McpApprovalWorkflow;
+    approvalNodes?: McpApprovalWorkflowNodeSnapshot[];
+    pathHistory?: string[];
+    nextTransitionPreview?: McpApprovalWorkflowTransitionPreview;
+    approvalStages?: Array<{
+      stage: McpApprovalStage;
+      requiredApprovals: number;
+      roles: string[];
+      approvedApprovals: number;
+      approvedByUserIds: string[];
+    }>;
+    remainingApprovals?: number;
+    approvalConditionMatched?: boolean;
+  } | null>(null);
   const [mcpInvocationToolId, setMcpInvocationToolId] = useState("");
   const [mcpFeedback, setMcpFeedback] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (mcpPolicyApprovalMode === "multi_stage" || mcpPolicyApprovalStagesJsonTouched) {
+      return;
+    }
+    setMcpPolicyApprovalStagesJson(
+      stringifyStaticMcpApprovalStages(
+        mcpPolicyApprovalMode,
+        parseOptionalNonNegativeInteger(mcpPolicyStage1RequiredApprovals) ?? 1,
+        parseOptionalNonNegativeInteger(mcpPolicyStage2RequiredApprovals) ?? 1,
+        parseDistinctCommaSeparatedList(mcpPolicyStage1Roles),
+        parseDistinctCommaSeparatedList(mcpPolicyStage2Roles),
+      ),
+    );
+  }, [
+    mcpPolicyApprovalMode,
+    mcpPolicyApprovalStagesJsonTouched,
+    mcpPolicyStage1RequiredApprovals,
+    mcpPolicyStage2RequiredApprovals,
+    mcpPolicyStage1Roles,
+    mcpPolicyStage2Roles,
+  ]);
+
+  const replaceMcpWorkflowNodeId = (
+    targetNodeId: string,
+    nextNodeId: string,
+  ) => {
+    setMcpWorkflowTransitions((prev) =>
+      prev.map((transition) => ({
+        ...transition,
+        fromNodeId:
+          transition.fromNodeId === targetNodeId
+            ? nextNodeId
+            : transition.fromNodeId,
+        toNodeId:
+          transition.toNodeId === targetNodeId
+            ? nextNodeId
+            : transition.toNodeId,
+      })),
+    );
+    setMcpWorkflowEntryNodeId((prev) =>
+      prev === targetNodeId ? nextNodeId : prev,
+    );
+  };
+
+  const removeMcpWorkflowNode = (index: number) => {
+    const targetNode = mcpWorkflowNodes[index];
+    if (!targetNode) {
+      return;
+    }
+    const remainingNodes = mcpWorkflowNodes.filter((_, itemIndex) => itemIndex !== index);
+    setMcpWorkflowNodes(remainingNodes);
+    setMcpWorkflowTransitions((prev) =>
+      prev.filter(
+        (transition) =>
+          transition.fromNodeId !== targetNode.nodeId &&
+          transition.toNodeId !== targetNode.nodeId,
+      ),
+    );
+    if (mcpWorkflowEntryNodeId === targetNode.nodeId) {
+      setMcpWorkflowEntryNodeId(
+        remainingNodes[0]?.nodeId ?? createDefaultMcpWorkflowDraftState().entryNodeId,
+      );
+    }
+  };
 
   const [openApiSummaryPayload, setOpenApiSummaryPayload] =
     useState<OpenPlatformOpenApiSummary | null>(null);
@@ -3074,6 +4320,55 @@ function GovernancePage() {
     setQualityProjectTrendsIncludeUnknown,
   ] = useState(false);
   const [qualityScorecardTeam, setQualityScorecardTeam] = useState("");
+  const [qualityAutomationRiskLevel, setQualityAutomationRiskLevel] =
+    useState<McpRiskLevel>("medium");
+  const [qualityAutomationDecision, setQualityAutomationDecision] =
+    useState<McpToolDecision>("allow");
+  const [qualityAutomationReason, setQualityAutomationReason] = useState("");
+  const [
+    qualityAutomationEvaluationScoreThreshold,
+    setQualityAutomationEvaluationScoreThreshold,
+  ] = useState("80");
+  const [
+    qualityAutomationTriggerOnEvaluationFailure,
+    setQualityAutomationTriggerOnEvaluationFailure,
+  ] = useState(true);
+  const [
+    qualityAutomationTriggerOnReplayRegression,
+    setQualityAutomationTriggerOnReplayRegression,
+  ] = useState(true);
+  const [qualityAutomationStrategyMatrixJson, setQualityAutomationStrategyMatrixJson] =
+    useState("[]");
+  const [qualityAutomationSimulationMetric, setQualityAutomationSimulationMetric] =
+    useState("accuracy");
+  const [qualityAutomationSimulationScore, setQualityAutomationSimulationScore] =
+    useState("72");
+  const [
+    qualityAutomationSimulationTrendDirection,
+    setQualityAutomationSimulationTrendDirection,
+  ] = useState<"up" | "down" | "flat">("down");
+  const [qualityAutomationSimulationConfidence, setQualityAutomationSimulationConfidence] =
+    useState("0.65");
+  const [
+    qualityAutomationSimulationRegressionProbability,
+    setQualityAutomationSimulationRegressionProbability,
+  ] = useState("0.55");
+  const [qualityAutomationSimulationReplayRegressionCount, setQualityAutomationSimulationReplayRegressionCount] =
+    useState("2");
+  const [qualityAutomationSimulationPayload, setQualityAutomationSimulationPayload] =
+    useState<OpenPlatformAutomationPolicySimulationResponse | null>(null);
+  const [qualityAdviceActionType, setQualityAdviceActionType] = useState<
+    "scorecard_adjustment" | "replay_experiment"
+  >("scorecard_adjustment");
+  const [qualityAdviceSelectedId, setQualityAdviceSelectedId] = useState("");
+  const [qualityAdviceExecuteProject, setQualityAdviceExecuteProject] = useState("");
+  const [qualityAdviceExecuteSeverity, setQualityAdviceExecuteSeverity] = useState<
+    "info" | "warn" | "critical"
+  >("warn");
+  const [qualityAdviceExecuteMetric, setQualityAdviceExecuteMetric] = useState("accuracy");
+  const [qualityAdviceExecuteDatasetId, setQualityAdviceExecuteDatasetId] = useState("");
+  const [qualityAdviceExecuteCandidateLabels, setQualityAdviceExecuteCandidateLabels] =
+    useState("");
   const [qualityDailyPayload, setQualityDailyPayload] = useState<{
     items: OpenPlatformQualityDailyItem[];
     total: number;
@@ -3085,8 +4380,20 @@ function GovernancePage() {
       total: number;
       summary: OpenPlatformQualityProjectTrendResponse["summary"];
     } | null>(null);
+  const [qualityForecastPayload, setQualityForecastPayload] = useState<{
+    items: OpenPlatformQualityForecastItem[];
+    total: number;
+  } | null>(null);
+  const [qualityAdvicePayload, setQualityAdvicePayload] = useState<{
+    items: OpenPlatformQualityAdviceItem[];
+    total: number;
+  } | null>(null);
   const [qualityScorecardPayload, setQualityScorecardPayload] = useState<{
     items: OpenPlatformQualityScorecard[];
+    total: number;
+  } | null>(null);
+  const [qualityAdviceExecutionPayload, setQualityAdviceExecutionPayload] = useState<{
+    items: OpenPlatformQualityAdviceExecution[];
     total: number;
   } | null>(null);
   const [qualityFeedback, setQualityFeedback] = useState<string | null>(null);
@@ -3094,7 +4401,12 @@ function GovernancePage() {
   const [hasLoadedQualityDaily, setHasLoadedQualityDaily] = useState(false);
   const [hasLoadedQualityProjectTrends, setHasLoadedQualityProjectTrends] =
     useState(false);
+  const [hasLoadedQualityForecast, setHasLoadedQualityForecast] =
+    useState(false);
+  const [hasLoadedQualityAdvice, setHasLoadedQualityAdvice] = useState(false);
   const [hasLoadedQualityScorecards, setHasLoadedQualityScorecards] =
+    useState(false);
+  const [hasLoadedQualityAdviceExecutions, setHasLoadedQualityAdviceExecutions] =
     useState(false);
 
   const [replayCreateDatasetName, setReplayCreateDatasetName] = useState("");
@@ -3107,11 +4419,22 @@ function GovernancePage() {
   const [replayCreateDatasetSampleCount, setReplayCreateDatasetSampleCount] =
     useState("50");
   const [replayDatasetKeyword, setReplayDatasetKeyword] = useState("");
+  const [replayVersionDatasetId, setReplayVersionDatasetId] = useState("");
+  const [replayCreateVersionDatasetRef, setReplayCreateVersionDatasetRef] =
+    useState("");
+  const [replayCreateVersionModel, setReplayCreateVersionModel] = useState("");
+  const [replayCreateVersionPromptVersion, setReplayCreateVersionPromptVersion] =
+    useState("");
+  const [replayCreateVersionSampleCount, setReplayCreateVersionSampleCount] =
+    useState("50");
+  const [replayCreateVersionNote, setReplayCreateVersionNote] = useState("");
   const [replayCreateRunDatasetId, setReplayCreateRunDatasetId] = useState("");
   const [replayCreateRunCandidateLabel, setReplayCreateRunCandidateLabel] =
     useState("");
   const [replayCreateRunSampleLimit, setReplayCreateRunSampleLimit] =
     useState("50");
+  const [replayCreateRunBaselineVersionId, setReplayCreateRunBaselineVersionId] =
+    useState("");
   const [replayDatasetCasesDatasetId, setReplayDatasetCasesDatasetId] =
     useState("");
   const [replayDatasetCasesEditor, setReplayDatasetCasesEditor] = useState("");
@@ -3139,11 +4462,25 @@ function GovernancePage() {
     items: OpenPlatformReplayDataset[];
     total: number;
   } | null>(null);
+  const [replayDatasetVersionPayload, setReplayDatasetVersionPayload] = useState<{
+    datasetId: string;
+    items: OpenPlatformReplayDatasetVersion[];
+    total: number;
+    currentVersionId?: string | null;
+    currentVersionNumber?: number | null;
+  } | null>(null);
   const [replayDatasetCasesPayload, setReplayDatasetCasesPayload] = useState<{
     datasetId: string;
     items: OpenPlatformReplayDatasetCase[];
     total: number;
   } | null>(null);
+  const [replayDatasetVersionCasesPayload, setReplayDatasetVersionCasesPayload] =
+    useState<{
+      datasetId: string;
+      versionId: string;
+      items: OpenPlatformReplayDatasetCase[];
+      total: number;
+    } | null>(null);
   const [replayRunPayload, setReplayRunPayload] = useState<{
     items: OpenPlatformReplayRun[];
     total: number;
@@ -3158,16 +4495,52 @@ function GovernancePage() {
     items: OpenPlatformReplayArtifact[];
     total: number;
   } | null>(null);
+  const [replayExperimentArtifactPayload, setReplayExperimentArtifactPayload] =
+    useState<{
+      experimentId: string;
+      datasetId: string;
+      items: OpenPlatformReplayArtifact[];
+      total: number;
+    } | null>(null);
+  const [replayExperimentName, setReplayExperimentName] = useState("");
+  const [replayExperimentDatasetId, setReplayExperimentDatasetId] = useState("");
+  const [replayExperimentBaselineVersionId, setReplayExperimentBaselineVersionId] =
+    useState("");
+  const [replayExperimentRunIds, setReplayExperimentRunIds] = useState("");
+  const [replayExperimentCandidateLabels, setReplayExperimentCandidateLabels] =
+    useState("");
+  const [replayExperimentAutoRun, setReplayExperimentAutoRun] = useState(true);
+  const [replayExperimentCompareIds, setReplayExperimentCompareIds] = useState("");
+  const [replayExperimentPayload, setReplayExperimentPayload] = useState<{
+    items: OpenPlatformReplayExperiment[];
+    total: number;
+  } | null>(null);
+  const [replayExperimentDetailPayload, setReplayExperimentDetailPayload] =
+    useState<OpenPlatformReplayExperiment | null>(null);
+  const [replayExperimentComparePayload, setReplayExperimentComparePayload] =
+    useState<OpenPlatformReplayExperimentCompareResponse | null>(null);
+  const [replayExperimentBatchComparePayload, setReplayExperimentBatchComparePayload] =
+    useState<OpenPlatformReplayExperimentBatchCompareResponse | null>(null);
+  const [replayExperimentWorkflowPayload, setReplayExperimentWorkflowPayload] =
+    useState<OpenPlatformReplayExperimentWorkflowResponse | null>(null);
+  const [hasLoadedReplayExperiments, setHasLoadedReplayExperiments] =
+    useState(false);
   const [replayMaterializePayload, setReplayMaterializePayload] =
     useState<OpenPlatformReplayDatasetMaterializeResponse | null>(null);
   const [replayFeedback, setReplayFeedback] = useState<string | null>(null);
   const [replayError, setReplayError] = useState<string | null>(null);
   const [hasLoadedReplayDatasets, setHasLoadedReplayDatasets] = useState(false);
+  const [hasLoadedReplayDatasetVersions, setHasLoadedReplayDatasetVersions] =
+    useState(false);
   const [hasLoadedReplayDatasetCases, setHasLoadedReplayDatasetCases] =
+    useState(false);
+  const [hasLoadedReplayDatasetVersionCases, setHasLoadedReplayDatasetVersionCases] =
     useState(false);
   const [hasLoadedReplayJobs, setHasLoadedReplayJobs] = useState(false);
   const [hasLoadedReplayDiff, setHasLoadedReplayDiff] = useState(false);
   const [hasLoadedReplayArtifacts, setHasLoadedReplayArtifacts] =
+    useState(false);
+  const [hasLoadedReplayExperimentArtifacts, setHasLoadedReplayExperimentArtifacts] =
     useState(false);
 
   const [sessionExportFormat, setSessionExportFormat] =
@@ -3179,6 +4552,10 @@ function GovernancePage() {
   const [exportFeedback, setExportFeedback] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const hasInitializedResidencyForm = useRef(false);
+  const lastHydratedResidencyPolicySignature = useRef<string | null>(null);
+  const hasRetriedResidencyPolicyAfterError = useRef(false);
+  const hasInitializedResidencyKmsDrafts = useRef(false);
+  const hasInitializedResidencyArchiveDrafts = useRef(false);
   const previousRuleAssetIdRef = useRef<string | null>(null);
 
   const alertQueryInput = useMemo(
@@ -3265,6 +4642,19 @@ function GovernancePage() {
               ),
             }
           : {}),
+        ...(typeof parseBooleanSelect(orchestrationExecutionEscalatedFilter) ===
+        "boolean"
+          ? {
+              escalated: parseBooleanSelect(
+                orchestrationExecutionEscalatedFilter,
+              ),
+            }
+          : {}),
+        ...(orchestrationExecutionEscalationReasonFilter
+          ? {
+              escalationReason: orchestrationExecutionEscalationReasonFilter,
+            }
+          : {}),
         ...(orchestrationExecutionFrom.trim().length > 0
           ? { from: orchestrationExecutionFrom.trim() }
           : {}),
@@ -3285,6 +4675,8 @@ function GovernancePage() {
         orchestrationExecutionConflictFilter,
         orchestrationExecutionDispatchModeFilter,
         orchestrationExecutionDedupeHitFilter,
+        orchestrationExecutionEscalatedFilter,
+        orchestrationExecutionEscalationReasonFilter,
         orchestrationExecutionEventTypeFilter,
         orchestrationExecutionFrom,
         orchestrationExecutionLimit,
@@ -3399,10 +4791,43 @@ function GovernancePage() {
     retryDelay: 200,
   });
 
+  const residencyKmsQuery = useQuery({
+    queryKey: ["residency", "kms-key-mappings"],
+    queryFn: ({ signal }) => fetchResidencyKmsKeyMappings(signal),
+    staleTime: 20_000,
+  });
+
+  const residencyArchiveQuery = useQuery({
+    queryKey: ["residency", "archive-region-policies"],
+    queryFn: ({ signal }) => fetchResidencyArchiveRegionPolicies(signal),
+    staleTime: 20_000,
+  });
+
   const replicationJobsQuery = useQuery({
     queryKey: ["residency", "jobs", replicationJobQueryInput],
     queryFn: ({ signal }) =>
       fetchReplicationJobs(replicationJobQueryInput, signal),
+    staleTime: 20_000,
+  });
+
+  const systemConfigPackagesQuery = useQuery({
+    queryKey: ["system-config", "packages"],
+    queryFn: ({ signal }) => fetchSystemConfigPackages(50, signal),
+    staleTime: 20_000,
+  });
+
+  const systemConfigPackageApprovalsQuery = useQuery({
+    queryKey: ["system-config", "packages", selectedSystemConfigPackageId, "approvals"],
+    enabled: Boolean(selectedSystemConfigPackageId),
+    queryFn: ({ signal }) =>
+      fetchSystemConfigPackageApprovals(selectedSystemConfigPackageId!, signal),
+    staleTime: 20_000,
+  });
+
+  const agentReleasesQuery = useQuery({
+    queryKey: ["agent-releases", agentReleaseChannelFilter],
+    queryFn: ({ signal }) =>
+      fetchAgentReleases({ channel: agentReleaseChannelFilter, limit: 50 }, signal),
     staleTime: 20_000,
   });
 
@@ -3447,20 +4872,78 @@ function GovernancePage() {
     staleTime: 20_000,
   });
 
+  const qualityAutomationPolicyQuery = useQuery({
+    queryKey: ["quality", "automation-policy"],
+    queryFn: ({ signal }) => fetchOpenPlatformAutomationPolicy(signal),
+    staleTime: 20_000,
+  });
+
+  const qualityAutomationExecutionsQuery = useQuery({
+    queryKey: ["quality", "automation-executions"],
+    queryFn: ({ signal }) =>
+      fetchMcpInvocations(
+        {
+          toolId: OPEN_PLATFORM_QUALITY_AUTOMATION_TOOL_ID,
+          limit: 20,
+        },
+        signal,
+      ),
+    staleTime: 20_000,
+  });
+
   useEffect(() => {
-    if (hasInitializedResidencyForm.current) {
+    const policy = qualityAutomationPolicyQuery.data;
+    if (!policy) {
       return;
     }
+    setQualityAutomationRiskLevel(policy.riskLevel);
+    setQualityAutomationDecision(policy.decision);
+    setQualityAutomationReason(policy.reason ?? "");
+    setQualityAutomationEvaluationScoreThreshold(
+      String(policy.evaluationScoreThreshold),
+    );
+    setQualityAutomationTriggerOnEvaluationFailure(
+      policy.triggerOnEvaluationFailure,
+    );
+    setQualityAutomationTriggerOnReplayRegression(
+      policy.triggerOnReplayRegression,
+    );
+    setQualityAutomationStrategyMatrixJson(
+      JSON.stringify(policy.strategyMatrix ?? [], null, 2),
+    );
+  }, [qualityAutomationPolicyQuery.data]);
+
+  useEffect(() => {
+    if (
+      residencyPolicyQuery.isError &&
+      !residencyPolicyQuery.isLoading &&
+      !hasRetriedResidencyPolicyAfterError.current
+    ) {
+      hasRetriedResidencyPolicyAfterError.current = true;
+      void residencyPolicyQuery.refetch();
+      return;
+    }
+    if (!residencyPolicyQuery.isError) {
+      hasRetriedResidencyPolicyAfterError.current = false;
+    }
+  }, [
+    residencyPolicyQuery.isError,
+    residencyPolicyQuery.isLoading,
+    residencyPolicyQuery.refetch,
+  ]);
+
+  useEffect(() => {
     if (residencyRegionsQuery.isLoading || residencyPolicyQuery.isLoading) {
-      return;
-    }
-    if (residencyRegionsQuery.isError || residencyPolicyQuery.isError) {
       return;
     }
     const regions = residencyRegionsQuery.data?.items ?? [];
     const policy = residencyPolicyQuery.data;
 
     if (policy) {
+      const signature = buildResidencyPolicyHydrationSignature(policy);
+      if (lastHydratedResidencyPolicySignature.current === signature) {
+        return;
+      }
       setResidencyMode(policy.mode);
       setPrimaryRegion(policy.primaryRegion);
       setReplicaRegionsInput(policy.replicaRegions.join(", "));
@@ -3468,7 +4951,15 @@ function GovernancePage() {
       setRequireTransferApproval(policy.requireTransferApproval);
       setReplicationSourceRegion(policy.primaryRegion);
       setReplicationTargetRegion(policy.replicaRegions[0] ?? "");
+      lastHydratedResidencyPolicySignature.current = signature;
       hasInitializedResidencyForm.current = true;
+      return;
+    }
+
+    if (hasInitializedResidencyForm.current) {
+      return;
+    }
+    if (residencyRegionsQuery.isError || residencyPolicyQuery.isError) {
       return;
     }
 
@@ -3486,6 +4977,60 @@ function GovernancePage() {
   ]);
 
   useEffect(() => {
+    if (hasInitializedResidencyKmsDrafts.current) {
+      return;
+    }
+    if (residencyKmsQuery.isLoading || residencyKmsQuery.isError) {
+      return;
+    }
+    setResidencyKmsDrafts(residencyKmsQuery.data?.items ?? []);
+    hasInitializedResidencyKmsDrafts.current = true;
+  }, [residencyKmsQuery.data, residencyKmsQuery.isError, residencyKmsQuery.isLoading]);
+
+  useEffect(() => {
+    if (hasInitializedResidencyArchiveDrafts.current) {
+      return;
+    }
+    if (residencyArchiveQuery.isLoading || residencyArchiveQuery.isError) {
+      return;
+    }
+    setResidencyArchiveDrafts(residencyArchiveQuery.data?.items ?? []);
+    hasInitializedResidencyArchiveDrafts.current = true;
+  }, [
+    residencyArchiveQuery.data,
+    residencyArchiveQuery.isError,
+    residencyArchiveQuery.isLoading,
+  ]);
+
+  useEffect(() => {
+    const items = systemConfigPackagesQuery.data?.items ?? [];
+    if (items.length === 0) {
+      setSelectedSystemConfigPackageId(null);
+      return;
+    }
+    if (
+      !selectedSystemConfigPackageId ||
+      !items.some((item) => item.packageId === selectedSystemConfigPackageId)
+    ) {
+      setSelectedSystemConfigPackageId(items[0]?.packageId ?? null);
+    }
+  }, [systemConfigPackagesQuery.data, selectedSystemConfigPackageId]);
+
+  useEffect(() => {
+    const items = agentReleasesQuery.data?.items ?? [];
+    if (items.length === 0) {
+      setSelectedAgentReleaseId(null);
+      return;
+    }
+    if (
+      !selectedAgentReleaseId ||
+      !items.some((item) => item.releaseId === selectedAgentReleaseId)
+    ) {
+      setSelectedAgentReleaseId(items[0]?.releaseId ?? null);
+    }
+  }, [agentReleasesQuery.data, selectedAgentReleaseId]);
+
+  useEffect(() => {
     const assets = ruleAssetsQuery.data?.items ?? [];
     if (assets.length === 0) {
       previousRuleAssetIdRef.current = null;
@@ -3493,13 +5038,37 @@ function GovernancePage() {
       setRulePublishVersion("");
       setRuleRollbackVersion("");
       setRuleApprovalVersion("");
+      setRuleDiffFromVersion("");
+      setRuleDiffToVersion("");
+      setRuleDiffPayload(null);
       return;
     }
     if (
       !selectedRuleAssetId ||
       !assets.some((asset) => asset.id === selectedRuleAssetId)
     ) {
-      setSelectedRuleAssetId(assets[0].id);
+      const nextSelectedAsset = assets[0];
+      if (!nextSelectedAsset) {
+        return;
+      }
+      const latestVersionText =
+        nextSelectedAsset.latestVersion > 0
+          ? String(nextSelectedAsset.latestVersion)
+          : "";
+      const defaultDiffFromVersion =
+        nextSelectedAsset.latestVersion > 1
+          ? String(nextSelectedAsset.latestVersion - 1)
+          : "";
+      const defaultDiffToVersion =
+        nextSelectedAsset.latestVersion > 1 ? latestVersionText : "";
+      previousRuleAssetIdRef.current = nextSelectedAsset.id;
+      setSelectedRuleAssetId(nextSelectedAsset.id);
+      setRulePublishVersion(latestVersionText);
+      setRuleRollbackVersion(latestVersionText);
+      setRuleApprovalVersion(latestVersionText);
+      setRuleDiffFromVersion(defaultDiffFromVersion);
+      setRuleDiffToVersion(defaultDiffToVersion);
+      setRuleDiffPayload(null);
     }
   }, [ruleAssetsQuery.data, selectedRuleAssetId]);
 
@@ -3581,6 +5150,353 @@ function GovernancePage() {
     onSuccess: async (alert) => {
       setAlertFeedback(`告警 ${alert.id} 已更新为 ${alert.status}。`);
       await queryClient.invalidateQueries({ queryKey: ["alerts"] });
+    },
+  });
+
+  const retryAlertExternalLinkSyncMutation = useMutation({
+    mutationFn: ({
+      alertId,
+      externalType,
+      externalId,
+    }: {
+      alertId: string;
+      externalType: "ticket" | "case" | "incident";
+      externalId: string;
+    }) =>
+      retryAlertExternalLinkSync(alertId, {
+        externalType,
+        externalId,
+      }),
+    onSuccess: async (alert, variables) => {
+      setAlertFeedback(
+        `告警 ${alert.id} 的外部联动 ${variables.externalType}:${variables.externalId} 已重新触发同步。`,
+      );
+      await queryClient.invalidateQueries({ queryKey: ["alerts"] });
+      if (selectedAlertOpsAlertId === alert.id) {
+        void loadAlertExternalLinkOpsMutation.mutateAsync({
+          alertId: alert.id,
+          externalType: alertOpsExternalType || undefined,
+          onlyFailed: alertOpsOnlyFailed,
+        });
+      }
+      if (alertFailurePayload) {
+        void loadAlertExternalLinkFailuresMutation.mutateAsync({
+          alertId: alertFailureAlertIdFilter.trim() || undefined,
+          externalSystem: alertFailureExternalSystemFilter.trim() || undefined,
+          syncState: alertFailureSyncStateFilter || undefined,
+          limit:
+            alertFailureLimit.trim().length > 0
+              ? Number(alertFailureLimit)
+              : undefined,
+        });
+      }
+      if (integrationDlqPayload) {
+        void loadIntegrationDlqMessagesMutation.mutateAsync({
+          eventType: integrationDlqEventTypeFilter.trim() || undefined,
+          channel: integrationDlqChannelFilter.trim() || undefined,
+          alertId: integrationDlqAlertIdFilter.trim() || undefined,
+          callbackId: integrationDlqCallbackIdFilter.trim() || undefined,
+          limit:
+            integrationDlqLimit.trim().length > 0
+              ? Number(integrationDlqLimit)
+              : undefined,
+        });
+      }
+    },
+  });
+
+  const loadAlertExternalLinkOpsMutation = useMutation({
+    mutationFn: ({
+      alertId,
+      externalType,
+      onlyFailed,
+    }: {
+      alertId: string;
+      externalType?: "ticket" | "case" | "incident";
+      onlyFailed?: boolean;
+    }) =>
+      fetchAlertExternalLinkOps(alertId, {
+        externalType,
+        onlyFailed,
+      }),
+    onSuccess: (payload) => {
+      setAlertOpsError(null);
+      setAlertOpsPayload(payload);
+    },
+    onError: (error) => {
+      setAlertOpsPayload(null);
+      setAlertOpsError(`加载外部联动运维视图失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadAlertExternalLinkFailuresMutation = useMutation({
+    mutationFn: ({
+      alertId,
+      externalSystem,
+      syncState,
+      limit,
+    }: {
+      alertId?: string;
+      externalSystem?: string;
+      syncState?: "synced" | "pending" | "failed";
+      limit?: number;
+    }) =>
+      fetchAlertExternalLinkFailures({
+        alertId,
+        externalSystem,
+        syncState,
+        limit,
+      }),
+    onSuccess: (payload) => {
+      setAlertFailureError(null);
+      setAlertFailurePayload(payload);
+    },
+    onError: (error) => {
+      setAlertFailurePayload(null);
+      setAlertFailureError(`加载失败外部联动视图失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadIntegrationAlertFailureReportMutation = useMutation({
+    mutationFn: ({
+      from,
+      to,
+      externalSystem,
+      stage,
+      actionType,
+      limit,
+    }: {
+      from?: string;
+      to?: string;
+      externalSystem?: string;
+      stage?: string;
+      actionType?:
+        | "retry_requested"
+        | "retry_completed"
+        | "retry_failed"
+        | "dlq_queried"
+        | "dlq_replayed"
+        | "recovery_job_created"
+        | "recovery_job_completed"
+        | "recovery_job_failed";
+      limit?: number;
+    }) =>
+      fetchIntegrationAlertFailureReport({
+        from,
+        to,
+        externalSystem,
+        stage,
+        actionType,
+        limit,
+      }),
+    onSuccess: (payload) => {
+      setFailureReportError(null);
+      setFailureReportPayload(payload);
+    },
+    onError: (error) => {
+      setFailureReportPayload(null);
+      setFailureReportError(`加载失败审计报表失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadIntegrationAlertFailureTrendMutation = useMutation({
+    mutationFn: ({
+      from,
+      to,
+      externalSystem,
+      stage,
+      actionType,
+      top,
+    }: {
+      from?: string;
+      to?: string;
+      externalSystem?: string;
+      stage?: string;
+      actionType?:
+        | "retry_requested"
+        | "retry_completed"
+        | "retry_failed"
+        | "dlq_queried"
+        | "dlq_replayed"
+        | "recovery_job_created"
+        | "recovery_job_completed"
+        | "recovery_job_failed";
+      top?: number;
+    }) =>
+      fetchIntegrationAlertFailureTrends({
+        from,
+        to,
+        externalSystem,
+        stage,
+        actionType,
+        top,
+      }),
+    onSuccess: (payload) => {
+      setFailureTrendError(null);
+      setFailureTrendPayload(payload);
+    },
+    onError: (error) => {
+      setFailureTrendPayload(null);
+      setFailureTrendError(`加载长期趋势/容量运维视图失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadIntegrationDlqMessagesMutation = useMutation({
+    mutationFn: ({
+      eventType,
+      channel,
+      alertId,
+      callbackId,
+      limit,
+    }: {
+      eventType?: string;
+      channel?: string;
+      alertId?: string;
+      callbackId?: string;
+      limit?: number;
+    }) =>
+      fetchIntegrationDlqMessages({
+        eventType,
+        channel,
+        alertId,
+        callbackId,
+        limit,
+      }),
+    onSuccess: (payload) => {
+      setIntegrationDlqError(null);
+      setIntegrationDlqPayload(payload);
+      setSelectedIntegrationDlqMessageIds([]);
+    },
+    onError: (error) => {
+      setIntegrationDlqPayload(null);
+      setSelectedIntegrationDlqMessageIds([]);
+      setIntegrationDlqError(`加载 Integration DLQ 失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const createIntegrationDlqRecoveryJobMutation = useMutation({
+    mutationFn: (input: {
+      messageIds?: string[];
+      filters?: {
+        eventType?: string;
+        channel?: string;
+        callbackId?: string;
+        alertId?: string;
+        limit?: number;
+      };
+    }) => createIntegrationDlqRecoveryJob(input),
+    onSuccess: async (job) => {
+      setAlertFeedback(`已创建恢复批次 ${job.id}。`);
+      setIntegrationDlqRecoveryError(null);
+      setIntegrationDlqRecoveryJobId(job.id);
+      setIntegrationDlqRecoveryJobDetail(job);
+      setSelectedIntegrationDlqMessageIds([]);
+      if (integrationDlqPayload) {
+        void loadIntegrationDlqMessagesMutation.mutateAsync({
+          eventType: integrationDlqEventTypeFilter.trim() || undefined,
+          channel: integrationDlqChannelFilter.trim() || undefined,
+          alertId: integrationDlqAlertIdFilter.trim() || undefined,
+          callbackId: integrationDlqCallbackIdFilter.trim() || undefined,
+          limit:
+            integrationDlqLimit.trim().length > 0
+              ? Number(integrationDlqLimit)
+              : undefined,
+        });
+      }
+      void loadIntegrationDlqRecoveryJobsMutation.mutateAsync({
+        limit: 20,
+      });
+    },
+    onError: (error) => {
+      setAlertFeedback(null);
+      setIntegrationDlqRecoveryError(
+        `创建 Integration DLQ 恢复批次失败：${toErrorMessage(error)}`,
+      );
+    },
+  });
+
+  const loadIntegrationDlqRecoveryJobsMutation = useMutation({
+    mutationFn: (input: { status?: "queued" | "running" | "completed" | "failed"; limit?: number }) =>
+      fetchIntegrationDlqRecoveryJobs(input),
+    onSuccess: (payload) => {
+      setIntegrationDlqRecoveryError(null);
+      setIntegrationDlqRecoveryJobsPayload(payload);
+    },
+    onError: (error) => {
+      setIntegrationDlqRecoveryError(
+        `加载 Integration DLQ 恢复批次失败：${toErrorMessage(error)}`,
+      );
+    },
+  });
+
+  const loadIntegrationDlqRecoveryJobDetailMutation = useMutation({
+    mutationFn: (jobId: string) => fetchIntegrationDlqRecoveryJobDetail(jobId),
+    onSuccess: (payload) => {
+      setIntegrationDlqRecoveryError(null);
+      setIntegrationDlqRecoveryJobDetail(payload);
+      setIntegrationDlqRecoveryJobId(payload.id);
+    },
+    onError: (error) => {
+      setIntegrationDlqRecoveryJobDetail(null);
+      setIntegrationDlqRecoveryError(
+        `加载 Integration DLQ 恢复批次详情失败：${toErrorMessage(error)}`,
+      );
+    },
+  });
+
+  const retryAlertExternalLinkSyncBatchMutation = useMutation({
+    mutationFn: ({
+      alertId,
+      externalType,
+    }: {
+      alertId: string;
+      externalType?: "ticket" | "case" | "incident";
+    }) =>
+      retryAlertExternalLinkSyncBatch(alertId, {
+        externalType,
+      }),
+    onSuccess: async (
+      payload: AlertExternalLinkBatchRetryResponse,
+      variables,
+    ) => {
+      setAlertFeedback(
+        `告警 ${payload.alertId} 已批量重试 ${payload.retriedCount} 条外部联动。`,
+      );
+      await queryClient.invalidateQueries({ queryKey: ["alerts"] });
+      if (selectedAlertOpsAlertId === payload.alertId) {
+        void loadAlertExternalLinkOpsMutation.mutateAsync({
+          alertId: payload.alertId,
+          externalType: variables.externalType,
+          onlyFailed: alertOpsOnlyFailed,
+        });
+      }
+      if (alertFailurePayload) {
+        void loadAlertExternalLinkFailuresMutation.mutateAsync({
+          alertId: alertFailureAlertIdFilter.trim() || undefined,
+          externalSystem: alertFailureExternalSystemFilter.trim() || undefined,
+          syncState: alertFailureSyncStateFilter || undefined,
+          limit:
+            alertFailureLimit.trim().length > 0
+              ? Number(alertFailureLimit)
+              : undefined,
+        });
+      }
+      if (integrationDlqPayload) {
+        void loadIntegrationDlqMessagesMutation.mutateAsync({
+          eventType: integrationDlqEventTypeFilter.trim() || undefined,
+          channel: integrationDlqChannelFilter.trim() || undefined,
+          alertId: integrationDlqAlertIdFilter.trim() || undefined,
+          callbackId: integrationDlqCallbackIdFilter.trim() || undefined,
+          limit:
+            integrationDlqLimit.trim().length > 0
+              ? Number(integrationDlqLimit)
+              : undefined,
+        });
+      }
+    },
+    onError: (error) => {
+      setAlertFeedback(null);
+      setAlertOpsError(`批量重试失败：${toErrorMessage(error)}`);
     },
   });
 
@@ -3718,6 +5634,54 @@ function GovernancePage() {
     },
   });
 
+  const saveResidencyKmsMappingsMutation = useMutation({
+    mutationFn: (items: ResidencyKmsKeyMapping[]) =>
+      upsertResidencyKmsKeyMappings({
+        items: items.map((item) => ({
+          regionId: item.regionId,
+          keyProvider: item.keyProvider,
+          keyRef: item.keyRef,
+          enabled: item.enabled,
+        })),
+      }),
+    onSuccess: async (payload) => {
+      setResidencyKmsError(null);
+      setResidencyKmsFeedback(`KMS 映射已保存，共 ${payload.total} 条。`);
+      setResidencyKmsDrafts(payload.items);
+      await queryClient.invalidateQueries({
+        queryKey: ["residency", "kms-key-mappings"],
+      });
+    },
+    onError: (error) => {
+      setResidencyKmsFeedback(null);
+      setResidencyKmsError(`保存 KMS 映射失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const saveResidencyArchivePoliciesMutation = useMutation({
+    mutationFn: (items: ResidencyArchiveRegionPolicy[]) =>
+      upsertResidencyArchiveRegionPolicies({
+        items: items.map((item) => ({
+          sourceRegion: item.sourceRegion,
+          archiveRegion: item.archiveRegion,
+          archiveClass: item.archiveClass,
+          enabled: item.enabled,
+        })),
+      }),
+    onSuccess: async (payload) => {
+      setResidencyArchiveError(null);
+      setResidencyArchiveFeedback(`区域归档策略已保存，共 ${payload.total} 条。`);
+      setResidencyArchiveDrafts(payload.items);
+      await queryClient.invalidateQueries({
+        queryKey: ["residency", "archive-region-policies"],
+      });
+    },
+    onError: (error) => {
+      setResidencyArchiveFeedback(null);
+      setResidencyArchiveError(`保存区域归档策略失败：${toErrorMessage(error)}`);
+    },
+  });
+
   const createReplicationJobMutation = useMutation({
     mutationFn: ({
       sourceRegion,
@@ -3769,6 +5733,146 @@ function GovernancePage() {
     onError: (error) => {
       setResidencyFeedback(null);
       setResidencyError(`取消复制任务失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const createSystemConfigPackageMutation = useMutation({
+    mutationFn: (input: SystemConfigPackageCreateInput) =>
+      createSystemConfigPackage(input),
+    onSuccess: async (pkg) => {
+      setSystemConfigError(null);
+      setSystemConfigFeedback(`配置包 ${pkg.packageId} 已创建。`);
+      setSelectedSystemConfigPackageId(pkg.packageId);
+      resetSystemConfigCreateForm();
+      await queryClient.invalidateQueries({ queryKey: ["system-config", "packages"] });
+    },
+    onError: (error) => {
+      setSystemConfigFeedback(null);
+      setSystemConfigError(`创建配置包失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const createSystemConfigPackageApprovalMutation = useMutation({
+    mutationFn: ({
+      packageId,
+      decision,
+      comment,
+    }: {
+      packageId: string;
+      decision: SystemConfigPackageApprovalDecision;
+      comment?: string;
+    }) =>
+      createSystemConfigPackageApproval(
+        packageId,
+        { decision, comment },
+      ),
+    onSuccess: async (approval) => {
+      setSystemConfigError(null);
+      setSystemConfigFeedback(
+        `配置包审批已提交：${approval.version} -> ${approval.decision}。`,
+      );
+      setSystemConfigApprovalComment("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["system-config", "packages"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["system-config", "packages", approval.packageId, "approvals"],
+        }),
+      ]);
+    },
+    onError: (error) => {
+      setSystemConfigFeedback(null);
+      setSystemConfigError(`提交配置包审批失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const publishSystemConfigPackageMutation = useMutation({
+    mutationFn: ({ packageId }: { packageId: string }) =>
+      publishSystemConfigPackage(packageId),
+    onSuccess: async (pkg) => {
+      setSystemConfigError(null);
+      setSystemConfigFeedback(`配置包 ${pkg.packageId} 已发布。`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["system-config", "packages"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["system-config", "packages", pkg.packageId, "approvals"],
+        }),
+      ]);
+    },
+    onError: (error) => {
+      setSystemConfigFeedback(null);
+      setSystemConfigError(`发布配置包失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const fetchSystemConfigWatchLatestMutation = useMutation({
+    mutationFn: () =>
+      fetchSystemConfigWatchLatest({
+        agentId: systemConfigWatchAgentId.trim() || undefined,
+        deviceId: systemConfigWatchDeviceId.trim() || undefined,
+        channel: systemConfigWatchChannel.trim() || undefined,
+        hostname: systemConfigWatchHostname.trim() || undefined,
+      }),
+    onSuccess: (pkg) => {
+      setSystemConfigError(null);
+      setHasLoadedSystemConfigWatch(true);
+      setSystemConfigWatchResult(pkg);
+      setSystemConfigFeedback(`watch/latest 已命中 ${pkg.packageId}。`);
+    },
+    onError: (error) => {
+      setSystemConfigFeedback(null);
+      setHasLoadedSystemConfigWatch(true);
+      setSystemConfigWatchResult(null);
+      setSystemConfigError(`watch/latest 查询失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const fetchAgentReleaseCheckPreviewMutation = useMutation({
+    mutationFn: () =>
+      fetchAgentReleaseCheckPreview({
+        currentVersion: agentReleasePreviewCurrentVersion.trim(),
+        channel: agentReleaseChannelFilter,
+        os: agentReleasePreviewOs.trim(),
+        arch: agentReleasePreviewArch.trim(),
+        agentId: agentReleasePreviewAgentId.trim() || undefined,
+        deviceId: agentReleasePreviewDeviceId.trim() || undefined,
+        hostname: agentReleasePreviewHostname.trim() || undefined,
+        ring: agentReleasePreviewRing.trim() || undefined,
+      }),
+    onSuccess: (payload) => {
+      setAgentReleaseError(null);
+      setHasLoadedAgentReleasePreview(true);
+      setAgentReleasePreviewPayload(payload);
+      setAgentReleaseFeedback(
+        payload.selectedArtifact
+          ? `升级预览已命中 ${payload.selectedArtifact.fileName ?? payload.latestRelease?.version ?? "--"}。`
+          : `升级预览已完成：${payload.selectionReason ?? payload.comparison}。`,
+      );
+    },
+    onError: (error) => {
+      setHasLoadedAgentReleasePreview(true);
+      setAgentReleasePreviewPayload(null);
+      setAgentReleaseFeedback(null);
+      setAgentReleaseError(`升级预览失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const fetchAgentReleaseCheckBatchPreviewMutation = useMutation({
+    mutationFn: (samples: AgentReleaseBatchCheckSampleInput[]) =>
+      fetchAgentReleaseCheckBatchPreview({
+        channel: agentReleaseChannelFilter,
+        os: agentReleaseBatchOs.trim(),
+        arch: agentReleaseBatchArch.trim(),
+        samples,
+      }),
+    onSuccess: (payload) => {
+      setAgentReleaseError(null);
+      setAgentReleaseFeedback(`批量升级模拟已完成，共 ${payload.total} 条。`);
+      setAgentReleaseBatchPreviewPayload(payload);
+    },
+    onError: (error) => {
+      setAgentReleaseFeedback(null);
+      setAgentReleaseBatchPreviewPayload(null);
+      setAgentReleaseError(`批量升级模拟失败：${toErrorMessage(error)}`);
     },
   });
 
@@ -3982,16 +6086,80 @@ function GovernancePage() {
       toolId,
       riskLevel,
       decision,
+      approvalMode,
+      approvalWorkflow,
+      approvalStages,
+      stage1RequiredApprovals,
+      stage2RequiredApprovals,
+      stage1Roles,
+      stage2Roles,
+      approvalCondition,
       reason,
     }: {
       toolId: string;
       riskLevel: McpRiskLevel;
       decision: McpToolDecision;
+      approvalMode?: McpApprovalMode;
+      approvalWorkflow?: McpApprovalWorkflow;
+      approvalStages?: McpToolPolicy["approvalStages"];
+      stage1RequiredApprovals?: number;
+      stage2RequiredApprovals?: number;
+      stage1Roles?: string[];
+      stage2Roles?: string[];
+      approvalCondition?: McpToolPolicy["approvalCondition"];
       reason?: string;
-    }) => upsertMcpPolicy(toolId, { riskLevel, decision, reason }),
+    }) =>
+      upsertMcpPolicy(toolId, {
+        riskLevel,
+        decision,
+        approvalMode,
+        approvalWorkflow,
+        approvalStages,
+        stage1RequiredApprovals,
+        stage2RequiredApprovals,
+        stage1Roles,
+        stage2Roles,
+        approvalCondition,
+        reason,
+      }),
     onSuccess: async (policy) => {
       setMcpError(null);
       setMcpFeedback(`策略 ${policy.toolId} 已更新为 ${policy.decision}。`);
+      setMcpPolicyToolId(policy.toolId);
+      setMcpPolicyRiskLevel(policy.riskLevel);
+      setMcpPolicyDecision(policy.decision);
+      setMcpPolicyApprovalMode(policy.approvalMode ?? "single_stage");
+      setMcpPolicyApprovalStagesJson(
+        policy.approvalStages && policy.approvalStages.length > 0
+          ? JSON.stringify(policy.approvalStages, null, 2)
+          : '[{"stage":"stage1","requiredApprovals":1,"roles":["owner","maintainer"]}]',
+      );
+      const workflowDraft = buildMcpWorkflowDraftFromWorkflow(policy.approvalWorkflow);
+      setMcpWorkflowEntryNodeId(workflowDraft.entryNodeId);
+      setMcpWorkflowNodes(workflowDraft.nodes);
+      setMcpWorkflowTransitions(workflowDraft.transitions);
+      setMcpPolicyStage1RequiredApprovals(
+        typeof policy.stage1RequiredApprovals === "number"
+          ? String(policy.stage1RequiredApprovals)
+          : "1",
+      );
+      setMcpPolicyStage2RequiredApprovals(
+        typeof policy.stage2RequiredApprovals === "number"
+          ? String(policy.stage2RequiredApprovals)
+          : "1",
+      );
+      setMcpPolicyStage1Roles((policy.stage1Roles ?? []).join(","));
+      setMcpPolicyStage2Roles((policy.stage2Roles ?? []).join(","));
+      setMcpPolicyConditionRiskLevel(
+        policy.approvalCondition?.riskLevelAtLeast ?? "",
+      );
+      setMcpPolicyConditionToolIds(
+        (policy.approvalCondition?.toolIds ?? []).join(","),
+      );
+      setMcpPolicyConditionTenantRoles(
+        (policy.approvalCondition?.tenantRoles ?? []).join(","),
+      );
+      setMcpPolicyReason(policy.reason ?? "");
       await queryClient.invalidateQueries({ queryKey: ["mcp", "policies"] });
     },
     onError: (error) => {
@@ -4001,8 +6169,15 @@ function GovernancePage() {
   });
 
   const createMcpApprovalMutation = useMutation({
-    mutationFn: ({ toolId, reason }: { toolId: string; reason?: string }) =>
-      createMcpApproval({ toolId, reason }),
+    mutationFn: ({
+      toolId,
+      reason,
+      approvalConfig,
+    }: {
+      toolId: string;
+      reason?: string;
+      approvalConfig?: McpApprovalConfig;
+    }) => createMcpApproval({ toolId, reason, approvalConfig }),
     onSuccess: async (approval) => {
       setMcpError(null);
       setMcpFeedback(`审批请求 ${approval.id} 已创建。`);
@@ -4021,22 +6196,86 @@ function GovernancePage() {
       approvalId,
       status,
       reason,
+      nodeId,
     }: {
       approvalId: string;
       status: "approved" | "rejected";
       reason?: string;
+      nodeId?: string;
     }) =>
       status === "approved"
-        ? approveMcpApproval(approvalId, reason ? { reason } : undefined)
-        : rejectMcpApproval(approvalId, reason ? { reason } : undefined),
+        ? approveMcpApproval(
+            approvalId,
+            reason || nodeId ? { ...(reason ? { reason } : {}), ...(nodeId ? { nodeId } : {}) } : undefined,
+          )
+        : rejectMcpApproval(
+            approvalId,
+            reason || nodeId ? { ...(reason ? { reason } : {}), ...(nodeId ? { nodeId } : {}) } : undefined,
+          ),
     onSuccess: async (approval) => {
       setMcpError(null);
       setMcpFeedback(`审批请求 ${approval.id} 已更新为 ${approval.status}。`);
       await queryClient.invalidateQueries({ queryKey: ["mcp", "approvals"] });
+      await queryClient.invalidateQueries({ queryKey: ["mcp", "invocations"] });
     },
     onError: (error) => {
       setMcpFeedback(null);
       setMcpError(`审批操作失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const evaluateMcpToolMutation = useMutation({
+    mutationFn: ({
+      toolId,
+      approvalRequestId,
+      reason,
+      evaluationTimestamp,
+      approvalConfig,
+    }: {
+      toolId: string;
+      approvalRequestId?: string;
+      reason?: string;
+      evaluationTimestamp?: string;
+      approvalConfig?: McpApprovalConfig;
+    }) =>
+      evaluateMcpTool({
+        toolId,
+        approvalRequestId,
+        reason,
+        evaluationTimestamp,
+        approvalConfig,
+      }),
+    onSuccess: async (result) => {
+      setMcpError(null);
+      setMcpEvaluateResultPayload({
+        toolId: result.toolId,
+        decision: result.decision,
+        result: result.result,
+        approvalRequestId: result.approvalRequestId,
+        approvalRequired: result.approvalRequired,
+        approvalMode: result.approvalMode,
+        currentNodeId: result.currentNodeId,
+        currentStage: result.currentStage,
+        approvalWorkflow: result.approvalWorkflow,
+        approvalNodes: result.approvalNodes,
+        pathHistory: result.pathHistory,
+        nextTransitionPreview: result.nextTransitionPreview,
+        approvalStages: result.approvalStages,
+        remainingApprovals: result.remainingApprovals,
+        approvalConditionMatched: result.approvalConditionMatched,
+      });
+      setMcpFeedback(
+        `MCP 评估完成：${result.toolId} -> ${result.result}${
+          result.currentStage ? ` (${result.currentStage})` : ""
+        }。`,
+      );
+      await queryClient.invalidateQueries({ queryKey: ["mcp", "approvals"] });
+      await queryClient.invalidateQueries({ queryKey: ["mcp", "invocations"] });
+    },
+    onError: (error) => {
+      setMcpEvaluateResultPayload(null);
+      setMcpFeedback(null);
+      setMcpError(`MCP 评估失败：${toErrorMessage(error)}`);
     },
   });
 
@@ -4247,6 +6486,68 @@ function GovernancePage() {
     },
   });
 
+  const upsertQualityAutomationPolicyMutation = useMutation({
+    mutationFn: (input: {
+      riskLevel: McpRiskLevel;
+      decision: McpToolDecision;
+      reason?: string;
+      evaluationScoreThreshold?: number;
+      triggerOnEvaluationFailure?: boolean;
+      triggerOnReplayRegression?: boolean;
+      strategyMatrix?: OpenPlatformAutomationStrategyRule[];
+    }) => upsertOpenPlatformAutomationPolicy(input),
+    onSuccess: async (payload) => {
+      setQualityError(null);
+      setQualityFeedback(`Quality automation policy 已更新为 ${payload.decision}。`);
+      setQualityAutomationRiskLevel(payload.riskLevel);
+      setQualityAutomationDecision(payload.decision);
+      setQualityAutomationReason(payload.reason ?? "");
+      setQualityAutomationEvaluationScoreThreshold(
+        String(payload.evaluationScoreThreshold),
+      );
+      setQualityAutomationTriggerOnEvaluationFailure(
+        payload.triggerOnEvaluationFailure,
+      );
+      setQualityAutomationTriggerOnReplayRegression(
+        payload.triggerOnReplayRegression,
+      );
+      setQualityAutomationStrategyMatrixJson(
+        JSON.stringify(payload.strategyMatrix ?? [], null, 2),
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["quality", "automation-policy"] }),
+        queryClient.invalidateQueries({ queryKey: ["quality", "automation-executions"] }),
+      ]);
+    },
+    onError: (error) => {
+      setQualityFeedback(null);
+      setQualityError(`保存 Quality automation policy 失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const simulateQualityAutomationPolicyMutation = useMutation({
+    mutationFn: (input: {
+      metric: string;
+      score: number;
+      sampleCount?: number;
+      trendDirection?: "up" | "down" | "flat";
+      confidence?: number;
+      regressionProbability?: number;
+      replayRegressionCount?: number;
+    }) => simulateOpenPlatformAutomationPolicy(input),
+    onSuccess: (payload) => {
+      setQualityError(null);
+      setQualityAutomationSimulationPayload(payload);
+      setQualityFeedback(
+        `Quality automation simulate 已完成：${payload.matchedRuleId ?? "default"} -> ${payload.resolvedAction}。`,
+      );
+    },
+    onError: (error) => {
+      setQualityFeedback(null);
+      setQualityError(`模拟 Quality automation policy 失败：${toErrorMessage(error)}`);
+    },
+  });
+
   const loadQualityDailyMutation = useMutation({
     mutationFn: (input: {
       date?: string;
@@ -4306,6 +6607,131 @@ function GovernancePage() {
     },
   });
 
+  const loadQualityForecastMutation = useMutation({
+    mutationFn: (input: {
+      from?: string;
+      to?: string;
+      metric?: string;
+      provider?: string;
+      workflow?: string;
+      limit?: number;
+    }) => fetchOpenPlatformQualityForecast(input),
+    onSuccess: (payload) => {
+      setQualityError(null);
+      setHasLoadedQualityForecast(true);
+      setQualityForecastPayload({
+        items: payload.items,
+        total: payload.total,
+      });
+      setQualityFeedback(`Quality forecast 已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setQualityFeedback(null);
+      setHasLoadedQualityForecast(true);
+      setQualityError(`Quality forecast 加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadQualityAdviceMutation = useMutation({
+    mutationFn: (input: {
+      from?: string;
+      to?: string;
+      provider?: string;
+      workflow?: string;
+    }) => fetchOpenPlatformQualityAdvice(input),
+    onSuccess: (payload) => {
+      setQualityError(null);
+      setHasLoadedQualityAdvice(true);
+      setQualityAdvicePayload({
+        items: payload.items,
+        total: payload.total,
+      });
+      setQualityFeedback(`Quality advice 已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setQualityFeedback(null);
+      setHasLoadedQualityAdvice(true);
+      setQualityError(`Quality advice 加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const executeQualityAdviceMutation = useMutation({
+    mutationFn: (input: {
+      adviceId: string;
+      project: string;
+      severity: "info" | "warn" | "critical";
+      actionType: "scorecard_adjustment" | "replay_experiment";
+      metric?: string;
+      datasetId?: string;
+      candidateLabels?: string[];
+    }) =>
+      executeOpenPlatformQualityAdvice(input.adviceId, {
+        project: input.project,
+        severity: input.severity,
+        actionType: input.actionType,
+        metric: input.metric,
+        datasetId: input.datasetId,
+        candidateLabels: input.candidateLabels,
+      }),
+    onSuccess: async (payload) => {
+      setQualityError(null);
+      setQualityFeedback(`Quality advice 执行已创建：${payload.id} (${payload.status})。`);
+      await queryClient.invalidateQueries({ queryKey: ["quality", "advice"] });
+      if (qualityAdviceExecutionPayload) {
+        const next = await fetchOpenPlatformQualityAdviceExecutions({ limit: 50 });
+        setHasLoadedQualityAdviceExecutions(true);
+        setQualityAdviceExecutionPayload({ items: next.items, total: next.total });
+      }
+      if (payload.experimentId) {
+        const experiment = await fetchOpenPlatformReplayExperimentResults(payload.experimentId);
+        setReplayExperimentDetailPayload(experiment);
+        setReplayExperimentComparePayload(null);
+        setReplayExperimentWorkflowPayload(null);
+      }
+    },
+    onError: (error) => {
+      setQualityFeedback(null);
+      setQualityError(`Quality advice 执行失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadQualityAdviceExecutionsMutation = useMutation({
+    mutationFn: (input: {
+      adviceId?: string;
+      actionType?: "scorecard_adjustment" | "replay_experiment";
+      status?: "pending" | "running" | "completed" | "failed" | "cancelled";
+      limit?: number;
+    }) => fetchOpenPlatformQualityAdviceExecutions(input),
+    onSuccess: (payload) => {
+      setQualityError(null);
+      setHasLoadedQualityAdviceExecutions(true);
+      setQualityAdviceExecutionPayload({ items: payload.items, total: payload.total });
+      setQualityFeedback(`Quality advice executions 已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setQualityFeedback(null);
+      setHasLoadedQualityAdviceExecutions(true);
+      setQualityError(`Quality advice executions 加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const cancelQualityAdviceExecutionMutation = useMutation({
+    mutationFn: (executionId: string) => cancelOpenPlatformQualityAdviceExecution(executionId),
+    onSuccess: async (payload) => {
+      setQualityError(null);
+      setQualityFeedback(`Quality advice execution ${payload.id} 已取消。`);
+      if (qualityAdviceExecutionPayload) {
+        const next = await fetchOpenPlatformQualityAdviceExecutions({ limit: 50 });
+        setHasLoadedQualityAdviceExecutions(true);
+        setQualityAdviceExecutionPayload({ items: next.items, total: next.total });
+      }
+    },
+    onError: (error) => {
+      setQualityFeedback(null);
+      setQualityError(`取消 Quality advice execution 失败：${toErrorMessage(error)}`);
+    },
+  });
+
   const loadQualityScorecardsMutation = useMutation({
     mutationFn: (input: { team?: string; limit: number }) =>
       fetchOpenPlatformQualityScorecards(input),
@@ -4341,6 +6767,203 @@ function GovernancePage() {
     },
   });
 
+  const loadReplayDatasetVersionsMutation = useMutation({
+    mutationFn: (datasetId: string) =>
+      fetchOpenPlatformReplayDatasetVersions(datasetId),
+    onSuccess: (payload) => {
+      setReplayError(null);
+      setHasLoadedReplayDatasetVersions(true);
+      setReplayVersionDatasetId(payload.datasetId);
+      setReplayDatasetVersionPayload({
+        datasetId: payload.datasetId,
+        items: payload.items,
+        total: payload.total,
+        currentVersionId: payload.currentVersionId,
+        currentVersionNumber: payload.currentVersionNumber,
+      });
+      if (
+        replayExperimentDatasetId.trim() === payload.datasetId &&
+        payload.currentVersionId
+      ) {
+        setReplayExperimentBaselineVersionId(payload.currentVersionId);
+      }
+      if (
+        replayCreateRunDatasetId.trim() === payload.datasetId &&
+        payload.currentVersionId
+      ) {
+        setReplayCreateRunBaselineVersionId(payload.currentVersionId);
+      }
+      setReplayFeedback(`回放数据集版本已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setHasLoadedReplayDatasetVersions(true);
+      setReplayError(`回放数据集版本加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadReplayDatasetVersionCasesMutation = useMutation({
+    mutationFn: ({ datasetId, versionId }: { datasetId: string; versionId: string }) =>
+      fetchOpenPlatformReplayDatasetVersionCases(datasetId, versionId),
+    onSuccess: (payload) => {
+      setReplayError(null);
+      setHasLoadedReplayDatasetVersionCases(true);
+      setReplayDatasetVersionCasesPayload({
+        datasetId: payload.datasetId,
+        versionId: payload.versionId,
+        items: payload.items,
+        total: payload.total,
+      });
+      setReplayFeedback(`回放版本样本已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setHasLoadedReplayDatasetVersionCases(true);
+      setReplayError(`回放版本样本加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const createReplayExperimentMutation = useMutation({
+    mutationFn: (input: {
+      name: string;
+      datasetId: string;
+      baselineVersionId?: string;
+      runIds?: string[];
+      candidateLabels?: string[];
+      autoRun?: boolean;
+      triggerSource?: "manual" | "quality_advice" | "automatic";
+      sourceAdviceId?: string;
+    }) => createOpenPlatformReplayExperiment(input),
+    onSuccess: async (payload) => {
+      setReplayError(null);
+      setReplayFeedback(`回放实验 ${payload.name} 已创建。`);
+      setReplayExperimentName("");
+      setReplayExperimentRunIds("");
+      setReplayExperimentCandidateLabels("");
+      setReplayExperimentBaselineVersionId(
+        payload.baselineVersionId ?? replayExperimentBaselineVersionId,
+      );
+      setReplayExperimentDetailPayload(payload);
+      setReplayExperimentComparePayload(null);
+      setReplayExperimentBatchComparePayload(null);
+      setReplayExperimentWorkflowPayload(null);
+      await queryClient.invalidateQueries({ queryKey: ["replay", "experiments"] });
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setReplayError(`创建回放实验失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadReplayExperimentsMutation = useMutation({
+    mutationFn: (input: { datasetId?: string; limit?: number }) =>
+      fetchOpenPlatformReplayExperiments(input),
+    onSuccess: (payload) => {
+      setReplayError(null);
+      setHasLoadedReplayExperiments(true);
+      setReplayExperimentPayload({ items: payload.items, total: payload.total });
+      setReplayFeedback(`回放实验已加载，共 ${payload.total} 条。`);
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setHasLoadedReplayExperiments(true);
+      setReplayError(`回放实验加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadReplayExperimentDetailMutation = useMutation({
+    mutationFn: (experimentId: string) => fetchOpenPlatformReplayExperimentResults(experimentId),
+    onSuccess: (payload) => {
+      setReplayError(null);
+      setReplayExperimentDetailPayload(payload);
+      setReplayExperimentComparePayload(null);
+      setReplayExperimentBatchComparePayload(null);
+      setReplayExperimentWorkflowPayload(null);
+      setReplayFeedback(`回放实验 ${payload.name} 已加载。`);
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setReplayError(`回放实验详情加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadReplayExperimentCompareMutation = useMutation({
+    mutationFn: (experimentId: string) => fetchOpenPlatformReplayExperimentCompare(experimentId),
+    onSuccess: (payload) => {
+      setReplayError(null);
+      setReplayExperimentComparePayload(payload);
+      setReplayExperimentBatchComparePayload(null);
+      setReplayFeedback(`回放实验对比已加载，共 ${payload.total} 个 run。`);
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setReplayError(`回放实验对比加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadReplayExperimentWorkflowMutation = useMutation({
+    mutationFn: (experimentId: string) => fetchOpenPlatformReplayExperimentWorkflow(experimentId),
+    onSuccess: (payload) => {
+      setReplayError(null);
+      setReplayExperimentWorkflowPayload(payload);
+      setReplayFeedback(`回放实验工作流已加载，共 ${payload.summary.totalNodes} 个节点。`);
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setReplayError(`回放实验工作流加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const loadReplayExperimentBatchCompareMutation = useMutation({
+    mutationFn: (input: { experimentIds: string[]; datasetId?: string }) =>
+      fetchOpenPlatformReplayExperimentsBatchCompare(input),
+    onSuccess: (payload) => {
+      setReplayError(null);
+      setReplayExperimentBatchComparePayload(payload);
+      setReplayFeedback(
+        `回放实验批量对比已加载，共 ${payload.summary.comparedExperimentCount} 个实验。`,
+      );
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setReplayError(`回放实验批量对比加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const runReplayExperimentMutation = useMutation({
+    mutationFn: (experimentId: string) => runOpenPlatformReplayExperiment(experimentId),
+    onSuccess: async (payload) => {
+      setReplayError(null);
+      setReplayFeedback(`回放实验 ${payload.name} 已启动。`);
+      setReplayExperimentDetailPayload(payload);
+      setReplayExperimentComparePayload(null);
+      setReplayExperimentBatchComparePayload(null);
+      setReplayExperimentWorkflowPayload(null);
+      await queryClient.invalidateQueries({ queryKey: ["replay", "experiments"] });
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setReplayError(`启动回放实验失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const cancelReplayExperimentMutation = useMutation({
+    mutationFn: (experimentId: string) => cancelOpenPlatformReplayExperiment(experimentId),
+    onSuccess: async (payload) => {
+      setReplayError(null);
+      setReplayFeedback(`回放实验 ${payload.name} 已取消。`);
+      setReplayExperimentDetailPayload(payload);
+      setReplayExperimentComparePayload(null);
+      setReplayExperimentBatchComparePayload(null);
+      setReplayExperimentWorkflowPayload(null);
+      await queryClient.invalidateQueries({ queryKey: ["replay", "experiments"] });
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setReplayError(`取消回放实验失败：${toErrorMessage(error)}`);
+    },
+  });
+
   const createReplayDatasetMutation = useMutation({
     mutationFn: (input: {
       name: string;
@@ -4357,7 +6980,11 @@ function GovernancePage() {
       setReplayCreateDatasetPromptVersion("");
       setReplayCreateDatasetSampleCount("50");
       setReplayDatasetCasesDatasetId(payload.datasetId);
+      setReplayVersionDatasetId(payload.datasetId);
       setReplayCreateRunDatasetId(payload.datasetId);
+      setReplayCreateRunBaselineVersionId(payload.currentVersionId ?? "");
+      setReplayExperimentDatasetId(payload.datasetId);
+      setReplayExperimentBaselineVersionId(payload.currentVersionId ?? "");
       setReplayDiffDatasetId(payload.datasetId);
       setReplayRunsDatasetIdFilter(payload.datasetId);
       setReplayFeedback(`回放数据集 ${payload.datasetId} 已创建。`);
@@ -4380,6 +7007,118 @@ function GovernancePage() {
     onError: (error) => {
       setReplayFeedback(null);
       setReplayError(`创建回放数据集失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const createReplayDatasetVersionMutation = useMutation({
+    mutationFn: ({
+      datasetId,
+      input,
+    }: {
+      datasetId: string;
+      input: {
+        datasetRef: string;
+        model: string;
+        promptVersion?: string;
+        sampleCount?: number;
+        note?: string;
+      };
+    }) => createOpenPlatformReplayDatasetVersion(datasetId, input),
+    onSuccess: async (payload) => {
+      setReplayError(null);
+      setReplayCreateVersionDatasetRef("");
+      setReplayCreateVersionModel("");
+      setReplayCreateVersionPromptVersion("");
+      setReplayCreateVersionSampleCount("50");
+      setReplayCreateVersionNote("");
+      setReplayFeedback(
+        `回放数据集版本 v${payload.version} 已创建，versionId=${payload.id}。`,
+      );
+      try {
+        const [versionPayload, datasetPayload] = await Promise.all([
+          fetchOpenPlatformReplayDatasetVersions(payload.datasetId),
+          fetchOpenPlatformReplayDatasets({
+            keyword: replayDatasetKeyword.trim() || undefined,
+            limit: 50,
+          }),
+        ]);
+        setHasLoadedReplayDatasetVersions(true);
+        setReplayDatasetVersionPayload({
+          datasetId: versionPayload.datasetId,
+          items: versionPayload.items,
+          total: versionPayload.total,
+          currentVersionId: versionPayload.currentVersionId,
+          currentVersionNumber: versionPayload.currentVersionNumber,
+        });
+        setHasLoadedReplayDatasets(true);
+        setReplayDatasetPayload({
+          items: datasetPayload.items,
+          total: datasetPayload.total,
+        });
+      } catch (error) {
+        setReplayFeedback(
+          `回放数据集版本 v${payload.version} 已创建，但列表刷新失败：${toErrorMessage(error)}`,
+        );
+      }
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setReplayError(`创建回放数据集版本失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const promoteReplayDatasetVersionMutation = useMutation({
+    mutationFn: ({ datasetId, versionId }: { datasetId: string; versionId: string }) =>
+      promoteOpenPlatformReplayDatasetVersion(datasetId, { versionId }),
+    onSuccess: async (payload) => {
+      setReplayError(null);
+      if (payload.dataset) {
+        setReplayDatasetPayload((current) =>
+          current
+            ? {
+                ...current,
+                items: current.items.map((item) =>
+                  item.datasetId === payload.dataset?.datasetId ? payload.dataset : item,
+                ),
+              }
+            : current,
+        );
+        if (replayExperimentDatasetId.trim() === payload.dataset.datasetId) {
+          setReplayExperimentBaselineVersionId(
+            payload.dataset.currentVersionId ?? payload.version.id,
+          );
+        }
+        if (replayCreateRunDatasetId.trim() === payload.dataset.datasetId) {
+          setReplayCreateRunBaselineVersionId(
+            payload.dataset.currentVersionId ?? payload.version.id,
+          );
+        }
+      }
+      setReplayFeedback(
+        `回放数据集版本 v${payload.version.version} 已提升为当前版本。`,
+      );
+      try {
+        const versionPayload = await fetchOpenPlatformReplayDatasetVersions(
+          payload.dataset?.datasetId ?? replayVersionDatasetId,
+        );
+        setHasLoadedReplayDatasetVersions(true);
+        setReplayVersionDatasetId(versionPayload.datasetId);
+        setReplayDatasetVersionPayload({
+          datasetId: versionPayload.datasetId,
+          items: versionPayload.items,
+          total: versionPayload.total,
+          currentVersionId: versionPayload.currentVersionId,
+          currentVersionNumber: versionPayload.currentVersionNumber,
+        });
+      } catch (error) {
+        setReplayFeedback(
+          `回放数据集版本已提升，但版本列表刷新失败：${toErrorMessage(error)}`,
+        );
+      }
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setReplayError(`提升回放数据集版本失败：${toErrorMessage(error)}`);
     },
   });
 
@@ -4525,6 +7264,7 @@ function GovernancePage() {
   const createReplayRunMutation = useMutation({
     mutationFn: (input: {
       datasetId: string;
+      baselineVersionId?: string;
       candidateLabel: string;
       sampleLimit?: number;
     }) => createOpenPlatformReplayRun(input),
@@ -4532,6 +7272,9 @@ function GovernancePage() {
       setReplayError(null);
       setReplayCreateRunCandidateLabel("");
       setReplayCreateRunSampleLimit("50");
+      setReplayCreateRunBaselineVersionId(
+        payload.baselineVersionId ?? replayCreateRunBaselineVersionId,
+      );
       setReplayDiffRunId(payload.runId);
       setReplayArtifactRunId(payload.runId);
       setReplayFeedback(
@@ -4619,6 +7362,27 @@ function GovernancePage() {
     },
   });
 
+  const loadReplayExperimentArtifactsMutation = useMutation({
+    mutationFn: (experimentId: string) =>
+      fetchOpenPlatformReplayExperimentArtifacts(experimentId),
+    onSuccess: (payload) => {
+      setReplayError(null);
+      setHasLoadedReplayExperimentArtifacts(true);
+      setReplayExperimentArtifactPayload({
+        experimentId: payload.experimentId,
+        datasetId: payload.datasetId,
+        items: payload.items,
+        total: payload.total,
+      });
+      setReplayFeedback(`回放实验工件已加载，共 ${payload.total} 个工件。`);
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setHasLoadedReplayExperimentArtifacts(true);
+      setReplayError(`回放实验工件加载失败：${toErrorMessage(error)}`);
+    },
+  });
+
   const downloadReplayArtifactMutation = useMutation({
     mutationFn: (input: {
       runId: string;
@@ -4703,6 +7467,9 @@ function GovernancePage() {
       simulatedExecutions: orchestrationExecutionItems.filter(
         (item) => item.simulated,
       ).length,
+      escalatedExecutions: orchestrationExecutionItems.filter(
+        (item) => item.escalated,
+      ).length,
     }),
     [orchestrationExecutionItems],
   );
@@ -4757,6 +7524,17 @@ function GovernancePage() {
     residencyRegionsQuery.data?.items ?? [];
   const replicationItems: ReplicationJob[] =
     replicationJobsQuery.data?.items ?? [];
+  const systemConfigPackageItems: SystemConfigPackage[] =
+    systemConfigPackagesQuery.data?.items ?? [];
+  const selectedSystemConfigPackage =
+    systemConfigPackageItems.find(
+      (item) => item.packageId === selectedSystemConfigPackageId,
+    ) ?? null;
+  const systemConfigApprovalItems: SystemConfigPackageApproval[] =
+    systemConfigPackageApprovalsQuery.data?.items ?? [];
+  const agentReleaseItems: AgentRelease[] = agentReleasesQuery.data?.items ?? [];
+  const selectedAgentRelease =
+    agentReleaseItems.find((item) => item.releaseId === selectedAgentReleaseId) ?? null;
   const ruleItems: RuleAsset[] = ruleAssetsQuery.data?.items ?? [];
   const selectedRuleAsset =
     ruleItems.find((asset) => asset.id === selectedRuleAssetId) ?? null;
@@ -4780,6 +7558,51 @@ function GovernancePage() {
     }
     return summary;
   }, [ruleApprovalItems]);
+
+  function resetSystemConfigCreateForm() {
+    setSystemConfigCreateVersion("");
+    setSystemConfigCreateIssuedAt("");
+    setSystemConfigCreateSignatureStatus("unknown");
+    setSystemConfigCreateRequiresApproval(false);
+    setSystemConfigCreateRequiredApprovals(0);
+    setSystemConfigCreateAgentIds("");
+    setSystemConfigCreateDeviceIds("");
+    setSystemConfigCreateChannels("");
+    setSystemConfigCreateHostnames("");
+    setSystemConfigCreatePayloadJson("{}");
+    setSystemConfigCreateFormSource(null);
+  }
+
+  function hydrateSystemConfigCreateForm(
+    pkg: SystemConfigPackage,
+    mode: SystemConfigCreateFormSource["mode"],
+  ) {
+    setSystemConfigCreateVersion(pkg.version);
+    setSystemConfigCreateIssuedAt(pkg.issuedAt ?? "");
+    setSystemConfigCreateSignatureStatus(pkg.signatureStatus);
+    setSystemConfigCreateRequiresApproval(pkg.requiresApproval);
+    setSystemConfigCreateRequiredApprovals(
+      pkg.requiresApproval ? pkg.requiredApprovals : 0,
+    );
+    setSystemConfigCreateAgentIds((pkg.targetSelectors.agentIds ?? []).join(","));
+    setSystemConfigCreateDeviceIds((pkg.targetSelectors.deviceIds ?? []).join(","));
+    setSystemConfigCreateChannels((pkg.targetSelectors.channels ?? []).join(","));
+    setSystemConfigCreateHostnames((pkg.targetSelectors.hostnames ?? []).join(","));
+    setSystemConfigCreatePayloadJson(JSON.stringify(pkg.payload ?? {}, null, 2));
+    setSystemConfigCreateFormSource({
+      packageId: pkg.packageId,
+      version: pkg.version,
+      mode,
+    });
+  }
+
+  function hydrateAgentReleasePreviewFromArtifact(
+    artifact: AgentReleaseArtifact,
+  ) {
+    setAgentReleasePreviewOs(artifact.os);
+    setAgentReleasePreviewArch(artifact.arch);
+    setAgentReleasePreviewRing(artifact.rolloutRing ?? "");
+  }
   const currentPublishVersion = Number(rulePublishVersion);
   const currentPublishApprovalSummary =
     Number.isInteger(currentPublishVersion) && currentPublishVersion > 0
@@ -4795,11 +7618,19 @@ function GovernancePage() {
     mcpApprovalsQuery.data?.items ?? [];
   const mcpInvocationItems: McpInvocationAudit[] =
     mcpInvocationsQuery.data?.items ?? [];
+  const qualityAutomationPolicy: OpenPlatformAutomationPolicy | null =
+    qualityAutomationPolicyQuery.data ?? null;
+  const qualityAutomationExecutionItems: McpInvocationAudit[] =
+    qualityAutomationExecutionsQuery.data?.items ?? [];
   const apiKeyItems: OpenPlatformApiKey[] = apiKeyPayload?.items ?? [];
   const webhookItems: OpenPlatformWebhook[] = webhookPayload?.items ?? [];
   const qualityDailyItems: OpenPlatformQualityDailyItem[] =
     qualityDailyPayload?.items ?? [];
   const qualityDailyGroups = qualityDailyPayload?.groups ?? [];
+  const qualityForecastItems: OpenPlatformQualityForecastItem[] =
+    qualityForecastPayload?.items ?? [];
+  const qualityAdviceItems: OpenPlatformQualityAdviceItem[] =
+    qualityAdvicePayload?.items ?? [];
   const qualityProjectTrendItems: OpenPlatformQualityProjectTrendItem[] =
     qualityProjectTrendsPayload?.items ?? [];
   const qualityProjectTrendSummary =
@@ -4808,13 +7639,23 @@ function GovernancePage() {
     qualityScorecardPayload?.items ?? [];
   const replayDatasetItems: OpenPlatformReplayDataset[] =
     replayDatasetPayload?.items ?? [];
+  const replayDatasetVersionItems: OpenPlatformReplayDatasetVersion[] =
+    replayDatasetVersionPayload?.items ?? [];
   const replayDatasetCaseItems: OpenPlatformReplayDatasetCase[] =
     replayDatasetCasesPayload?.items ?? [];
+  const replayDatasetVersionCaseItems: OpenPlatformReplayDatasetCase[] =
+    replayDatasetVersionCasesPayload?.items ?? [];
   const replayRunItems: OpenPlatformReplayRun[] = replayRunPayload?.items ?? [];
+  const replayExperimentItems: OpenPlatformReplayExperiment[] =
+    replayExperimentPayload?.items ?? [];
+  const replayExperimentBatchCompareItems =
+    replayExperimentBatchComparePayload?.items ?? [];
   const replayDiffItems: OpenPlatformReplayDiffItem[] =
     replayDiffPayload?.items ?? [];
   const replayArtifactItems: OpenPlatformReplayArtifact[] =
     replayArtifactPayload?.items ?? [];
+  const replayExperimentArtifactItems: OpenPlatformReplayArtifact[] =
+    replayExperimentArtifactPayload?.items ?? [];
   const replaySelectedRunSummary = useMemo(() => {
     const diffSummary = replayDiffPayload?.summary;
     if (
@@ -4854,12 +7695,346 @@ function GovernancePage() {
       ).sort((left, right) => left.localeCompare(right)),
     [replayDatasetItems, replayDatasetCaseItems, replayRunItems],
   );
+  const knownReplayVersionIds = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...replayDatasetVersionItems.map((item) => item.id),
+          ...replayDatasetItems
+            .map((item) => item.currentVersionId)
+            .filter((item): item is string => Boolean(item)),
+        ]),
+      ).sort((left, right) => left.localeCompare(right)),
+    [replayDatasetItems, replayDatasetVersionItems],
+  );
+  const replaySelectedExperimentDataset = useMemo(
+    () =>
+      replayDatasetItems.find(
+        (item) => item.datasetId === replayExperimentDatasetId.trim(),
+      ) ?? null,
+    [replayDatasetItems, replayExperimentDatasetId],
+  );
+  const replaySelectedExperimentCurrentVersionId =
+    replayDatasetVersionPayload?.datasetId === replayExperimentDatasetId.trim()
+      ? replayDatasetVersionPayload.currentVersionId ??
+        replaySelectedExperimentDataset?.currentVersionId ??
+        null
+      : replaySelectedExperimentDataset?.currentVersionId ?? null;
+  const replaySelectedExperimentCurrentVersionNumber =
+    replayDatasetVersionPayload?.datasetId === replayExperimentDatasetId.trim()
+      ? replayDatasetVersionPayload.currentVersionNumber ??
+        replaySelectedExperimentDataset?.currentVersionNumber ??
+        null
+      : replaySelectedExperimentDataset?.currentVersionNumber ?? null;
   const knownReplayRunIds = useMemo(
     () =>
       Array.from(new Set(replayRunItems.map((item) => item.runId))).sort(
         (left, right) => left.localeCompare(right),
       ),
     [replayRunItems],
+  );
+  const residencyExtensionPanel = (
+    <div className="governance-stack">
+      <h3>KMS Key Mapping</h3>
+      <div className="filters-row governance-inline-grid">
+        <label className="inline-field" htmlFor="residency-kms-region-id-inline">
+          Region
+          <select
+            id="residency-kms-region-id-inline"
+            value={residencyKmsRegionId}
+            onChange={(event) => setResidencyKmsRegionId(event.target.value)}
+          >
+            <option value="">请选择</option>
+            {regionItems.map((region) => (
+              <option key={`kms-inline-${region.id}`} value={region.id}>
+                {region.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="inline-field" htmlFor="residency-kms-provider-inline">
+          Key Provider
+          <input
+            id="residency-kms-provider-inline"
+            type="text"
+            value={residencyKmsProvider}
+            onChange={(event) => setResidencyKmsProvider(event.target.value)}
+            placeholder="例如：kms"
+          />
+        </label>
+        <label className="inline-field governance-wide-field" htmlFor="residency-kms-key-ref-inline">
+          Key Ref
+          <input
+            id="residency-kms-key-ref-inline"
+            type="text"
+            value={residencyKmsKeyRef}
+            onChange={(event) => setResidencyKmsKeyRef(event.target.value)}
+            placeholder="例如：kms://primary-cn-hangzhou"
+          />
+        </label>
+        <label className="checkbox-field" htmlFor="residency-kms-enabled-inline">
+          <input
+            id="residency-kms-enabled-inline"
+            type="checkbox"
+            checked={residencyKmsEnabled}
+            onChange={(event) => setResidencyKmsEnabled(event.target.checked)}
+          />
+          启用
+        </label>
+        <button
+          type="button"
+          className="submit-button"
+          onClick={() => {
+            const regionId = residencyKmsRegionId.trim();
+            const keyProvider = residencyKmsProvider.trim();
+            const keyRef = residencyKmsKeyRef.trim();
+            if (!regionId || !keyProvider || !keyRef) {
+              setResidencyKmsFeedback(null);
+              setResidencyKmsError("Region、Key Provider、Key Ref 不能为空。");
+              return;
+            }
+            setResidencyKmsFeedback(null);
+            setResidencyKmsError(null);
+            setResidencyKmsDrafts((prev) => {
+              const nextItem: ResidencyKmsKeyMapping = {
+                tenantId: residencyPolicyQuery.data?.tenantId ?? "default",
+                regionId,
+                keyProvider,
+                keyRef,
+                enabled: residencyKmsEnabled,
+                updatedAt: new Date().toISOString(),
+              };
+              return [...prev.filter((item) => item.regionId !== regionId), nextItem].sort(
+                (a, b) => a.regionId.localeCompare(b.regionId),
+              );
+            });
+            setResidencyKmsRegionId("");
+            setResidencyKmsProvider("");
+            setResidencyKmsKeyRef("");
+            setResidencyKmsEnabled(true);
+          }}
+        >
+          添加 / 覆盖 KMS 映射
+        </button>
+        <button
+          type="button"
+          className="submit-button"
+          disabled={saveResidencyKmsMappingsMutation.isPending}
+          onClick={() => {
+            setResidencyKmsFeedback(null);
+            setResidencyKmsError(null);
+            saveResidencyKmsMappingsMutation.mutate(residencyKmsDrafts);
+          }}
+        >
+          {saveResidencyKmsMappingsMutation.isPending ? "保存中..." : "保存 KMS 映射"}
+        </button>
+      </div>
+      {residencyKmsQuery.isLoading ? <p className="feedback info">KMS 映射加载中...</p> : null}
+      {residencyKmsQuery.isError ? (
+        <p className="feedback error">KMS 映射加载失败：{toErrorMessage(residencyKmsQuery.error)}</p>
+      ) : null}
+      {residencyKmsFeedback ? <p className="feedback success">{residencyKmsFeedback}</p> : null}
+      {residencyKmsError ? <p className="feedback error">{residencyKmsError}</p> : null}
+      <div className="table-wrapper">
+        <table className="session-table">
+          <thead>
+            <tr>
+              <th>Region</th>
+              <th>Provider</th>
+              <th>Key Ref</th>
+              <th>Enabled</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {residencyKmsDrafts.length === 0 ? (
+              <tr>
+                <td className="table-empty-cell" colSpan={5}>
+                  暂无 KMS 映射
+                </td>
+              </tr>
+            ) : (
+              residencyKmsDrafts.map((item) => (
+                <tr key={`kms-inline-row-${item.regionId}`}>
+                  <td>{item.regionId}</td>
+                  <td>{item.keyProvider}</td>
+                  <td>{item.keyRef}</td>
+                  <td>{item.enabled ? "true" : "false"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="table-action"
+                      onClick={() =>
+                        setResidencyKmsDrafts((prev) =>
+                          prev.filter((current) => current.regionId !== item.regionId),
+                        )
+                      }
+                    >
+                      删除
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Archive Region Policy</h3>
+      <div className="filters-row governance-inline-grid">
+        <label className="inline-field" htmlFor="residency-archive-source-region-inline">
+          Source Region
+          <select
+            id="residency-archive-source-region-inline"
+            value={residencyArchiveSourceRegion}
+            onChange={(event) => setResidencyArchiveSourceRegion(event.target.value)}
+          >
+            <option value="">请选择</option>
+            {regionItems.map((region) => (
+              <option key={`archive-source-inline-${region.id}`} value={region.id}>
+                {region.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="inline-field" htmlFor="residency-archive-target-region-inline">
+          Archive Region
+          <select
+            id="residency-archive-target-region-inline"
+            value={residencyArchiveTargetRegion}
+            onChange={(event) => setResidencyArchiveTargetRegion(event.target.value)}
+          >
+            <option value="">请选择</option>
+            {regionItems.map((region) => (
+              <option key={`archive-target-inline-${region.id}`} value={region.id}>
+                {region.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="inline-field" htmlFor="residency-archive-class-inline">
+          Archive Class
+          <input
+            id="residency-archive-class-inline"
+            type="text"
+            value={residencyArchiveClass}
+            onChange={(event) => setResidencyArchiveClass(event.target.value)}
+            placeholder="例如：cold"
+          />
+        </label>
+        <label className="checkbox-field" htmlFor="residency-archive-enabled-inline">
+          <input
+            id="residency-archive-enabled-inline"
+            type="checkbox"
+            checked={residencyArchiveEnabled}
+            onChange={(event) => setResidencyArchiveEnabled(event.target.checked)}
+          />
+          启用
+        </label>
+        <button
+          type="button"
+          className="submit-button"
+          onClick={() => {
+            const sourceRegion = residencyArchiveSourceRegion.trim();
+            const archiveRegion = residencyArchiveTargetRegion.trim();
+            const archiveClass = residencyArchiveClass.trim();
+            if (!sourceRegion || !archiveRegion || !archiveClass) {
+              setResidencyArchiveFeedback(null);
+              setResidencyArchiveError("Source Region、Archive Region、Archive Class 不能为空。");
+              return;
+            }
+            if (sourceRegion === archiveRegion) {
+              setResidencyArchiveFeedback(null);
+              setResidencyArchiveError("Source Region 与 Archive Region 不能相同。");
+              return;
+            }
+            setResidencyArchiveFeedback(null);
+            setResidencyArchiveError(null);
+            setResidencyArchiveDrafts((prev) => {
+              const nextItem: ResidencyArchiveRegionPolicy = {
+                tenantId: residencyPolicyQuery.data?.tenantId ?? "default",
+                sourceRegion,
+                archiveRegion,
+                archiveClass,
+                enabled: residencyArchiveEnabled,
+                updatedAt: new Date().toISOString(),
+              };
+              return [...prev.filter((item) => item.sourceRegion !== sourceRegion), nextItem].sort(
+                (a, b) => a.sourceRegion.localeCompare(b.sourceRegion),
+              );
+            });
+            setResidencyArchiveSourceRegion("");
+            setResidencyArchiveTargetRegion("");
+            setResidencyArchiveClass("");
+            setResidencyArchiveEnabled(true);
+          }}
+        >
+          添加 / 覆盖归档策略
+        </button>
+        <button
+          type="button"
+          className="submit-button"
+          disabled={saveResidencyArchivePoliciesMutation.isPending}
+          onClick={() => {
+            setResidencyArchiveFeedback(null);
+            setResidencyArchiveError(null);
+            saveResidencyArchivePoliciesMutation.mutate(residencyArchiveDrafts);
+          }}
+        >
+          {saveResidencyArchivePoliciesMutation.isPending ? "保存中..." : "保存归档策略"}
+        </button>
+      </div>
+      {residencyArchiveQuery.isLoading ? <p className="feedback info">归档策略加载中...</p> : null}
+      {residencyArchiveQuery.isError ? (
+        <p className="feedback error">归档策略加载失败：{toErrorMessage(residencyArchiveQuery.error)}</p>
+      ) : null}
+      {residencyArchiveFeedback ? <p className="feedback success">{residencyArchiveFeedback}</p> : null}
+      {residencyArchiveError ? <p className="feedback error">{residencyArchiveError}</p> : null}
+      <div className="table-wrapper">
+        <table className="session-table">
+          <thead>
+            <tr>
+              <th>Source Region</th>
+              <th>Archive Region</th>
+              <th>Archive Class</th>
+              <th>Enabled</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {residencyArchiveDrafts.length === 0 ? (
+              <tr>
+                <td className="table-empty-cell" colSpan={5}>
+                  暂无归档策略
+                </td>
+              </tr>
+            ) : (
+              residencyArchiveDrafts.map((item) => (
+                <tr key={`archive-inline-row-${item.sourceRegion}`}>
+                  <td>{item.sourceRegion}</td>
+                  <td>{item.archiveRegion}</td>
+                  <td>{item.archiveClass}</td>
+                  <td>{item.enabled ? "true" : "false"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="table-action"
+                      onClick={() =>
+                        setResidencyArchiveDrafts((prev) =>
+                          prev.filter((current) => current.sourceRegion !== item.sourceRegion),
+                        )
+                      }
+                    >
+                      删除
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 
   return (
@@ -5041,6 +8216,13 @@ function GovernancePage() {
             告警状态更新失败：{toErrorMessage(updateAlertStatusMutation.error)}
           </p>
         ) : null}
+        {retryAlertExternalLinkSyncMutation.isError ? (
+          <p className="feedback error">
+            外部联动重试失败：
+            {toErrorMessage(retryAlertExternalLinkSyncMutation.error)}
+          </p>
+        ) : null}
+        {alertOpsError ? <p className="feedback error">{alertOpsError}</p> : null}
 
         <div className="table-wrapper">
           <table className="session-table">
@@ -5050,6 +8232,7 @@ function GovernancePage() {
                 <th>级别</th>
                 <th>状态</th>
                 <th>消息</th>
+                <th>外部联动</th>
                 <th>更新时间</th>
                 <th>操作</th>
               </tr>
@@ -5057,7 +8240,7 @@ function GovernancePage() {
             <tbody>
               {alertItems.length === 0 ? (
                 <tr>
-                  <td className="table-empty-cell" colSpan={6}>
+                  <td className="table-empty-cell" colSpan={7}>
                     暂无告警
                   </td>
                 </tr>
@@ -5066,6 +8249,10 @@ function GovernancePage() {
                   const isUpdating =
                     updateAlertStatusMutation.isPending &&
                     updateAlertStatusMutation.variables?.alertId === alert.id;
+                  const retryableExternalLinks =
+                    alert.externalLinks?.filter((link) =>
+                      isAlertExternalLinkRetryable(alert.status, link),
+                    ) ?? [];
 
                   return (
                     <tr key={alert.id}>
@@ -5073,6 +8260,9 @@ function GovernancePage() {
                       <td>{alert.severity}</td>
                       <td>{alert.status}</td>
                       <td>{alert.message}</td>
+	                      <td>
+	                        {formatAlertExternalLinks(alert.externalLinks)}
+	                      </td>
                       <td>{formatDateTime(alert.updatedAt)}</td>
                       <td>
                         <div className="governance-action-row">
@@ -5110,6 +8300,59 @@ function GovernancePage() {
                               已完成
                             </span>
                           )}
+                          {retryableExternalLinks.map((link) => {
+                            const isRetrying =
+                              retryAlertExternalLinkSyncMutation.isPending &&
+                              retryAlertExternalLinkSyncMutation.variables
+                                ?.alertId === alert.id &&
+                              retryAlertExternalLinkSyncMutation.variables
+                                ?.externalType === link.externalType &&
+                              retryAlertExternalLinkSyncMutation.variables
+                                ?.externalId === link.externalId;
+                            return (
+                              <button
+                                key={`${alert.id}:${link.externalType}:${link.externalId}:retry`}
+                                type="button"
+                                className="table-action"
+                                disabled={isUpdating || isRetrying}
+                                onClick={() =>
+                                  retryAlertExternalLinkSyncMutation.mutate({
+                                    alertId: alert.id,
+                                    externalType: link.externalType,
+                                    externalId: link.externalId,
+                                  })
+                                }
+                              >
+                                重试同步 {link.externalType}:{link.externalId}
+                              </button>
+                            );
+                          })}
+                          {Array.isArray(alert.externalLinks) &&
+                          alert.externalLinks.length > 0 ? (
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() => {
+                                const nextAlertId =
+                                  selectedAlertOpsAlertId === alert.id ? null : alert.id;
+                                setSelectedAlertOpsAlertId(nextAlertId);
+                                setAlertOpsError(null);
+                                if (!nextAlertId) {
+                                  setAlertOpsPayload(null);
+                                  return;
+                                }
+                                void loadAlertExternalLinkOpsMutation.mutateAsync({
+                                  alertId: alert.id,
+                                  externalType: alertOpsExternalType || undefined,
+                                  onlyFailed: alertOpsOnlyFailed,
+                                });
+                              }}
+                            >
+                              {selectedAlertOpsAlertId === alert.id
+                                ? "收起联动运维"
+                                : "查看联动运维"}
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -5119,6 +8362,1043 @@ function GovernancePage() {
             </tbody>
           </table>
         </div>
+
+        <div className="governance-stack">
+          <h3>失败外部联动视图</h3>
+          <div className="filters-row">
+            <label className="inline-field" htmlFor="alert-failure-alert-id-filter">
+              alertId
+              <input
+                id="alert-failure-alert-id-filter"
+                type="text"
+                value={alertFailureAlertIdFilter}
+                onChange={(event) => setAlertFailureAlertIdFilter(event.target.value)}
+                placeholder="可选"
+              />
+            </label>
+            <label
+              className="inline-field"
+              htmlFor="alert-failure-external-system-filter"
+            >
+              externalSystem
+              <input
+                id="alert-failure-external-system-filter"
+                type="text"
+                value={alertFailureExternalSystemFilter}
+                onChange={(event) =>
+                  setAlertFailureExternalSystemFilter(event.target.value)
+                }
+                placeholder="可选"
+              />
+            </label>
+            <label className="inline-field" htmlFor="alert-failure-sync-state-filter">
+              syncState
+              <select
+                id="alert-failure-sync-state-filter"
+                value={alertFailureSyncStateFilter}
+                onChange={(event) =>
+                  setAlertFailureSyncStateFilter(
+                    event.target.value as "" | "synced" | "pending" | "failed",
+                  )
+                }
+              >
+                <option value="">全部</option>
+                <option value="failed">failed</option>
+                <option value="pending">pending</option>
+                <option value="synced">synced</option>
+              </select>
+            </label>
+            <label className="inline-field" htmlFor="alert-failure-limit">
+              limit
+              <input
+                id="alert-failure-limit"
+                type="number"
+                min={1}
+                max={200}
+                step={1}
+                value={alertFailureLimit}
+                onChange={(event) => setAlertFailureLimit(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="table-action"
+              disabled={loadAlertExternalLinkFailuresMutation.isPending}
+              onClick={() => {
+                const numericLimit = Number(alertFailureLimit);
+                if (
+                  alertFailureLimit.trim().length > 0 &&
+                  (!Number.isInteger(numericLimit) ||
+                    numericLimit < 1 ||
+                    numericLimit > 200)
+                ) {
+                  setAlertFailurePayload(null);
+                  setAlertFailureError("失败外部联动 limit 必须是 1 到 200 的整数。");
+                  return;
+                }
+                setAlertFailureError(null);
+                void loadAlertExternalLinkFailuresMutation.mutateAsync({
+                  alertId: alertFailureAlertIdFilter.trim() || undefined,
+                  externalSystem: alertFailureExternalSystemFilter.trim() || undefined,
+                  syncState: alertFailureSyncStateFilter || undefined,
+                  limit:
+                    alertFailureLimit.trim().length > 0 ? numericLimit : undefined,
+                });
+              }}
+            >
+              {loadAlertExternalLinkFailuresMutation.isPending
+                ? "加载中..."
+                : "加载失败联动"}
+            </button>
+          </div>
+
+          {alertFailureError ? (
+            <p className="feedback error">{alertFailureError}</p>
+          ) : null}
+
+          {alertFailurePayload ? (
+            <>
+              <p className="feedback info">
+                聚合：total={alertFailurePayload.summary.total} / pending=
+                {alertFailurePayload.summary.pending} / failed=
+                {alertFailurePayload.summary.failed}
+              </p>
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <thead>
+                    <tr>
+                      <th>alertId</th>
+                      <th>externalSystem</th>
+                      <th>external object</th>
+                      <th>syncState</th>
+                      <th>publishStatus</th>
+                      <th>failureStage</th>
+                      <th>failureCode</th>
+                      <th>retryable</th>
+                      <th>updatedAt</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {alertFailurePayload.items.length === 0 ? (
+                      <tr>
+                        <td className="table-empty-cell" colSpan={11}>
+                          暂无失败外部联动项
+                        </td>
+                      </tr>
+                    ) : (
+                      alertFailurePayload.items.map((item) => {
+                        const isRetryingSingle =
+                          retryAlertExternalLinkSyncMutation.isPending &&
+                          retryAlertExternalLinkSyncMutation.variables?.alertId ===
+                            item.alertId &&
+                          retryAlertExternalLinkSyncMutation.variables?.externalType ===
+                            item.externalType &&
+                          retryAlertExternalLinkSyncMutation.variables?.externalId ===
+                            item.externalId;
+                        const isRetryingBatch =
+                          retryAlertExternalLinkSyncBatchMutation.isPending &&
+                          retryAlertExternalLinkSyncBatchMutation.variables?.alertId ===
+                            item.alertId;
+                        return (
+                          <tr
+                            key={`alert-failure-${item.alertId}-${item.id}`}
+                          >
+                            <td>{item.alertId ?? "--"}</td>
+                            <td>{item.externalSystem}</td>
+                            <td>
+                              {item.externalType}:{item.externalId}
+                            </td>
+                            <td>{item.syncState}</td>
+                            <td>{item.publishStatus ?? "--"}</td>
+                            <td>{item.lastSyncFailureStage ?? "--"}</td>
+                            <td>{item.lastSyncFailureCode ?? "--"}</td>
+                            <td>{item.retryable ? "true" : "false"}</td>
+                            <td>
+                              {formatDateTime(item.updatedAt ?? item.lastSyncedAt)}
+                            </td>
+                            <td>
+                              <div className="governance-action-row">
+                                <button
+                                  type="button"
+                                  className="table-action"
+                                  disabled={!item.retryable || isRetryingSingle}
+                                  onClick={() => {
+                                    if (!item.alertId) {
+                                      return;
+                                    }
+                                    setAlertFailureError(null);
+                                    retryAlertExternalLinkSyncMutation.mutate({
+                                      alertId: item.alertId,
+                                      externalType: item.externalType,
+                                      externalId: item.externalId,
+                                    });
+                                  }}
+                                >
+                                  单条重试
+                                </button>
+                                <button
+                                  type="button"
+                                  className="table-action"
+                                  disabled={!item.alertId || isRetryingBatch}
+                                  onClick={() => {
+                                    if (!item.alertId) {
+                                      return;
+                                    }
+                                    setAlertFailureError(null);
+                                    retryAlertExternalLinkSyncBatchMutation.mutate({
+                                      alertId: item.alertId,
+                                    });
+                                  }}
+                                >
+                                  按告警批量重试
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <p className="feedback empty">尚未加载失败外部联动列表。</p>
+          )}
+        </div>
+
+        <div className="governance-stack">
+          <h3>失败审计报表</h3>
+          <div className="filters-row">
+            <label className="inline-field" htmlFor="failure-report-from">
+              from
+              <input
+                id="failure-report-from"
+                type="datetime-local"
+                value={failureReportFrom}
+                onChange={(event) => setFailureReportFrom(event.target.value)}
+              />
+            </label>
+            <label className="inline-field" htmlFor="failure-report-to">
+              to
+              <input
+                id="failure-report-to"
+                type="datetime-local"
+                value={failureReportTo}
+                onChange={(event) => setFailureReportTo(event.target.value)}
+              />
+            </label>
+            <label className="inline-field" htmlFor="failure-report-external-system">
+              externalSystem
+              <input
+                id="failure-report-external-system"
+                type="text"
+                value={failureReportExternalSystem}
+                onChange={(event) => setFailureReportExternalSystem(event.target.value)}
+                placeholder="可选"
+              />
+            </label>
+            <label className="inline-field" htmlFor="failure-report-stage">
+              stage
+              <input
+                id="failure-report-stage"
+                type="text"
+                value={failureReportStage}
+                onChange={(event) => setFailureReportStage(event.target.value)}
+                placeholder="可选"
+              />
+            </label>
+            <label className="inline-field" htmlFor="failure-report-action-type">
+              actionType
+              <select
+                id="failure-report-action-type"
+                value={failureReportActionType}
+                onChange={(event) =>
+                  setFailureReportActionType(
+                    event.target.value as typeof failureReportActionType,
+                  )
+                }
+              >
+                <option value="">全部</option>
+                <option value="retry_requested">retry_requested</option>
+                <option value="retry_completed">retry_completed</option>
+                <option value="retry_failed">retry_failed</option>
+                <option value="dlq_queried">dlq_queried</option>
+                <option value="dlq_replayed">dlq_replayed</option>
+                <option value="recovery_job_created">recovery_job_created</option>
+                <option value="recovery_job_completed">recovery_job_completed</option>
+                <option value="recovery_job_failed">recovery_job_failed</option>
+              </select>
+            </label>
+            <label className="inline-field" htmlFor="failure-report-limit">
+              limit
+              <input
+                id="failure-report-limit"
+                type="number"
+                min={1}
+                max={500}
+                step={1}
+                value={failureReportLimit}
+                onChange={(event) => setFailureReportLimit(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="table-action"
+              disabled={loadIntegrationAlertFailureReportMutation.isPending}
+              onClick={() => {
+                const numericLimit = Number(failureReportLimit);
+                if (
+                  failureReportLimit.trim().length > 0 &&
+                  (!Number.isInteger(numericLimit) ||
+                    numericLimit < 1 ||
+                    numericLimit > 500)
+                ) {
+                  setFailureReportPayload(null);
+                  setFailureReportError("失败审计报表 limit 必须是 1 到 500 的整数。");
+                  return;
+                }
+                setFailureReportError(null);
+                void loadIntegrationAlertFailureReportMutation.mutateAsync({
+                  from: failureReportFrom.trim() || undefined,
+                  to: failureReportTo.trim() || undefined,
+                  externalSystem: failureReportExternalSystem.trim() || undefined,
+                  stage: failureReportStage.trim() || undefined,
+                  actionType: failureReportActionType || undefined,
+                  limit:
+                    failureReportLimit.trim().length > 0 ? numericLimit : undefined,
+                });
+              }}
+            >
+              {loadIntegrationAlertFailureReportMutation.isPending
+                ? "加载中..."
+                : "加载失败审计报表"}
+            </button>
+          </div>
+
+          {failureReportError ? (
+            <p className="feedback error">{failureReportError}</p>
+          ) : null}
+
+          {failureReportPayload ? (
+            <>
+              <p className="feedback info">
+                total={failureReportPayload.summary.totalEvents} / retryRequested=
+                {failureReportPayload.summary.retryRequested} / retryFailed=
+                {failureReportPayload.summary.retryFailed} / dlqReplayed=
+                {failureReportPayload.summary.dlqReplayed} / recoveryJobsFailed=
+                {failureReportPayload.summary.recoveryJobsFailed}
+              </p>
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <thead>
+                    <tr>
+                      <th>occurredAt</th>
+                      <th>action</th>
+                      <th>alertId</th>
+                      <th>externalSystem</th>
+                      <th>stage</th>
+                      <th>code</th>
+                      <th>status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {failureReportPayload.items.length === 0 ? (
+                      <tr>
+                        <td className="table-empty-cell" colSpan={7}>
+                          暂无失败审计事件
+                        </td>
+                      </tr>
+                    ) : (
+                      failureReportPayload.items.map((item) => (
+                        <tr key={`${item.occurredAt}:${item.action}:${item.alertId ?? "--"}`}>
+                          <td>{formatDateTime(item.occurredAt)}</td>
+                          <td>{item.actionType}</td>
+                          <td>{item.alertId ?? "--"}</td>
+                          <td>{item.externalSystem ?? "--"}</td>
+                          <td>{item.stage ?? "--"}</td>
+                          <td>{item.code ?? "--"}</td>
+                          <td>{item.status}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <p className="feedback empty">尚未加载失败审计报表。</p>
+          )}
+        </div>
+
+        <div className="governance-stack">
+          <h3>长期趋势/容量运维视图</h3>
+          <div className="filters-row">
+            <label className="inline-field" htmlFor="failure-trend-from">
+              from
+              <input
+                id="failure-trend-from"
+                type="datetime-local"
+                value={failureTrendFrom}
+                onChange={(event) => setFailureTrendFrom(event.target.value)}
+              />
+            </label>
+            <label className="inline-field" htmlFor="failure-trend-to">
+              to
+              <input
+                id="failure-trend-to"
+                type="datetime-local"
+                value={failureTrendTo}
+                onChange={(event) => setFailureTrendTo(event.target.value)}
+              />
+            </label>
+            <label className="inline-field" htmlFor="failure-trend-external-system">
+              externalSystem
+              <input
+                id="failure-trend-external-system"
+                type="text"
+                value={failureTrendExternalSystem}
+                onChange={(event) => setFailureTrendExternalSystem(event.target.value)}
+                placeholder="可选"
+              />
+            </label>
+            <label className="inline-field" htmlFor="failure-trend-stage">
+              stage
+              <input
+                id="failure-trend-stage"
+                type="text"
+                value={failureTrendStage}
+                onChange={(event) => setFailureTrendStage(event.target.value)}
+                placeholder="可选"
+              />
+            </label>
+            <label className="inline-field" htmlFor="failure-trend-action-type">
+              actionType
+              <select
+                id="failure-trend-action-type"
+                value={failureTrendActionType}
+                onChange={(event) =>
+                  setFailureTrendActionType(event.target.value as typeof failureTrendActionType)
+                }
+              >
+                <option value="">全部</option>
+                <option value="retry_requested">retry_requested</option>
+                <option value="retry_completed">retry_completed</option>
+                <option value="retry_failed">retry_failed</option>
+                <option value="dlq_queried">dlq_queried</option>
+                <option value="dlq_replayed">dlq_replayed</option>
+                <option value="recovery_job_created">recovery_job_created</option>
+                <option value="recovery_job_completed">recovery_job_completed</option>
+                <option value="recovery_job_failed">recovery_job_failed</option>
+              </select>
+            </label>
+            <label className="inline-field" htmlFor="failure-trend-top">
+              top
+              <input
+                id="failure-trend-top"
+                type="number"
+                min={1}
+                max={20}
+                step={1}
+                value={failureTrendTop}
+                onChange={(event) => setFailureTrendTop(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="table-action"
+              disabled={loadIntegrationAlertFailureTrendMutation.isPending}
+              onClick={() => {
+                const numericTop = Number(failureTrendTop);
+                if (
+                  failureTrendTop.trim().length > 0 &&
+                  (!Number.isInteger(numericTop) || numericTop < 1 || numericTop > 20)
+                ) {
+                  setFailureTrendPayload(null);
+                  setFailureTrendError("长期趋势/容量运维视图 top 必须是 1 到 20 的整数。");
+                  return;
+                }
+                setFailureTrendError(null);
+                void loadIntegrationAlertFailureTrendMutation.mutateAsync({
+                  from: failureTrendFrom.trim() || undefined,
+                  to: failureTrendTo.trim() || undefined,
+                  externalSystem: failureTrendExternalSystem.trim() || undefined,
+                  stage: failureTrendStage.trim() || undefined,
+                  actionType: failureTrendActionType || undefined,
+                  top: failureTrendTop.trim().length > 0 ? numericTop : undefined,
+                });
+              }}
+            >
+              {loadIntegrationAlertFailureTrendMutation.isPending
+                ? "加载中..."
+                : "加载长期趋势/容量运维视图"}
+            </button>
+          </div>
+
+          {failureTrendError ? (
+            <p className="feedback error">{failureTrendError}</p>
+          ) : null}
+
+          {failureTrendPayload ? (
+            <>
+              <p className="feedback info">
+                total={failureTrendPayload.summary.totalEvents} / failed=
+                {failureTrendPayload.summary.failedEvents} / requested=
+                {failureTrendPayload.summary.requestedEvents} / avg/day=
+                {failureTrendPayload.summary.averageEventsPerDay} / peak=
+                {failureTrendPayload.summary.peakDate ?? "--"}(
+                {failureTrendPayload.summary.peakCount})
+              </p>
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <thead>
+                    <tr>
+                      <th>date</th>
+                      <th>total</th>
+                      <th>failed</th>
+                      <th>success</th>
+                      <th>requested</th>
+                      <th>alerts</th>
+                      <th>retryFailed</th>
+                      <th>recoveryCompleted</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {failureTrendPayload.daily.length === 0 ? (
+                      <tr>
+                        <td className="table-empty-cell" colSpan={8}>
+                          暂无长期趋势数据
+                        </td>
+                      </tr>
+                    ) : (
+                      failureTrendPayload.daily.map((item) => (
+                        <tr key={item.date}>
+                          <td>{item.date}</td>
+                          <td>{item.totalEvents}</td>
+                          <td>{item.failedEvents}</td>
+                          <td>{item.successEvents}</td>
+                          <td>{item.requestedEvents}</td>
+                          <td>{item.uniqueAlerts}</td>
+                          <td>{item.retryFailed}</td>
+                          <td>{item.recoveryJobsCompleted}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <thead>
+                    <tr>
+                      <th>externalSystem</th>
+                      <th>total</th>
+                      <th>failed</th>
+                      <th>success</th>
+                      <th>requested</th>
+                      <th>alerts</th>
+                      <th>lastOccurredAt</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {failureTrendPayload.capacity.externalSystems.length === 0 ? (
+                      <tr>
+                        <td className="table-empty-cell" colSpan={7}>
+                          暂无 externalSystem 容量桶
+                        </td>
+                      </tr>
+                    ) : (
+                      failureTrendPayload.capacity.externalSystems.map((item) => (
+                        <tr key={`external-system-${item.name}`}>
+                          <td>{item.name}</td>
+                          <td>{item.totalEvents}</td>
+                          <td>{item.failedEvents}</td>
+                          <td>{item.successEvents}</td>
+                          <td>{item.requestedEvents}</td>
+                          <td>{item.uniqueAlerts}</td>
+                          <td>{formatOptionalDateTime(item.lastOccurredAt ?? null)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <thead>
+                    <tr>
+                      <th>stage</th>
+                      <th>total</th>
+                      <th>failed</th>
+                      <th>success</th>
+                      <th>requested</th>
+                      <th>alerts</th>
+                      <th>lastOccurredAt</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {failureTrendPayload.capacity.stages.length === 0 ? (
+                      <tr>
+                        <td className="table-empty-cell" colSpan={7}>
+                          暂无 stage 容量桶
+                        </td>
+                      </tr>
+                    ) : (
+                      failureTrendPayload.capacity.stages.map((item) => (
+                        <tr key={`stage-${item.name}`}>
+                          <td>{item.name}</td>
+                          <td>{item.totalEvents}</td>
+                          <td>{item.failedEvents}</td>
+                          <td>{item.successEvents}</td>
+                          <td>{item.requestedEvents}</td>
+                          <td>{item.uniqueAlerts}</td>
+                          <td>{formatOptionalDateTime(item.lastOccurredAt ?? null)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <p className="feedback empty">尚未加载长期趋势/容量运维视图。</p>
+          )}
+        </div>
+
+        <div className="governance-stack">
+          <h3>Integration DLQ</h3>
+          <div className="filters-row">
+            <label className="inline-field" htmlFor="integration-dlq-event-type-filter">
+              eventType
+              <input
+                id="integration-dlq-event-type-filter"
+                type="text"
+                value={integrationDlqEventTypeFilter}
+                onChange={(event) => setIntegrationDlqEventTypeFilter(event.target.value)}
+                placeholder="可选"
+              />
+            </label>
+            <label className="inline-field" htmlFor="integration-dlq-channel-filter">
+              channel
+              <input
+                id="integration-dlq-channel-filter"
+                type="text"
+                value={integrationDlqChannelFilter}
+                onChange={(event) => setIntegrationDlqChannelFilter(event.target.value)}
+                placeholder="可选"
+              />
+            </label>
+            <label className="inline-field" htmlFor="integration-dlq-alert-id-filter">
+              alertId
+              <input
+                id="integration-dlq-alert-id-filter"
+                type="text"
+                value={integrationDlqAlertIdFilter}
+                onChange={(event) => setIntegrationDlqAlertIdFilter(event.target.value)}
+                placeholder="可选"
+              />
+            </label>
+            <label className="inline-field" htmlFor="integration-dlq-callback-id-filter">
+              callbackId
+              <input
+                id="integration-dlq-callback-id-filter"
+                type="text"
+                value={integrationDlqCallbackIdFilter}
+                onChange={(event) => setIntegrationDlqCallbackIdFilter(event.target.value)}
+                placeholder="可选"
+              />
+            </label>
+            <label className="inline-field" htmlFor="integration-dlq-limit">
+              limit
+              <input
+                id="integration-dlq-limit"
+                type="number"
+                min={1}
+                max={200}
+                step={1}
+                value={integrationDlqLimit}
+                onChange={(event) => setIntegrationDlqLimit(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="table-action"
+              disabled={loadIntegrationDlqMessagesMutation.isPending}
+              onClick={() => {
+                const numericLimit = Number(integrationDlqLimit);
+                if (
+                  integrationDlqLimit.trim().length > 0 &&
+                  (!Number.isInteger(numericLimit) ||
+                    numericLimit < 1 ||
+                    numericLimit > 200)
+                ) {
+                  setIntegrationDlqPayload(null);
+                  setSelectedIntegrationDlqMessageIds([]);
+                  setIntegrationDlqError("Integration DLQ limit 必须是 1 到 200 的整数。");
+                  return;
+                }
+                setIntegrationDlqError(null);
+                void loadIntegrationDlqMessagesMutation.mutateAsync({
+                  eventType: integrationDlqEventTypeFilter.trim() || undefined,
+                  channel: integrationDlqChannelFilter.trim() || undefined,
+                  alertId: integrationDlqAlertIdFilter.trim() || undefined,
+                  callbackId: integrationDlqCallbackIdFilter.trim() || undefined,
+                  limit:
+                    integrationDlqLimit.trim().length > 0
+                      ? numericLimit
+                      : undefined,
+                });
+              }}
+            >
+              {loadIntegrationDlqMessagesMutation.isPending
+                ? "加载中..."
+                : "加载 DLQ"}
+            </button>
+            <button
+              type="button"
+              className="table-action"
+              disabled={
+                createIntegrationDlqRecoveryJobMutation.isPending ||
+                selectedIntegrationDlqMessageIds.length === 0
+              }
+              onClick={() => {
+                setIntegrationDlqRecoveryError(null);
+                void createIntegrationDlqRecoveryJobMutation.mutateAsync({
+                  messageIds: selectedIntegrationDlqMessageIds,
+                });
+              }}
+            >
+              创建恢复批次
+            </button>
+            <button
+              type="button"
+              className="table-action"
+              disabled={loadIntegrationDlqRecoveryJobsMutation.isPending}
+              onClick={() => {
+                setIntegrationDlqRecoveryError(null);
+                void loadIntegrationDlqRecoveryJobsMutation.mutateAsync({
+                  limit: 20,
+                });
+              }}
+            >
+              加载恢复批次
+            </button>
+          </div>
+
+          {integrationDlqError ? (
+            <p className="feedback error">{integrationDlqError}</p>
+          ) : null}
+          {integrationDlqRecoveryError ? (
+            <p className="feedback error">{integrationDlqRecoveryError}</p>
+          ) : null}
+
+          {integrationDlqPayload ? (
+            <>
+              <p className="feedback info">
+                共 {integrationDlqPayload.total} 条 DLQ 消息，当前展示{" "}
+                {integrationDlqPayload.items.length} 条。
+              </p>
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <thead>
+                    <tr>
+                      <th>选择</th>
+                      <th>eventType</th>
+                      <th>channel</th>
+                      <th>alertId</th>
+                      <th>callbackId</th>
+                      <th>error</th>
+                      <th>retryable</th>
+                      <th>attempt</th>
+                      <th>failedAt</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {integrationDlqPayload.items.length === 0 ? (
+                      <tr>
+                        <td className="table-empty-cell" colSpan={9}>
+                          暂无 DLQ 消息
+                        </td>
+                      </tr>
+                    ) : (
+                      integrationDlqPayload.items.map((item) => (
+                        <tr key={item.messageId}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={selectedIntegrationDlqMessageIds.includes(
+                                item.messageId,
+                              )}
+                              onChange={(event) => {
+                                setSelectedIntegrationDlqMessageIds((prev) =>
+                                  event.target.checked
+                                    ? [...prev, item.messageId]
+                                    : prev.filter((value) => value !== item.messageId),
+                                );
+                              }}
+                            />
+                          </td>
+                          <td>{item.eventType}</td>
+                          <td>{item.channel ?? "--"}</td>
+                          <td>{item.alertId ?? "--"}</td>
+                          <td>{item.callbackId ?? "--"}</td>
+                          <td>{item.error}</td>
+                          <td>{item.retryable ? "true" : "false"}</td>
+                          <td>{item.attempt}</td>
+                          <td>{formatDateTime(item.failedAt)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <p className="feedback empty">尚未加载 Integration DLQ 列表。</p>
+          )}
+
+          <div className="governance-stack">
+            <h4>恢复批次</h4>
+            <div className="filters-row">
+              <label
+                className="inline-field"
+                htmlFor="integration-dlq-recovery-job-id"
+              >
+                jobId
+                <input
+                  id="integration-dlq-recovery-job-id"
+                  type="text"
+                  value={integrationDlqRecoveryJobId}
+                  onChange={(event) =>
+                    setIntegrationDlqRecoveryJobId(event.target.value)
+                  }
+                  placeholder="可选"
+                />
+              </label>
+              <button
+                type="button"
+                className="table-action"
+                disabled={loadIntegrationDlqRecoveryJobDetailMutation.isPending}
+                onClick={() => {
+                  const jobId = integrationDlqRecoveryJobId.trim();
+                  if (!jobId) {
+                    setIntegrationDlqRecoveryJobDetail(null);
+                    setIntegrationDlqRecoveryError("恢复批次 jobId 不能为空。");
+                    return;
+                  }
+                  setIntegrationDlqRecoveryError(null);
+                  void loadIntegrationDlqRecoveryJobDetailMutation.mutateAsync(jobId);
+                }}
+              >
+                查看恢复详情
+              </button>
+            </div>
+
+            {integrationDlqRecoveryJobsPayload ? (
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <thead>
+                    <tr>
+                      <th>jobId</th>
+                      <th>status</th>
+                      <th>requestedAt</th>
+                      <th>startedAt</th>
+                      <th>finishedAt</th>
+                      <th>total</th>
+                      <th>replayed</th>
+                      <th>failed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {integrationDlqRecoveryJobsPayload.items.length === 0 ? (
+                      <tr>
+                        <td className="table-empty-cell" colSpan={8}>
+                          暂无恢复批次
+                        </td>
+                      </tr>
+                    ) : (
+                      integrationDlqRecoveryJobsPayload.items.map((item) => (
+                        <tr key={item.id}>
+                          <td>{item.id}</td>
+                          <td>{item.status}</td>
+                          <td>{formatDateTime(item.requestedAt)}</td>
+                          <td>{item.startedAt ? formatDateTime(item.startedAt) : "--"}</td>
+                          <td>{item.finishedAt ? formatDateTime(item.finishedAt) : "--"}</td>
+                          <td>{item.summary.total}</td>
+                          <td>{item.summary.replayed}</td>
+                          <td>{item.summary.failed}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="feedback empty">尚未加载恢复批次列表。</p>
+            )}
+
+            {integrationDlqRecoveryJobDetail ? (
+              <>
+                <p className="feedback info">
+                  恢复批次 {integrationDlqRecoveryJobDetail.id}：
+                  total={integrationDlqRecoveryJobDetail.summary.total} / replayed=
+                  {integrationDlqRecoveryJobDetail.summary.replayed} / failed=
+                  {integrationDlqRecoveryJobDetail.summary.failed}
+                </p>
+                <div className="table-wrapper">
+                  <table className="session-table">
+                    <thead>
+                      <tr>
+                        <th>messageId</th>
+                        <th>status</th>
+                        <th>error</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {integrationDlqRecoveryJobDetail.items.length === 0 ? (
+                        <tr>
+                          <td className="table-empty-cell" colSpan={3}>
+                            暂无恢复明细
+                          </td>
+                        </tr>
+                      ) : (
+                        integrationDlqRecoveryJobDetail.items.map((item) => (
+                          <tr key={`${integrationDlqRecoveryJobDetail.id}:${item.messageId}`}>
+                            <td>{item.messageId}</td>
+                            <td>{item.status}</td>
+                            <td>{item.error ?? "--"}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
+
+        {selectedAlertOpsAlertId ? (
+          <div className="governance-stack">
+            <h3>外部联动运维视图</h3>
+            <div className="filters-row">
+              <label className="inline-field" htmlFor="alert-ops-external-type-filter">
+                externalType
+                <select
+                  id="alert-ops-external-type-filter"
+                  value={alertOpsExternalType}
+                  onChange={(event) =>
+                    setAlertOpsExternalType(
+                      event.target.value as "" | "ticket" | "case" | "incident",
+                    )
+                  }
+                >
+                  <option value="">全部</option>
+                  <option value="ticket">ticket</option>
+                  <option value="case">case</option>
+                  <option value="incident">incident</option>
+                </select>
+              </label>
+              <label className="checkbox-field" htmlFor="alert-ops-only-failed">
+                <input
+                  id="alert-ops-only-failed"
+                  type="checkbox"
+                  checked={alertOpsOnlyFailed}
+                  onChange={(event) => setAlertOpsOnlyFailed(event.target.checked)}
+                />
+                仅失败项
+              </label>
+              <button
+                type="button"
+                className="table-action"
+                disabled={loadAlertExternalLinkOpsMutation.isPending}
+                onClick={() => {
+                  setAlertOpsError(null);
+                  void loadAlertExternalLinkOpsMutation.mutateAsync({
+                    alertId: selectedAlertOpsAlertId,
+                    externalType: alertOpsExternalType || undefined,
+                    onlyFailed: alertOpsOnlyFailed,
+                  });
+                }}
+              >
+                刷新联动运维
+              </button>
+              <button
+                type="button"
+                className="table-action"
+                disabled={
+                  retryAlertExternalLinkSyncBatchMutation.isPending ||
+                  !alertOpsPayload ||
+                  alertOpsPayload.summary.pending + alertOpsPayload.summary.failed === 0
+                }
+                onClick={() => {
+                  setAlertOpsError(null);
+                  void retryAlertExternalLinkSyncBatchMutation.mutateAsync({
+                    alertId: selectedAlertOpsAlertId,
+                    externalType: alertOpsExternalType || undefined,
+                  });
+                }}
+              >
+                批量重试当前告警
+              </button>
+            </div>
+
+            {loadAlertExternalLinkOpsMutation.isPending ? (
+              <p className="feedback info">外部联动运维视图加载中...</p>
+            ) : null}
+
+            {alertOpsPayload ? (
+              <>
+                <p className="feedback info">
+                  聚合：total={alertOpsPayload.summary.total} / pending=
+                  {alertOpsPayload.summary.pending} / failed=
+                  {alertOpsPayload.summary.failed}
+                </p>
+                <div className="table-wrapper">
+                  <table className="session-table">
+                    <thead>
+                      <tr>
+                        <th>外部对象</th>
+                        <th>syncState</th>
+                        <th>当前状态</th>
+                        <th>目标状态</th>
+                        <th>失败归因</th>
+                        <th>最近同步</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {alertOpsPayload.items.length === 0 ? (
+                        <tr>
+                          <td className="table-empty-cell" colSpan={7}>
+                            暂无外部联动运维项
+                          </td>
+                        </tr>
+                      ) : (
+                        alertOpsPayload.items.map((item) => (
+                          <tr key={`alert-ops-${item.id}`}>
+                            <td>
+                              {item.externalType}:{item.externalId}
+                            </td>
+                            <td>{item.syncState}</td>
+                            <td>{item.externalStatus ?? "--"}</td>
+                            <td>{item.pendingExternalStatus ?? "--"}</td>
+                            <td>
+                              {item.lastSyncFailureStage || item.lastSyncFailureCode
+                                ? `${item.lastSyncFailureStage ?? "--"} / ${item.lastSyncFailureCode ?? "--"}`
+                                : item.lastSyncError ?? item.publishError ?? "--"}
+                            </td>
+                            <td>{formatDateTime(item.lastSyncedAt)}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <section className="panel">
@@ -5874,6 +10154,53 @@ function GovernancePage() {
 
           <label
             className="inline-field"
+            htmlFor="orchestration-execution-escalated-filter"
+          >
+            escalated
+            <select
+              id="orchestration-execution-escalated-filter"
+              value={orchestrationExecutionEscalatedFilter}
+              onChange={(event) =>
+                setOrchestrationExecutionEscalatedFilter(
+                  event.target.value as "" | "true" | "false",
+                )
+              }
+            >
+              {BOOLEAN_FILTER_OPTIONS.map((option) => (
+                <option key={`escalated-${option.label}`} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label
+            className="inline-field"
+            htmlFor="orchestration-execution-escalation-reason-filter"
+          >
+            escalationReason
+            <select
+              id="orchestration-execution-escalation-reason-filter"
+              value={orchestrationExecutionEscalationReasonFilter}
+              onChange={(event) =>
+                setOrchestrationExecutionEscalationReasonFilter(
+                  event.target.value as AlertOrchestrationEscalationReason | "",
+                )
+              }
+            >
+              {ALERT_ORCHESTRATION_ESCALATION_REASON_OPTIONS.map((option) => (
+                <option
+                  key={`escalation-reason-${option.label}`}
+                  value={option.value}
+                >
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label
+            className="inline-field"
             htmlFor="orchestration-execution-from"
           >
             from
@@ -5998,6 +10325,12 @@ function GovernancePage() {
               <h3>simulated</h3>
               <strong>
                 {orchestrationExecutionSummary.simulatedExecutions}
+              </strong>
+            </article>
+            <article className="analytics-kpi-card">
+              <h3>escalated</h3>
+              <strong>
+                {orchestrationExecutionSummary.escalatedExecutions}
               </strong>
             </article>
           </section>
@@ -6244,6 +10577,8 @@ function GovernancePage() {
                 <th>ruleId</th>
                 <th>eventType</th>
                 <th>mode</th>
+                <th>escalated</th>
+                <th>reason</th>
                 <th>severity</th>
                 <th>sourceId</th>
                 <th>dedupeHit</th>
@@ -6251,6 +10586,8 @@ function GovernancePage() {
                 <th>simulated</th>
                 <th>conflicts</th>
                 <th>channels</th>
+                <th>targetChannels</th>
+                <th>sla</th>
                 <th>metadata</th>
                 <th>创建时间</th>
               </tr>
@@ -6258,7 +10595,7 @@ function GovernancePage() {
             <tbody>
               {orchestrationExecutionItems.length === 0 ? (
                 <tr>
-                  <td className="table-empty-cell" colSpan={13}>
+                  <td className="table-empty-cell" colSpan={17}>
                     {hasLoadedOrchestrationExecutions
                       ? "无匹配执行日志。"
                       : "尚未加载执行日志，请点击“加载执行日志”。"}
@@ -6271,6 +10608,8 @@ function GovernancePage() {
                     <td>{item.ruleId}</td>
                     <td>{item.eventType}</td>
                     <td>{item.dispatchMode}</td>
+                    <td>{item.escalated ? "true" : "false"}</td>
+                    <td>{item.escalationReason ?? "--"}</td>
                     <td>{item.severity ?? "--"}</td>
                     <td>{item.sourceId ?? "--"}</td>
                     <td>{item.dedupeHit ? "true" : "false"}</td>
@@ -6282,6 +10621,17 @@ function GovernancePage() {
                         : "--"}
                     </td>
                     <td>{item.channels.join(",")}</td>
+                    <td>
+                      {Array.isArray(item.escalationTargetChannels) &&
+                      item.escalationTargetChannels.length > 0
+                        ? item.escalationTargetChannels.join(",")
+                        : "--"}
+                    </td>
+                    <td>
+                      {typeof item.slaMinutes === "number"
+                        ? `${item.slaMinutes}m`
+                        : "--"}
+                    </td>
                     <td>{formatCompactJson(item.metadata)}</td>
                     <td>{formatDateTime(item.createdAt)}</td>
                   </tr>
@@ -6446,6 +10796,8 @@ function GovernancePage() {
         {residencyError ? (
           <p className="feedback error">{residencyError}</p>
         ) : null}
+
+        {residencyExtensionPanel}
 
         <div className="filters-row governance-inline-grid">
           <label className="inline-field" htmlFor="replication-source-region">
@@ -6657,6 +11009,534 @@ function GovernancePage() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="panel">
+        <header>
+          <h2>Config Packages</h2>
+          <p>配置包审批、发布与 watch/latest 预览。</p>
+        </header>
+
+        {systemConfigCreateFormSource ? (
+          <p className="feedback info">
+            {systemConfigCreateFormSource.mode === "clone"
+              ? `当前基于配置包 ${systemConfigCreateFormSource.packageId} / v${systemConfigCreateFormSource.version} 克隆新包，请修改 Version 后再创建。`
+              : `创建表单已载入配置包 ${systemConfigCreateFormSource.packageId} / v${systemConfigCreateFormSource.version}。`}
+          </p>
+        ) : null}
+
+        <div className="filters-row governance-inline-grid">
+          <label className="inline-field" htmlFor="system-config-create-version">
+            Version
+            <input
+              id="system-config-create-version"
+              type="text"
+              value={systemConfigCreateVersion}
+              onChange={(event) => setSystemConfigCreateVersion(event.target.value)}
+              placeholder="例如：config-v2"
+            />
+          </label>
+          <label className="inline-field" htmlFor="system-config-create-issued-at">
+            Issued At
+            <input
+              id="system-config-create-issued-at"
+              type="text"
+              value={systemConfigCreateIssuedAt}
+              onChange={(event) => setSystemConfigCreateIssuedAt(event.target.value)}
+              placeholder="可选，ISO 时间"
+            />
+          </label>
+          <label className="inline-field" htmlFor="system-config-create-signature-status">
+            Signature Status
+            <input
+              id="system-config-create-signature-status"
+              type="text"
+              value={systemConfigCreateSignatureStatus}
+              onChange={(event) =>
+                setSystemConfigCreateSignatureStatus(event.target.value)
+              }
+              placeholder="unknown / verified"
+            />
+          </label>
+          <label className="checkbox-field" htmlFor="system-config-create-requires-approval">
+            <input
+              id="system-config-create-requires-approval"
+              type="checkbox"
+              checked={systemConfigCreateRequiresApproval}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                setSystemConfigCreateRequiresApproval(checked);
+                setSystemConfigCreateRequiredApprovals(checked ? 1 : 0);
+              }}
+            />
+            Requires Approval
+          </label>
+          <label className="inline-field" htmlFor="system-config-create-required-approvals">
+            Required Approvals
+            <select
+              id="system-config-create-required-approvals"
+              value={String(systemConfigCreateRequiredApprovals)}
+              onChange={(event) =>
+                setSystemConfigCreateRequiredApprovals(
+                  Number(event.target.value) === 2
+                    ? 2
+                    : Number(event.target.value) === 1
+                      ? 1
+                      : 0,
+                )
+              }
+              disabled={!systemConfigCreateRequiresApproval}
+            >
+              <option value="0">0</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+            </select>
+          </label>
+          <label className="inline-field" htmlFor="system-config-create-agent-ids">
+            Agent IDs
+            <input
+              id="system-config-create-agent-ids"
+              type="text"
+              value={systemConfigCreateAgentIds}
+              onChange={(event) => setSystemConfigCreateAgentIds(event.target.value)}
+              placeholder="逗号分隔"
+            />
+          </label>
+          <label className="inline-field" htmlFor="system-config-create-device-ids">
+            Device IDs
+            <input
+              id="system-config-create-device-ids"
+              type="text"
+              value={systemConfigCreateDeviceIds}
+              onChange={(event) => setSystemConfigCreateDeviceIds(event.target.value)}
+              placeholder="逗号分隔"
+            />
+          </label>
+          <label className="inline-field" htmlFor="system-config-create-channels">
+            Channels
+            <input
+              id="system-config-create-channels"
+              type="text"
+              value={systemConfigCreateChannels}
+              onChange={(event) => setSystemConfigCreateChannels(event.target.value)}
+              placeholder="逗号分隔"
+            />
+          </label>
+          <label className="inline-field" htmlFor="system-config-create-hostnames">
+            Hostnames
+            <input
+              id="system-config-create-hostnames"
+              type="text"
+              value={systemConfigCreateHostnames}
+              onChange={(event) => setSystemConfigCreateHostnames(event.target.value)}
+              placeholder="逗号分隔"
+            />
+          </label>
+        </div>
+
+        <div className="filters-row">
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="system-config-create-payload-json"
+          >
+            Payload JSON
+            <textarea
+              id="system-config-create-payload-json"
+              value={systemConfigCreatePayloadJson}
+              onChange={(event) =>
+                setSystemConfigCreatePayloadJson(event.target.value)
+              }
+              rows={6}
+              placeholder='{"mode":"observe"}'
+            />
+          </label>
+
+          <button
+            type="button"
+            className="submit-button"
+            disabled={createSystemConfigPackageMutation.isPending}
+            onClick={() => {
+              const version = systemConfigCreateVersion.trim();
+              if (!version) {
+                setSystemConfigFeedback(null);
+                setSystemConfigError("Version 不能为空。");
+                return;
+              }
+              if (
+                systemConfigCreateFormSource?.mode === "clone" &&
+                version === systemConfigCreateFormSource.version
+              ) {
+                setSystemConfigFeedback(null);
+                setSystemConfigError("克隆为新包时 Version 必须不同。");
+                return;
+              }
+              let payload: Record<string, unknown>;
+              try {
+                const parsed = JSON.parse(systemConfigCreatePayloadJson);
+                if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+                  setSystemConfigFeedback(null);
+                  setSystemConfigError("Payload JSON 必须是对象。");
+                  return;
+                }
+                payload = parsed as Record<string, unknown>;
+              } catch (error) {
+                setSystemConfigFeedback(null);
+                setSystemConfigError(`Payload JSON 非法：${toErrorMessage(error)}`);
+                return;
+              }
+              const targetSelectors = {
+                ...(parseDistinctCommaSeparatedList(systemConfigCreateAgentIds).length > 0
+                  ? { agentIds: parseDistinctCommaSeparatedList(systemConfigCreateAgentIds) }
+                  : {}),
+                ...(parseDistinctCommaSeparatedList(systemConfigCreateDeviceIds).length > 0
+                  ? {
+                      deviceIds: parseDistinctCommaSeparatedList(
+                        systemConfigCreateDeviceIds,
+                      ),
+                    }
+                  : {}),
+                ...(parseDistinctCommaSeparatedList(systemConfigCreateChannels).length > 0
+                  ? {
+                      channels: parseDistinctCommaSeparatedList(
+                        systemConfigCreateChannels,
+                      ),
+                    }
+                  : {}),
+                ...(parseDistinctCommaSeparatedList(systemConfigCreateHostnames).length > 0
+                  ? {
+                      hostnames: parseDistinctCommaSeparatedList(
+                        systemConfigCreateHostnames,
+                      ),
+                    }
+                  : {}),
+              };
+              setSystemConfigFeedback(null);
+              setSystemConfigError(null);
+              createSystemConfigPackageMutation.mutate({
+                version,
+                issuedAt: systemConfigCreateIssuedAt.trim() || undefined,
+                signatureStatus: systemConfigCreateSignatureStatus.trim() || undefined,
+                requiresApproval: systemConfigCreateRequiresApproval,
+                requiredApprovals: systemConfigCreateRequiresApproval
+                  ? systemConfigCreateRequiredApprovals === 2
+                    ? 2
+                    : 1
+                  : 0,
+                targetSelectors,
+                payload,
+              });
+            }}
+          >
+            {createSystemConfigPackageMutation.isPending ? "创建中..." : "创建配置包"}
+          </button>
+        </div>
+
+        {systemConfigPackagesQuery.isLoading ? (
+          <p className="feedback info">配置包加载中...</p>
+        ) : null}
+        {systemConfigPackagesQuery.isError ? (
+          <p className="feedback error">
+            配置包加载失败：{toErrorMessage(systemConfigPackagesQuery.error)}
+          </p>
+        ) : null}
+        {systemConfigFeedback ? (
+          <p className="feedback success">{systemConfigFeedback}</p>
+        ) : null}
+        {systemConfigError ? (
+          <p className="feedback error">{systemConfigError}</p>
+        ) : null}
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>Package ID</th>
+                <th>Version</th>
+                <th>审批开关</th>
+                <th>审批门槛</th>
+                <th>已发布</th>
+                <th>发布时间</th>
+                <th>签名状态</th>
+                <th>Target Selectors</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {systemConfigPackageItems.length === 0 ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={9}>
+                    暂无配置包
+                  </td>
+                </tr>
+              ) : (
+                systemConfigPackageItems.map((item) => (
+                  <tr
+                    key={item.packageId}
+                    className={
+                      selectedSystemConfigPackageId === item.packageId
+                        ? "is-selected-row"
+                        : ""
+                    }
+                  >
+                    <td>{item.packageId}</td>
+                    <td>{item.version}</td>
+                    <td>{item.requiresApproval ? "是" : "否"}</td>
+                    <td>{item.requiredApprovals}</td>
+                    <td>{item.isPublished ? "是" : "否"}</td>
+                    <td>{item.publishedAt ? formatDateTime(item.publishedAt) : "--"}</td>
+                    <td>{item.signatureStatus}</td>
+                    <td>{formatSystemConfigTargetSelectors(item.targetSelectors)}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="table-action"
+                        onClick={() => setSelectedSystemConfigPackageId(item.packageId)}
+                      >
+                        {selectedSystemConfigPackageId === item.packageId ? "已选中" : "选中"}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {selectedSystemConfigPackage ? (
+          <>
+            <p className="feedback info">
+              当前配置包：{selectedSystemConfigPackage.packageId} / v
+              {selectedSystemConfigPackage.version} / selectors：
+              {formatSystemConfigTargetSelectors(
+                selectedSystemConfigPackage.targetSelectors,
+              )}
+            </p>
+
+            <div className="governance-action-row">
+              <button
+                type="button"
+                className="table-action"
+                onClick={() => {
+                  hydrateSystemConfigCreateForm(selectedSystemConfigPackage, "loaded");
+                  setSystemConfigFeedback(
+                    `已将配置包 ${selectedSystemConfigPackage.packageId} 载入创建表单。`,
+                  );
+                  setSystemConfigError(null);
+                }}
+              >
+                载入到表单
+              </button>
+              <button
+                type="button"
+                className="table-action"
+                onClick={() => {
+                  hydrateSystemConfigCreateForm(selectedSystemConfigPackage, "clone");
+                  setSystemConfigFeedback(
+                    `已基于配置包 ${selectedSystemConfigPackage.packageId} 回填表单，请修改 Version 后创建新包。`,
+                  );
+                  setSystemConfigError(null);
+                }}
+              >
+                克隆为新包
+              </button>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label
+                className="inline-field"
+                htmlFor="system-config-approval-decision"
+              >
+                审批决策
+                <select
+                  id="system-config-approval-decision"
+                  value={systemConfigApprovalDecision}
+                  onChange={(event) =>
+                    setSystemConfigApprovalDecision(
+                      event.target.value as SystemConfigPackageApprovalDecision,
+                    )
+                  }
+                >
+                  <option value="approved">approved</option>
+                  <option value="rejected">rejected</option>
+                </select>
+              </label>
+
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="system-config-approval-comment"
+              >
+                审批意见
+                <input
+                  id="system-config-approval-comment"
+                  type="text"
+                  value={systemConfigApprovalComment}
+                  onChange={(event) =>
+                    setSystemConfigApprovalComment(event.target.value)
+                  }
+                  placeholder="可选"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={createSystemConfigPackageApprovalMutation.isPending}
+                onClick={() => {
+                  setSystemConfigFeedback(null);
+                  setSystemConfigError(null);
+                  createSystemConfigPackageApprovalMutation.mutate({
+                    packageId: selectedSystemConfigPackage.packageId,
+                    decision: systemConfigApprovalDecision,
+                    comment: systemConfigApprovalComment.trim() || undefined,
+                  });
+                }}
+              >
+                {createSystemConfigPackageApprovalMutation.isPending
+                  ? "提交中..."
+                  : "提交配置审批"}
+              </button>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={publishSystemConfigPackageMutation.isPending}
+                onClick={() => {
+                  setSystemConfigFeedback(null);
+                  setSystemConfigError(null);
+                  publishSystemConfigPackageMutation.mutate({
+                    packageId: selectedSystemConfigPackage.packageId,
+                  });
+                }}
+              >
+                {publishSystemConfigPackageMutation.isPending ? "发布中..." : "发布配置包"}
+              </button>
+            </div>
+
+            {systemConfigPackageApprovalsQuery.isLoading ? (
+              <p className="feedback info">配置审批记录加载中...</p>
+            ) : null}
+            {systemConfigPackageApprovalsQuery.isError ? (
+              <p className="feedback error">
+                配置审批记录加载失败：
+                {toErrorMessage(systemConfigPackageApprovalsQuery.error)}
+              </p>
+            ) : null}
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>Approval ID</th>
+                    <th>Version</th>
+                    <th>Decision</th>
+                    <th>Approver</th>
+                    <th>Comment</th>
+                    <th>Updated At</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {systemConfigApprovalItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={6}>
+                        暂无审批记录
+                      </td>
+                    </tr>
+                  ) : (
+                    systemConfigApprovalItems.map((item) => (
+                      <tr key={item.approvalId}>
+                        <td>{item.approvalId}</td>
+                        <td>{item.version}</td>
+                        <td>{item.decision}</td>
+                        <td>{item.approverUserId}</td>
+                        <td>{item.comment ?? "--"}</td>
+                        <td>{formatDateTime(item.updatedAt)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label
+                className="inline-field"
+                htmlFor="system-config-watch-agent-id"
+              >
+                Watch Agent ID
+                <input
+                  id="system-config-watch-agent-id"
+                  type="text"
+                  value={systemConfigWatchAgentId}
+                  onChange={(event) => setSystemConfigWatchAgentId(event.target.value)}
+                  placeholder="可选"
+                />
+              </label>
+              <label
+                className="inline-field"
+                htmlFor="system-config-watch-device-id"
+              >
+                Watch Device ID
+                <input
+                  id="system-config-watch-device-id"
+                  type="text"
+                  value={systemConfigWatchDeviceId}
+                  onChange={(event) => setSystemConfigWatchDeviceId(event.target.value)}
+                  placeholder="可选"
+                />
+              </label>
+              <label
+                className="inline-field"
+                htmlFor="system-config-watch-channel"
+              >
+                Watch Channel
+                <input
+                  id="system-config-watch-channel"
+                  type="text"
+                  value={systemConfigWatchChannel}
+                  onChange={(event) => setSystemConfigWatchChannel(event.target.value)}
+                  placeholder="例如：stable"
+                />
+              </label>
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="system-config-watch-hostname"
+              >
+                Watch Hostname
+                <input
+                  id="system-config-watch-hostname"
+                  type="text"
+                  value={systemConfigWatchHostname}
+                  onChange={(event) => setSystemConfigWatchHostname(event.target.value)}
+                  placeholder="可选"
+                />
+              </label>
+              <button
+                type="button"
+                className="submit-button"
+                disabled={fetchSystemConfigWatchLatestMutation.isPending}
+                onClick={() => {
+                  setSystemConfigFeedback(null);
+                  setSystemConfigError(null);
+                  fetchSystemConfigWatchLatestMutation.mutate();
+                }}
+              >
+                {fetchSystemConfigWatchLatestMutation.isPending
+                  ? "查询中..."
+                  : "查询 watch/latest"}
+              </button>
+            </div>
+
+            <p className="feedback info">
+              {hasLoadedSystemConfigWatch
+                ? systemConfigWatchResult
+                  ? `watch/latest 命中：${systemConfigWatchResult.packageId} / v${systemConfigWatchResult.version}`
+                  : "watch/latest 未命中任何已发布配置包。"
+                : "可按 agent/device/channel/hostname 预览 watch/latest 命中结果。"}
+            </p>
+          </>
+        ) : (
+          <p className="feedback empty">请选择一个配置包查看审批和发布详情。</p>
+        )}
       </section>
 
       <section className="panel">
@@ -7345,6 +12225,449 @@ function GovernancePage() {
 
       <section className="panel">
         <header>
+          <h2>Agent Releases / Rollout</h2>
+          <p>查看 release 与服务端 rollout 预览结果。</p>
+        </header>
+
+        <div className="filters-row governance-inline-grid">
+          <label className="inline-field" htmlFor="agent-release-channel-filter">
+            Release Channel
+            <select
+              id="agent-release-channel-filter"
+              value={agentReleaseChannelFilter}
+              onChange={(event) =>
+                setAgentReleaseChannelFilter(
+                  event.target.value as AgentReleaseChannel,
+                )
+              }
+            >
+              <option value="stable">stable</option>
+              <option value="beta">beta</option>
+              <option value="canary">canary</option>
+            </select>
+          </label>
+        </div>
+
+        {agentReleasesQuery.isLoading ? (
+          <p className="feedback info">Agent Releases 加载中...</p>
+        ) : null}
+        {agentReleasesQuery.isError ? (
+          <p className="feedback error">
+            Agent Releases 加载失败：{toErrorMessage(agentReleasesQuery.error)}
+          </p>
+        ) : null}
+        {agentReleaseFeedback ? (
+          <p className="feedback success">{agentReleaseFeedback}</p>
+        ) : null}
+        {agentReleaseError ? (
+          <p className="feedback error">{agentReleaseError}</p>
+        ) : null}
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>Release ID</th>
+                <th>Version</th>
+                <th>Channel</th>
+                <th>Published At</th>
+                <th>Artifacts</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {agentReleaseItems.length === 0 ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={6}>
+                    暂无 Agent Release
+                  </td>
+                </tr>
+              ) : (
+                agentReleaseItems.map((item) => (
+                  <tr
+                    key={item.releaseId}
+                    className={
+                      selectedAgentReleaseId === item.releaseId ? "is-selected-row" : ""
+                    }
+                  >
+                    <td>{item.releaseId}</td>
+                    <td>{item.version}</td>
+                    <td>{item.channel}</td>
+                    <td>{formatDateTime(item.publishedAt)}</td>
+                    <td>
+                      {item.artifacts.length > 0
+                        ? item.artifacts
+                            .map((artifact) => formatAgentReleaseArtifactSummary(artifact))
+                            .join(" || ")
+                        : "--"}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="table-action"
+                        onClick={() => setSelectedAgentReleaseId(item.releaseId)}
+                      >
+                        {selectedAgentReleaseId === item.releaseId ? "已选中" : "选中"}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {selectedAgentRelease ? (
+          <>
+            <p className="feedback info">
+              当前 Release：{selectedAgentRelease.releaseId} / v
+              {selectedAgentRelease.version} / channel={selectedAgentRelease.channel}
+            </p>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>OS</th>
+                    <th>Arch</th>
+                    <th>File Name</th>
+                    <th>Rollout Ring</th>
+                    <th>Rollout Percentage</th>
+                    <th>Min Agent Version</th>
+                    <th>Signature</th>
+                    <th>Install Hint</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedAgentRelease.artifacts.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={9}>
+                        当前 release 暂无 artifact
+                      </td>
+                    </tr>
+                  ) : (
+                    selectedAgentRelease.artifacts.map((artifact, index) => (
+                      <tr key={`${selectedAgentRelease.releaseId}-${artifact.os}-${artifact.arch}-${index}`}>
+                        <td>{artifact.os}</td>
+                        <td>{artifact.arch}</td>
+                        <td>{artifact.fileName ?? "--"}</td>
+                        <td>{artifact.rolloutRing ?? "--"}</td>
+                        <td>
+                          {typeof artifact.rolloutPercentage === "number"
+                            ? artifact.rolloutPercentage
+                            : "--"}
+                        </td>
+                        <td>{artifact.minAgentVersion ?? "--"}</td>
+                        <td>{artifact.signatureAlgorithm ?? "--"}</td>
+                        <td>{artifact.installHint ?? "--"}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="table-action"
+                            onClick={() => {
+                              hydrateAgentReleasePreviewFromArtifact(artifact);
+                              setAgentReleaseError(null);
+                              setAgentReleaseFeedback(
+                                agentReleasePreviewCurrentVersion.trim().length > 0
+                                  ? artifact.fileName
+                                    ? `已将 ${artifact.fileName} 回填到升级预览。`
+                                    : "已将 artifact 回填到升级预览。"
+                                  : artifact.fileName
+                                    ? `已将 ${artifact.fileName} 回填到升级预览，请补 Current Version 后执行。`
+                                    : "已将 artifact 回填到升级预览，请补 Current Version 后执行。",
+                              );
+                            }}
+                          >
+                            回填到预览
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <p className="feedback empty">请选择一个 release 查看 artifact 编排视图。</p>
+        )}
+
+        <div className="filters-row governance-inline-grid">
+          <label className="inline-field" htmlFor="agent-release-preview-current-version">
+            Current Version
+            <input
+              id="agent-release-preview-current-version"
+              type="text"
+              value={agentReleasePreviewCurrentVersion}
+              onChange={(event) =>
+                setAgentReleasePreviewCurrentVersion(event.target.value)
+              }
+              placeholder="例如：1.0.0"
+            />
+          </label>
+          <label className="inline-field" htmlFor="agent-release-preview-os">
+            OS
+            <input
+              id="agent-release-preview-os"
+              type="text"
+              value={agentReleasePreviewOs}
+              onChange={(event) => setAgentReleasePreviewOs(event.target.value)}
+              placeholder="例如：darwin"
+            />
+          </label>
+          <label className="inline-field" htmlFor="agent-release-preview-arch">
+            Arch
+            <input
+              id="agent-release-preview-arch"
+              type="text"
+              value={agentReleasePreviewArch}
+              onChange={(event) => setAgentReleasePreviewArch(event.target.value)}
+              placeholder="例如：amd64"
+            />
+          </label>
+          <label className="inline-field" htmlFor="agent-release-preview-agent-id">
+            Agent ID
+            <input
+              id="agent-release-preview-agent-id"
+              type="text"
+              value={agentReleasePreviewAgentId}
+              onChange={(event) =>
+                setAgentReleasePreviewAgentId(event.target.value)
+              }
+              placeholder="可选"
+            />
+          </label>
+          <label className="inline-field" htmlFor="agent-release-preview-device-id">
+            Device ID
+            <input
+              id="agent-release-preview-device-id"
+              type="text"
+              value={agentReleasePreviewDeviceId}
+              onChange={(event) =>
+                setAgentReleasePreviewDeviceId(event.target.value)
+              }
+              placeholder="可选"
+            />
+          </label>
+          <label className="inline-field" htmlFor="agent-release-preview-hostname">
+            Hostname
+            <input
+              id="agent-release-preview-hostname"
+              type="text"
+              value={agentReleasePreviewHostname}
+              onChange={(event) =>
+                setAgentReleasePreviewHostname(event.target.value)
+              }
+              placeholder="可选"
+            />
+          </label>
+          <label className="inline-field" htmlFor="agent-release-preview-ring">
+            Rollout Ring
+            <input
+              id="agent-release-preview-ring"
+              type="text"
+              value={agentReleasePreviewRing}
+              onChange={(event) => setAgentReleasePreviewRing(event.target.value)}
+              placeholder="例如：stable"
+            />
+          </label>
+          <button
+            type="button"
+            className="submit-button"
+            disabled={fetchAgentReleaseCheckPreviewMutation.isPending}
+            onClick={() => {
+              if (!agentReleasePreviewCurrentVersion.trim()) {
+                setAgentReleaseFeedback(null);
+                setAgentReleaseError("Current Version 不能为空。");
+                return;
+              }
+              if (!agentReleasePreviewOs.trim() || !agentReleasePreviewArch.trim()) {
+                setAgentReleaseFeedback(null);
+                setAgentReleaseError("OS 和 Arch 不能为空。");
+                return;
+              }
+              setAgentReleaseFeedback(null);
+              setAgentReleaseError(null);
+              fetchAgentReleaseCheckPreviewMutation.mutate();
+            }}
+          >
+            {fetchAgentReleaseCheckPreviewMutation.isPending ? "预览中..." : "执行升级预览"}
+          </button>
+        </div>
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>Comparison</th>
+                <th>Update Available</th>
+                <th>Latest Release</th>
+                <th>Selected Artifact</th>
+                <th>Evaluated Ring</th>
+                <th>Rollout Bucket</th>
+                <th>Selection Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!agentReleasePreviewPayload ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={7}>
+                    {hasLoadedAgentReleasePreview
+                      ? "未查询到 rollout 预览结果。"
+                      : "请输入版本与环境信息后执行升级预览。"}
+                  </td>
+                </tr>
+              ) : (
+                <tr>
+                  <td>{agentReleasePreviewPayload.comparison}</td>
+                  <td>{agentReleasePreviewPayload.updateAvailable ? "true" : "false"}</td>
+                  <td>{agentReleasePreviewPayload.latestRelease?.version ?? "--"}</td>
+                  <td>
+                    {agentReleasePreviewPayload.selectedArtifact
+                      ? formatAgentReleaseArtifactSummary(
+                          agentReleasePreviewPayload.selectedArtifact,
+                        )
+                      : "--"}
+                  </td>
+                  <td>{agentReleasePreviewPayload.evaluatedRing ?? "--"}</td>
+                  <td>
+                    {typeof agentReleasePreviewPayload.rolloutBucket === "number"
+                      ? agentReleasePreviewPayload.rolloutBucket
+                      : "--"}
+                  </td>
+                  <td>{agentReleasePreviewPayload.selectionReason ?? "--"}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="filters-row governance-inline-grid">
+          <label className="inline-field" htmlFor="agent-release-batch-os">
+            Batch OS
+            <input
+              id="agent-release-batch-os"
+              type="text"
+              value={agentReleaseBatchOs}
+              onChange={(event) => setAgentReleaseBatchOs(event.target.value)}
+              placeholder="例如：darwin"
+            />
+          </label>
+          <label className="inline-field" htmlFor="agent-release-batch-arch">
+            Batch Arch
+            <input
+              id="agent-release-batch-arch"
+              type="text"
+              value={agentReleaseBatchArch}
+              onChange={(event) => setAgentReleaseBatchArch(event.target.value)}
+              placeholder="例如：amd64"
+            />
+          </label>
+        </div>
+
+        <div className="filters-row">
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="agent-release-batch-samples-json"
+          >
+            Batch Samples JSON
+            <textarea
+              id="agent-release-batch-samples-json"
+              value={agentReleaseBatchSamplesJson}
+              onChange={(event) =>
+                setAgentReleaseBatchSamplesJson(event.target.value)
+              }
+              rows={8}
+              placeholder='[{"label":"stable-default","currentVersion":"1.0.0","ring":"stable"}]'
+            />
+          </label>
+
+          <button
+            type="button"
+            className="submit-button"
+            disabled={fetchAgentReleaseCheckBatchPreviewMutation.isPending}
+            onClick={() => {
+              if (!agentReleaseBatchOs.trim() || !agentReleaseBatchArch.trim()) {
+                setAgentReleaseFeedback(null);
+                setAgentReleaseError("Batch OS 和 Batch Arch 不能为空。");
+                return;
+              }
+              let samples: AgentReleaseBatchCheckSampleInput[];
+              try {
+                const parsed = JSON.parse(agentReleaseBatchSamplesJson);
+                if (!Array.isArray(parsed) || parsed.length === 0) {
+                  setAgentReleaseFeedback(null);
+                  setAgentReleaseError("Batch Samples JSON 必须是非空数组。");
+                  return;
+                }
+                samples = parsed as AgentReleaseBatchCheckSampleInput[];
+              } catch (error) {
+                setAgentReleaseFeedback(null);
+                setAgentReleaseError(`Batch Samples JSON 非法：${toErrorMessage(error)}`);
+                return;
+              }
+              setAgentReleaseFeedback(null);
+              setAgentReleaseError(null);
+              fetchAgentReleaseCheckBatchPreviewMutation.mutate(samples);
+            }}
+          >
+            {fetchAgentReleaseCheckBatchPreviewMutation.isPending
+              ? "模拟中..."
+              : "执行批量模拟"}
+          </button>
+        </div>
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>Label</th>
+                <th>Comparison</th>
+                <th>Update Available</th>
+                <th>Latest Release</th>
+                <th>Selected Artifact</th>
+                <th>Evaluated Ring</th>
+                <th>Rollout Bucket</th>
+                <th>Selection Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!agentReleaseBatchPreviewPayload ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={8}>
+                    暂无批量模拟结果
+                  </td>
+                </tr>
+              ) : (
+                agentReleaseBatchPreviewPayload.items.map((item) => (
+                  <tr key={item.label}>
+                    <td>{item.label}</td>
+                    <td>{item.comparison}</td>
+                    <td>{item.updateAvailable ? "true" : "false"}</td>
+                    <td>{item.latestRelease?.version ?? "--"}</td>
+                    <td>
+                      {item.selectedArtifact
+                        ? formatAgentReleaseArtifactSummary(item.selectedArtifact)
+                        : "--"}
+                    </td>
+                    <td>{item.evaluatedRing ?? "--"}</td>
+                    <td>
+                      {typeof item.rolloutBucket === "number"
+                        ? item.rolloutBucket
+                        : "--"}
+                    </td>
+                    <td>{item.selectionReason ?? "--"}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel">
+        <header>
           <h2>TokenPulse Runtime Events</h2>
           <p>按 traceId 联查 TokenPulse 运行时摘要事件。</p>
         </header>
@@ -7572,9 +12895,97 @@ function GovernancePage() {
             disabled={upsertMcpPolicyMutation.isPending}
             onClick={() => {
               const toolId = mcpPolicyToolId.trim();
+              const stage1RequiredApprovals = parseOptionalNonNegativeInteger(
+                mcpPolicyStage1RequiredApprovals,
+              );
+              const stage2RequiredApprovals = parseOptionalNonNegativeInteger(
+                mcpPolicyStage2RequiredApprovals,
+              );
+              const stage1Roles = parseDistinctCommaSeparatedList(mcpPolicyStage1Roles);
+              const stage2Roles = parseDistinctCommaSeparatedList(mcpPolicyStage2Roles);
+              const approvalWorkflowResult =
+                mcpPolicyApprovalMode === "multi_stage"
+                  ? buildMcpWorkflowFromDraft({
+                      entryNodeId: mcpWorkflowEntryNodeId,
+                      nodes: mcpWorkflowNodes,
+                      transitions: mcpWorkflowTransitions,
+                    })
+                  : null;
+              const staticApprovalConfigResult =
+                mcpPolicyApprovalMode === "multi_stage"
+                  ? null
+                  : resolveMcpStaticApprovalConfig({
+                      mode: mcpPolicyApprovalMode,
+                      approvalStagesJson: mcpPolicyApprovalStagesJson,
+                      approvalStagesJsonTouched: mcpPolicyApprovalStagesJsonTouched,
+                      stage1RequiredApprovals,
+                      stage2RequiredApprovals,
+                      stage1Roles,
+                      stage2Roles,
+                    });
+              const approvalCondition = {
+                ...(mcpPolicyConditionRiskLevel
+                  ? { riskLevelAtLeast: mcpPolicyConditionRiskLevel }
+                  : {}),
+                ...(parseDistinctCommaSeparatedList(mcpPolicyConditionToolIds).length > 0
+                  ? {
+                      toolIds: parseDistinctCommaSeparatedList(
+                        mcpPolicyConditionToolIds,
+                      ),
+                    }
+                  : {}),
+                ...(parseDistinctCommaSeparatedList(mcpPolicyConditionTenantRoles)
+                  .length > 0
+                  ? {
+                      tenantRoles: parseDistinctCommaSeparatedList(
+                        mcpPolicyConditionTenantRoles,
+                      ),
+                    }
+                  : {}),
+              };
               if (!toolId) {
                 setMcpFeedback(null);
                 setMcpError("Tool ID 不能为空。");
+                return;
+              }
+              if (
+                mcpPolicyDecision === "require_approval" &&
+                mcpPolicyApprovalMode === "multi_stage" &&
+                approvalWorkflowResult &&
+                !approvalWorkflowResult.success
+              ) {
+                setMcpFeedback(null);
+                setMcpError(approvalWorkflowResult.message);
+                return;
+              }
+              if (
+                mcpPolicyDecision === "require_approval" &&
+                staticApprovalConfigResult &&
+                !staticApprovalConfigResult.success
+              ) {
+                setMcpFeedback(null);
+                setMcpError(staticApprovalConfigResult.message);
+                return;
+              }
+              if (
+                mcpPolicyDecision === "require_approval" &&
+                (typeof stage1RequiredApprovals !== "number" ||
+                  stage1RequiredApprovals < 1)
+                &&
+                mcpPolicyApprovalMode !== "multi_stage"
+              ) {
+                setMcpFeedback(null);
+                setMcpError("stage1 审批人数必须是大于等于 1 的整数。");
+                return;
+              }
+              if (
+                mcpPolicyDecision === "require_approval" &&
+                mcpPolicyApprovalMode === "two_stage" &&
+                (typeof stage2RequiredApprovals !== "number" ||
+                  stage2RequiredApprovals < 1)
+              ) {
+                setMcpFeedback(null);
+                setMcpError("two_stage 模式下 stage2 审批人数必须是大于等于 1 的整数。");
                 return;
               }
               setMcpFeedback(null);
@@ -7583,12 +12994,665 @@ function GovernancePage() {
                 toolId,
                 riskLevel: mcpPolicyRiskLevel,
                 decision: mcpPolicyDecision,
+                approvalMode:
+                  mcpPolicyDecision === "require_approval"
+                    ? mcpPolicyApprovalMode
+                    : undefined,
+                approvalWorkflow:
+                  mcpPolicyDecision === "require_approval" &&
+                  mcpPolicyApprovalMode === "multi_stage" &&
+                  approvalWorkflowResult &&
+                  approvalWorkflowResult.success
+                    ? approvalWorkflowResult.data
+                    : undefined,
+                approvalStages:
+                  mcpPolicyDecision === "require_approval" &&
+                  mcpPolicyApprovalMode !== "multi_stage" &&
+                  staticApprovalConfigResult &&
+                  staticApprovalConfigResult.success
+                    ? staticApprovalConfigResult.approvalStages
+                    : undefined,
+                stage1RequiredApprovals:
+                  mcpPolicyDecision === "require_approval" &&
+                  mcpPolicyApprovalMode !== "multi_stage" &&
+                  staticApprovalConfigResult &&
+                  staticApprovalConfigResult.success
+                    ? staticApprovalConfigResult.approvalStages[0]?.requiredApprovals
+                    : undefined,
+                stage2RequiredApprovals:
+                  mcpPolicyDecision === "require_approval" &&
+                  mcpPolicyApprovalMode !== "multi_stage" &&
+                  staticApprovalConfigResult &&
+                  staticApprovalConfigResult.success &&
+                  mcpPolicyApprovalMode === "two_stage"
+                    ? staticApprovalConfigResult.approvalStages[1]?.requiredApprovals
+                    : undefined,
+                stage1Roles:
+                  mcpPolicyDecision === "require_approval" &&
+                  mcpPolicyApprovalMode !== "multi_stage" &&
+                  staticApprovalConfigResult &&
+                  staticApprovalConfigResult.success &&
+                  (staticApprovalConfigResult.approvalStages[0]?.roles.length ?? 0) > 0
+                    ? staticApprovalConfigResult.approvalStages[0]?.roles
+                    : undefined,
+                stage2Roles:
+                  mcpPolicyDecision === "require_approval" &&
+                  mcpPolicyApprovalMode !== "multi_stage" &&
+                  staticApprovalConfigResult &&
+                  staticApprovalConfigResult.success &&
+                  mcpPolicyApprovalMode === "two_stage" &&
+                  (staticApprovalConfigResult.approvalStages[1]?.roles.length ?? 0) > 0
+                    ? staticApprovalConfigResult.approvalStages[1]?.roles
+                    : undefined,
+                approvalCondition:
+                  mcpPolicyDecision === "require_approval" &&
+                  Object.keys(approvalCondition).length > 0
+                    ? approvalCondition
+                    : undefined,
                 reason: mcpPolicyReason.trim() || undefined,
               });
             }}
           >
             {upsertMcpPolicyMutation.isPending ? "保存中..." : "保存策略"}
           </button>
+        </div>
+
+        <div className="filters-row governance-inline-grid">
+          <label className="inline-field" htmlFor="mcp-policy-approval-mode">
+            审批模式
+            <select
+              id="mcp-policy-approval-mode"
+              value={mcpPolicyApprovalMode}
+              onChange={(event) =>
+                setMcpPolicyApprovalMode(
+                  event.target.value as McpApprovalMode,
+                )
+              }
+            >
+              {MCP_APPROVAL_MODE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label
+            className="inline-field"
+            htmlFor="mcp-policy-stage1-required-approvals"
+          >
+            stage1 人数
+            <input
+              id="mcp-policy-stage1-required-approvals"
+              type="number"
+              min={1}
+              step={1}
+              value={mcpPolicyStage1RequiredApprovals}
+              onChange={(event) =>
+                setMcpPolicyStage1RequiredApprovals(event.target.value)
+              }
+              disabled={mcpPolicyApprovalMode === "multi_stage"}
+            />
+          </label>
+
+          <label
+            className="inline-field"
+            htmlFor="mcp-policy-stage2-required-approvals"
+          >
+            stage2 人数
+            <input
+              id="mcp-policy-stage2-required-approvals"
+              type="number"
+              min={1}
+              step={1}
+              value={mcpPolicyStage2RequiredApprovals}
+              onChange={(event) =>
+                setMcpPolicyStage2RequiredApprovals(event.target.value)
+              }
+              disabled={mcpPolicyApprovalMode !== "two_stage"}
+            />
+          </label>
+
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="mcp-policy-stage1-roles"
+          >
+            stage1 角色（逗号分隔）
+            <input
+              id="mcp-policy-stage1-roles"
+              type="text"
+              value={mcpPolicyStage1Roles}
+              onChange={(event) => setMcpPolicyStage1Roles(event.target.value)}
+              placeholder="例如：owner,maintainer"
+              disabled={mcpPolicyApprovalMode === "multi_stage"}
+            />
+          </label>
+
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="mcp-policy-stage2-roles"
+          >
+            stage2 角色（逗号分隔）
+            <input
+              id="mcp-policy-stage2-roles"
+              type="text"
+              value={mcpPolicyStage2Roles}
+              onChange={(event) => setMcpPolicyStage2Roles(event.target.value)}
+              placeholder="例如：owner"
+              disabled={mcpPolicyApprovalMode !== "two_stage"}
+            />
+          </label>
+
+          {mcpPolicyApprovalMode === "multi_stage" ? (
+            <>
+              <label className="inline-field" htmlFor="mcp-workflow-entry-node">
+                入口节点
+                <select
+                  id="mcp-workflow-entry-node"
+                  value={mcpWorkflowEntryNodeId}
+                  onChange={(event) => setMcpWorkflowEntryNodeId(event.target.value)}
+                >
+                  {mcpWorkflowNodes.map((node) => (
+                    <option key={`workflow-entry-${node.nodeId}`} value={node.nodeId}>
+                      {node.label || node.nodeId}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="inline-field governance-wide-field">
+                审批节点编排器
+                <div className="governance-action-row">
+                  <button
+                    type="button"
+                    className="table-action"
+                    onClick={() =>
+                      setMcpWorkflowNodes((prev) => [
+                        ...prev,
+                        createDefaultMcpWorkflowNodeDraft(prev.length),
+                      ])
+                    }
+                  >
+                    添加审批节点
+                  </button>
+                </div>
+                <div className="table-wrapper">
+                  <table className="session-table">
+                    <thead>
+                      <tr>
+                        <th>nodeId</th>
+                        <th>label</th>
+                        <th>stage</th>
+                        <th>requiredApprovals</th>
+                        <th>roles</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mcpWorkflowNodes.map((node, index) => (
+                        <tr key={`workflow-node-${index}-${node.nodeId}`}>
+                          <td>
+                            <input
+                              aria-label={`workflow-node-${index}-nodeId`}
+                              value={node.nodeId}
+                              onChange={(event) => {
+                                const nextNodeId = event.target.value;
+                                replaceMcpWorkflowNodeId(node.nodeId, nextNodeId);
+                                setMcpWorkflowNodes((prev) =>
+                                  prev.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? { ...item, nodeId: nextNodeId }
+                                      : item,
+                                  ),
+                                );
+                              }}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              aria-label={`workflow-node-${index}-label`}
+                              value={node.label}
+                              onChange={(event) =>
+                                setMcpWorkflowNodes((prev) =>
+                                  prev.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? { ...item, label: event.target.value }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              aria-label={`workflow-node-${index}-stage`}
+                              value={node.stage}
+                              onChange={(event) =>
+                                setMcpWorkflowNodes((prev) =>
+                                  prev.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? { ...item, stage: event.target.value }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              aria-label={`workflow-node-${index}-requiredApprovals`}
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={node.requiredApprovals}
+                              onChange={(event) =>
+                                setMcpWorkflowNodes((prev) =>
+                                  prev.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? { ...item, requiredApprovals: event.target.value }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              aria-label={`workflow-node-${index}-roles`}
+                              value={node.roles}
+                              onChange={(event) =>
+                                setMcpWorkflowNodes((prev) =>
+                                  prev.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? { ...item, roles: event.target.value }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            />
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="table-action"
+                              disabled={mcpWorkflowNodes.length <= 1}
+                              onClick={() => removeMcpWorkflowNode(index)}
+                            >
+                              删除
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="inline-field governance-wide-field">
+                转移编排器
+                <div className="governance-action-row">
+                  <button
+                    type="button"
+                    className="table-action"
+                    onClick={() =>
+                      setMcpWorkflowTransitions((prev) => [
+                        ...prev,
+                        {
+                          fromNodeId: mcpWorkflowNodes[0]?.nodeId ?? "stage1-node",
+                          toNodeId: "approved",
+                          mode: "default",
+                          riskLevelAtLeast: "",
+                          toolIds: "",
+                          tenantRoles: "",
+                          timeWindowTimezone: "",
+                          timeWindowWeekdays: "",
+                          timeWindowStartTime: "",
+                          timeWindowEndTime: "",
+                        },
+                      ])
+                    }
+                  >
+                    添加转移
+                  </button>
+                </div>
+                <div className="table-wrapper">
+                  <table className="session-table">
+                    <thead>
+                      <tr>
+                        <th>from</th>
+                        <th>to</th>
+                        <th>mode</th>
+                        <th>risk</th>
+                        <th>toolIds</th>
+                        <th>tenantRoles</th>
+                        <th>timezone</th>
+                        <th>weekdays</th>
+                        <th>start</th>
+                        <th>end</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mcpWorkflowTransitions.map((transition, index) => (
+                        <tr key={`workflow-transition-${index}`}>
+                          <td>
+                            <select
+                              aria-label={`workflow-transition-${index}-from`}
+                              value={transition.fromNodeId}
+                              onChange={(event) =>
+                                setMcpWorkflowTransitions((prev) =>
+                                  prev.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? { ...item, fromNodeId: event.target.value }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            >
+                              {mcpWorkflowNodes.map((node) => (
+                                <option key={`from-${node.nodeId}`} value={node.nodeId}>
+                                  {node.label || node.nodeId}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>
+                            <select
+                              aria-label={`workflow-transition-${index}-to`}
+                              value={transition.toNodeId}
+                              onChange={(event) =>
+                                setMcpWorkflowTransitions((prev) =>
+                                  prev.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? { ...item, toNodeId: event.target.value }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            >
+                              {[...mcpWorkflowNodes.map((node) => node.nodeId), "approved", "rejected"].map((nodeId) => (
+                                <option key={`to-${nodeId}`} value={nodeId}>
+                                  {nodeId}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>
+                            <select
+                              aria-label={`workflow-transition-${index}-mode`}
+                              value={transition.mode}
+                              onChange={(event) =>
+                                setMcpWorkflowTransitions((prev) =>
+                                  prev.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? {
+                                          ...item,
+                                          mode: event.target.value as "default" | "conditional",
+                                        }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            >
+                              <option value="default">default</option>
+                              <option value="conditional">conditional</option>
+                            </select>
+                          </td>
+                          <td>
+                            <select
+                              aria-label={`workflow-transition-${index}-risk`}
+                              value={transition.riskLevelAtLeast}
+                              disabled={transition.mode !== "conditional"}
+                              onChange={(event) =>
+                                setMcpWorkflowTransitions((prev) =>
+                                  prev.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? {
+                                          ...item,
+                                          riskLevelAtLeast: event.target.value as "" | McpRiskLevel,
+                                        }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            >
+                              <option value="">--</option>
+                              {MCP_RISK_LEVEL_OPTIONS.map((option) => (
+                                <option key={`workflow-risk-${option.value}`} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>
+                            <input
+                              aria-label={`workflow-transition-${index}-toolIds`}
+                              value={transition.toolIds}
+                              disabled={transition.mode !== "conditional"}
+                              onChange={(event) =>
+                                setMcpWorkflowTransitions((prev) =>
+                                  prev.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? { ...item, toolIds: event.target.value }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              aria-label={`workflow-transition-${index}-tenantRoles`}
+                              value={transition.tenantRoles}
+                              disabled={transition.mode !== "conditional"}
+                              onChange={(event) =>
+                                setMcpWorkflowTransitions((prev) =>
+                                  prev.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? { ...item, tenantRoles: event.target.value }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              aria-label={`workflow-transition-${index}-timezone`}
+                              value={transition.timeWindowTimezone}
+                              disabled={transition.mode !== "conditional"}
+                              placeholder="Asia/Shanghai"
+                              onChange={(event) =>
+                                setMcpWorkflowTransitions((prev) =>
+                                  prev.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? {
+                                          ...item,
+                                          timeWindowTimezone: event.target.value,
+                                        }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              aria-label={`workflow-transition-${index}-weekdays`}
+                              value={transition.timeWindowWeekdays}
+                              disabled={transition.mode !== "conditional"}
+                              placeholder="1,2,3,4,5"
+                              onChange={(event) =>
+                                setMcpWorkflowTransitions((prev) =>
+                                  prev.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? {
+                                          ...item,
+                                          timeWindowWeekdays: event.target.value,
+                                        }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              aria-label={`workflow-transition-${index}-startTime`}
+                              type="time"
+                              value={transition.timeWindowStartTime}
+                              disabled={transition.mode !== "conditional"}
+                              onChange={(event) =>
+                                setMcpWorkflowTransitions((prev) =>
+                                  prev.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? {
+                                          ...item,
+                                          timeWindowStartTime: event.target.value,
+                                        }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              aria-label={`workflow-transition-${index}-endTime`}
+                              type="time"
+                              value={transition.timeWindowEndTime}
+                              disabled={transition.mode !== "conditional"}
+                              onChange={(event) =>
+                                setMcpWorkflowTransitions((prev) =>
+                                  prev.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? {
+                                          ...item,
+                                          timeWindowEndTime: event.target.value,
+                                        }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            />
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() =>
+                                setMcpWorkflowTransitions((prev) =>
+                                  prev.filter((_, itemIndex) => itemIndex !== index),
+                                )
+                              }
+                            >
+                              删除
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="mcp-policy-approval-stages-json"
+              >
+                approvalWorkflow 预览
+                <textarea
+                  id="mcp-policy-approval-stages-json"
+                  value={(() => {
+                    const preview = buildMcpWorkflowFromDraft({
+                      entryNodeId: mcpWorkflowEntryNodeId,
+                      nodes: mcpWorkflowNodes,
+                      transitions: mcpWorkflowTransitions,
+                    });
+                    return preview.success
+                      ? JSON.stringify(preview.data, null, 2)
+                      : preview.message;
+                  })()}
+                  rows={10}
+                  readOnly
+                />
+              </label>
+            </>
+          ) : (
+            <label
+              className="inline-field governance-wide-field"
+              htmlFor="mcp-policy-approval-stages-json"
+            >
+              approvalStages JSON
+              <textarea
+                id="mcp-policy-approval-stages-json"
+                value={mcpPolicyApprovalStagesJson}
+                onChange={(event) => {
+                  setMcpPolicyApprovalStagesJsonTouched(true);
+                  setMcpPolicyApprovalStagesJson(event.target.value);
+                }}
+                rows={6}
+                placeholder='[{"stage":"stage1","requiredApprovals":1,"roles":["owner"]}]'
+              />
+            </label>
+          )}
+        </div>
+
+        <div className="filters-row governance-inline-grid">
+          <label
+            className="inline-field"
+            htmlFor="mcp-policy-condition-risk-level"
+          >
+            条件风险下限
+            <select
+              id="mcp-policy-condition-risk-level"
+              value={mcpPolicyConditionRiskLevel}
+              onChange={(event) =>
+                setMcpPolicyConditionRiskLevel(
+                  event.target.value as McpRiskLevel | "",
+                )
+              }
+            >
+              <option value="">全部风险</option>
+              {MCP_RISK_LEVEL_OPTIONS.map((option) => (
+                <option key={`condition-risk-${option.value}`} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="mcp-policy-condition-tool-ids"
+          >
+            条件 Tool IDs（逗号分隔）
+            <input
+              id="mcp-policy-condition-tool-ids"
+              type="text"
+              value={mcpPolicyConditionToolIds}
+              onChange={(event) =>
+                setMcpPolicyConditionToolIds(event.target.value)
+              }
+              placeholder="可选"
+            />
+          </label>
+
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="mcp-policy-condition-tenant-roles"
+          >
+            条件租户角色（逗号分隔）
+            <input
+              id="mcp-policy-condition-tenant-roles"
+              type="text"
+              value={mcpPolicyConditionTenantRoles}
+              onChange={(event) =>
+                setMcpPolicyConditionTenantRoles(event.target.value)
+              }
+              placeholder="例如：owner,maintainer"
+            />
+          </label>
         </div>
 
         <div className="table-wrapper">
@@ -7598,6 +13662,8 @@ function GovernancePage() {
                 <th>Tool ID</th>
                 <th>Risk</th>
                 <th>Decision</th>
+                <th>Approval</th>
+                <th>Condition</th>
                 <th>Reason</th>
                 <th>Updated</th>
               </tr>
@@ -7605,7 +13671,7 @@ function GovernancePage() {
             <tbody>
               {mcpPolicyItems.length === 0 ? (
                 <tr>
-                  <td className="table-empty-cell" colSpan={5}>
+                  <td className="table-empty-cell" colSpan={7}>
                     暂无 MCP 策略
                   </td>
                 </tr>
@@ -7615,6 +13681,44 @@ function GovernancePage() {
                     <td>{policy.toolId}</td>
                     <td>{policy.riskLevel}</td>
                     <td>{policy.decision}</td>
+                    <td>
+                      {policy.decision === "require_approval"
+                        ? `${policy.approvalMode ?? "single_stage"} / ${
+                            policy.approvalWorkflow
+                              ? formatMcpApprovalWorkflowSummary(policy.approvalWorkflow)
+                              : formatMcpApprovalStages(
+                                  policy.approvalStages && policy.approvalStages.length > 0
+                                    ? policy.approvalStages
+                                    : [
+                                        {
+                                          stage: "stage1",
+                                          requiredApprovals:
+                                            policy.stage1RequiredApprovals ?? 1,
+                                          roles: policy.stage1Roles ?? [
+                                            "owner",
+                                            "maintainer",
+                                          ],
+                                        },
+                                        ...(typeof policy.stage2RequiredApprovals === "number"
+                                          ? [
+                                              {
+                                                stage: "stage2",
+                                                requiredApprovals:
+                                                  policy.stage2RequiredApprovals,
+                                                roles: policy.stage2Roles ?? ["owner"],
+                                              },
+                                            ]
+                                          : []),
+                                      ],
+                                )
+                          }`
+                        : "--"}
+                    </td>
+                    <td>
+                      {policy.approvalCondition
+                        ? formatCompactJson(policy.approvalCondition)
+                        : "--"}
+                    </td>
                     <td>{policy.reason ?? "--"}</td>
                     <td>{formatDateTime(policy.updatedAt)}</td>
                   </tr>
@@ -7623,6 +13727,290 @@ function GovernancePage() {
             </tbody>
           </table>
         </div>
+
+        <div className="filters-row governance-inline-grid">
+          <label className="inline-field" htmlFor="mcp-evaluate-tool-id">
+            评估 Tool ID
+            <input
+              id="mcp-evaluate-tool-id"
+              type="text"
+              value={mcpEvaluateToolId}
+              onChange={(event) => setMcpEvaluateToolId(event.target.value)}
+              placeholder="例如：github.delete_repo"
+            />
+          </label>
+
+          <label
+            className="inline-field"
+            htmlFor="mcp-evaluate-approval-request-id"
+          >
+            审批请求 ID
+            <input
+              id="mcp-evaluate-approval-request-id"
+              type="text"
+              value={mcpEvaluateApprovalRequestId}
+              onChange={(event) =>
+                setMcpEvaluateApprovalRequestId(event.target.value)
+              }
+              placeholder="可选"
+            />
+          </label>
+
+          <label
+            className="inline-field governance-wide-field"
+            htmlFor="mcp-evaluate-reason"
+          >
+            评估说明
+            <input
+              id="mcp-evaluate-reason"
+              type="text"
+              value={mcpEvaluateReason}
+              onChange={(event) => setMcpEvaluateReason(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+
+          <label className="inline-field" htmlFor="mcp-evaluate-timestamp">
+            评估时间（可选）
+            <input
+              id="mcp-evaluate-timestamp"
+              type="datetime-local"
+              value={mcpEvaluateTimestamp}
+              onChange={(event) => setMcpEvaluateTimestamp(event.target.value)}
+            />
+          </label>
+
+          <button
+            type="button"
+            className="submit-button"
+            disabled={evaluateMcpToolMutation.isPending}
+            onClick={() => {
+              const toolId = mcpEvaluateToolId.trim();
+              const normalizedEvaluationTimestamp = mcpEvaluateTimestamp.trim();
+              const stage1Roles = parseDistinctCommaSeparatedList(
+                mcpPolicyStage1Roles,
+              );
+              const stage2Roles = parseDistinctCommaSeparatedList(
+                mcpPolicyStage2Roles,
+              );
+              const stage1RequiredApprovals = parseOptionalNonNegativeInteger(
+                mcpPolicyStage1RequiredApprovals,
+              );
+              const stage2RequiredApprovals = parseOptionalNonNegativeInteger(
+                mcpPolicyStage2RequiredApprovals,
+              );
+              const approvalWorkflowResult =
+                mcpPolicyApprovalMode === "multi_stage"
+                  ? buildMcpWorkflowFromDraft({
+                      entryNodeId: mcpWorkflowEntryNodeId,
+                      nodes: mcpWorkflowNodes,
+                      transitions: mcpWorkflowTransitions,
+                    })
+                  : null;
+              const staticApprovalConfigResult =
+                mcpPolicyApprovalMode === "multi_stage"
+                  ? null
+                  : resolveMcpStaticApprovalConfig({
+                      mode: mcpPolicyApprovalMode,
+                      approvalStagesJson: mcpPolicyApprovalStagesJson,
+                      approvalStagesJsonTouched: mcpPolicyApprovalStagesJsonTouched,
+                      stage1RequiredApprovals,
+                      stage2RequiredApprovals,
+                      stage1Roles,
+                      stage2Roles,
+                    });
+              if (!toolId) {
+                setMcpFeedback(null);
+                setMcpError("评估 Tool ID 不能为空。");
+                return;
+              }
+              if (
+                normalizedEvaluationTimestamp &&
+                Number.isNaN(Date.parse(normalizedEvaluationTimestamp))
+              ) {
+                setMcpFeedback(null);
+                setMcpError("评估时间格式不合法。");
+                return;
+              }
+              if (
+                !mcpEvaluateApprovalRequestId.trim() &&
+                mcpPolicyDecision === "require_approval" &&
+                mcpPolicyApprovalMode === "multi_stage" &&
+                approvalWorkflowResult &&
+                !approvalWorkflowResult.success
+              ) {
+                setMcpFeedback(null);
+                setMcpError(approvalWorkflowResult.message);
+                return;
+              }
+              if (
+                !mcpEvaluateApprovalRequestId.trim() &&
+                mcpPolicyDecision === "require_approval" &&
+                staticApprovalConfigResult &&
+                !staticApprovalConfigResult.success
+              ) {
+                setMcpFeedback(null);
+                setMcpError(staticApprovalConfigResult.message);
+                return;
+              }
+              setMcpFeedback(null);
+              setMcpError(null);
+              evaluateMcpToolMutation.mutate({
+                toolId,
+                approvalRequestId:
+                  mcpEvaluateApprovalRequestId.trim() || undefined,
+                reason: mcpEvaluateReason.trim() || undefined,
+                evaluationTimestamp: normalizedEvaluationTimestamp
+                  ? new Date(normalizedEvaluationTimestamp).toISOString()
+                  : undefined,
+                approvalConfig:
+                  !mcpEvaluateApprovalRequestId.trim() &&
+                  mcpPolicyDecision === "require_approval" &&
+                  (mcpPolicyApprovalMode === "multi_stage"
+                    ? Boolean(approvalWorkflowResult && approvalWorkflowResult.success)
+                    : typeof stage1RequiredApprovals === "number")
+                    ? {
+                        mode: mcpPolicyApprovalMode,
+                        ...(mcpPolicyApprovalMode === "multi_stage" &&
+                        approvalWorkflowResult &&
+                        approvalWorkflowResult.success
+                          ? {
+                              approvalWorkflow: approvalWorkflowResult.data,
+                            }
+                          : {}),
+                        ...(mcpPolicyApprovalMode !== "multi_stage" &&
+                        staticApprovalConfigResult &&
+                        staticApprovalConfigResult.success
+                          ? {
+                              approvalStages: staticApprovalConfigResult.approvalStages,
+                              stage1: {
+                                nodeId: staticApprovalConfigResult.approvalStages[0]?.nodeId,
+                                stage: staticApprovalConfigResult.approvalStages[0]?.stage,
+                                label: staticApprovalConfigResult.approvalStages[0]?.label,
+                                requiredApprovals:
+                                  staticApprovalConfigResult.approvalStages[0]
+                                    ?.requiredApprovals ?? 1,
+                                roles:
+                                  staticApprovalConfigResult.approvalStages[0]?.roles ?? [
+                                    "owner",
+                                    "maintainer",
+                                  ],
+                              },
+                              ...(mcpPolicyApprovalMode === "two_stage"
+                                ? {
+                                    stage2: {
+                                      nodeId:
+                                        staticApprovalConfigResult.approvalStages[1]?.nodeId,
+                                      stage:
+                                        staticApprovalConfigResult.approvalStages[1]?.stage,
+                                      label:
+                                        staticApprovalConfigResult.approvalStages[1]?.label,
+                                      requiredApprovals:
+                                        staticApprovalConfigResult.approvalStages[1]
+                                          ?.requiredApprovals ?? 1,
+                                      roles:
+                                        staticApprovalConfigResult.approvalStages[1]?.roles ?? [
+                                          "owner",
+                                        ],
+                                    },
+                                  }
+                                : {}),
+                            }
+                          : {}),
+                      }
+                    : undefined,
+              });
+            }}
+          >
+            {evaluateMcpToolMutation.isPending ? "评估中..." : "执行 MCP 评估"}
+          </button>
+        </div>
+
+        {mcpEvaluateResultPayload ? (
+          <div className="table-wrapper">
+            <table className="session-table">
+              <thead>
+                <tr>
+                  <th>评估结果</th>
+                  <th>值</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>toolId</td>
+                  <td>{mcpEvaluateResultPayload.toolId}</td>
+                </tr>
+                <tr>
+                  <td>decision</td>
+                  <td>{mcpEvaluateResultPayload.decision}</td>
+                </tr>
+                <tr>
+                  <td>result</td>
+                  <td>{mcpEvaluateResultPayload.result}</td>
+                </tr>
+                <tr>
+                  <td>approvalMode</td>
+                  <td>{mcpEvaluateResultPayload.approvalMode ?? "--"}</td>
+                </tr>
+                <tr>
+                  <td>currentNodeId</td>
+                  <td>{mcpEvaluateResultPayload.currentNodeId ?? "--"}</td>
+                </tr>
+                <tr>
+                  <td>currentStage</td>
+                  <td>{mcpEvaluateResultPayload.currentStage ?? "--"}</td>
+                </tr>
+                <tr>
+                  <td>pathHistory</td>
+                  <td>{formatMcpPathHistory(mcpEvaluateResultPayload.pathHistory)}</td>
+                </tr>
+                <tr>
+                  <td>nextTransitionPreview</td>
+                  <td>
+                    {formatMcpTransitionPreview(
+                      mcpEvaluateResultPayload.nextTransitionPreview,
+                    )}
+                  </td>
+                </tr>
+                <tr>
+                  <td>approvalStages</td>
+                  <td>
+                    {formatMcpApprovalStages(
+                      mcpEvaluateResultPayload.approvalStages,
+                    )}
+                  </td>
+                </tr>
+                <tr>
+                  <td>approvalWorkflow</td>
+                  <td>
+                    {formatMcpApprovalWorkflowSummary(
+                      mcpEvaluateResultPayload.approvalWorkflow,
+                    )}
+                  </td>
+                </tr>
+                <tr>
+                  <td>remainingApprovals</td>
+                  <td>
+                    {typeof mcpEvaluateResultPayload.remainingApprovals === "number"
+                      ? mcpEvaluateResultPayload.remainingApprovals
+                      : "--"}
+                  </td>
+                </tr>
+                <tr>
+                  <td>approvalConditionMatched</td>
+                  <td>
+                    {typeof mcpEvaluateResultPayload.approvalConditionMatched ===
+                    "boolean"
+                      ? mcpEvaluateResultPayload.approvalConditionMatched
+                        ? "true"
+                        : "false"
+                      : "--"}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        ) : null}
 
         <div className="filters-row governance-inline-grid">
           <label className="inline-field" htmlFor="mcp-approval-status-filter">
@@ -7675,9 +14063,60 @@ function GovernancePage() {
             disabled={createMcpApprovalMutation.isPending}
             onClick={() => {
               const toolId = mcpApprovalToolId.trim();
+              const stage1Roles = parseDistinctCommaSeparatedList(
+                mcpPolicyStage1Roles,
+              );
+              const stage2Roles = parseDistinctCommaSeparatedList(
+                mcpPolicyStage2Roles,
+              );
+              const stage1RequiredApprovals = parseOptionalNonNegativeInteger(
+                mcpPolicyStage1RequiredApprovals,
+              );
+              const stage2RequiredApprovals = parseOptionalNonNegativeInteger(
+                mcpPolicyStage2RequiredApprovals,
+              );
+              const approvalWorkflowResult =
+                mcpPolicyApprovalMode === "multi_stage"
+                  ? buildMcpWorkflowFromDraft({
+                      entryNodeId: mcpWorkflowEntryNodeId,
+                      nodes: mcpWorkflowNodes,
+                      transitions: mcpWorkflowTransitions,
+                    })
+                  : null;
+              const staticApprovalConfigResult =
+                mcpPolicyApprovalMode === "multi_stage"
+                  ? null
+                  : resolveMcpStaticApprovalConfig({
+                      mode: mcpPolicyApprovalMode,
+                      approvalStagesJson: mcpPolicyApprovalStagesJson,
+                      approvalStagesJsonTouched: mcpPolicyApprovalStagesJsonTouched,
+                      stage1RequiredApprovals,
+                      stage2RequiredApprovals,
+                      stage1Roles,
+                      stage2Roles,
+                    });
               if (!toolId) {
                 setMcpFeedback(null);
                 setMcpError("审批请求的 Tool ID 不能为空。");
+                return;
+              }
+              if (
+                mcpPolicyDecision === "require_approval" &&
+                mcpPolicyApprovalMode === "multi_stage" &&
+                approvalWorkflowResult &&
+                !approvalWorkflowResult.success
+              ) {
+                setMcpFeedback(null);
+                setMcpError(approvalWorkflowResult.message);
+                return;
+              }
+              if (
+                mcpPolicyDecision === "require_approval" &&
+                staticApprovalConfigResult &&
+                !staticApprovalConfigResult.success
+              ) {
+                setMcpFeedback(null);
+                setMcpError(staticApprovalConfigResult.message);
                 return;
               }
               setMcpFeedback(null);
@@ -7685,6 +14124,61 @@ function GovernancePage() {
               createMcpApprovalMutation.mutate({
                 toolId,
                 reason: mcpApprovalReason.trim() || undefined,
+                approvalConfig:
+                  mcpPolicyDecision === "require_approval" &&
+                  (mcpPolicyApprovalMode === "multi_stage"
+                    ? Boolean(approvalWorkflowResult && approvalWorkflowResult.success)
+                    : typeof stage1RequiredApprovals === "number")
+                    ? {
+                        mode: mcpPolicyApprovalMode,
+                        ...(mcpPolicyApprovalMode === "multi_stage" &&
+                        approvalWorkflowResult &&
+                        approvalWorkflowResult.success
+                          ? {
+                              approvalWorkflow: approvalWorkflowResult.data,
+                            }
+                          : {}),
+                        ...(mcpPolicyApprovalMode !== "multi_stage" &&
+                        staticApprovalConfigResult &&
+                        staticApprovalConfigResult.success
+                          ? {
+                              approvalStages: staticApprovalConfigResult.approvalStages,
+                              stage1: {
+                                nodeId: staticApprovalConfigResult.approvalStages[0]?.nodeId,
+                                stage: staticApprovalConfigResult.approvalStages[0]?.stage,
+                                label: staticApprovalConfigResult.approvalStages[0]?.label,
+                                requiredApprovals:
+                                  staticApprovalConfigResult.approvalStages[0]
+                                    ?.requiredApprovals ?? 1,
+                                roles:
+                                  staticApprovalConfigResult.approvalStages[0]?.roles ?? [
+                                    "owner",
+                                    "maintainer",
+                                  ],
+                              },
+                              ...(mcpPolicyApprovalMode === "two_stage"
+                                ? {
+                                    stage2: {
+                                      nodeId:
+                                        staticApprovalConfigResult.approvalStages[1]?.nodeId,
+                                      stage:
+                                        staticApprovalConfigResult.approvalStages[1]?.stage,
+                                      label:
+                                        staticApprovalConfigResult.approvalStages[1]?.label,
+                                      requiredApprovals:
+                                        staticApprovalConfigResult.approvalStages[1]
+                                          ?.requiredApprovals ?? 1,
+                                      roles:
+                                        staticApprovalConfigResult.approvalStages[1]?.roles ?? [
+                                          "owner",
+                                        ],
+                                    },
+                                  }
+                                : {}),
+                            }
+                          : {}),
+                      }
+                    : undefined,
               });
             }}
           >
@@ -7738,6 +14232,8 @@ function GovernancePage() {
                 <th>审批 ID</th>
                 <th>Tool ID</th>
                 <th>状态</th>
+                <th>模式/阶段</th>
+                <th>剩余</th>
                 <th>申请人</th>
                 <th>创建时间</th>
                 <th>操作</th>
@@ -7746,7 +14242,7 @@ function GovernancePage() {
             <tbody>
               {mcpApprovalItems.length === 0 ? (
                 <tr>
-                  <td className="table-empty-cell" colSpan={6}>
+                  <td className="table-empty-cell" colSpan={8}>
                     暂无审批请求
                   </td>
                 </tr>
@@ -7762,8 +14258,27 @@ function GovernancePage() {
                       <td>{approval.toolId}</td>
                       <td>{approval.status}</td>
                       <td>
+                        {approval.approvalMode
+                          ? `${approval.approvalMode} / ${
+                              approval.currentNodeId ?? approval.currentStage ?? "--"
+                            } / ${
+                              approval.approvalWorkflow
+                                ? formatMcpApprovalWorkflowSummary(approval.approvalWorkflow)
+                                : formatMcpApprovalStages(approval.approvalStages)
+                            }`
+                          : "--"}
+                      </td>
+                      <td>
+                        {typeof approval.remainingApprovals === "number"
+                          ? approval.remainingApprovals
+                          : "--"}
+                      </td>
+                      <td>
                         {approval.requestedByEmail ??
                           approval.requestedByUserId}
+                        <div className="secondary-text">
+                          {formatMcpPathHistory(approval.pathHistory)}
+                        </div>
                       </td>
                       <td>{formatDateTime(approval.createdAt)}</td>
                       <td>
@@ -7778,6 +14293,7 @@ function GovernancePage() {
                                   approvalId: approval.id,
                                   status: "approved",
                                   reason: mcpReviewReason.trim() || undefined,
+                                  nodeId: approval.currentNodeId,
                                 })
                               }
                             >
@@ -7792,6 +14308,7 @@ function GovernancePage() {
                                   approvalId: approval.id,
                                   status: "rejected",
                                   reason: mcpReviewReason.trim() || undefined,
+                                  nodeId: approval.currentNodeId,
                                 })
                               }
                             >
@@ -7836,6 +14353,7 @@ function GovernancePage() {
                 <th>Tool ID</th>
                 <th>Decision</th>
                 <th>Result</th>
+                <th>Approval</th>
                 <th>审批请求</th>
                 <th>时间</th>
               </tr>
@@ -7843,7 +14361,7 @@ function GovernancePage() {
             <tbody>
               {mcpInvocationItems.length === 0 ? (
                 <tr>
-                  <td className="table-empty-cell" colSpan={6}>
+                  <td className="table-empty-cell" colSpan={7}>
                     暂无调用审计
                   </td>
                 </tr>
@@ -7854,6 +14372,13 @@ function GovernancePage() {
                     <td>{item.toolId}</td>
                     <td>{item.decision}</td>
                     <td>{item.result}</td>
+                    <td>
+                      {item.approvalMode
+                        ? `${item.approvalMode} / ${item.approvalStage ?? "--"} / ${
+                            item.approvalSatisfied === true ? "done" : "pending"
+                          }`
+                        : "--"}
+                    </td>
                     <td>{item.approvalRequestId ?? "--"}</td>
                     <td>{formatDateTime(item.createdAt)}</td>
                   </tr>
@@ -9013,6 +15538,496 @@ function GovernancePage() {
             <div className="filters-row governance-inline-grid">
               <label
                 className="inline-field"
+                htmlFor="open-platform-quality-automation-risk-level"
+              >
+                风险等级（automation）
+                <select
+                  id="open-platform-quality-automation-risk-level"
+                  value={qualityAutomationRiskLevel}
+                  onChange={(event) =>
+                    setQualityAutomationRiskLevel(
+                      event.target.value as McpRiskLevel,
+                    )
+                  }
+                >
+                  {MCP_RISK_LEVEL_OPTIONS.map((option) => (
+                    <option
+                      key={`quality-automation-${option.value}`}
+                      value={option.value}
+                    >
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-automation-decision"
+              >
+                决策（automation）
+                <select
+                  id="open-platform-quality-automation-decision"
+                  value={qualityAutomationDecision}
+                  onChange={(event) =>
+                    setQualityAutomationDecision(
+                      event.target.value as McpToolDecision,
+                    )
+                  }
+                >
+                  {MCP_DECISION_OPTIONS.map((option) => (
+                    <option
+                      key={`quality-automation-decision-${option.value}`}
+                      value={option.value}
+                    >
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-automation-threshold"
+              >
+                阈值（automation）
+                <input
+                  id="open-platform-quality-automation-threshold"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={qualityAutomationEvaluationScoreThreshold}
+                  onChange={(event) =>
+                    setQualityAutomationEvaluationScoreThreshold(
+                      event.target.value,
+                    )
+                  }
+                />
+              </label>
+
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="open-platform-quality-automation-reason"
+              >
+                策略说明（automation）
+                <input
+                  id="open-platform-quality-automation-reason"
+                  type="text"
+                  value={qualityAutomationReason}
+                  onChange={(event) =>
+                    setQualityAutomationReason(event.target.value)
+                  }
+                  placeholder="例如：失败评估默认自动升级为建议执行"
+                />
+              </label>
+
+              <label className="inline-field checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={qualityAutomationTriggerOnEvaluationFailure}
+                  onChange={(event) =>
+                    setQualityAutomationTriggerOnEvaluationFailure(
+                      event.target.checked,
+                    )
+                  }
+                />
+                评估失败时自动触发
+              </label>
+
+              <label className="inline-field checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={qualityAutomationTriggerOnReplayRegression}
+                  onChange={(event) =>
+                    setQualityAutomationTriggerOnReplayRegression(
+                      event.target.checked,
+                    )
+                  }
+                />
+                回放回退时自动触发
+              </label>
+
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="open-platform-quality-automation-strategy-matrix"
+              >
+                策略矩阵（strategyMatrix JSON）
+                <textarea
+                  id="open-platform-quality-automation-strategy-matrix"
+                  rows={8}
+                  value={qualityAutomationStrategyMatrixJson}
+                  onChange={(event) =>
+                    setQualityAutomationStrategyMatrixJson(event.target.value)
+                  }
+                  placeholder='[{"id":"critical-replay","severity":"critical","actionType":"replay_experiment","requiresApproval":true,"reason":"高风险先做回放"}]'
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={
+                  upsertQualityAutomationPolicyMutation.isPending ||
+                  qualityAutomationPolicyQuery.isLoading
+                }
+                onClick={() => {
+                  setQualityFeedback(null);
+                  setQualityError(null);
+                  const parsedThreshold = Number(
+                    qualityAutomationEvaluationScoreThreshold,
+                  );
+                  if (!Number.isFinite(parsedThreshold)) {
+                    setQualityError("automation threshold 必须是数字。");
+                    return;
+                  }
+                  if (parsedThreshold < 0 || parsedThreshold > 100) {
+                    setQualityError(
+                      "automation threshold 必须在 0 到 100 之间。",
+                    );
+                    return;
+                  }
+                  const strategyMatrixResult =
+                    parseQualityAutomationStrategyMatrixJson(
+                      qualityAutomationStrategyMatrixJson,
+                    );
+                  if (!strategyMatrixResult.success) {
+                    setQualityError(strategyMatrixResult.message);
+                    return;
+                  }
+                  upsertQualityAutomationPolicyMutation.mutate({
+                    riskLevel: qualityAutomationRiskLevel,
+                    decision: qualityAutomationDecision,
+                    reason: qualityAutomationReason.trim() || undefined,
+                    evaluationScoreThreshold: parsedThreshold,
+                    triggerOnEvaluationFailure:
+                      qualityAutomationTriggerOnEvaluationFailure,
+                    triggerOnReplayRegression:
+                      qualityAutomationTriggerOnReplayRegression,
+                    strategyMatrix: strategyMatrixResult.data,
+                  });
+                }}
+              >
+                {upsertQualityAutomationPolicyMutation.isPending
+                  ? "保存中..."
+                  : "保存 automation policy"}
+              </button>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>automation tool</th>
+                    <th>scope</th>
+                    <th>threshold</th>
+                    <th>defaultAction</th>
+                    <th>decision</th>
+                    <th>reason</th>
+                    <th>updatedAt</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {!qualityAutomationPolicy ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={7}>
+                        {qualityAutomationPolicyQuery.isLoading
+                          ? "正在加载 automation policy。"
+                          : "尚未加载 automation policy。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr>
+                      <td>{qualityAutomationPolicy.toolId}</td>
+                      <td>{qualityAutomationPolicy.scope}</td>
+                      <td>{qualityAutomationPolicy.evaluationScoreThreshold}</td>
+                      <td>{qualityAutomationPolicy.defaultActionType ?? "--"}</td>
+                      <td>{qualityAutomationPolicy.decision}</td>
+                      <td>{qualityAutomationPolicy.reason ?? "--"}</td>
+                      <td>{formatDateTime(qualityAutomationPolicy.updatedAt)}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>ruleId</th>
+                    <th>metric</th>
+                    <th>severity</th>
+                    <th>trend</th>
+                    <th>minConfidence</th>
+                    <th>regressionProbability</th>
+                    <th>replayRegression</th>
+                    <th>action</th>
+                    <th>approval</th>
+                    <th>cooldown</th>
+                    <th>reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(qualityAutomationPolicy?.strategyMatrix ?? []).length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={11}>
+                        当前未配置 strategyMatrix，默认沿用基础 automation policy。
+                      </td>
+                    </tr>
+                  ) : (
+                    (qualityAutomationPolicy?.strategyMatrix ?? []).map((rule) => (
+                      <tr key={rule.id}>
+                        <td>{rule.id}</td>
+                        <td>{rule.metric ?? "--"}</td>
+                        <td>{rule.severity ?? "--"}</td>
+                        <td>{rule.trendDirection ?? "--"}</td>
+                        <td>{rule.minConfidence ?? "--"}</td>
+                        <td>{rule.regressionProbabilityAtLeast ?? "--"}</td>
+                        <td>{rule.replayRegressionAtLeast ?? "--"}</td>
+                        <td>{rule.actionType}</td>
+                        <td>{rule.requiresApproval ? "yes" : "no"}</td>
+                        <td>{rule.cooldownMinutes ?? "--"}</td>
+                        <td>{rule.reason}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-automation-simulate-metric"
+              >
+                metric（simulate）
+                <input
+                  id="open-platform-quality-automation-simulate-metric"
+                  type="text"
+                  value={qualityAutomationSimulationMetric}
+                  onChange={(event) =>
+                    setQualityAutomationSimulationMetric(event.target.value)
+                  }
+                />
+              </label>
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-automation-simulate-score"
+              >
+                score（simulate）
+                <input
+                  id="open-platform-quality-automation-simulate-score"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={qualityAutomationSimulationScore}
+                  onChange={(event) =>
+                    setQualityAutomationSimulationScore(event.target.value)
+                  }
+                />
+              </label>
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-automation-simulate-trend"
+              >
+                trend（simulate）
+                <select
+                  id="open-platform-quality-automation-simulate-trend"
+                  value={qualityAutomationSimulationTrendDirection}
+                  onChange={(event) =>
+                    setQualityAutomationSimulationTrendDirection(
+                      event.target.value as "up" | "down" | "flat",
+                    )
+                  }
+                >
+                  <option value="up">up</option>
+                  <option value="down">down</option>
+                  <option value="flat">flat</option>
+                </select>
+              </label>
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-automation-simulate-confidence"
+              >
+                confidence（simulate）
+                <input
+                  id="open-platform-quality-automation-simulate-confidence"
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={qualityAutomationSimulationConfidence}
+                  onChange={(event) =>
+                    setQualityAutomationSimulationConfidence(event.target.value)
+                  }
+                />
+              </label>
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-automation-simulate-regression-probability"
+              >
+                regressionProbability（simulate）
+                <input
+                  id="open-platform-quality-automation-simulate-regression-probability"
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={qualityAutomationSimulationRegressionProbability}
+                  onChange={(event) =>
+                    setQualityAutomationSimulationRegressionProbability(
+                      event.target.value,
+                    )
+                  }
+                />
+              </label>
+              <label
+                className="inline-field"
+                htmlFor="open-platform-quality-automation-simulate-replay-regression-count"
+              >
+                replayRegressionCount（simulate）
+                <input
+                  id="open-platform-quality-automation-simulate-replay-regression-count"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={qualityAutomationSimulationReplayRegressionCount}
+                  onChange={(event) =>
+                    setQualityAutomationSimulationReplayRegressionCount(
+                      event.target.value,
+                    )
+                  }
+                />
+              </label>
+              <button
+                type="button"
+                className="submit-button"
+                disabled={simulateQualityAutomationPolicyMutation.isPending}
+                onClick={() => {
+                  const score = Number(qualityAutomationSimulationScore);
+                  const confidence = Number(qualityAutomationSimulationConfidence);
+                  const regressionProbability = Number(
+                    qualityAutomationSimulationRegressionProbability,
+                  );
+                  const replayRegressionCount = Number(
+                    qualityAutomationSimulationReplayRegressionCount,
+                  );
+                  if (
+                    !qualityAutomationSimulationMetric.trim() ||
+                    !Number.isFinite(score) ||
+                    !Number.isFinite(confidence) ||
+                    !Number.isFinite(regressionProbability) ||
+                    !Number.isInteger(replayRegressionCount) ||
+                    replayRegressionCount < 0
+                  ) {
+                    setQualityFeedback(null);
+                    setQualityError("automation simulate 输入非法。");
+                    return;
+                  }
+                  setQualityFeedback(null);
+                  setQualityError(null);
+                  simulateQualityAutomationPolicyMutation.mutate({
+                    metric: qualityAutomationSimulationMetric.trim(),
+                    score,
+                    trendDirection: qualityAutomationSimulationTrendDirection,
+                    confidence,
+                    regressionProbability,
+                    replayRegressionCount,
+                  });
+                }}
+              >
+                {simulateQualityAutomationPolicyMutation.isPending
+                  ? "模拟中..."
+                  : "模拟 automation policy"}
+              </button>
+            </div>
+
+            {qualityAutomationSimulationPayload ? (
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <tbody>
+                    <tr>
+                      <th>simulate metric</th>
+                      <td>{qualityAutomationSimulationPayload.metric}</td>
+                      <th>severity</th>
+                      <td>{qualityAutomationSimulationPayload.severity}</td>
+                    </tr>
+                    <tr>
+                      <th>matchedRule</th>
+                      <td>{qualityAutomationSimulationPayload.matchedRuleId ?? "--"}</td>
+                      <th>resolvedAction</th>
+                      <td>{qualityAutomationSimulationPayload.resolvedAction ?? "--"}</td>
+                    </tr>
+                    <tr>
+                      <th>requiresApproval</th>
+                      <td>{qualityAutomationSimulationPayload.requiresApproval ? "yes" : "no"}</td>
+                      <th>blockingReasons</th>
+                      <td>{qualityAutomationSimulationPayload.blockingReasons.join(", ") || "--"}</td>
+                    </tr>
+                    <tr>
+                      <th>simulation context</th>
+                      <td colSpan={3}>
+                        {formatCompactJson(
+                          {
+                            confidence:
+                              qualityAutomationSimulationPayload.confidence,
+                            trendDirection:
+                              qualityAutomationSimulationPayload.trendDirection,
+                            regressionProbability:
+                              qualityAutomationSimulationPayload.regressionProbability,
+                            replayRegressionCount:
+                              qualityAutomationSimulationPayload.replayRegressionCount,
+                          },
+                        )}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>automation execution</th>
+                    <th>decision</th>
+                    <th>result</th>
+                    <th>approvalRequest</th>
+                    <th>source</th>
+                    <th>createdAt</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {qualityAutomationExecutionItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={6}>
+                        {qualityAutomationExecutionsQuery.isLoading
+                          ? "正在加载 automation executions。"
+                          : "尚未触发 automation executions。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    qualityAutomationExecutionItems.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.toolId}</td>
+                        <td>{item.decision}</td>
+                        <td>{item.result}</td>
+                        <td>{item.approvalRequestId ?? "--"}</td>
+                        <td>{String(item.metadata.source ?? "--")}</td>
+                        <td>{formatDateTime(item.createdAt)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label
+                className="inline-field"
                 htmlFor="open-platform-quality-scorecard-team"
               >
                 指标（scorecards）
@@ -9043,6 +16058,48 @@ function GovernancePage() {
                 {loadQualityScorecardsMutation.isPending
                   ? "查询中..."
                   : "加载 Quality scorecards"}
+              </button>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadQualityForecastMutation.isPending}
+                onClick={() => {
+                  setQualityFeedback(null);
+                  setQualityError(null);
+                  loadQualityForecastMutation.mutate({
+                    from: qualityProjectTrendsFrom.trim() || undefined,
+                    to: qualityProjectTrendsTo.trim() || undefined,
+                    metric: qualityProjectTrendsMetric.trim() || undefined,
+                    provider: qualityProjectTrendsProvider.trim() || undefined,
+                    workflow: qualityProjectTrendsWorkflow.trim() || undefined,
+                    limit: 20,
+                  });
+                }}
+              >
+                {loadQualityForecastMutation.isPending
+                  ? "查询中..."
+                  : "加载 Quality forecast"}
+              </button>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadQualityAdviceMutation.isPending}
+                onClick={() => {
+                  setQualityFeedback(null);
+                  setQualityError(null);
+                  loadQualityAdviceMutation.mutate({
+                    from: qualityProjectTrendsFrom.trim() || undefined,
+                    to: qualityProjectTrendsTo.trim() || undefined,
+                    provider: qualityProjectTrendsProvider.trim() || undefined,
+                    workflow: qualityProjectTrendsWorkflow.trim() || undefined,
+                  });
+                }}
+              >
+                {loadQualityAdviceMutation.isPending
+                  ? "查询中..."
+                  : "加载 Quality advice"}
               </button>
             </div>
 
@@ -9218,6 +16275,329 @@ function GovernancePage() {
                 </tbody>
               </table>
             </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>forecast project</th>
+                    <th>metric</th>
+                    <th>modelVersion</th>
+                    <th>predictedScore</th>
+                    <th>confidence</th>
+                    <th>regressionProbability</th>
+                    <th>delta</th>
+                    <th>windowCount</th>
+                    <th>trend</th>
+                    <th>rationale</th>
+                    <th>window</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {qualityForecastItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={11}>
+                        {hasLoadedQualityForecast
+                          ? "无 forecast 数据。"
+                          : "尚未加载 forecast。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    qualityForecastItems.map((item) => (
+                      <tr key={`${item.project}:${item.metric}:forecast`}>
+                        <td>{item.project}</td>
+                        <td>{item.metric}</td>
+                        <td>{item.modelVersion ?? "--"}</td>
+                        <td>{item.predictedScore.toFixed(2)}</td>
+                        <td>{item.confidence.toFixed(2)}</td>
+                        <td>
+                          {typeof item.regressionProbability === "number"
+                            ? item.regressionProbability.toFixed(4)
+                            : "--"}
+                        </td>
+                        <td>
+                          {typeof item.projectedDelta === "number"
+                            ? item.projectedDelta.toFixed(2)
+                            : "--"}
+                        </td>
+                        <td>{item.basisWindowCount ?? "--"}</td>
+                        <td>{item.trendDirection ?? "--"}</td>
+                        <td>{item.rationale ?? formatCompactJson(item.explanation)}</td>
+                        <td>
+                          {(item.windowStart ? formatDateTime(item.windowStart) : "--")}
+                          {" ~ "}
+                          {(item.windowEnd ? formatDateTime(item.windowEnd) : "--")}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>adviceId</th>
+                    <th>advice project</th>
+                    <th>severity</th>
+                    <th>title</th>
+                    <th>recommendation</th>
+                    <th>explanation</th>
+                    <th>strategyRule</th>
+                    <th>autoDecision</th>
+                    <th>execution hint</th>
+                    <th>latestExecution</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {qualityAdviceItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={11}>
+                        {hasLoadedQualityAdvice
+                          ? "无 advice 数据。"
+                          : "尚未加载 advice。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    qualityAdviceItems.map((item) => (
+                      <tr key={`${item.project}:${item.title}:advice`}>
+                        <td>{item.id}</td>
+                        <td>{item.project}</td>
+                        <td>{item.severity}</td>
+                        <td>{item.title}</td>
+                        <td>{item.recommendation}</td>
+                        <td>{item.explanation ?? "--"}</td>
+                        <td>{item.strategyMatrixMatch ?? "--"}</td>
+                        <td>{item.autoExecutionDecision ?? "--"}</td>
+                        <td>
+                          {item.executionOptions?.map((option) =>
+                            `${option.actionType}:${option.availability}`,
+                          ).join(" | ") ||
+                            formatCompactJson(item.executionHint)}
+                        </td>
+                        <td>{item.latestExecutionStatus ?? "--"}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="table-action"
+                            onClick={() => {
+                              setQualityAdviceSelectedId(item.id);
+                              setQualityAdviceExecuteProject(item.project);
+                              setQualityAdviceExecuteSeverity(item.severity);
+                              setQualityAdviceActionType(
+                                item.executionHint?.recommendedActionType ??
+                                  item.suggestedActions?.[0] ??
+                                  "scorecard_adjustment",
+                              );
+                              setQualityFeedback(`已将 advice ${item.id} 带入执行表单。`);
+                              setQualityError(null);
+                            }}
+                          >
+                            带入执行
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label className="inline-field" htmlFor="quality-advice-id">
+                adviceId
+                <input
+                  id="quality-advice-id"
+                  type="text"
+                  value={qualityAdviceSelectedId}
+                  onChange={(event) => setQualityAdviceSelectedId(event.target.value)}
+                  placeholder="必填"
+                />
+              </label>
+              <label className="inline-field" htmlFor="quality-advice-project">
+                project
+                <input
+                  id="quality-advice-project"
+                  type="text"
+                  value={qualityAdviceExecuteProject}
+                  onChange={(event) => setQualityAdviceExecuteProject(event.target.value)}
+                  placeholder="必填"
+                />
+              </label>
+              <label className="inline-field" htmlFor="quality-advice-severity">
+                severity
+                <select
+                  id="quality-advice-severity"
+                  value={qualityAdviceExecuteSeverity}
+                  onChange={(event) =>
+                    setQualityAdviceExecuteSeverity(
+                      event.target.value as "info" | "warn" | "critical",
+                    )
+                  }
+                >
+                  <option value="info">info</option>
+                  <option value="warn">warn</option>
+                  <option value="critical">critical</option>
+                </select>
+              </label>
+              <label className="inline-field" htmlFor="quality-advice-action-type">
+                actionType
+                <select
+                  id="quality-advice-action-type"
+                  value={qualityAdviceActionType}
+                  onChange={(event) =>
+                    setQualityAdviceActionType(
+                      event.target.value as "scorecard_adjustment" | "replay_experiment",
+                    )
+                  }
+                >
+                  <option value="scorecard_adjustment">scorecard_adjustment</option>
+                  <option value="replay_experiment">replay_experiment</option>
+                </select>
+              </label>
+              <label className="inline-field" htmlFor="quality-advice-metric">
+                metric
+                <input
+                  id="quality-advice-metric"
+                  type="text"
+                  value={qualityAdviceExecuteMetric}
+                  onChange={(event) => setQualityAdviceExecuteMetric(event.target.value)}
+                  placeholder="默认 accuracy"
+                />
+              </label>
+              <label className="inline-field" htmlFor="quality-advice-dataset-id">
+                datasetId
+                <input
+                  id="quality-advice-dataset-id"
+                  type="text"
+                  value={qualityAdviceExecuteDatasetId}
+                  onChange={(event) => setQualityAdviceExecuteDatasetId(event.target.value)}
+                  placeholder="replay_experiment 时必填"
+                />
+              </label>
+              <label className="inline-field governance-wide-field" htmlFor="quality-advice-candidate-labels">
+                candidateLabels（逗号分隔）
+                <input
+                  id="quality-advice-candidate-labels"
+                  type="text"
+                  value={qualityAdviceExecuteCandidateLabels}
+                  onChange={(event) => setQualityAdviceExecuteCandidateLabels(event.target.value)}
+                  placeholder="如 candidate-a,candidate-b"
+                />
+              </label>
+              <button
+                type="button"
+                className="submit-button"
+                disabled={executeQualityAdviceMutation.isPending}
+                onClick={() => {
+                  const adviceId = qualityAdviceSelectedId.trim();
+                  const project = qualityAdviceExecuteProject.trim();
+                  if (!adviceId || !project) {
+                    setQualityFeedback(null);
+                    setQualityError("执行 Quality advice 前请填写 adviceId 和 project。");
+                    return;
+                  }
+                  if (
+                    qualityAdviceActionType === "replay_experiment" &&
+                    !qualityAdviceExecuteDatasetId.trim()
+                  ) {
+                    setQualityFeedback(null);
+                    setQualityError("replay_experiment 执行时 datasetId 必填。");
+                    return;
+                  }
+                  setQualityFeedback(null);
+                  setQualityError(null);
+                  executeQualityAdviceMutation.mutate({
+                    adviceId,
+                    project,
+                    severity: qualityAdviceExecuteSeverity,
+                    actionType: qualityAdviceActionType,
+                    metric: qualityAdviceExecuteMetric.trim() || undefined,
+                    datasetId: qualityAdviceExecuteDatasetId.trim() || undefined,
+                    candidateLabels: parseDistinctCommaSeparatedList(
+                      qualityAdviceExecuteCandidateLabels,
+                    ),
+                  });
+                }}
+              >
+                {executeQualityAdviceMutation.isPending ? "执行中..." : "执行 Quality advice"}
+              </button>
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadQualityAdviceExecutionsMutation.isPending}
+                onClick={() => {
+                  setQualityFeedback(null);
+                  setQualityError(null);
+                  loadQualityAdviceExecutionsMutation.mutate({
+                    adviceId: qualityAdviceSelectedId.trim() || undefined,
+                    actionType: qualityAdviceActionType,
+                    limit: 50,
+                  });
+                }}
+              >
+                {loadQualityAdviceExecutionsMutation.isPending
+                  ? "查询中..."
+                  : "加载 advice executions"}
+              </button>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>executionId</th>
+                    <th>adviceId</th>
+                    <th>actionType</th>
+                    <th>status</th>
+                    <th>result</th>
+                    <th>updatedAt</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {qualityAdviceExecutionPayload?.items?.length ? (
+                    qualityAdviceExecutionPayload.items.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.id}</td>
+                        <td>{item.adviceId}</td>
+                        <td>{item.actionType}</td>
+                        <td>{item.status}</td>
+                        <td>{formatCompactJson(item.resultSummary)}</td>
+                        <td>{formatDateTime(item.updatedAt)}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="table-action"
+                            disabled={
+                              cancelQualityAdviceExecutionMutation.isPending ||
+                              item.status === "completed" ||
+                              item.status === "cancelled"
+                            }
+                            onClick={() =>
+                              cancelQualityAdviceExecutionMutation.mutate(item.id)
+                            }
+                          >
+                            取消
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={7}>
+                        {hasLoadedQualityAdviceExecutions
+                          ? "无 advice executions。"
+                          : "尚未加载 advice executions。"}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </article>
 
           <article className="open-platform-card">
@@ -9229,6 +16609,11 @@ function GovernancePage() {
             <datalist id="open-platform-replay-baseline-options">
               {knownReplayDatasetIds.map((datasetId) => (
                 <option key={datasetId} value={datasetId} />
+              ))}
+            </datalist>
+            <datalist id="open-platform-replay-version-options">
+              {knownReplayVersionIds.map((versionId) => (
+                <option key={versionId} value={versionId} />
               ))}
             </datalist>
             <datalist id="open-platform-replay-run-options">
@@ -9398,6 +16783,376 @@ function GovernancePage() {
                 {loadReplayDatasetsMutation.isPending
                   ? "查询中..."
                   : "加载回放数据集"}
+              </button>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-dataset-version-dataset-id"
+              >
+                datasetId（versions）
+                <input
+                  id="open-platform-replay-dataset-version-dataset-id"
+                  type="text"
+                  list="open-platform-replay-baseline-options"
+                  value={replayVersionDatasetId}
+                  onChange={(event) => setReplayVersionDatasetId(event.target.value)}
+                  placeholder="必填"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadReplayDatasetVersionsMutation.isPending}
+                onClick={() => {
+                  const datasetId = replayVersionDatasetId.trim();
+                  if (!datasetId) {
+                    setReplayFeedback(null);
+                    setReplayError("回放数据集版本的 datasetId 不能为空。");
+                    return;
+                  }
+                  setReplayFeedback(null);
+                  setReplayError(null);
+                  loadReplayDatasetVersionsMutation.mutate(datasetId);
+                }}
+              >
+                {loadReplayDatasetVersionsMutation.isPending
+                  ? "查询中..."
+                  : "加载回放数据集版本"}
+              </button>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-create-version-dataset-ref"
+              >
+                datasetRef（version）
+                <input
+                  id="open-platform-replay-create-version-dataset-ref"
+                  type="text"
+                  value={replayCreateVersionDatasetRef}
+                  onChange={(event) =>
+                    setReplayCreateVersionDatasetRef(event.target.value)
+                  }
+                  placeholder="必填"
+                />
+              </label>
+
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-create-version-model"
+              >
+                model（version）
+                <input
+                  id="open-platform-replay-create-version-model"
+                  type="text"
+                  value={replayCreateVersionModel}
+                  onChange={(event) =>
+                    setReplayCreateVersionModel(event.target.value)
+                  }
+                  placeholder="必填"
+                />
+              </label>
+
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-create-version-prompt-version"
+              >
+                promptVersion（version）
+                <input
+                  id="open-platform-replay-create-version-prompt-version"
+                  type="text"
+                  value={replayCreateVersionPromptVersion}
+                  onChange={(event) =>
+                    setReplayCreateVersionPromptVersion(event.target.value)
+                  }
+                  placeholder="可选"
+                />
+              </label>
+
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-create-version-sample-count"
+              >
+                sampleCount（version）
+                <input
+                  id="open-platform-replay-create-version-sample-count"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={replayCreateVersionSampleCount}
+                  onChange={(event) =>
+                    setReplayCreateVersionSampleCount(event.target.value)
+                  }
+                />
+              </label>
+
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="open-platform-replay-create-version-note"
+              >
+                note（version）
+                <input
+                  id="open-platform-replay-create-version-note"
+                  type="text"
+                  value={replayCreateVersionNote}
+                  onChange={(event) => setReplayCreateVersionNote(event.target.value)}
+                  placeholder="可选"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={createReplayDatasetVersionMutation.isPending}
+                onClick={() => {
+                  const datasetId = replayVersionDatasetId.trim();
+                  const datasetRef = replayCreateVersionDatasetRef.trim();
+                  const model = replayCreateVersionModel.trim();
+                  const sampleCount = parseOptionalNonNegativeInteger(
+                    replayCreateVersionSampleCount,
+                  );
+                  if (!datasetId || !datasetRef || !model) {
+                    setReplayFeedback(null);
+                    setReplayError(
+                      "创建回放数据集版本前请填写 datasetId、datasetRef、model。",
+                    );
+                    return;
+                  }
+                  if (
+                    replayCreateVersionSampleCount.trim().length > 0 &&
+                    sampleCount === undefined
+                  ) {
+                    setReplayFeedback(null);
+                    setReplayError(
+                      "回放数据集版本的 sampleCount 必须是大于等于 0 的整数。",
+                    );
+                    return;
+                  }
+                  setReplayFeedback(null);
+                  setReplayError(null);
+                  createReplayDatasetVersionMutation.mutate({
+                    datasetId,
+                    input: {
+                      datasetRef,
+                      model,
+                      promptVersion:
+                        replayCreateVersionPromptVersion.trim() || undefined,
+                      sampleCount,
+                      note: replayCreateVersionNote.trim() || undefined,
+                    },
+                  });
+                }}
+              >
+                {createReplayDatasetVersionMutation.isPending
+                  ? "创建中..."
+                  : "创建回放数据集版本"}
+              </button>
+            </div>
+
+            {replayDatasetVersionPayload ? (
+              <p>
+                当前版本：
+                {replayDatasetVersionPayload.currentVersionNumber ?? "--"}
+                {" / "}
+                {replayDatasetVersionPayload.currentVersionId ?? "--"}
+              </p>
+            ) : null}
+
+            <div className="filters-row governance-inline-grid">
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-experiment-name"
+              >
+                experiment 名称
+                <input
+                  id="open-platform-replay-experiment-name"
+                  type="text"
+                  value={replayExperimentName}
+                  onChange={(event) => setReplayExperimentName(event.target.value)}
+                  placeholder="必填"
+                />
+              </label>
+
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-experiment-dataset-id"
+              >
+                datasetId（experiment）
+                <input
+                  id="open-platform-replay-experiment-dataset-id"
+                  type="text"
+                  list="open-platform-replay-baseline-options"
+                  value={replayExperimentDatasetId}
+                  onChange={(event) => setReplayExperimentDatasetId(event.target.value)}
+                  placeholder="必填"
+                />
+              </label>
+
+              <label
+                className="inline-field"
+                htmlFor="open-platform-replay-experiment-baseline-version-id"
+              >
+                baselineVersionId（experiment）
+                <input
+                  id="open-platform-replay-experiment-baseline-version-id"
+                  type="text"
+                  list="open-platform-replay-version-options"
+                  value={replayExperimentBaselineVersionId}
+                  onChange={(event) =>
+                    setReplayExperimentBaselineVersionId(event.target.value)
+                  }
+                  placeholder="可选"
+                />
+              </label>
+
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="open-platform-replay-experiment-run-ids"
+              >
+                runIds（逗号分隔）
+                <input
+                  id="open-platform-replay-experiment-run-ids"
+                  type="text"
+                  value={replayExperimentRunIds}
+                  onChange={(event) => setReplayExperimentRunIds(event.target.value)}
+                  placeholder="可选"
+                />
+              </label>
+
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="open-platform-replay-experiment-candidate-labels"
+              >
+                candidateLabels（逗号分隔）
+                <input
+                  id="open-platform-replay-experiment-candidate-labels"
+                  type="text"
+                  value={replayExperimentCandidateLabels}
+                  onChange={(event) =>
+                    setReplayExperimentCandidateLabels(event.target.value)
+                  }
+                  placeholder="如 candidate-a,candidate-b"
+                />
+              </label>
+
+              {replaySelectedExperimentCurrentVersionId ? (
+                <p>
+                  当前 dataset 版本：v
+                  {replaySelectedExperimentCurrentVersionNumber ?? "--"}
+                  {" / "}
+                  {replaySelectedExperimentCurrentVersionId}
+                </p>
+              ) : null}
+
+              <label
+                className="checkbox-field"
+                htmlFor="open-platform-replay-experiment-auto-run"
+              >
+                <input
+                  id="open-platform-replay-experiment-auto-run"
+                  type="checkbox"
+                  checked={replayExperimentAutoRun}
+                  onChange={(event) =>
+                    setReplayExperimentAutoRun(event.target.checked)
+                  }
+                />
+                自动启动实验
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={createReplayExperimentMutation.isPending}
+                onClick={() => {
+                  const name = replayExperimentName.trim();
+                  const datasetId = replayExperimentDatasetId.trim();
+                  if (!name || !datasetId) {
+                    setReplayFeedback(null);
+                    setReplayError("创建回放实验前请填写 name 和 datasetId。");
+                    return;
+                  }
+                  setReplayFeedback(null);
+                  setReplayError(null);
+                  createReplayExperimentMutation.mutate({
+                    name,
+                    datasetId,
+                    baselineVersionId:
+                      replayExperimentBaselineVersionId.trim() || undefined,
+                    runIds: parseDistinctCommaSeparatedList(replayExperimentRunIds),
+                    candidateLabels: parseDistinctCommaSeparatedList(
+                      replayExperimentCandidateLabels,
+                    ),
+                    autoRun: replayExperimentAutoRun,
+                  });
+                }}
+              >
+                {createReplayExperimentMutation.isPending
+                  ? "创建中..."
+                  : "创建回放实验"}
+              </button>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadReplayExperimentsMutation.isPending}
+                onClick={() => {
+                  setReplayFeedback(null);
+                  setReplayError(null);
+                  loadReplayExperimentsMutation.mutate({
+                    datasetId: replayExperimentDatasetId.trim() || undefined,
+                    limit: 50,
+                  });
+                }}
+              >
+                {loadReplayExperimentsMutation.isPending
+                  ? "查询中..."
+                  : "加载回放实验"}
+              </button>
+            </div>
+
+            <div className="filters-row governance-inline-grid">
+              <label
+                className="inline-field governance-wide-field"
+                htmlFor="open-platform-replay-experiment-compare-ids"
+              >
+                experimentIds（批量对比，逗号分隔）
+                <input
+                  id="open-platform-replay-experiment-compare-ids"
+                  type="text"
+                  value={replayExperimentCompareIds}
+                  onChange={(event) => setReplayExperimentCompareIds(event.target.value)}
+                  placeholder="至少两个 experimentId"
+                />
+              </label>
+
+              <button
+                type="button"
+                className="submit-button"
+                disabled={loadReplayExperimentBatchCompareMutation.isPending}
+                onClick={() => {
+                  const experimentIds = parseDistinctCommaSeparatedList(
+                    replayExperimentCompareIds,
+                  );
+                  if (experimentIds.length < 2) {
+                    setReplayFeedback(null);
+                    setReplayError("批量对比至少需要 2 个 experimentId。");
+                    return;
+                  }
+                  setReplayFeedback(null);
+                  setReplayError(null);
+                  loadReplayExperimentBatchCompareMutation.mutate({
+                    experimentIds,
+                    datasetId: replayExperimentDatasetId.trim() || undefined,
+                  });
+                }}
+              >
+                {loadReplayExperimentBatchCompareMutation.isPending
+                  ? "对比中..."
+                  : "批量对比实验"}
               </button>
             </div>
 
@@ -9804,6 +17559,23 @@ function GovernancePage() {
 
               <label
                 className="inline-field"
+                htmlFor="open-platform-replay-create-run-baseline-version-id"
+              >
+                baselineVersionId（run）
+                <input
+                  id="open-platform-replay-create-run-baseline-version-id"
+                  type="text"
+                  list="open-platform-replay-version-options"
+                  value={replayCreateRunBaselineVersionId}
+                  onChange={(event) =>
+                    setReplayCreateRunBaselineVersionId(event.target.value)
+                  }
+                  placeholder="可选，默认当前版本"
+                />
+              </label>
+
+              <label
+                className="inline-field"
                 htmlFor="open-platform-replay-create-run-candidate-label"
               >
                 candidateLabel
@@ -9862,6 +17634,8 @@ function GovernancePage() {
                   setReplayError(null);
                   createReplayRunMutation.mutate({
                     datasetId,
+                    baselineVersionId:
+                      replayCreateRunBaselineVersionId.trim() || undefined,
                     candidateLabel,
                     sampleLimit:
                       replayCreateRunSampleLimit.trim().length > 0
@@ -10088,8 +17862,22 @@ function GovernancePage() {
                       </td>
                     </tr>
                     <tr>
-                      <th>样本来源</th>
+                      <th>baselineVersionId</th>
                       <td>
+                        {String(
+                          replaySelectedRunSummary.baselineVersionId ?? "--",
+                        )}
+                      </td>
+                      <th>digest</th>
+                      <td>
+                        {formatCompactJson(
+                          replaySelectedRunDigest ?? undefined,
+                        )}
+                      </td>
+                    </tr>
+                    <tr>
+                      <th>样本来源</th>
+                      <td colSpan={3}>
                         {formatCompactJson(
                           replaySelectedRunSummary.sourceSummary &&
                             typeof replaySelectedRunSummary.sourceSummary ===
@@ -10104,13 +17892,334 @@ function GovernancePage() {
                             : undefined,
                         )}
                       </td>
-                      <th>digest</th>
-                      <td>
-                        {formatCompactJson(
-                          replaySelectedRunDigest ?? undefined,
-                        )}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>experiment</th>
+                    <th>datasetId</th>
+                    <th>baselineVersionId</th>
+                    <th>status</th>
+                    <th>trigger</th>
+                    <th>sourceAdvice</th>
+                    <th>candidates</th>
+                    <th>runIds</th>
+                    <th>runSummary</th>
+                    <th>aggregate</th>
+                    <th>updatedAt</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {replayExperimentItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={12}>
+                        {hasLoadedReplayExperiments
+                          ? "无匹配 experiment。"
+                          : "尚未加载 experiment。"}
                       </td>
                     </tr>
+                  ) : (
+                    replayExperimentItems.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.name}</td>
+                        <td>{item.datasetId}</td>
+                        <td>{item.baselineVersionId ?? "--"}</td>
+                        <td>{item.status ?? "--"}</td>
+                        <td>{item.triggerSource ?? "--"}</td>
+                        <td>{item.sourceAdviceId ?? "--"}</td>
+                        <td>{item.candidateLabels?.join(", ") || "--"}</td>
+                        <td>{item.runIds.join(", ") || "--"}</td>
+                        <td>{formatCompactJson(item.runStatusSummary ?? item.summary)}</td>
+                        <td>{formatCompactJson(item.aggregateSummary ?? item.summary)}</td>
+                        <td>{formatDateTime(item.updatedAt)}</td>
+                        <td>
+                          <div className="governance-action-row">
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() =>
+                                loadReplayExperimentDetailMutation.mutate(item.id)
+                              }
+                            >
+                              详情
+                            </button>
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() =>
+                                loadReplayExperimentCompareMutation.mutate(item.id)
+                              }
+                            >
+                              对比
+                            </button>
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() =>
+                                loadReplayExperimentWorkflowMutation.mutate(item.id)
+                              }
+                            >
+                              工作流
+                            </button>
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() =>
+                                loadReplayExperimentArtifactsMutation.mutate(item.id)
+                              }
+                            >
+                              工件
+                            </button>
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() => runReplayExperimentMutation.mutate(item.id)}
+                            >
+                              启动
+                            </button>
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() =>
+                                cancelReplayExperimentMutation.mutate(item.id)
+                              }
+                            >
+                              取消
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {replayExperimentDetailPayload ? (
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <tbody>
+                    <tr>
+                      <th>实验详情</th>
+                      <td>{replayExperimentDetailPayload.name}</td>
+                      <th>状态</th>
+                      <td>{replayExperimentDetailPayload.status ?? "--"}</td>
+                    </tr>
+                    <tr>
+                      <th>trigger</th>
+                      <td>{replayExperimentDetailPayload.triggerSource ?? "--"}</td>
+                      <th>candidates</th>
+                      <td>{replayExperimentDetailPayload.candidateLabels?.join(", ") || "--"}</td>
+                    </tr>
+                    <tr>
+                      <th>runIds</th>
+                      <td>{replayExperimentDetailPayload.runIds.join(", ") || "--"}</td>
+                      <th>sourceAdvice</th>
+                      <td>{replayExperimentDetailPayload.sourceAdviceId ?? "--"}</td>
+                    </tr>
+                    <tr>
+                      <th>baselineVersionId</th>
+                      <td>{replayExperimentDetailPayload.baselineVersionId ?? "--"}</td>
+                      <th>datasetId</th>
+                      <td>{replayExperimentDetailPayload.datasetId}</td>
+                    </tr>
+                    <tr>
+                      <th>runSummary</th>
+                      <td>{formatCompactJson(replayExperimentDetailPayload.runStatusSummary ?? replayExperimentDetailPayload.summary)}</td>
+                      <th>aggregate</th>
+                      <td>{formatCompactJson(replayExperimentDetailPayload.aggregateSummary ?? replayExperimentDetailPayload.summary)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            {replayExperimentComparePayload ? (
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <tbody>
+                    <tr>
+                      <th>实验对比</th>
+                      <td>{replayExperimentComparePayload.experimentId}</td>
+                      <th>最佳 run</th>
+                      <td>{replayExperimentComparePayload.summary.bestRunId ?? "--"}</td>
+                    </tr>
+                    <tr>
+                      <th>completed</th>
+                      <td>{replayExperimentComparePayload.summary.completedRuns}</td>
+                      <th>queued/running/failed</th>
+                      <td>
+                        {replayExperimentComparePayload.summary.queuedRuns} /{" "}
+                        {replayExperimentComparePayload.summary.runningRuns} /{" "}
+                        {replayExperimentComparePayload.summary.failedRuns}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            {replayExperimentBatchComparePayload ? (
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <tbody>
+                    <tr>
+                      <th>批量对比</th>
+                      <td>{replayExperimentBatchComparePayload.summary.comparedExperimentCount}</td>
+                      <th>datasets</th>
+                      <td>
+                        {replayExperimentBatchComparePayload.summary.datasets.join(", ") || "--"}
+                      </td>
+                    </tr>
+                    <tr>
+                      <th>best/worst</th>
+                      <td>
+                        {replayExperimentBatchComparePayload.summary.bestExperimentId ?? "--"}
+                        {" / "}
+                        {replayExperimentBatchComparePayload.summary.worstExperimentId ?? "--"}
+                      </td>
+                      <th>runs</th>
+                      <td>
+                        {replayExperimentBatchComparePayload.summary.completedRuns}
+                        {" completed / "}
+                        {replayExperimentBatchComparePayload.summary.runningRuns}
+                        {" running / "}
+                        {replayExperimentBatchComparePayload.summary.failedRuns}
+                        {" failed"}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            {replayExperimentComparePayload ? (
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <thead>
+                    <tr>
+                      <th>runId</th>
+                      <th>candidate</th>
+                      <th>status</th>
+                      <th>processed/total</th>
+                      <th>improved</th>
+                      <th>regressed</th>
+                      <th>passRate</th>
+                      <th>netDelta</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {replayExperimentComparePayload.items.map((item) => (
+                      <tr key={`${item.runId}:compare`}>
+                        <td>{item.runId}</td>
+                        <td>{item.candidateLabel}</td>
+                        <td>{item.status}</td>
+                        <td>
+                          {item.processedCases}/{item.totalCases}
+                        </td>
+                        <td>{item.improvedCases}</td>
+                        <td>{item.regressedCases}</td>
+                        <td>{item.passRate.toFixed(4)}</td>
+                        <td>{item.netDelta}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            {replayExperimentBatchComparePayload ? (
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <thead>
+                    <tr>
+                      <th>experimentId</th>
+                      <th>name</th>
+                      <th>datasetId</th>
+                      <th>workflow</th>
+                      <th>bestRun</th>
+                      <th>netDelta</th>
+                      <th>rates</th>
+                      <th>run overview</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {replayExperimentBatchCompareItems.map((item) => (
+                      <tr key={`${item.experimentId}:batch-compare`}>
+                        <td>{item.experimentId}</td>
+                        <td>{item.name}</td>
+                        <td>{item.datasetId}</td>
+                        <td>{item.workflowStage}</td>
+                        <td>{item.bestRunId ?? "--"}</td>
+                        <td>{item.netDelta}</td>
+                        <td>
+                          improve {item.improvementRate.toFixed(4)} / regress{" "}
+                          {item.regressionRate.toFixed(4)}
+                        </td>
+                        <td>
+                          {item.runs
+                            .map((run) => `${run.candidateLabel}:${run.netDelta}`)
+                            .join(" | ") || "--"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            {replayExperimentWorkflowPayload ? (
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <tbody>
+                    <tr>
+                      <th>实验工作流</th>
+                      <td>{replayExperimentWorkflowPayload.experimentId}</td>
+                      <th>状态</th>
+                      <td>{replayExperimentWorkflowPayload.status}</td>
+                    </tr>
+                    <tr>
+                      <th>nodes</th>
+                      <td>{replayExperimentWorkflowPayload.summary.totalNodes}</td>
+                      <th>runs</th>
+                      <td>{replayExperimentWorkflowPayload.summary.totalRuns}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            {replayExperimentWorkflowPayload ? (
+              <div className="table-wrapper">
+                <table className="session-table">
+                  <thead>
+                    <tr>
+                      <th>node</th>
+                      <th>type</th>
+                      <th>status</th>
+                      <th>startedAt</th>
+                      <th>finishedAt</th>
+                      <th>metadata</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {replayExperimentWorkflowPayload.nodes.map((node) => (
+                      <tr key={node.id}>
+                        <td>{node.label}</td>
+                        <td>{node.type}</td>
+                        <td>{node.status}</td>
+                        <td>{node.startedAt ? formatDateTime(node.startedAt) : "--"}</td>
+                        <td>{node.finishedAt ? formatDateTime(node.finishedAt) : "--"}</td>
+                        <td>{formatCompactJson(node.metadata)}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -10124,6 +18233,7 @@ function GovernancePage() {
                     <th>name</th>
                     <th>model</th>
                     <th>dataset</th>
+                    <th>currentVersion</th>
                     <th>来源</th>
                     <th>updatedAt</th>
                   </tr>
@@ -10131,7 +18241,7 @@ function GovernancePage() {
                 <tbody>
                   {replayDatasetItems.length === 0 ? (
                     <tr>
-                      <td className="table-empty-cell" colSpan={6}>
+                      <td className="table-empty-cell" colSpan={7}>
                         {hasLoadedReplayDatasets
                           ? "无匹配 dataset。"
                           : "尚未加载 dataset。"}
@@ -10144,6 +18254,11 @@ function GovernancePage() {
                         <td>{item.name}</td>
                         <td>{item.model}</td>
                         <td>{item.datasetRef ?? item.datasetId}</td>
+                        <td>
+                          {item.currentVersionNumber ?? "--"}
+                          {" / "}
+                          {item.currentVersionId ?? "--"}
+                        </td>
                         <td>{formatCompactJson(item.metadata)}</td>
                         <td>
                           <div className="governance-action-row">
@@ -10153,12 +18268,104 @@ function GovernancePage() {
                               className="table-action"
                               onClick={() => {
                                 setReplayDatasetCasesDatasetId(item.datasetId);
+                                setReplayVersionDatasetId(item.datasetId);
                                 setReplayCreateRunDatasetId(item.datasetId);
+                                setReplayCreateRunBaselineVersionId(
+                                  item.currentVersionId ?? "",
+                                );
                                 setReplayRunsDatasetIdFilter(item.datasetId);
+                                setReplayExperimentDatasetId(item.datasetId);
+                                setReplayExperimentBaselineVersionId(
+                                  item.currentVersionId ?? "",
+                                );
                                 setReplayDiffDatasetId(item.datasetId);
                               }}
                             >
                               使用此数据集
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>version</th>
+                    <th>versionId</th>
+                    <th>datasetRef</th>
+                    <th>model</th>
+                    <th>sampleCount</th>
+                    <th>promotedAt</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {replayDatasetVersionItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={7}>
+                        {hasLoadedReplayDatasetVersions
+                          ? "无匹配 dataset version。"
+                          : "尚未加载 dataset version。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    replayDatasetVersionItems.map((item) => (
+                      <tr key={item.id}>
+                        <td>v{item.version}</td>
+                        <td>{item.id}</td>
+                        <td>{item.datasetRef ?? item.datasetId}</td>
+                        <td>{item.model}</td>
+                        <td>{item.sampleCount}</td>
+                        <td>
+                          {item.promotedAt ? formatDateTime(item.promotedAt) : "--"}
+                        </td>
+                        <td>
+                          <div className="governance-action-row">
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() => {
+                                setReplayCreateRunDatasetId(item.datasetId);
+                                setReplayCreateRunBaselineVersionId(item.id);
+                                setReplayExperimentDatasetId(item.datasetId);
+                                setReplayExperimentBaselineVersionId(item.id);
+                              }}
+                            >
+                              带入实验版本
+                            </button>
+                            <button
+                              type="button"
+                              className="table-action"
+                              disabled={loadReplayDatasetVersionCasesMutation.isPending}
+                              onClick={() => {
+                                setReplayFeedback(null);
+                                setReplayError(null);
+                                loadReplayDatasetVersionCasesMutation.mutate({
+                                  datasetId: item.datasetId,
+                                  versionId: item.id,
+                                });
+                              }}
+                            >
+                              版本样本
+                            </button>
+                            <button
+                              type="button"
+                              className="table-action"
+                              disabled={promoteReplayDatasetVersionMutation.isPending}
+                              onClick={() =>
+                                promoteReplayDatasetVersionMutation.mutate({
+                                  datasetId: item.datasetId,
+                                  versionId: item.id,
+                                })
+                              }
+                            >
+                              提升为当前版本
                             </button>
                           </div>
                         </td>
@@ -10193,6 +18400,45 @@ function GovernancePage() {
                     replayDatasetCaseItems.map((item) => (
                       <tr key={`${item.datasetId}:${item.caseId}`}>
                         <td>{item.datasetId}</td>
+                        <td>{item.caseId}</td>
+                        <td>{item.sortOrder}</td>
+                        <td>{item.input}</td>
+                        <td>{formatCompactJson(item.metadata)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>datasetId</th>
+                    <th>versionId</th>
+                    <th>caseId</th>
+                    <th>sortOrder</th>
+                    <th>input</th>
+                    <th>metadata</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {replayDatasetVersionCaseItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={6}>
+                        {hasLoadedReplayDatasetVersionCases
+                          ? "无匹配版本样本。"
+                          : "尚未加载版本样本。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    replayDatasetVersionCaseItems.map((item) => (
+                      <tr
+                        key={`${replayDatasetVersionCasesPayload?.versionId ?? "version"}:${item.caseId}`}
+                      >
+                        <td>{item.datasetId}</td>
+                        <td>{replayDatasetVersionCasesPayload?.versionId ?? "--"}</td>
                         <td>{item.caseId}</td>
                         <td>{item.sortOrder}</td>
                         <td>{item.input}</td>
@@ -10322,6 +18568,49 @@ function GovernancePage() {
                         <td>{item.summary}</td>
                         <td>{item.verdict}</td>
                         <td>{item.deltaScore.toFixed(3)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>experimentId</th>
+                    <th>runId</th>
+                    <th>type</th>
+                    <th>storage</th>
+                    <th>byteSize</th>
+                    <th>preview</th>
+                    <th>downloadUrl</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {replayExperimentArtifactItems.length === 0 ? (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={7}>
+                        {hasLoadedReplayExperimentArtifacts
+                          ? "无匹配 experiment artifacts。"
+                          : "尚未加载 experiment artifacts。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    replayExperimentArtifactItems.map((item, index) => (
+                      <tr
+                        key={`${replayExperimentArtifactPayload?.experimentId ?? "experiment"}:${item.runId ?? index}:${item.type}`}
+                      >
+                        <td>{replayExperimentArtifactPayload?.experimentId ?? "--"}</td>
+                        <td>{item.runId ?? "--"}</td>
+                        <td>{item.type}</td>
+                        <td>{item.storageBackend ?? "--"}</td>
+                        <td>
+                          {typeof item.byteSize === "number" ? item.byteSize : "--"}
+                        </td>
+                        <td>{formatCompactJson(item.inline ?? item.metadata)}</td>
+                        <td>{item.downloadUrl ?? "--"}</td>
                       </tr>
                     ))
                   )}
@@ -10507,6 +18796,231 @@ function GovernancePage() {
           <p className="feedback success">{exportFeedback}</p>
         ) : null}
         {exportError ? <p className="feedback error">{exportError}</p> : null}
+      </section>
+    </>
+  );
+}
+
+function AgentsPage() {
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+
+  const agentRuntimeViewsQuery = useQuery({
+    queryKey: ["agent-runtime-views"],
+    queryFn: ({ signal }) => fetchAgentRuntimeViews(signal),
+    staleTime: 20_000,
+  });
+
+  const runtimeViews = agentRuntimeViewsQuery.data?.items ?? [];
+
+  useEffect(() => {
+    if (runtimeViews.length === 0) {
+      setSelectedAgentId(null);
+      return;
+    }
+    if (!selectedAgentId || !runtimeViews.some((item) => item.agentId === selectedAgentId)) {
+      setSelectedAgentId(runtimeViews[0]?.agentId ?? null);
+    }
+  }, [runtimeViews, selectedAgentId]);
+
+  const agentRuntimeConfigQuery = useQuery({
+    queryKey: ["agent-runtime-config", selectedAgentId],
+    enabled: Boolean(selectedAgentId),
+    queryFn: ({ signal }) => fetchAgentRuntimeConfig(selectedAgentId!, signal),
+    staleTime: 20_000,
+  });
+
+  const overview = useMemo(
+    () => ({
+      total: runtimeViews.length,
+      online: runtimeViews.filter((item) => item.runtimeStatus === "online").length,
+      stale: runtimeViews.filter((item) => item.runtimeStatus === "stale").length,
+      neverSeen: runtimeViews.filter((item) => item.runtimeStatus === "never_seen").length,
+    }),
+    [runtimeViews],
+  );
+
+  const selectedRuntimeView =
+    runtimeViews.find((item) => item.agentId === selectedAgentId) ?? null;
+  const runtimeConfig: AgentRuntimeConfigResponse | null =
+    agentRuntimeConfigQuery.data ?? null;
+
+  return (
+    <>
+      <section className="panel">
+        <header>
+          <h2>Agent 守护状态</h2>
+          <p>按租户查看 agent 最近心跳、采集状态与运行时配置快照。</p>
+        </header>
+
+        <section className="kpi-grid" aria-label="Agent 守护概览">
+          <article className="kpi-card">
+            <span>总 Agent</span>
+            <strong>{overview.total}</strong>
+          </article>
+          <article className="kpi-card">
+            <span>在线</span>
+            <strong>{overview.online}</strong>
+          </article>
+          <article className="kpi-card">
+            <span>陈旧</span>
+            <strong>{overview.stale}</strong>
+          </article>
+          <article className="kpi-card">
+            <span>未上报</span>
+            <strong>{overview.neverSeen}</strong>
+          </article>
+        </section>
+
+        {agentRuntimeViewsQuery.isLoading ? (
+          <p className="feedback info">Agent 守护视图加载中...</p>
+        ) : null}
+        {agentRuntimeViewsQuery.isError ? (
+          <p className="feedback error">
+            加载 Agent 守护视图失败：{toErrorMessage(agentRuntimeViewsQuery.error)}
+          </p>
+        ) : null}
+
+        <div className="table-wrapper">
+          <table className="session-table">
+            <thead>
+              <tr>
+                <th>Agent</th>
+                <th>主机</th>
+                <th>版本</th>
+                <th>状态</th>
+                <th>Sources</th>
+                <th>最近心跳</th>
+                <th>上次写入</th>
+                <th>最近结果</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runtimeViews.length === 0 ? (
+                <tr>
+                  <td className="table-empty-cell" colSpan={8}>
+                    暂无 agent 守护记录
+                  </td>
+                </tr>
+              ) : (
+                runtimeViews.map((item) => (
+                  <tr
+                    key={item.agentId}
+                    onClick={() => setSelectedAgentId(item.agentId)}
+                    style={{ cursor: "pointer" }}
+                    aria-selected={selectedAgentId === item.agentId}
+                  >
+                    <td>{item.displayName}</td>
+                    <td>{item.hostname}</td>
+                    <td>{item.version ?? "--"}</td>
+                    <td>{formatAgentRuntimeStatus(item.runtimeStatus)}</td>
+                    <td>{item.sourceCount}</td>
+                    <td>{formatOptionalDateTime(item.lastHeartbeatAt)}</td>
+                    <td>{formatDateTime(item.updatedAt)}</td>
+                    <td>
+                      {item.lastIngestStatusCode === null
+                        ? "--"
+                        : `${item.lastIngestStatusCode} / ${item.lastAccepted}:${item.lastRejected}`}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel">
+        <header>
+          <h2>运行时配置</h2>
+          <p>展示当前选中 agent 的服务端配置快照与 source 绑定。</p>
+        </header>
+
+        {!selectedRuntimeView ? (
+          <p className="feedback empty">请选择一个 agent 查看运行时配置。</p>
+        ) : null}
+        {agentRuntimeConfigQuery.isLoading ? (
+          <p className="feedback info">运行时配置加载中...</p>
+        ) : null}
+        {agentRuntimeConfigQuery.isError ? (
+          <p className="feedback error">
+            运行时配置加载失败：{toErrorMessage(agentRuntimeConfigQuery.error)}
+          </p>
+        ) : null}
+
+        {selectedRuntimeView ? (
+          <>
+            <div className="detail-grid">
+              <article className="detail-card">
+                <h3>{selectedRuntimeView.displayName}</h3>
+                <p>状态：{formatAgentRuntimeStatus(selectedRuntimeView.runtimeStatus)}</p>
+                <p>配置版本：{selectedRuntimeView.lastConfigVersion ?? "--"}</p>
+                <p>最近取配：{formatOptionalDateTime(selectedRuntimeView.lastConfigFetchedAt)}</p>
+                <p>错误：{selectedRuntimeView.lastError ?? "--"}</p>
+              </article>
+              <article className="detail-card">
+                <h3>服务端默认值</h3>
+                <p>
+                  心跳间隔：
+                  {runtimeConfig?.runtime.heartbeatIntervalSeconds ??
+                    selectedRuntimeView.heartbeatIntervalSeconds}
+                  s
+                </p>
+                <p>
+                  陈旧阈值：
+                  {runtimeConfig?.runtime.staleAfterSeconds ??
+                    selectedRuntimeView.staleAfterSeconds}
+                  s
+                </p>
+                <p>
+                  上报协议：
+                  {runtimeConfig?.runtime.ingestProtocol ??
+                    selectedRuntimeView.ingestProtocol}
+                </p>
+                <p>
+                  Endpoint：
+                  {runtimeConfig?.runtime.ingestEndpoint ??
+                    selectedRuntimeView.ingestEndpoint ??
+                    "--"}
+                </p>
+              </article>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="session-table">
+                <thead>
+                  <tr>
+                    <th>Source ID</th>
+                    <th>Name</th>
+                    <th>Access Mode</th>
+                    <th>Enabled</th>
+                    <th>Location</th>
+                    <th>Region</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {runtimeConfig?.bindings.sources.length ? (
+                    runtimeConfig.bindings.sources.map((item) => (
+                      <tr key={item.sourceId}>
+                        <td>{item.sourceId}</td>
+                        <td>{item.name}</td>
+                        <td>{item.accessMode}</td>
+                        <td>{item.enabled ? "true" : "false"}</td>
+                        <td>{item.location}</td>
+                        <td>{item.sourceRegion ?? "--"}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td className="table-empty-cell" colSpan={6}>
+                        当前 agent 没有 source 绑定
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : null}
       </section>
     </>
   );
@@ -11427,6 +19941,7 @@ function Workspace({
       ) : null}
       {route === "analytics" ? <AnalyticsPage /> : null}
       {route === "governance" ? <GovernancePage /> : null}
+      {route === "agents" ? <AgentsPage /> : null}
       {route === "sources" ? <SourcesPage /> : null}
       {route === "pricing" ? <PricingPage /> : null}
     </main>
@@ -11434,7 +19949,20 @@ function Workspace({
 }
 
 export default function App() {
-  const [queryClient] = useState(() => new QueryClient());
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            retry: import.meta.env.MODE === "test" ? false : 3,
+            gcTime: import.meta.env.MODE === "test" ? 0 : 5 * 60 * 1000,
+          },
+          mutations: {
+            retry: false,
+          },
+        },
+      }),
+  );
   const [isAuthenticated, setIsAuthenticated] = useState(() =>
     hasAccessToken(),
   );
@@ -11470,6 +19998,12 @@ export default function App() {
     });
     return () => {
       setUnauthorizedHandler(null);
+    };
+  }, [queryClient]);
+
+  useEffect(() => {
+    return () => {
+      queryClient.clear();
     };
   }, [queryClient]);
 

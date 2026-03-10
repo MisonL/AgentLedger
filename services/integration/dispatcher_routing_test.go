@@ -15,7 +15,7 @@ func TestRouteChannels(t *testing.T) {
 	t.Parallel()
 
 	cfg := integrationConfig{
-		Channels: []integrationChannel{channelWebhook, channelWeCom, channelDingTalk, channelFeishu, channelEmail, channelEmailWebhook, channelTicket},
+		Channels: []integrationChannel{channelWebhook, channelWeCom, channelDingTalk, channelFeishu, channelEmail, channelEmailWebhook, channelIncident, channelTicket},
 	}
 	dispatcher := &alertDispatcher{cfg: cfg}
 
@@ -29,7 +29,7 @@ func TestRouteChannels(t *testing.T) {
 		t.Fatalf("critical route mismatch: got %v want %v", got, cfg.Channels)
 	}
 
-	wantWarning := []integrationChannel{channelWebhook, channelWeCom, channelEmail, channelEmailWebhook, channelTicket}
+	wantWarning := []integrationChannel{channelWebhook, channelWeCom, channelEmail, channelEmailWebhook, channelIncident, channelTicket}
 	if got := dispatcher.routeChannels(eventTypeAlert, []byte(`{"severity":"warning"}`)); !reflect.DeepEqual(got, wantWarning) {
 		t.Fatalf("warning route mismatch: got %v want %v", got, wantWarning)
 	}
@@ -346,6 +346,13 @@ func TestDispatchToChannelPayloadAdaptation(t *testing.T) {
 			payload:   weeklyPayload,
 			wantText:  weeklyText,
 		},
+		{
+			name:      "incident uses wrapped payload for alert",
+			channel:   channelIncident,
+			eventType: eventTypeAlert,
+			payload:   alertPayload,
+			wantText:  alertText,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -443,7 +450,7 @@ func TestDispatchToChannelPayloadAdaptation(t *testing.T) {
 				if compactJSONPayload(parsed.Event) != compactJSONPayload(tc.payload) {
 					t.Fatalf("event payload mismatch: got %s want %s", parsed.Event, tc.payload)
 				}
-			case channelTicket:
+			case channelTicket, channelIncident:
 				var parsed ticketWebhookChannelPayload
 				if err := json.Unmarshal(gotBody, &parsed); err != nil {
 					t.Fatalf("unmarshal ticket webhook payload failed: %v", err)

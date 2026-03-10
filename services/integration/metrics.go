@@ -219,7 +219,7 @@ func normalizeOutcome(outcome string) string {
 
 func normalizeChannel(channel string) string {
 	switch channel {
-	case string(channelWebhook), string(channelWeCom), string(channelDingTalk), string(channelFeishu), string(channelEmail), string(channelEmailWebhook), string(channelTicket), labelChannelNone, labelChannelControl:
+	case string(channelWebhook), string(channelWeCom), string(channelDingTalk), string(channelFeishu), string(channelEmail), string(channelEmailWebhook), string(channelTicket), string(channelIncident), labelChannelNone, labelChannelControl:
 		return channel
 	default:
 		return labelChannelUnknown
@@ -228,7 +228,7 @@ func normalizeChannel(channel string) string {
 
 func normalizeEventType(eventType string) string {
 	switch eventType {
-	case eventTypeAlert, eventTypeWeeklyReport, eventTypeCallback:
+	case eventTypeAlert, eventTypeWeeklyReport, eventTypeCallback, eventTypeAlertExternalStatusSync:
 		return eventType
 	default:
 		return eventTypeUnknown

@@ -1953,6 +1953,152 @@ export function buildOpenApiDocument() {
           },
         },
       },
+      "/api/v2/replay/datasets/{id}/versions": {
+        get: {
+          summary: "列出回放数据集版本（v2）",
+          operationId: "listReplayDatasetVersionsV2",
+          tags: ["replay"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "回放数据集版本列表",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayDatasetVersionListResponseV2" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+        post: {
+          summary: "创建回放数据集版本（v2）",
+          operationId: "createReplayDatasetVersionV2",
+          tags: ["replay"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ReplayDatasetVersionCreateInputV2" },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "回放数据集版本创建成功",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayDatasetVersionV2" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+      },
+      "/api/v2/replay/datasets/{id}/versions/{versionId}/cases": {
+        get: {
+          summary: "获取回放数据集版本样本（v2）",
+          operationId: "listReplayDatasetVersionCasesV2",
+          tags: ["replay"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+            {
+              name: "versionId",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+            {
+              name: "limit",
+              in: "query",
+              description: "返回样本上限",
+              schema: { type: "integer", minimum: 1, maximum: 5000 },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "版本样本列表",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayDatasetVersionCasesResponseV2" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+      },
+      "/api/v2/replay/datasets/{id}/promote": {
+        post: {
+          summary: "提升回放数据集版本为当前版本（v2）",
+          operationId: "promoteReplayDatasetVersionV2",
+          tags: ["replay"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ReplayDatasetVersionPromoteInputV2" },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "提升成功后的当前版本快照",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayDatasetVersionPromoteResponseV2" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+      },
       "/api/v2/replay/datasets/{id}/cases": {
         get: {
           summary: "获取回放数据集样本（v2）",
@@ -2274,6 +2420,311 @@ export function buildOpenApiDocument() {
               content: {
                 "application/octet-stream": {
                   schema: { type: "string", format: "binary" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+      },
+      "/api/v2/replay/experiments": {
+        post: {
+          summary: "创建回放实验（v2）",
+          operationId: "createReplayExperimentV2",
+          tags: ["replay"],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ReplayExperimentInputV2" },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "回放实验创建成功",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayExperimentV2" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+        get: {
+          summary: "列出回放实验（v2）",
+          operationId: "listReplayExperimentsV2",
+          tags: ["replay"],
+          parameters: [
+            { $ref: "#/components/parameters/PageLimit" },
+            {
+              name: "datasetId",
+              in: "query",
+              description: "按 datasetId 过滤",
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "回放实验列表",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayExperimentListResponseV2" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+      },
+      "/api/v2/replay/experiments/compare": {
+        get: {
+          summary: "批量对比回放实验（v2）",
+          operationId: "compareReplayExperimentsV2",
+          tags: ["replay"],
+          parameters: [
+            {
+              name: "experimentIds",
+              in: "query",
+              required: true,
+              description: "逗号分隔的实验 ID 列表，至少 2 个。",
+              schema: { type: "string" },
+            },
+            {
+              name: "datasetId",
+              in: "query",
+              description: "可选：按 datasetId 约束可比较实验。",
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "实验批量对比结果",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayExperimentBatchCompareResponseV2" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+      },
+      "/api/v2/replay/experiments/{id}": {
+        get: {
+          summary: "获取回放实验（v2）",
+          operationId: "getReplayExperimentV2",
+          tags: ["replay"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "回放实验详情",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayExperimentV2" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+      },
+      "/api/v2/replay/experiments/{id}/run": {
+        post: {
+          summary: "执行回放实验（v2）",
+          operationId: "runReplayExperimentV2",
+          tags: ["replay"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "已启动的回放实验",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayExperimentV2" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+      },
+      "/api/v2/replay/experiments/{id}/cancel": {
+        post: {
+          summary: "取消回放实验（v2）",
+          operationId: "cancelReplayExperimentV2",
+          tags: ["replay"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "已取消的回放实验",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayExperimentV2" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+      },
+      "/api/v2/replay/experiments/{id}/results": {
+        get: {
+          summary: "获取回放实验结果（v2）",
+          operationId: "getReplayExperimentResultsV2",
+          tags: ["replay"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "回放实验结果快照",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayExperimentV2" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+      },
+      "/api/v2/replay/experiments/{id}/compare": {
+        get: {
+          summary: "对比单个回放实验下的运行（v2）",
+          operationId: "getReplayExperimentCompareV2",
+          tags: ["replay"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "回放实验对比结果",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayExperimentCompareResponseV2" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+      },
+      "/api/v2/replay/experiments/{id}/workflow": {
+        get: {
+          summary: "获取回放实验工作流（v2）",
+          operationId: "getReplayExperimentWorkflowV2",
+          tags: ["replay"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "回放实验工作流拓扑",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayExperimentWorkflowResponseV2" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequestError" },
+            "401": { $ref: "#/components/responses/UnauthorizedError" },
+            "403": { $ref: "#/components/responses/ForbiddenError" },
+            "404": { $ref: "#/components/responses/NotFoundError" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+      },
+      "/api/v2/replay/experiments/{id}/artifacts": {
+        get: {
+          summary: "获取回放实验聚合工件（v2）",
+          operationId: "getReplayExperimentArtifactsV2",
+          tags: ["replay"],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "按实验聚合后的回放工件列表",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ReplayExperimentArtifactsResponseV2" },
                 },
               },
             },
@@ -3360,6 +3811,17 @@ export function buildOpenApiDocument() {
             promptVersion: { type: "string", nullable: true },
             caseCount: { type: "integer", minimum: 0 },
             sampleCount: { type: "integer", minimum: 0 },
+            currentVersionId: {
+              type: "string",
+              nullable: true,
+              description: "当前生效的 dataset version ID。",
+            },
+            currentVersionNumber: {
+              type: "integer",
+              minimum: 1,
+              nullable: true,
+              description: "当前生效的 dataset version 序号。",
+            },
             metadata: { type: "object", additionalProperties: true },
             createdAt: { type: "string", format: "date-time" },
             updatedAt: { type: "string", format: "date-time" },
@@ -3374,6 +3836,93 @@ export function buildOpenApiDocument() {
               items: { $ref: "#/components/schemas/ReplayDatasetV2" },
             },
             total: { type: "integer", minimum: 0 },
+          },
+        },
+        ReplayDatasetVersionV2: {
+          type: "object",
+          required: [
+            "id",
+            "tenantId",
+            "datasetId",
+            "version",
+            "model",
+            "sampleCount",
+            "metadata",
+            "createdAt",
+          ],
+          properties: {
+            id: { type: "string" },
+            tenantId: { type: "string" },
+            replayDatasetId: {
+              type: "string",
+              description: "兼容别名：等价于 datasetId。",
+            },
+            datasetId: { type: "string", description: "回放数据集资源 ID。" },
+            baselineId: {
+              type: "string",
+              description: "兼容别名：等价于 datasetId。",
+            },
+            version: { type: "integer", minimum: 1 },
+            datasetRef: {
+              type: "string",
+              nullable: true,
+              description: "该版本关联的数据集引用快照。",
+            },
+            model: { type: "string" },
+            promptVersion: { type: "string", nullable: true },
+            sampleCount: { type: "integer", minimum: 0 },
+            metadata: { type: "object", additionalProperties: true },
+            note: { type: "string", nullable: true },
+            createdAt: { type: "string", format: "date-time" },
+            promotedAt: { type: "string", format: "date-time", nullable: true },
+          },
+        },
+        ReplayDatasetVersionListResponseV2: {
+          type: "object",
+          required: ["items", "total", "currentVersionId", "currentVersionNumber"],
+          properties: {
+            items: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ReplayDatasetVersionV2" },
+            },
+            total: { type: "integer", minimum: 0 },
+            currentVersionId: { type: "string", nullable: true },
+            currentVersionNumber: { type: "integer", minimum: 1, nullable: true },
+          },
+        },
+        ReplayDatasetVersionCreateInputV2: {
+          type: "object",
+          required: ["datasetRef", "model"],
+          properties: {
+            datasetRef: { type: "string", minLength: 1 },
+            versionDatasetId: {
+              type: "string",
+              minLength: 1,
+              description: "兼容别名：等价于 datasetRef。",
+            },
+            model: { type: "string", minLength: 1 },
+            promptVersion: { type: "string" },
+            sampleCount: { type: "integer", minimum: 0 },
+            metadata: { type: "object", additionalProperties: true },
+            note: { type: "string" },
+          },
+        },
+        ReplayDatasetVersionPromoteInputV2: {
+          type: "object",
+          required: ["versionId"],
+          properties: {
+            versionId: { type: "string", minLength: 1 },
+          },
+        },
+        ReplayDatasetVersionPromoteResponseV2: {
+          type: "object",
+          required: ["dataset", "version"],
+          properties: {
+            dataset: {
+              allOf: [{ $ref: "#/components/schemas/ReplayDatasetV2" }],
+              nullable: true,
+            },
+            version: { $ref: "#/components/schemas/ReplayDatasetVersionV2" },
           },
         },
         ReplayDatasetCaseV2: {
@@ -3433,6 +3982,19 @@ export function buildOpenApiDocument() {
           required: ["datasetId", "items", "total"],
           properties: {
             datasetId: { type: "string" },
+            items: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ReplayDatasetCaseV2" },
+            },
+            total: { type: "integer", minimum: 0 },
+          },
+        },
+        ReplayDatasetVersionCasesResponseV2: {
+          type: "object",
+          required: ["datasetId", "versionId", "items", "total"],
+          properties: {
+            datasetId: { type: "string" },
+            versionId: { type: "string" },
             items: {
               type: "array",
               items: { $ref: "#/components/schemas/ReplayDatasetCaseV2" },
@@ -3854,6 +4416,427 @@ export function buildOpenApiDocument() {
             items: {
               type: "array",
               items: { $ref: "#/components/schemas/ReplayArtifactItemV2" },
+            },
+            total: { type: "integer", minimum: 0 },
+          },
+        },
+        ReplayExperimentInputV2: {
+          type: "object",
+          required: ["name", "datasetId"],
+          properties: {
+            name: { type: "string", minLength: 1 },
+            datasetId: { type: "string", minLength: 1 },
+            baselineId: {
+              type: "string",
+              description: "兼容别名：等价于 datasetId。",
+            },
+            baselineVersionId: {
+              type: "string",
+              description: "可选：绑定具体的数据集版本快照，用于实验创建与自动 run 透传。",
+            },
+            triggerSource: {
+              type: "string",
+              enum: ["manual", "quality_advice", "automatic"],
+            },
+            autoRun: { type: "boolean" },
+            candidateLabels: { type: "array", items: { type: "string" } },
+            sourceAdviceId: { type: "string" },
+            runIds: { type: "array", items: { type: "string" } },
+          },
+        },
+        ReplayExperimentStatusSummaryV2: {
+          type: "object",
+          required: ["totalRuns", "completedRuns", "failedRuns", "runningRuns", "queuedRuns"],
+          properties: {
+            totalRuns: { type: "integer", minimum: 0 },
+            completedRuns: { type: "integer", minimum: 0 },
+            failedRuns: { type: "integer", minimum: 0 },
+            runningRuns: { type: "integer", minimum: 0 },
+            queuedRuns: { type: "integer", minimum: 0 },
+          },
+        },
+        ReplayExperimentAggregateSummaryV2: {
+          type: "object",
+          required: ["totalCases", "processedCases", "improvedCases", "regressedCases", "baselineVersionId"],
+          properties: {
+            totalCases: { type: "integer", minimum: 0 },
+            processedCases: { type: "integer", minimum: 0 },
+            improvedCases: { type: "integer", minimum: 0 },
+            regressedCases: { type: "integer", minimum: 0 },
+            baselineVersionId: { type: "string", nullable: true },
+          },
+        },
+        ReplayExperimentMetadataV2: {
+          type: "object",
+          properties: {
+            baselineVersionId: { type: "string", nullable: true },
+          },
+          additionalProperties: true,
+        },
+        ReplayExperimentV2: {
+          type: "object",
+          required: [
+            "id",
+            "tenantId",
+            "name",
+            "datasetId",
+            "baselineVersionId",
+            "runIds",
+            "runStatusSummary",
+            "aggregateSummary",
+            "summary",
+            "metadata",
+            "runs",
+            "createdAt",
+            "updatedAt",
+          ],
+          properties: {
+            id: { type: "string" },
+            tenantId: { type: "string" },
+            name: { type: "string" },
+            datasetId: { type: "string" },
+            baselineId: {
+              type: "string",
+              nullable: true,
+              description: "兼容别名：等价于 datasetId。",
+            },
+            baselineVersionId: {
+              type: "string",
+              nullable: true,
+              description: "实验绑定的 dataset version ID；若存在会同步回显到 metadata 与 summary。",
+            },
+            status: {
+              type: "string",
+              enum: ["draft", "queued", "running", "completed", "failed", "cancelled"],
+            },
+            triggerSource: {
+              type: "string",
+              enum: ["manual", "quality_advice", "automatic"],
+            },
+            executionMode: {
+              type: "string",
+              enum: ["manual", "automatic"],
+            },
+            candidateLabels: { type: "array", items: { type: "string" } },
+            sourceAdviceId: { type: "string", nullable: true },
+            runIds: { type: "array", items: { type: "string" } },
+            runStatusSummary: { $ref: "#/components/schemas/ReplayExperimentStatusSummaryV2" },
+            aggregateSummary: { $ref: "#/components/schemas/ReplayExperimentAggregateSummaryV2" },
+            summary: {
+              type: "object",
+              additionalProperties: true,
+              description: "兼容聚合摘要，包含 status、runStatusSummary、aggregateSummary 与 baselineVersionId。",
+            },
+            metadata: { $ref: "#/components/schemas/ReplayExperimentMetadataV2" },
+            runs: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ReplayRunV2" },
+            },
+            createdAt: { type: "string", format: "date-time" },
+            updatedAt: { type: "string", format: "date-time" },
+            startedAt: { type: "string", format: "date-time", nullable: true },
+            finishedAt: { type: "string", format: "date-time", nullable: true },
+            lastError: { type: "string", nullable: true },
+          },
+        },
+        ReplayExperimentListResponseV2: {
+          type: "object",
+          required: ["items", "total"],
+          properties: {
+            items: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ReplayExperimentV2" },
+            },
+            total: { type: "integer", minimum: 0 },
+          },
+        },
+        ReplayExperimentCompareItemV2: {
+          type: "object",
+          required: [
+            "runId",
+            "candidateLabel",
+            "status",
+            "totalCases",
+            "processedCases",
+            "improvedCases",
+            "regressedCases",
+            "unchangedCases",
+            "passRate",
+            "improvementRate",
+            "regressionRate",
+            "netDelta",
+            "finishedAt",
+          ],
+          properties: {
+            runId: { type: "string" },
+            candidateLabel: { type: "string" },
+            status: {
+              type: "string",
+              enum: ["pending", "running", "completed", "failed", "cancelled"],
+            },
+            totalCases: { type: "integer", minimum: 0 },
+            processedCases: { type: "integer", minimum: 0 },
+            improvedCases: { type: "integer", minimum: 0 },
+            regressedCases: { type: "integer", minimum: 0 },
+            unchangedCases: { type: "integer", minimum: 0 },
+            passRate: { type: "number" },
+            improvementRate: { type: "number" },
+            regressionRate: { type: "number" },
+            netDelta: { type: "number" },
+            startedAt: { type: "string", format: "date-time", nullable: true },
+            finishedAt: { type: "string", format: "date-time", nullable: true },
+          },
+        },
+        ReplayExperimentCompareSummaryV2: {
+          type: "object",
+          required: [
+            "totalRuns",
+            "completedRuns",
+            "failedRuns",
+            "runningRuns",
+            "queuedRuns",
+            "cancelledRuns",
+          ],
+          properties: {
+            totalRuns: { type: "integer", minimum: 0 },
+            completedRuns: { type: "integer", minimum: 0 },
+            failedRuns: { type: "integer", minimum: 0 },
+            runningRuns: { type: "integer", minimum: 0 },
+            queuedRuns: { type: "integer", minimum: 0 },
+            cancelledRuns: { type: "integer", minimum: 0 },
+            bestRunId: { type: "string", nullable: true },
+            worstRunId: { type: "string", nullable: true },
+            bestNetDelta: { type: "number", nullable: true },
+            worstNetDelta: { type: "number", nullable: true },
+          },
+        },
+        ReplayExperimentCompareResponseV2: {
+          type: "object",
+          required: ["experimentId", "datasetId", "items", "total", "summary"],
+          properties: {
+            experimentId: { type: "string" },
+            datasetId: { type: "string" },
+            items: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ReplayExperimentCompareItemV2" },
+            },
+            total: { type: "integer", minimum: 0 },
+            summary: { $ref: "#/components/schemas/ReplayExperimentCompareSummaryV2" },
+          },
+        },
+        ReplayExperimentBatchCompareItemV2: {
+          type: "object",
+          required: [
+            "experimentId",
+            "name",
+            "datasetId",
+            "status",
+            "workflowStage",
+            "triggerSource",
+            "candidateLabels",
+            "totalRuns",
+            "completedRuns",
+            "failedRuns",
+            "runningRuns",
+            "queuedRuns",
+            "totalCases",
+            "processedCases",
+            "improvedCases",
+            "regressedCases",
+            "improvementRate",
+            "regressionRate",
+            "netDelta",
+            "runs",
+            "updatedAt",
+          ],
+          properties: {
+            experimentId: { type: "string" },
+            name: { type: "string" },
+            datasetId: { type: "string" },
+            status: {
+              type: "string",
+              enum: ["draft", "queued", "running", "completed", "failed", "cancelled"],
+            },
+            workflowStage: {
+              type: "string",
+              enum: ["draft", "queued", "running", "completed", "failed", "cancelled"],
+            },
+            triggerSource: {
+              type: "string",
+              enum: ["manual", "quality_advice", "automatic"],
+            },
+            sourceAdviceId: { type: "string", nullable: true },
+            candidateLabels: { type: "array", items: { type: "string" } },
+            totalRuns: { type: "integer", minimum: 0 },
+            completedRuns: { type: "integer", minimum: 0 },
+            failedRuns: { type: "integer", minimum: 0 },
+            runningRuns: { type: "integer", minimum: 0 },
+            queuedRuns: { type: "integer", minimum: 0 },
+            totalCases: { type: "integer", minimum: 0 },
+            processedCases: { type: "integer", minimum: 0 },
+            improvedCases: { type: "integer", minimum: 0 },
+            regressedCases: { type: "integer", minimum: 0 },
+            improvementRate: { type: "number" },
+            regressionRate: { type: "number" },
+            netDelta: { type: "number" },
+            bestRunId: { type: "string", nullable: true },
+            worstRunId: { type: "string", nullable: true },
+            runs: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ReplayExperimentCompareItemV2" },
+            },
+            updatedAt: { type: "string", format: "date-time" },
+          },
+        },
+        ReplayExperimentBatchCompareSummaryV2: {
+          type: "object",
+          required: [
+            "comparedExperimentCount",
+            "comparedAt",
+            "datasets",
+            "totalRuns",
+            "completedRuns",
+            "failedRuns",
+            "runningRuns",
+            "queuedRuns",
+            "totalCases",
+            "processedCases",
+            "improvedCases",
+            "regressedCases",
+          ],
+          properties: {
+            comparedExperimentCount: { type: "integer", minimum: 0 },
+            comparedAt: { type: "string", format: "date-time" },
+            datasets: { type: "array", items: { type: "string" } },
+            totalRuns: { type: "integer", minimum: 0 },
+            completedRuns: { type: "integer", minimum: 0 },
+            failedRuns: { type: "integer", minimum: 0 },
+            runningRuns: { type: "integer", minimum: 0 },
+            queuedRuns: { type: "integer", minimum: 0 },
+            totalCases: { type: "integer", minimum: 0 },
+            processedCases: { type: "integer", minimum: 0 },
+            improvedCases: { type: "integer", minimum: 0 },
+            regressedCases: { type: "integer", minimum: 0 },
+            bestExperimentId: { type: "string", nullable: true },
+            worstExperimentId: { type: "string", nullable: true },
+          },
+        },
+        ReplayExperimentBatchCompareFiltersV2: {
+          type: "object",
+          required: ["experimentIds", "datasetId"],
+          properties: {
+            experimentIds: { type: "array", items: { type: "string" } },
+            datasetId: { type: "string", nullable: true },
+          },
+        },
+        ReplayExperimentBatchCompareResponseV2: {
+          type: "object",
+          required: ["items", "total", "summary", "filters"],
+          properties: {
+            items: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ReplayExperimentBatchCompareItemV2" },
+            },
+            total: { type: "integer", minimum: 0 },
+            summary: { $ref: "#/components/schemas/ReplayExperimentBatchCompareSummaryV2" },
+            filters: { $ref: "#/components/schemas/ReplayExperimentBatchCompareFiltersV2" },
+          },
+        },
+        ReplayExperimentWorkflowNodeV2: {
+          type: "object",
+          required: ["id", "type", "label", "status", "finishedAt"],
+          properties: {
+            id: { type: "string" },
+            type: { type: "string", enum: ["experiment", "run"] },
+            label: { type: "string" },
+            status: { type: "string" },
+            startedAt: { type: "string", format: "date-time", nullable: true },
+            finishedAt: { type: "string", format: "date-time", nullable: true },
+            metadata: { type: "object", additionalProperties: true },
+          },
+        },
+        ReplayExperimentWorkflowEdgeV2: {
+          type: "object",
+          required: ["from", "to", "label"],
+          properties: {
+            from: { type: "string" },
+            to: { type: "string" },
+            label: { type: "string" },
+          },
+        },
+        ReplayExperimentWorkflowResponseV2: {
+          type: "object",
+          required: ["experimentId", "status", "nodes", "edges", "summary"],
+          properties: {
+            experimentId: { type: "string" },
+            status: { type: "string" },
+            nodes: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ReplayExperimentWorkflowNodeV2" },
+            },
+            edges: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ReplayExperimentWorkflowEdgeV2" },
+            },
+            summary: {
+              type: "object",
+              required: [
+                "totalNodes",
+                "totalRuns",
+                "queuedRuns",
+                "runningRuns",
+                "completedRuns",
+                "failedRuns",
+                "cancelledRuns",
+              ],
+              properties: {
+                totalNodes: { type: "integer", minimum: 0 },
+                totalRuns: { type: "integer", minimum: 0 },
+                queuedRuns: { type: "integer", minimum: 0 },
+                runningRuns: { type: "integer", minimum: 0 },
+                completedRuns: { type: "integer", minimum: 0 },
+                failedRuns: { type: "integer", minimum: 0 },
+                cancelledRuns: { type: "integer", minimum: 0 },
+              },
+            },
+          },
+        },
+        ReplayExperimentArtifactItemV2: {
+          type: "object",
+          required: ["runId", "type", "contentType"],
+          properties: {
+            runId: { type: "string" },
+            type: {
+              type: "string",
+              enum: ["summary", "diff", "cases"],
+            },
+            name: { type: "string", nullable: true },
+            description: { type: "string", nullable: true },
+            contentType: { type: "string" },
+            downloadName: { type: "string", nullable: true },
+            downloadUrl: { type: "string", format: "uri-reference", nullable: true },
+            byteSize: { type: "integer", minimum: 0, nullable: true },
+            checksum: { type: "string", nullable: true },
+            storageBackend: {
+              type: "string",
+              enum: ["local", "object", "hybrid"],
+              nullable: true,
+            },
+            storageKey: { type: "string", nullable: true },
+            metadata: { type: "object", additionalProperties: true },
+            createdAt: { type: "string", format: "date-time", nullable: true },
+            inline: { $ref: "#/components/schemas/ReplayArtifactInlinePreviewV2" },
+          },
+        },
+        ReplayExperimentArtifactsResponseV2: {
+          type: "object",
+          required: ["experimentId", "datasetId", "items", "total"],
+          properties: {
+            experimentId: { type: "string" },
+            datasetId: { type: "string" },
+            items: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ReplayExperimentArtifactItemV2" },
             },
             total: { type: "integer", minimum: 0 },
           },

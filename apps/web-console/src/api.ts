@@ -1,10 +1,15 @@
 import type {
+  AlertExternalLinkBatchRetryResponse,
+  AlertExternalLinkFailureResponse,
+  AlertExternalLinkOpsItem,
+  AlertExternalLinkOpsResponse,
   AlertItem,
   AlertListInput,
   AlertListResponse,
   AlertMutableStatus,
   AlertOrchestrationChannel,
   AlertOrchestrationDispatchMode,
+  AlertOrchestrationEscalationReason,
   AlertOrchestrationEventType,
   AlertOrchestrationExecutionListInput,
   AlertOrchestrationExecutionListResponse,
@@ -24,14 +29,41 @@ import type {
   AuthRefreshResponse,
   AuthTokens,
   CreateSourceInput,
+  AgentRuntimeConfigResponse,
+  AgentRuntimeStatus,
+  AgentRuntimeView,
+  AgentRuntimeViewListResponse,
+  AgentRelease,
+  AgentReleaseArtifact,
+  AgentReleaseChannel,
+  AgentReleaseCheckBatchPreviewInput,
+  AgentReleaseCheckBatchPreviewResponse,
+  AgentReleaseCheckPreviewInput,
+  AgentReleaseCheckPreviewResponse,
+  AgentReleaseCheckSelectionReason,
+  AgentReleaseListResponse,
   DataResidencyMode,
   DownloadFile,
   ExportFormat,
   HeatmapCell,
+  IntegrationDlqMessageListResponse,
+  IntegrationDlqRecoveryJob,
+  IntegrationDlqRecoveryJobListResponse,
+  IntegrationAlertFailureReportResponse,
+  IntegrationAlertFailureTrendResponse,
+  IntegrationDlqReplayResponse,
   McpApprovalListInput,
+  McpApprovalMode,
   McpApprovalListResponse,
+  McpApprovalCreateInput,
   McpApprovalRequest,
   McpApprovalReviewInput,
+  McpApprovalStage,
+  McpApprovalWorkflow,
+  McpApprovalWorkflowNode,
+  McpApprovalWorkflowNodeSnapshot,
+  McpApprovalWorkflowTransition,
+  McpApprovalWorkflowTransitionPreview,
   McpEvaluateInput,
   McpEvaluateResult,
   McpInvocationCreateInput,
@@ -49,10 +81,19 @@ import type {
   OpenPlatformApiKeyListResponse,
   OpenPlatformApiKeyStatus,
   OpenPlatformApiKeyUpsertInput,
+  OpenPlatformAutomationPolicy,
+  OpenPlatformAutomationPolicySimulationInput,
+  OpenPlatformAutomationPolicySimulationResponse,
+  OpenPlatformAutomationStrategyRule,
+  OpenPlatformAutomationPolicyUpsertInput,
   OpenPlatformOpenApiSummary,
   OpenPlatformQualityDailyItem,
   OpenPlatformQualityDailyQueryInput,
   OpenPlatformQualityDailyResponse,
+  OpenPlatformQualityForecastResponse,
+  OpenPlatformQualityAdviceResponse,
+  OpenPlatformQualityAdviceExecution,
+  OpenPlatformQualityAdviceExecutionListResponse,
   OpenPlatformQualityDailyStatus,
   OpenPlatformQualityProjectTrendItem,
   OpenPlatformQualityProjectTrendQueryInput,
@@ -64,7 +105,13 @@ import type {
   OpenPlatformReplayArtifact,
   OpenPlatformReplayArtifactListResponse,
   OpenPlatformReplayDataset,
+  OpenPlatformReplayDatasetVersion,
+  OpenPlatformReplayDatasetVersionCreateInput,
+  OpenPlatformReplayDatasetVersionListResponse,
+  OpenPlatformReplayDatasetVersionPromoteInput,
+  OpenPlatformReplayDatasetVersionPromoteResponse,
   OpenPlatformReplayDatasetCase,
+  OpenPlatformReplayDatasetVersionCaseListResponse,
   OpenPlatformReplayDatasetCaseListResponse,
   OpenPlatformReplayDatasetMaterializeInput,
   OpenPlatformReplayDatasetMaterializeResponse,
@@ -85,6 +132,12 @@ import type {
   OpenPlatformReplayJobStatus,
   OpenPlatformReplayRun,
   OpenPlatformReplayRunCreateInput,
+  OpenPlatformReplayExperiment,
+  OpenPlatformReplayExperimentArtifactListResponse,
+  OpenPlatformReplayExperimentBatchCompareResponse,
+  OpenPlatformReplayExperimentCompareResponse,
+  OpenPlatformReplayExperimentListResponse,
+  OpenPlatformReplayExperimentWorkflowResponse,
   OpenPlatformReplayRunListInput,
   OpenPlatformReplayRunListResponse,
   OpenPlatformReplayRunStatus,
@@ -99,6 +152,12 @@ import type {
   PricingCatalogEntry,
   PricingCatalogUpsertInput,
   RegionDescriptor,
+  ResidencyArchiveRegionPolicy,
+  ResidencyArchiveRegionPolicyListResponse,
+  ResidencyArchiveRegionPolicyUpsertInput,
+  ResidencyKmsKeyMapping,
+  ResidencyKmsKeyMappingListResponse,
+  ResidencyKmsKeyMappingUpsertInput,
   ReplicationJobApproveInput,
   ReplicationJobCancelInput,
   ReplicationJobCreateInput,
@@ -106,6 +165,17 @@ import type {
   ReplicationJobListResponse,
   ReplicationJobStatus,
   ReplicationJob,
+  SystemConfigPackage,
+  SystemConfigPackageCreateInput,
+  SystemConfigPackageApproval,
+  SystemConfigPackageApprovalCreateInput,
+  SystemConfigPackageApprovalDecision,
+  SystemConfigPackageApprovalListResponse,
+  SystemConfigPackageListResponse,
+  SystemConfigPackageRequiredApprovals,
+  SystemConfigPackageTargetSelectors,
+  SystemConfigWatchLatestInput,
+  SystemConfigWatchLatestResponse,
   ResidencyRegionListResponse,
   RuleAssetCreateInput,
   RuleAssetListInput,
@@ -176,11 +246,17 @@ function toDateKey(iso: string): string {
 }
 
 const SOURCE_TYPES: SourceType[] = ["local", "ssh", "sync-cache"];
+const AGENT_RUNTIME_STATUSES: AgentRuntimeStatus[] = [
+  "online",
+  "stale",
+  "never_seen",
+];
 const ALERT_SEVERITIES = ["warning", "critical"] as const;
 const ALERT_STATUSES = ["open", "acknowledged", "resolved"] as const;
 const ALERT_MUTABLE_STATUSES = ["acknowledged", "resolved"] as const;
 const ALERT_ORCHESTRATION_EVENT_TYPES = ["alert", "weekly"] as const;
 const ALERT_ORCHESTRATION_DISPATCH_MODES = ["rule", "fallback"] as const;
+const ALERT_ORCHESTRATION_ESCALATION_REASONS = ["sla_timeout"] as const;
 const ALERT_ORCHESTRATION_CHANNELS = [
   "webhook",
   "wecom",
@@ -188,6 +264,7 @@ const ALERT_ORCHESTRATION_CHANNELS = [
   "feishu",
   "email",
   "email_webhook",
+  "incident",
   "ticket",
 ] as const;
 const EXPORT_FORMATS = ["json", "csv"] as const;
@@ -216,7 +293,9 @@ const RULE_LIFECYCLE_STATUSES: RuleLifecycleStatus[] = [
 const RULE_APPROVAL_DECISIONS: RuleApprovalDecision[] = ["approved", "rejected"];
 const MCP_RISK_LEVELS: McpRiskLevel[] = ["low", "medium", "high"];
 const MCP_TOOL_DECISIONS: McpToolDecision[] = ["allow", "deny", "require_approval"];
+const MCP_APPROVAL_MODES: McpApprovalMode[] = ["single_stage", "two_stage", "multi_stage"];
 const MCP_APPROVAL_STATUSES = ["pending", "approved", "rejected"] as const;
+export const OPEN_PLATFORM_QUALITY_AUTOMATION_TOOL_ID = "quality.replay.advice.execute";
 const OPEN_PLATFORM_API_KEY_STATUSES: OpenPlatformApiKeyStatus[] = [
   "active",
   "disabled",
@@ -446,6 +525,151 @@ function isISODateString(value: unknown): value is string {
   return typeof value === "string" && !Number.isNaN(Date.parse(value));
 }
 
+function isAgentRuntimeStatus(value: unknown): value is AgentRuntimeStatus {
+  return (
+    typeof value === "string" &&
+    AGENT_RUNTIME_STATUSES.includes(value as AgentRuntimeStatus)
+  );
+}
+
+function isAgentRuntimeView(value: unknown): value is AgentRuntimeView {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const deviceIdOk =
+    value.deviceId === undefined ||
+    value.deviceId === null ||
+    typeof value.deviceId === "string";
+  const versionOk =
+    value.version === undefined ||
+    value.version === null ||
+    typeof value.version === "string";
+  const lastConfigVersionOk =
+    value.lastConfigVersion === undefined ||
+    value.lastConfigVersion === null ||
+    typeof value.lastConfigVersion === "string";
+  const lastErrorOk =
+    value.lastError === undefined ||
+    value.lastError === null ||
+    typeof value.lastError === "string";
+  const ingestEndpointOk =
+    value.ingestEndpoint === undefined ||
+    value.ingestEndpoint === null ||
+    typeof value.ingestEndpoint === "string";
+  return (
+    typeof value.id === "string" &&
+    typeof value.agentId === "string" &&
+    typeof value.tenantId === "string" &&
+    deviceIdOk &&
+    typeof value.displayName === "string" &&
+    typeof value.hostname === "string" &&
+    versionOk &&
+    typeof value.sourceCount === "number" &&
+    Number.isInteger(value.sourceCount) &&
+    value.sourceCount >= 0 &&
+    Array.isArray(value.sourceIds) &&
+    value.sourceIds.every((item) => typeof item === "string") &&
+    Array.isArray(value.sourceNames) &&
+    value.sourceNames.every((item) => typeof item === "string") &&
+    isAgentRuntimeStatus(value.runtimeStatus) &&
+    (value.lastHeartbeatAt === null || isISODateString(value.lastHeartbeatAt)) &&
+    (value.lastConfigFetchedAt === null || isISODateString(value.lastConfigFetchedAt)) &&
+    lastConfigVersionOk &&
+    lastErrorOk &&
+    (value.lastIngestStatusCode === null ||
+      (typeof value.lastIngestStatusCode === "number" &&
+        Number.isInteger(value.lastIngestStatusCode) &&
+        value.lastIngestStatusCode >= 0)) &&
+    typeof value.lastAccepted === "number" &&
+    Number.isInteger(value.lastAccepted) &&
+    value.lastAccepted >= 0 &&
+    typeof value.lastRejected === "number" &&
+    Number.isInteger(value.lastRejected) &&
+    value.lastRejected >= 0 &&
+    typeof value.heartbeatIntervalSeconds === "number" &&
+    Number.isInteger(value.heartbeatIntervalSeconds) &&
+    value.heartbeatIntervalSeconds > 0 &&
+    typeof value.staleAfterSeconds === "number" &&
+    Number.isInteger(value.staleAfterSeconds) &&
+    value.staleAfterSeconds > 0 &&
+    (value.ingestProtocol === "http" || value.ingestProtocol === "grpc") &&
+    ingestEndpointOk &&
+    isISODateString(value.updatedAt)
+  );
+}
+
+function isAgentRuntimeViewListResponse(
+  value: unknown,
+): value is AgentRuntimeViewListResponse {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.items) &&
+    value.items.every((item) => isAgentRuntimeView(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isISODateString(value.generatedAt)
+  );
+}
+
+function isAgentRuntimeConfigResponse(
+  value: unknown,
+): value is AgentRuntimeConfigResponse {
+  if (!isRecord(value) || !isRecord(value.agent) || !isRecord(value.runtime) || !isRecord(value.bindings)) {
+    return false;
+  }
+  const agent = value.agent;
+  const runtime = value.runtime;
+  const bindings = value.bindings;
+  const deviceIdOk =
+    agent.deviceId === undefined || agent.deviceId === null || typeof agent.deviceId === "string";
+  const versionOk =
+    agent.version === undefined || agent.version === null || typeof agent.version === "string";
+  const ingestEndpointOk =
+    runtime.ingestEndpoint === undefined ||
+    runtime.ingestEndpoint === null ||
+    typeof runtime.ingestEndpoint === "string";
+  return (
+    typeof value.tenantId === "string" &&
+    typeof agent.agentId === "string" &&
+    deviceIdOk &&
+    typeof agent.hostname === "string" &&
+    versionOk &&
+    typeof agent.displayName === "string" &&
+    typeof runtime.heartbeatIntervalSeconds === "number" &&
+    Number.isInteger(runtime.heartbeatIntervalSeconds) &&
+    runtime.heartbeatIntervalSeconds > 0 &&
+    typeof runtime.staleAfterSeconds === "number" &&
+    Number.isInteger(runtime.staleAfterSeconds) &&
+    runtime.staleAfterSeconds > 0 &&
+    (runtime.ingestProtocol === "http" || runtime.ingestProtocol === "grpc") &&
+    ingestEndpointOk &&
+    typeof runtime.sampleGenerateCount === "number" &&
+    Number.isInteger(runtime.sampleGenerateCount) &&
+    runtime.sampleGenerateCount >= 0 &&
+    typeof bindings.sourceCount === "number" &&
+    Number.isInteger(bindings.sourceCount) &&
+    bindings.sourceCount >= 0 &&
+    Array.isArray(bindings.sourceIds) &&
+    bindings.sourceIds.every((item) => typeof item === "string") &&
+    Array.isArray(bindings.sources) &&
+    bindings.sources.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.sourceId === "string" &&
+        typeof item.name === "string" &&
+        typeof item.accessMode === "string" &&
+        typeof item.enabled === "boolean" &&
+        typeof item.location === "string" &&
+        (item.sourceRegion === undefined ||
+          item.sourceRegion === null ||
+          typeof item.sourceRegion === "string")
+    ) &&
+    typeof value.configVersion === "string" &&
+    isISODateString(value.updatedAt)
+  );
+}
+
 function isDataResidencyMode(value: unknown): value is DataResidencyMode {
   return typeof value === "string" && DATA_RESIDENCY_MODES.includes(value as DataResidencyMode);
 }
@@ -477,6 +701,222 @@ function isMcpRiskLevel(value: unknown): value is McpRiskLevel {
 
 function isMcpToolDecision(value: unknown): value is McpToolDecision {
   return typeof value === "string" && MCP_TOOL_DECISIONS.includes(value as McpToolDecision);
+}
+
+function isMcpApprovalMode(value: unknown): value is McpApprovalMode {
+  return typeof value === "string" && MCP_APPROVAL_MODES.includes(value as McpApprovalMode);
+}
+
+function isMcpApprovalStage(value: unknown): value is McpApprovalStage {
+  return typeof value === "string" && /^stage[1-9]\d*$/.test(value);
+}
+
+function isMcpApprovalStageConfig(
+  value: unknown,
+): value is {
+  stage?: McpApprovalStage;
+  requiredApprovals: number;
+  roles: string[];
+} {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const stageOk =
+    value.stage === undefined ||
+    value.stage === null ||
+    isMcpApprovalStage(value.stage);
+  return (
+    stageOk &&
+    typeof value.requiredApprovals === "number" &&
+    Number.isInteger(value.requiredApprovals) &&
+    value.requiredApprovals >= 1 &&
+    Array.isArray(value.roles) &&
+    value.roles.every((item) => typeof item === "string")
+  );
+}
+
+function isMcpApprovalStageSnapshot(
+  value: unknown,
+): value is {
+  stage: McpApprovalStage;
+  requiredApprovals: number;
+  roles: string[];
+  approvedApprovals: number;
+  approvedByUserIds: string[];
+} {
+  return (
+    isRecord(value) &&
+    isMcpApprovalStage(value.stage) &&
+    typeof value.requiredApprovals === "number" &&
+    Number.isInteger(value.requiredApprovals) &&
+    value.requiredApprovals >= 1 &&
+    Array.isArray(value.roles) &&
+    value.roles.every((item) => typeof item === "string") &&
+    typeof value.approvedApprovals === "number" &&
+    Number.isInteger(value.approvedApprovals) &&
+    value.approvedApprovals >= 0 &&
+    Array.isArray(value.approvedByUserIds) &&
+    value.approvedByUserIds.every((item) => typeof item === "string")
+  );
+}
+
+function isMcpApprovalWorkflowNode(
+  value: unknown,
+): value is McpApprovalWorkflowNode {
+  if (!isRecord(value) || typeof value.nodeId !== "string") {
+    return false;
+  }
+  const kindOk =
+    value.kind === "approval" ||
+    value.kind === "terminal_approved" ||
+    value.kind === "terminal_rejected";
+  const labelOk =
+    value.label === undefined || value.label === null || typeof value.label === "string";
+  const stageOk =
+    value.stage === undefined || value.stage === null || isMcpApprovalStage(value.stage);
+  const requiredApprovalsOk =
+    value.requiredApprovals === undefined ||
+    value.requiredApprovals === null ||
+    (typeof value.requiredApprovals === "number" &&
+      Number.isInteger(value.requiredApprovals) &&
+      value.requiredApprovals >= 1);
+  const rolesOk =
+    value.roles === undefined ||
+    value.roles === null ||
+    (Array.isArray(value.roles) && value.roles.every((item) => typeof item === "string"));
+  return kindOk && labelOk && stageOk && requiredApprovalsOk && rolesOk;
+}
+
+function isMcpApprovalWorkflowTransition(
+  value: unknown,
+): value is McpApprovalWorkflowTransition {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const condition = value.condition;
+  const isTimeWindow = (candidate: unknown) =>
+    isRecord(candidate) &&
+    typeof candidate.timezone === "string" &&
+    typeof candidate.startTime === "string" &&
+    typeof candidate.endTime === "string" &&
+    (candidate.weekdays === undefined ||
+      candidate.weekdays === null ||
+      (Array.isArray(candidate.weekdays) &&
+        candidate.weekdays.every(
+          (item) =>
+            typeof item === "number" &&
+            Number.isInteger(item) &&
+            item >= 1 &&
+            item <= 7,
+        )));
+  const conditionOk =
+    condition === undefined ||
+    condition === null ||
+    (isRecord(condition) &&
+      (condition.riskLevelAtLeast === undefined ||
+        condition.riskLevelAtLeast === null ||
+        isMcpRiskLevel(condition.riskLevelAtLeast)) &&
+      (condition.toolIds === undefined ||
+        condition.toolIds === null ||
+        (Array.isArray(condition.toolIds) &&
+          condition.toolIds.every((item) => typeof item === "string"))) &&
+      (condition.tenantRoles === undefined ||
+        condition.tenantRoles === null ||
+        (Array.isArray(condition.tenantRoles) &&
+          condition.tenantRoles.every((item) => typeof item === "string"))) &&
+      (condition.timeWindow === undefined ||
+        condition.timeWindow === null ||
+        isTimeWindow(condition.timeWindow)) &&
+      (condition.default === undefined ||
+        condition.default === null ||
+        typeof condition.default === "boolean"));
+  return (
+    typeof value.fromNodeId === "string" &&
+    typeof value.toNodeId === "string" &&
+    conditionOk
+  );
+}
+
+function isMcpApprovalWorkflow(
+  value: unknown,
+): value is McpApprovalWorkflow {
+  return (
+    isRecord(value) &&
+    typeof value.entryNodeId === "string" &&
+    Array.isArray(value.nodes) &&
+    value.nodes.every((item) => isMcpApprovalWorkflowNode(item)) &&
+    Array.isArray(value.transitions) &&
+    value.transitions.every((item) => isMcpApprovalWorkflowTransition(item))
+  );
+}
+
+function isMcpApprovalWorkflowNodeSnapshot(
+  value: unknown,
+): value is McpApprovalWorkflowNodeSnapshot {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    isMcpApprovalWorkflowNode(value) &&
+    typeof value.approvedApprovals === "number" &&
+    Number.isInteger(value.approvedApprovals) &&
+    value.approvedApprovals >= 0 &&
+    Array.isArray(value.approvedByUserIds) &&
+    value.approvedByUserIds.every((item: unknown) => typeof item === "string") &&
+    (value.rejectedByUserId === undefined ||
+      value.rejectedByUserId === null ||
+      typeof value.rejectedByUserId === "string")
+  );
+}
+
+function isMcpApprovalWorkflowTransitionPreview(
+  value: unknown,
+): value is McpApprovalWorkflowTransitionPreview {
+  return (
+    isRecord(value) &&
+    typeof value.fromNodeId === "string" &&
+    (value.toNodeId === undefined ||
+      value.toNodeId === null ||
+      typeof value.toNodeId === "string") &&
+    typeof value.matched === "boolean" &&
+    (value.matchedBy === undefined ||
+      value.matchedBy === null ||
+      value.matchedBy === "condition" ||
+      value.matchedBy === "default") &&
+    (value.condition === undefined ||
+      value.condition === null ||
+      (isRecord(value.condition) &&
+        (value.condition.riskLevelAtLeast === undefined ||
+          value.condition.riskLevelAtLeast === null ||
+          isMcpRiskLevel(value.condition.riskLevelAtLeast)) &&
+        (value.condition.toolIds === undefined ||
+          value.condition.toolIds === null ||
+          (Array.isArray(value.condition.toolIds) &&
+            value.condition.toolIds.every((item) => typeof item === "string"))) &&
+        (value.condition.tenantRoles === undefined ||
+          value.condition.tenantRoles === null ||
+          (Array.isArray(value.condition.tenantRoles) &&
+            value.condition.tenantRoles.every((item) => typeof item === "string"))) &&
+        (value.condition.timeWindow === undefined ||
+          value.condition.timeWindow === null ||
+          (isRecord(value.condition.timeWindow) &&
+            typeof value.condition.timeWindow.timezone === "string" &&
+            typeof value.condition.timeWindow.startTime === "string" &&
+            typeof value.condition.timeWindow.endTime === "string" &&
+            (value.condition.timeWindow.weekdays === undefined ||
+              value.condition.timeWindow.weekdays === null ||
+              (Array.isArray(value.condition.timeWindow.weekdays) &&
+                value.condition.timeWindow.weekdays.every(
+                  (item) =>
+                    typeof item === "number" &&
+                    Number.isInteger(item) &&
+                    item >= 1 &&
+                    item <= 7,
+                ))))) &&
+        (value.condition.default === undefined ||
+          value.condition.default === null ||
+          typeof value.condition.default === "boolean")))
+  );
 }
 
 function isMcpApprovalStatus(value: unknown): value is McpApprovalRequest["status"] {
@@ -564,6 +1004,68 @@ function isTenantResidencyPolicy(value: unknown): value is TenantResidencyPolicy
   );
 }
 
+function isResidencyKmsKeyMapping(
+  value: unknown,
+): value is ResidencyKmsKeyMapping {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.tenantId === "string" &&
+    typeof value.regionId === "string" &&
+    typeof value.keyProvider === "string" &&
+    typeof value.keyRef === "string" &&
+    typeof value.enabled === "boolean" &&
+    isISODateString(value.updatedAt)
+  );
+}
+
+function isResidencyKmsKeyMappingListResponse(
+  value: unknown,
+): value is ResidencyKmsKeyMappingListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isResidencyKmsKeyMapping(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0
+  );
+}
+
+function isResidencyArchiveRegionPolicy(
+  value: unknown,
+): value is ResidencyArchiveRegionPolicy {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.tenantId === "string" &&
+    typeof value.sourceRegion === "string" &&
+    typeof value.archiveRegion === "string" &&
+    typeof value.archiveClass === "string" &&
+    typeof value.enabled === "boolean" &&
+    isISODateString(value.updatedAt)
+  );
+}
+
+function isResidencyArchiveRegionPolicyListResponse(
+  value: unknown,
+): value is ResidencyArchiveRegionPolicyListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isResidencyArchiveRegionPolicy(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0
+  );
+}
+
 function isReplicationJob(value: unknown): value is ReplicationJob {
   if (!isRecord(value)) {
     return false;
@@ -625,6 +1127,349 @@ function isReplicationJobListResponse(value: unknown): value is ReplicationJobLi
     Number.isInteger(value.total) &&
     value.total >= 0 &&
     filtersOk
+  );
+}
+
+function isSystemConfigPackageRequiredApprovals(
+  value: unknown,
+): value is SystemConfigPackageRequiredApprovals {
+  return value === 0 || value === 1 || value === 2;
+}
+
+function isSystemConfigPackageApprovalDecision(
+  value: unknown,
+): value is SystemConfigPackageApprovalDecision {
+  return value === "approved" || value === "rejected";
+}
+
+function isSystemConfigPackageTargetSelectors(
+  value: unknown,
+): value is SystemConfigPackageTargetSelectors {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const arrayOfStrings = (input: unknown) =>
+    input === undefined ||
+    input === null ||
+    (Array.isArray(input) && input.every((item) => typeof item === "string"));
+  return (
+    arrayOfStrings(value.agentIds) &&
+    arrayOfStrings(value.deviceIds) &&
+    arrayOfStrings(value.channels) &&
+    arrayOfStrings(value.hostnames)
+  );
+}
+
+function isSystemConfigPackage(value: unknown): value is SystemConfigPackage {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const issuedAtOk =
+    value.issuedAt === undefined ||
+    value.issuedAt === null ||
+    isISODateString(value.issuedAt);
+  const publishedAtOk =
+    value.publishedAt === undefined ||
+    value.publishedAt === null ||
+    isISODateString(value.publishedAt);
+  return (
+    typeof value.packageId === "string" &&
+    typeof value.tenantId === "string" &&
+    typeof value.version === "string" &&
+    issuedAtOk &&
+    typeof value.signatureStatus === "string" &&
+    isRecord(value.payload) &&
+    isSystemConfigPackageTargetSelectors(value.targetSelectors) &&
+    typeof value.requiresApproval === "boolean" &&
+    isSystemConfigPackageRequiredApprovals(value.requiredApprovals) &&
+    typeof value.isPublished === "boolean" &&
+    publishedAtOk &&
+    isISODateString(value.createdAt) &&
+    isISODateString(value.updatedAt)
+  );
+}
+
+function isSystemConfigPackageListResponse(
+  value: unknown,
+): value is SystemConfigPackageListResponse {
+  if (!isRecord(value) || !isRecord(value.filters)) {
+    return false;
+  }
+  const limitOk =
+    value.filters.limit === undefined ||
+    (typeof value.filters.limit === "number" &&
+      Number.isInteger(value.filters.limit) &&
+      value.filters.limit >= 1);
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isSystemConfigPackage(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    limitOk
+  );
+}
+
+function isSystemConfigPackageCreateInput(
+  value: unknown,
+): value is SystemConfigPackageCreateInput {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const issuedAtOk =
+    value.issuedAt === undefined ||
+    value.issuedAt === null ||
+    isISODateString(value.issuedAt);
+  const signatureStatusOk =
+    value.signatureStatus === undefined ||
+    value.signatureStatus === null ||
+    typeof value.signatureStatus === "string";
+  const selectorsOk =
+    value.targetSelectors === undefined ||
+    value.targetSelectors === null ||
+    isSystemConfigPackageTargetSelectors(value.targetSelectors);
+  const payloadOk =
+    value.payload === undefined ||
+    value.payload === null ||
+    isRecord(value.payload);
+  return (
+    typeof value.version === "string" &&
+    issuedAtOk &&
+    signatureStatusOk &&
+    typeof value.requiresApproval === "boolean" &&
+    isSystemConfigPackageRequiredApprovals(value.requiredApprovals) &&
+    selectorsOk &&
+    payloadOk
+  );
+}
+
+function isSystemConfigPackageApproval(
+  value: unknown,
+): value is SystemConfigPackageApproval {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const commentOk =
+    value.comment === undefined ||
+    value.comment === null ||
+    typeof value.comment === "string";
+  return (
+    typeof value.approvalId === "string" &&
+    typeof value.tenantId === "string" &&
+    typeof value.packageId === "string" &&
+    typeof value.version === "string" &&
+    typeof value.approverUserId === "string" &&
+    isSystemConfigPackageApprovalDecision(value.decision) &&
+    commentOk &&
+    isISODateString(value.createdAt) &&
+    isISODateString(value.updatedAt)
+  );
+}
+
+function isSystemConfigPackageApprovalListResponse(
+  value: unknown,
+): value is SystemConfigPackageApprovalListResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isSystemConfigPackageApproval(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0
+  );
+}
+
+function isAgentReleaseChannel(value: unknown): value is AgentReleaseChannel {
+  return value === "stable" || value === "beta" || value === "canary";
+}
+
+function isAgentReleaseArtifact(value: unknown): value is AgentReleaseArtifact {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const checksumOk =
+    value.checksumSha256 === undefined ||
+    value.checksumSha256 === null ||
+    typeof value.checksumSha256 === "string";
+  const signatureOk =
+    value.signature === undefined ||
+    value.signature === null ||
+    typeof value.signature === "string";
+  const signatureAlgorithmOk =
+    value.signatureAlgorithm === undefined ||
+    value.signatureAlgorithm === null ||
+    value.signatureAlgorithm === "ed25519";
+  const rolloutRingOk =
+    value.rolloutRing === undefined ||
+    value.rolloutRing === null ||
+    typeof value.rolloutRing === "string";
+  const rolloutPercentageOk =
+    value.rolloutPercentage === undefined ||
+    value.rolloutPercentage === null ||
+    (typeof value.rolloutPercentage === "number" &&
+      Number.isInteger(value.rolloutPercentage) &&
+      value.rolloutPercentage >= 0 &&
+      value.rolloutPercentage <= 100);
+  const minAgentVersionOk =
+    value.minAgentVersion === undefined ||
+    value.minAgentVersion === null ||
+    typeof value.minAgentVersion === "string";
+  const fileNameOk =
+    value.fileName === undefined ||
+    value.fileName === null ||
+    typeof value.fileName === "string";
+  const installHintOk =
+    value.installHint === undefined ||
+    value.installHint === null ||
+    typeof value.installHint === "string";
+  return (
+    typeof value.os === "string" &&
+    typeof value.arch === "string" &&
+    typeof value.downloadUrl === "string" &&
+    checksumOk &&
+    signatureOk &&
+    signatureAlgorithmOk &&
+    rolloutRingOk &&
+    rolloutPercentageOk &&
+    minAgentVersionOk &&
+    fileNameOk &&
+    installHintOk
+  );
+}
+
+function isAgentRelease(value: unknown): value is AgentRelease {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const notesOk =
+    value.notes === undefined ||
+    value.notes === null ||
+    typeof value.notes === "string";
+  return (
+    typeof value.releaseId === "string" &&
+    typeof value.tenantId === "string" &&
+    typeof value.version === "string" &&
+    isAgentReleaseChannel(value.channel) &&
+    notesOk &&
+    isISODateString(value.publishedAt) &&
+    Array.isArray(value.artifacts) &&
+    value.artifacts.every((item) => isAgentReleaseArtifact(item)) &&
+    isISODateString(value.createdAt) &&
+    isISODateString(value.updatedAt)
+  );
+}
+
+function isAgentReleaseListResponse(
+  value: unknown,
+): value is AgentReleaseListResponse {
+  if (!isRecord(value) || !isRecord(value.filters)) {
+    return false;
+  }
+  const limitOk =
+    value.filters.limit === undefined ||
+    (typeof value.filters.limit === "number" &&
+      Number.isInteger(value.filters.limit) &&
+      value.filters.limit >= 1);
+  const channelOk =
+    value.filters.channel === undefined ||
+    isAgentReleaseChannel(value.filters.channel);
+  const osOk =
+    value.filters.os === undefined || typeof value.filters.os === "string";
+  const archOk =
+    value.filters.arch === undefined || typeof value.filters.arch === "string";
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => isAgentRelease(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    limitOk &&
+    channelOk &&
+    osOk &&
+    archOk
+  );
+}
+
+function isAgentReleaseCheckSelectionReason(
+  value: unknown,
+): value is AgentReleaseCheckSelectionReason {
+  return (
+    value === "matched" ||
+    value === "no_candidate" ||
+    value === "ring_mismatch" ||
+    value === "rollout_percentage_blocked" ||
+    value === "min_agent_version_blocked"
+  );
+}
+
+function isAgentReleaseCheckPreviewResponse(
+  value: unknown,
+): value is AgentReleaseCheckPreviewResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const latestReleaseOk =
+    value.latestRelease === null ||
+    value.latestRelease === undefined ||
+    isAgentRelease(value.latestRelease);
+  const selectedArtifactOk =
+    value.selectedArtifact === null ||
+    value.selectedArtifact === undefined ||
+    isAgentReleaseArtifact(value.selectedArtifact);
+  const evaluatedRingOk =
+    value.evaluatedRing === undefined ||
+    value.evaluatedRing === null ||
+    typeof value.evaluatedRing === "string";
+  const rolloutBucketOk =
+    value.rolloutBucket === undefined ||
+    value.rolloutBucket === null ||
+    (typeof value.rolloutBucket === "number" &&
+      Number.isInteger(value.rolloutBucket) &&
+      value.rolloutBucket >= 0 &&
+      value.rolloutBucket <= 99);
+  const selectionReasonOk =
+    value.selectionReason === undefined ||
+    value.selectionReason === null ||
+    isAgentReleaseCheckSelectionReason(value.selectionReason);
+  return (
+    isISODateString(value.checkedAt) &&
+    typeof value.currentVersion === "string" &&
+    isAgentReleaseChannel(value.channel) &&
+    typeof value.os === "string" &&
+    typeof value.arch === "string" &&
+    typeof value.updateAvailable === "boolean" &&
+    (value.comparison === "upgrade_available" ||
+      value.comparison === "up_to_date" ||
+      value.comparison === "ahead_of_latest" ||
+      value.comparison === "no_release") &&
+    latestReleaseOk &&
+    selectedArtifactOk &&
+    typeof value.instructions === "string" &&
+    evaluatedRingOk &&
+    rolloutBucketOk &&
+    selectionReasonOk
+  );
+}
+
+function isAgentReleaseBatchCheckPreviewResponse(
+  value: unknown,
+): value is AgentReleaseCheckBatchPreviewResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.items) &&
+    value.items.every((item) => {
+      if (!isRecord(item) || typeof item.label !== "string") {
+        return false;
+      }
+      return isAgentReleaseCheckPreviewResponse(item);
+    }) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0
   );
 }
 
@@ -960,11 +1805,74 @@ function isMcpToolPolicy(value: unknown): value is McpToolPolicy {
     return false;
   }
   const reasonOk = value.reason === undefined || value.reason === null || typeof value.reason === "string";
+  const approvalModeOk =
+    value.approvalMode === undefined ||
+    value.approvalMode === null ||
+    isMcpApprovalMode(value.approvalMode);
+  const approvalWorkflowOk =
+    value.approvalWorkflow === undefined ||
+    value.approvalWorkflow === null ||
+    isMcpApprovalWorkflow(value.approvalWorkflow);
+  const approvalStagesOk =
+    value.approvalStages === undefined ||
+    value.approvalStages === null ||
+    (Array.isArray(value.approvalStages) &&
+      value.approvalStages.every((item) => isMcpApprovalStageConfig(item)));
+  const stage1RequiredApprovalsOk =
+    value.stage1RequiredApprovals === undefined ||
+    value.stage1RequiredApprovals === null ||
+    (typeof value.stage1RequiredApprovals === "number" &&
+      Number.isInteger(value.stage1RequiredApprovals) &&
+      value.stage1RequiredApprovals >= 0);
+  const stage2RequiredApprovalsOk =
+    value.stage2RequiredApprovals === undefined ||
+    value.stage2RequiredApprovals === null ||
+    (typeof value.stage2RequiredApprovals === "number" &&
+      Number.isInteger(value.stage2RequiredApprovals) &&
+      value.stage2RequiredApprovals >= 0);
+  const stage1RolesOk =
+    value.stage1Roles === undefined ||
+    value.stage1Roles === null ||
+    (Array.isArray(value.stage1Roles) &&
+      value.stage1Roles.every((item) => typeof item === "string"));
+  const stage2RolesOk =
+    value.stage2Roles === undefined ||
+    value.stage2Roles === null ||
+    (Array.isArray(value.stage2Roles) &&
+      value.stage2Roles.every((item) => typeof item === "string"));
+  const approvalConditionOk =
+    value.approvalCondition === undefined ||
+    value.approvalCondition === null ||
+    (isRecord(value.approvalCondition) &&
+      (value.approvalCondition.riskLevelAtLeast === undefined ||
+        value.approvalCondition.riskLevelAtLeast === null ||
+        isMcpRiskLevel(value.approvalCondition.riskLevelAtLeast)) &&
+      (value.approvalCondition.toolIds === undefined ||
+        value.approvalCondition.toolIds === null ||
+        (Array.isArray(value.approvalCondition.toolIds) &&
+          value.approvalCondition.toolIds.every((item) => typeof item === "string"))) &&
+      (value.approvalCondition.tenantRoles === undefined ||
+        value.approvalCondition.tenantRoles === null ||
+        (Array.isArray(value.approvalCondition.tenantRoles) &&
+          value.approvalCondition.tenantRoles.every((item) => typeof item === "string"))));
+  const metadataOk =
+    value.metadata === undefined ||
+    value.metadata === null ||
+    isRecord(value.metadata);
   return (
     typeof value.tenantId === "string" &&
     typeof value.toolId === "string" &&
     isMcpRiskLevel(value.riskLevel) &&
     isMcpToolDecision(value.decision) &&
+    approvalModeOk &&
+    approvalWorkflowOk &&
+    approvalStagesOk &&
+    stage1RequiredApprovalsOk &&
+    stage2RequiredApprovalsOk &&
+    stage1RolesOk &&
+    stage2RolesOk &&
+    approvalConditionOk &&
+    metadataOk &&
     reasonOk &&
     isISODateString(value.updatedAt)
   );
@@ -1019,11 +1927,106 @@ function isMcpApprovalRequest(value: unknown): value is McpApprovalRequest {
     value.reviewReason === undefined ||
     value.reviewReason === null ||
     typeof value.reviewReason === "string";
+  const approvalModeOk =
+    value.approvalMode === undefined ||
+    value.approvalMode === null ||
+    isMcpApprovalMode(value.approvalMode);
+  const currentNodeIdOk =
+    value.currentNodeId === undefined ||
+    value.currentNodeId === null ||
+    typeof value.currentNodeId === "string";
+  const currentStageOk =
+    value.currentStage === undefined ||
+    value.currentStage === null ||
+    isMcpApprovalStage(value.currentStage);
+  const approvalWorkflowOk =
+    value.approvalWorkflow === undefined ||
+    value.approvalWorkflow === null ||
+    isMcpApprovalWorkflow(value.approvalWorkflow);
+  const approvalNodesOk =
+    value.approvalNodes === undefined ||
+    value.approvalNodes === null ||
+    (Array.isArray(value.approvalNodes) &&
+      value.approvalNodes.every((item) => isMcpApprovalWorkflowNodeSnapshot(item)));
+  const pathHistoryOk =
+    value.pathHistory === undefined ||
+    value.pathHistory === null ||
+    (Array.isArray(value.pathHistory) &&
+      value.pathHistory.every((item) => typeof item === "string"));
+  const nextTransitionPreviewOk =
+    value.nextTransitionPreview === undefined ||
+    value.nextTransitionPreview === null ||
+    isMcpApprovalWorkflowTransitionPreview(value.nextTransitionPreview);
+  const approvalStagesOk =
+    value.approvalStages === undefined ||
+    value.approvalStages === null ||
+    (Array.isArray(value.approvalStages) &&
+      value.approvalStages.every((item) => isMcpApprovalStageSnapshot(item)));
+  const stage1RequiredApprovalsOk =
+    value.stage1RequiredApprovals === undefined ||
+    value.stage1RequiredApprovals === null ||
+    (typeof value.stage1RequiredApprovals === "number" &&
+      Number.isInteger(value.stage1RequiredApprovals) &&
+      value.stage1RequiredApprovals >= 0);
+  const stage2RequiredApprovalsOk =
+    value.stage2RequiredApprovals === undefined ||
+    value.stage2RequiredApprovals === null ||
+    (typeof value.stage2RequiredApprovals === "number" &&
+      Number.isInteger(value.stage2RequiredApprovals) &&
+      value.stage2RequiredApprovals >= 0);
+  const stage1ApprovedCountOk =
+    value.stage1ApprovedCount === undefined ||
+    value.stage1ApprovedCount === null ||
+    (typeof value.stage1ApprovedCount === "number" &&
+      Number.isInteger(value.stage1ApprovedCount) &&
+      value.stage1ApprovedCount >= 0);
+  const stage2ApprovedCountOk =
+    value.stage2ApprovedCount === undefined ||
+    value.stage2ApprovedCount === null ||
+    (typeof value.stage2ApprovedCount === "number" &&
+      Number.isInteger(value.stage2ApprovedCount) &&
+      value.stage2ApprovedCount >= 0);
+  const remainingApprovalsOk =
+    value.remainingApprovals === undefined ||
+    value.remainingApprovals === null ||
+    (typeof value.remainingApprovals === "number" &&
+      Number.isInteger(value.remainingApprovals) &&
+      value.remainingApprovals >= 0);
+  const stage1RolesOk =
+    value.stage1Roles === undefined ||
+    value.stage1Roles === null ||
+    (Array.isArray(value.stage1Roles) &&
+      value.stage1Roles.every((item) => typeof item === "string"));
+  const stage2RolesOk =
+    value.stage2Roles === undefined ||
+    value.stage2Roles === null ||
+    (Array.isArray(value.stage2Roles) &&
+      value.stage2Roles.every((item) => typeof item === "string"));
+  const approvalConditionMatchedOk =
+    value.approvalConditionMatched === undefined ||
+    value.approvalConditionMatched === null ||
+    typeof value.approvalConditionMatched === "boolean";
   return (
     typeof value.id === "string" &&
     typeof value.tenantId === "string" &&
     typeof value.toolId === "string" &&
     isMcpApprovalStatus(value.status) &&
+    approvalModeOk &&
+    currentNodeIdOk &&
+    currentStageOk &&
+    approvalWorkflowOk &&
+    approvalNodesOk &&
+    pathHistoryOk &&
+    nextTransitionPreviewOk &&
+    approvalStagesOk &&
+    stage1RequiredApprovalsOk &&
+    stage2RequiredApprovalsOk &&
+    stage1ApprovedCountOk &&
+    stage2ApprovedCountOk &&
+    remainingApprovalsOk &&
+    stage1RolesOk &&
+    stage2RolesOk &&
+    approvalConditionMatchedOk &&
     typeof value.requestedByUserId === "string" &&
     requestedByEmailOk &&
     reasonOk &&
@@ -1075,6 +2078,22 @@ function isMcpInvocationAudit(value: unknown): value is McpInvocationAudit {
     value.evaluatedDecision === undefined ||
     value.evaluatedDecision === null ||
     isMcpToolDecision(value.evaluatedDecision);
+  const approvalModeOk =
+    value.approvalMode === undefined ||
+    value.approvalMode === null ||
+    isMcpApprovalMode(value.approvalMode);
+  const approvalStageOk =
+    value.approvalStage === undefined ||
+    value.approvalStage === null ||
+    isMcpApprovalStage(value.approvalStage);
+  const approvalSatisfiedOk =
+    value.approvalSatisfied === undefined ||
+    value.approvalSatisfied === null ||
+    typeof value.approvalSatisfied === "boolean";
+  const approvalConditionMatchedOk =
+    value.approvalConditionMatched === undefined ||
+    value.approvalConditionMatched === null ||
+    typeof value.approvalConditionMatched === "boolean";
   return (
     typeof value.id === "string" &&
     typeof value.tenantId === "string" &&
@@ -1084,6 +2103,10 @@ function isMcpInvocationAudit(value: unknown): value is McpInvocationAudit {
     approvalRequestIdOk &&
     typeof value.enforced === "boolean" &&
     evaluatedDecisionOk &&
+    approvalModeOk &&
+    approvalStageOk &&
+    approvalSatisfiedOk &&
+    approvalConditionMatchedOk &&
     isRecord(value.metadata) &&
     isISODateString(value.createdAt)
   );
@@ -1099,11 +2122,71 @@ function isMcpEvaluateResult(value: unknown): value is McpEvaluateResult {
     typeof value.approvalRequestId === "string";
   const resultOk =
     value.result === "allowed" || value.result === "blocked" || value.result === "approved";
+  const approvalRequiredOk =
+    value.approvalRequired === undefined ||
+    value.approvalRequired === null ||
+    typeof value.approvalRequired === "boolean";
+  const approvalModeOk =
+    value.approvalMode === undefined ||
+    value.approvalMode === null ||
+    isMcpApprovalMode(value.approvalMode);
+  const currentNodeIdOk =
+    value.currentNodeId === undefined ||
+    value.currentNodeId === null ||
+    typeof value.currentNodeId === "string";
+  const currentStageOk =
+    value.currentStage === undefined ||
+    value.currentStage === null ||
+    isMcpApprovalStage(value.currentStage);
+  const approvalWorkflowOk =
+    value.approvalWorkflow === undefined ||
+    value.approvalWorkflow === null ||
+    isMcpApprovalWorkflow(value.approvalWorkflow);
+  const approvalNodesOk =
+    value.approvalNodes === undefined ||
+    value.approvalNodes === null ||
+    (Array.isArray(value.approvalNodes) &&
+      value.approvalNodes.every((item) => isMcpApprovalWorkflowNodeSnapshot(item)));
+  const pathHistoryOk =
+    value.pathHistory === undefined ||
+    value.pathHistory === null ||
+    (Array.isArray(value.pathHistory) &&
+      value.pathHistory.every((item) => typeof item === "string"));
+  const nextTransitionPreviewOk =
+    value.nextTransitionPreview === undefined ||
+    value.nextTransitionPreview === null ||
+    isMcpApprovalWorkflowTransitionPreview(value.nextTransitionPreview);
+  const approvalStagesOk =
+    value.approvalStages === undefined ||
+    value.approvalStages === null ||
+    (Array.isArray(value.approvalStages) &&
+      value.approvalStages.every((item) => isMcpApprovalStageSnapshot(item)));
+  const remainingApprovalsOk =
+    value.remainingApprovals === undefined ||
+    value.remainingApprovals === null ||
+    (typeof value.remainingApprovals === "number" &&
+      Number.isInteger(value.remainingApprovals) &&
+      value.remainingApprovals >= 0);
+  const approvalConditionMatchedOk =
+    value.approvalConditionMatched === undefined ||
+    value.approvalConditionMatched === null ||
+    typeof value.approvalConditionMatched === "boolean";
   return (
     typeof value.toolId === "string" &&
     isMcpToolDecision(value.decision) &&
     resultOk &&
     approvalRequestIdOk &&
+    approvalRequiredOk &&
+    approvalModeOk &&
+    currentNodeIdOk &&
+    currentStageOk &&
+    approvalWorkflowOk &&
+    approvalNodesOk &&
+    pathHistoryOk &&
+    nextTransitionPreviewOk &&
+    approvalStagesOk &&
+    remainingApprovalsOk &&
+    approvalConditionMatchedOk &&
     value.enforced === true &&
     isMcpToolDecision(value.evaluatedDecision) &&
     isMcpToolPolicy(value.policy) &&
@@ -1554,6 +2637,358 @@ function isOpenPlatformQualityProjectTrendResponse(
   );
 }
 
+function isOpenPlatformAutomationPolicy(
+  value: unknown,
+): value is OpenPlatformAutomationPolicy {
+  return (
+    isRecord(value) &&
+    typeof value.tenantId === "string" &&
+    typeof value.toolId === "string" &&
+    value.scope === "quality_replay_advice" &&
+    isMcpRiskLevel(value.riskLevel) &&
+    isMcpToolDecision(value.decision) &&
+    (value.reason === undefined ||
+      value.reason === null ||
+      typeof value.reason === "string") &&
+    typeof value.evaluationScoreThreshold === "number" &&
+    Number.isFinite(value.evaluationScoreThreshold) &&
+    typeof value.triggerOnEvaluationFailure === "boolean" &&
+    typeof value.triggerOnReplayRegression === "boolean" &&
+    (value.defaultActionType === undefined ||
+      value.defaultActionType === null ||
+      value.defaultActionType === "scorecard_adjustment" ||
+      value.defaultActionType === "replay_experiment") &&
+    (value.modelVersion === undefined ||
+      value.modelVersion === null ||
+      typeof value.modelVersion === "string") &&
+    (value.strategyMatrix === undefined ||
+      value.strategyMatrix === null ||
+      (Array.isArray(value.strategyMatrix) &&
+        value.strategyMatrix.every((rule) =>
+          isOpenPlatformAutomationStrategyRule(rule),
+        ))) &&
+    isISODateString(value.updatedAt)
+  );
+}
+
+function isOpenPlatformAutomationStrategyRule(
+  value: unknown,
+): value is OpenPlatformAutomationStrategyRule {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    (value.metric === undefined || value.metric === null || typeof value.metric === "string") &&
+    (value.severity === undefined ||
+      value.severity === null ||
+      value.severity === "info" ||
+      value.severity === "warn" ||
+      value.severity === "critical") &&
+    (value.trendDirection === undefined ||
+      value.trendDirection === null ||
+      value.trendDirection === "up" ||
+      value.trendDirection === "down" ||
+      value.trendDirection === "flat") &&
+    (value.minConfidence === undefined ||
+      value.minConfidence === null ||
+      (typeof value.minConfidence === "number" && Number.isFinite(value.minConfidence))) &&
+    (value.regressionProbabilityAtLeast === undefined ||
+      value.regressionProbabilityAtLeast === null ||
+      (typeof value.regressionProbabilityAtLeast === "number" &&
+        Number.isFinite(value.regressionProbabilityAtLeast))) &&
+    (value.replayRegressionAtLeast === undefined ||
+      value.replayRegressionAtLeast === null ||
+      (typeof value.replayRegressionAtLeast === "number" &&
+        Number.isInteger(value.replayRegressionAtLeast) &&
+        value.replayRegressionAtLeast >= 0)) &&
+    (value.actionType === "scorecard_adjustment" ||
+      value.actionType === "replay_experiment") &&
+    typeof value.requiresApproval === "boolean" &&
+    (value.cooldownMinutes === undefined ||
+      value.cooldownMinutes === null ||
+      (typeof value.cooldownMinutes === "number" &&
+        Number.isInteger(value.cooldownMinutes) &&
+        value.cooldownMinutes >= 0)) &&
+    (value.reason === undefined || value.reason === null || typeof value.reason === "string")
+  );
+}
+
+function isOpenPlatformAutomationPolicySimulationResponse(
+  value: unknown,
+): value is OpenPlatformAutomationPolicySimulationResponse {
+  return (
+    isRecord(value) &&
+    typeof value.metric === "string" &&
+    (value.severity === "info" ||
+      value.severity === "warn" ||
+      value.severity === "critical") &&
+    typeof value.confidence === "number" &&
+    Number.isFinite(value.confidence) &&
+    (value.trendDirection === "up" ||
+      value.trendDirection === "down" ||
+      value.trendDirection === "flat") &&
+    typeof value.regressionProbability === "number" &&
+    Number.isFinite(value.regressionProbability) &&
+    typeof value.replayRegressionCount === "number" &&
+    Number.isInteger(value.replayRegressionCount) &&
+    (value.matchedRuleId === undefined ||
+      value.matchedRuleId === null ||
+      typeof value.matchedRuleId === "string") &&
+    (value.resolvedAction === "scorecard_adjustment" ||
+      value.resolvedAction === "replay_experiment") &&
+    typeof value.requiresApproval === "boolean" &&
+    Array.isArray(value.blockingReasons) &&
+    value.blockingReasons.every((item) => typeof item === "string")
+  );
+}
+
+function isOpenPlatformQualityForecastResponse(
+  value: unknown,
+): value is OpenPlatformQualityForecastResponse {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.items) &&
+    value.items.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.project === "string" &&
+        typeof item.metric === "string" &&
+        typeof item.predictedScore === "number" &&
+        Number.isFinite(item.predictedScore) &&
+        typeof item.confidence === "number" &&
+        Number.isFinite(item.confidence) &&
+        (item.confidenceLabel === undefined ||
+          item.confidenceLabel === null ||
+          item.confidenceLabel === "low" ||
+          item.confidenceLabel === "medium" ||
+          item.confidenceLabel === "high") &&
+        (item.trendDirection === undefined ||
+          item.trendDirection === null ||
+          item.trendDirection === "up" ||
+          item.trendDirection === "down" ||
+          item.trendDirection === "flat") &&
+        (item.projectedDelta === undefined ||
+          item.projectedDelta === null ||
+          (typeof item.projectedDelta === "number" &&
+            Number.isFinite(item.projectedDelta))) &&
+        (item.basisWindowCount === undefined ||
+          item.basisWindowCount === null ||
+          (typeof item.basisWindowCount === "number" &&
+            Number.isInteger(item.basisWindowCount) &&
+            item.basisWindowCount >= 0)) &&
+        (item.rationale === undefined ||
+          item.rationale === null ||
+          typeof item.rationale === "string") &&
+        (item.modelVersion === undefined ||
+          item.modelVersion === null ||
+          typeof item.modelVersion === "string") &&
+        (item.forecastHorizonDays === undefined ||
+          item.forecastHorizonDays === null ||
+          (typeof item.forecastHorizonDays === "number" &&
+            Number.isInteger(item.forecastHorizonDays) &&
+            item.forecastHorizonDays >= 0)) &&
+        (item.expectedScoreRange === undefined ||
+          item.expectedScoreRange === null ||
+          (isRecord(item.expectedScoreRange) &&
+            typeof item.expectedScoreRange.lower === "number" &&
+            Number.isFinite(item.expectedScoreRange.lower) &&
+            typeof item.expectedScoreRange.upper === "number" &&
+            Number.isFinite(item.expectedScoreRange.upper))) &&
+        (item.regressionProbability === undefined ||
+          item.regressionProbability === null ||
+          (typeof item.regressionProbability === "number" &&
+            Number.isFinite(item.regressionProbability))) &&
+        (item.explanation === undefined ||
+          item.explanation === null ||
+          (isRecord(item.explanation) &&
+            typeof item.explanation.summary === "string" &&
+            (item.explanation.confidenceLabel === "low" ||
+              item.explanation.confidenceLabel === "medium" ||
+              item.explanation.confidenceLabel === "high") &&
+            typeof item.explanation.primaryDriver === "string")) &&
+        (item.riskDrivers === undefined ||
+          item.riskDrivers === null ||
+          (Array.isArray(item.riskDrivers) &&
+            item.riskDrivers.every((driver) => typeof driver === "string"))) &&
+        (item.recommendedActions === undefined ||
+          item.recommendedActions === null ||
+          (Array.isArray(item.recommendedActions) &&
+            item.recommendedActions.every((action) => typeof action === "string"))) &&
+        (item.featureContributions === undefined ||
+          item.featureContributions === null ||
+          (Array.isArray(item.featureContributions) &&
+            item.featureContributions.every(
+              (entry) =>
+                isRecord(entry) &&
+                typeof entry.feature === "string" &&
+                typeof entry.impact === "number" &&
+                Number.isFinite(entry.impact) &&
+                (entry.direction === "positive" ||
+                  entry.direction === "negative" ||
+                  entry.direction === "neutral"),
+            ))) &&
+        (item.windowComparisons === undefined ||
+          item.windowComparisons === null ||
+          (isRecord(item.windowComparisons) &&
+            isRecord(item.windowComparisons.currentWindow) &&
+            isRecord(item.windowComparisons.previousWindow))) &&
+        isRecord(item.basis),
+    ) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isRecord(value.filters)
+  );
+}
+
+function isOpenPlatformQualityAdviceResponse(
+  value: unknown,
+): value is OpenPlatformQualityAdviceResponse {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.items) &&
+    value.items.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.id === "string" &&
+        typeof item.project === "string" &&
+        (item.severity === "info" ||
+          item.severity === "warn" ||
+          item.severity === "critical") &&
+        typeof item.title === "string" &&
+        typeof item.recommendation === "string" &&
+        (item.explanation === undefined ||
+          item.explanation === null ||
+          typeof item.explanation === "string") &&
+        (item.confidence === undefined ||
+          item.confidence === null ||
+          (typeof item.confidence === "number" && Number.isFinite(item.confidence))) &&
+        (item.confidenceLabel === undefined ||
+          item.confidenceLabel === null ||
+          item.confidenceLabel === "low" ||
+          item.confidenceLabel === "medium" ||
+          item.confidenceLabel === "high") &&
+        (item.why === undefined ||
+          item.why === null ||
+          (Array.isArray(item.why) && item.why.every((reason) => typeof reason === "string"))) &&
+        (item.automationReadiness === undefined ||
+          item.automationReadiness === null ||
+          item.automationReadiness === "monitor_only" ||
+          item.automationReadiness === "manual_review" ||
+          item.automationReadiness === "ready_for_execution" ||
+          item.automationReadiness === "execution_in_progress") &&
+        (item.executionHint === undefined ||
+          item.executionHint === null ||
+          (isRecord(item.executionHint) &&
+            (item.executionHint.recommendedActionType === "scorecard_adjustment" ||
+              item.executionHint.recommendedActionType === "replay_experiment") &&
+            typeof item.executionHint.requiresDataset === "boolean" &&
+            (item.executionHint.priority === "low" ||
+              item.executionHint.priority === "medium" ||
+              item.executionHint.priority === "high") &&
+            typeof item.executionHint.reason === "string")) &&
+        (item.executionOptions === undefined ||
+          item.executionOptions === null ||
+          (Array.isArray(item.executionOptions) &&
+            item.executionOptions.every(
+              (option) =>
+                isRecord(option) &&
+                (option.actionType === "scorecard_adjustment" ||
+                  option.actionType === "replay_experiment") &&
+                (option.availability === "recommended" ||
+                  option.availability === "available" ||
+                  option.availability === "approval_required" ||
+                  option.availability === "disabled") &&
+                typeof option.reason === "string",
+            ))) &&
+        (item.strategyMatrixMatch === undefined ||
+          item.strategyMatrixMatch === null ||
+          typeof item.strategyMatrixMatch === "string") &&
+        (item.recommendedPlan === undefined ||
+          item.recommendedPlan === null ||
+          isRecord(item.recommendedPlan)) &&
+        (item.autoExecutionDecision === undefined ||
+          item.autoExecutionDecision === null ||
+          typeof item.autoExecutionDecision === "string") &&
+        (item.blockingReasons === undefined ||
+          item.blockingReasons === null ||
+          (Array.isArray(item.blockingReasons) &&
+            item.blockingReasons.every((reason) => typeof reason === "string"))) &&
+        isRecord(item.basis) &&
+        Array.isArray(item.relatedMetrics) &&
+        item.relatedMetrics.every((metric) => typeof metric === "string") &&
+        (item.suggestedActions === undefined ||
+          item.suggestedActions === null ||
+          (Array.isArray(item.suggestedActions) &&
+            item.suggestedActions.every(
+              (action) =>
+                action === "scorecard_adjustment" || action === "replay_experiment",
+            ))) &&
+        (item.latestExecutionId === undefined ||
+          item.latestExecutionId === null ||
+          typeof item.latestExecutionId === "string") &&
+        (item.latestExecutionStatus === undefined ||
+          item.latestExecutionStatus === null ||
+          item.latestExecutionStatus === "pending" ||
+          item.latestExecutionStatus === "running" ||
+          item.latestExecutionStatus === "completed" ||
+          item.latestExecutionStatus === "failed" ||
+          item.latestExecutionStatus === "cancelled"),
+    ) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isRecord(value.filters)
+  );
+}
+
+function isOpenPlatformQualityAdviceExecution(
+  value: unknown,
+): value is OpenPlatformQualityAdviceExecution {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.tenantId === "string" &&
+    typeof value.adviceId === "string" &&
+    typeof value.project === "string" &&
+    (value.severity === "info" || value.severity === "warn" || value.severity === "critical") &&
+    (value.actionType === "scorecard_adjustment" || value.actionType === "replay_experiment") &&
+    (value.triggerSource === "manual" || value.triggerSource === "automatic") &&
+    (value.status === "pending" ||
+      value.status === "running" ||
+      value.status === "completed" ||
+      value.status === "failed" ||
+      value.status === "cancelled") &&
+    (value.metric === undefined || value.metric === null || typeof value.metric === "string") &&
+    (value.datasetId === undefined || value.datasetId === null || typeof value.datasetId === "string") &&
+    (value.experimentId === undefined || value.experimentId === null || typeof value.experimentId === "string") &&
+    (value.candidateLabels === undefined ||
+      value.candidateLabels === null ||
+      (Array.isArray(value.candidateLabels) &&
+        value.candidateLabels.every((item) => typeof item === "string"))) &&
+    (value.scorecardKey === undefined || value.scorecardKey === null || typeof value.scorecardKey === "string") &&
+    (value.resultSummary === undefined || value.resultSummary === null || isRecord(value.resultSummary)) &&
+    (value.error === undefined || value.error === null || typeof value.error === "string") &&
+    isISODateString(value.requestedAt) &&
+    (value.startedAt === undefined || value.startedAt === null || isISODateString(value.startedAt)) &&
+    (value.finishedAt === undefined || value.finishedAt === null || isISODateString(value.finishedAt)) &&
+    isISODateString(value.updatedAt)
+  );
+}
+
+function isOpenPlatformQualityAdviceExecutionListResponse(
+  value: unknown,
+): value is OpenPlatformQualityAdviceExecutionListResponse {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.items) &&
+    value.items.every((item) => isOpenPlatformQualityAdviceExecution(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isRecord(value.filters)
+  );
+}
+
 function isOpenPlatformReplayBaseline(value: unknown): value is OpenPlatformReplayBaseline {
   if (!isRecord(value)) {
     return false;
@@ -1578,6 +3013,16 @@ function isOpenPlatformReplayBaseline(value: unknown): value is OpenPlatformRepl
     (typeof value.caseCount === "number" &&
       Number.isInteger(value.caseCount) &&
       value.caseCount >= 0);
+  const currentVersionIdOk =
+    value.currentVersionId === undefined ||
+    value.currentVersionId === null ||
+    typeof value.currentVersionId === "string";
+  const currentVersionNumberOk =
+    value.currentVersionNumber === undefined ||
+    value.currentVersionNumber === null ||
+    (typeof value.currentVersionNumber === "number" &&
+      Number.isInteger(value.currentVersionNumber) &&
+      value.currentVersionNumber >= 1);
   return (
     typeof value.id === "string" &&
     typeof value.name === "string" &&
@@ -1587,9 +3032,393 @@ function isOpenPlatformReplayBaseline(value: unknown): value is OpenPlatformRepl
     promptVersionOk &&
     sampleCountOk &&
     caseCountOk &&
+    currentVersionIdOk &&
+    currentVersionNumberOk &&
     descriptionOk &&
     isISODateString(value.createdAt) &&
     isISODateString(value.updatedAt)
+  );
+}
+
+function isOpenPlatformReplayDatasetVersion(
+  value: unknown,
+): value is OpenPlatformReplayDatasetVersion {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    (value.tenantId === undefined || value.tenantId === null || typeof value.tenantId === "string") &&
+    typeof value.datasetId === "string" &&
+    typeof value.version === "number" &&
+    Number.isInteger(value.version) &&
+    value.version >= 1 &&
+    (value.datasetRef === undefined || value.datasetRef === null || typeof value.datasetRef === "string") &&
+    typeof value.model === "string" &&
+    (value.promptVersion === undefined ||
+      value.promptVersion === null ||
+      typeof value.promptVersion === "string") &&
+    typeof value.sampleCount === "number" &&
+    Number.isInteger(value.sampleCount) &&
+    value.sampleCount >= 0 &&
+    (value.metadata === undefined || value.metadata === null || isRecord(value.metadata)) &&
+    (value.note === undefined || value.note === null || typeof value.note === "string") &&
+    isISODateString(value.createdAt) &&
+    (value.promotedAt === undefined || value.promotedAt === null || isISODateString(value.promotedAt))
+  );
+}
+
+function isOpenPlatformReplayDatasetVersionListResponse(
+  value: unknown,
+): value is OpenPlatformReplayDatasetVersionListResponse {
+  return (
+    isRecord(value) &&
+    typeof value.datasetId === "string" &&
+    Array.isArray(value.items) &&
+    value.items.every((item) => isOpenPlatformReplayDatasetVersion(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    (value.currentVersionId === undefined ||
+      value.currentVersionId === null ||
+      typeof value.currentVersionId === "string") &&
+    (value.currentVersionNumber === undefined ||
+      value.currentVersionNumber === null ||
+      (typeof value.currentVersionNumber === "number" &&
+        Number.isInteger(value.currentVersionNumber) &&
+        value.currentVersionNumber >= 1))
+  );
+}
+
+function isOpenPlatformReplayDatasetVersionPromoteResponse(
+  value: unknown,
+): value is OpenPlatformReplayDatasetVersionPromoteResponse {
+  return (
+    isRecord(value) &&
+    isOpenPlatformReplayDatasetVersion(value.version) &&
+    (value.dataset === undefined ||
+      value.dataset === null ||
+      isOpenPlatformReplayBaseline(value.dataset))
+  );
+}
+
+function isOpenPlatformReplayExperiment(
+  value: unknown,
+): value is OpenPlatformReplayExperiment {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.tenantId === "string" &&
+    typeof value.name === "string" &&
+    typeof value.datasetId === "string" &&
+    (value.baselineId === undefined ||
+      value.baselineId === null ||
+      typeof value.baselineId === "string") &&
+    (value.baselineVersionId === undefined ||
+      value.baselineVersionId === null ||
+      typeof value.baselineVersionId === "string") &&
+    (value.metadata === undefined || value.metadata === null || isRecord(value.metadata)) &&
+    (value.status === undefined ||
+      value.status === null ||
+      value.status === "draft" ||
+      value.status === "queued" ||
+      value.status === "running" ||
+      value.status === "completed" ||
+      value.status === "failed" ||
+      value.status === "cancelled") &&
+    (value.triggerSource === undefined ||
+      value.triggerSource === null ||
+      value.triggerSource === "manual" ||
+      value.triggerSource === "quality_advice" ||
+      value.triggerSource === "automatic") &&
+    (value.executionMode === undefined ||
+      value.executionMode === null ||
+      value.executionMode === "manual" ||
+      value.executionMode === "automatic") &&
+    (value.candidateLabels === undefined ||
+      value.candidateLabels === null ||
+      (Array.isArray(value.candidateLabels) &&
+        value.candidateLabels.every((item) => typeof item === "string"))) &&
+    (value.sourceAdviceId === undefined ||
+      value.sourceAdviceId === null ||
+      typeof value.sourceAdviceId === "string") &&
+    Array.isArray(value.runIds) &&
+    value.runIds.every((item) => typeof item === "string") &&
+    (value.runStatusSummary === undefined ||
+      value.runStatusSummary === null ||
+      isRecord(value.runStatusSummary)) &&
+    (value.aggregateSummary === undefined ||
+      value.aggregateSummary === null ||
+      isRecord(value.aggregateSummary)) &&
+    isRecord(value.summary) &&
+    Array.isArray(value.runs) &&
+    value.runs.every((item) => mapOpenPlatformReplayJob(item) !== null) &&
+    isISODateString(value.createdAt) &&
+    isISODateString(value.updatedAt) &&
+    (value.startedAt === undefined ||
+      value.startedAt === null ||
+      isISODateString(value.startedAt)) &&
+    (value.finishedAt === undefined ||
+      value.finishedAt === null ||
+      isISODateString(value.finishedAt)) &&
+    (value.lastError === undefined ||
+      value.lastError === null ||
+      typeof value.lastError === "string")
+  );
+}
+
+function isOpenPlatformReplayExperimentListResponse(
+  value: unknown,
+): value is OpenPlatformReplayExperimentListResponse {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.items) &&
+    value.items.every((item) => isOpenPlatformReplayExperiment(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0
+  );
+}
+
+function isOpenPlatformReplayExperimentCompareResponse(
+  value: unknown,
+): value is OpenPlatformReplayExperimentCompareResponse {
+  return (
+    isRecord(value) &&
+    typeof value.experimentId === "string" &&
+    typeof value.datasetId === "string" &&
+    Array.isArray(value.items) &&
+    value.items.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.runId === "string" &&
+        typeof item.candidateLabel === "string" &&
+        (item.status === "pending" ||
+          item.status === "running" ||
+          item.status === "completed" ||
+          item.status === "failed" ||
+          item.status === "cancelled") &&
+        typeof item.totalCases === "number" &&
+        Number.isInteger(item.totalCases) &&
+        typeof item.processedCases === "number" &&
+        Number.isInteger(item.processedCases) &&
+        typeof item.improvedCases === "number" &&
+        Number.isInteger(item.improvedCases) &&
+        typeof item.regressedCases === "number" &&
+        Number.isInteger(item.regressedCases) &&
+        typeof item.unchangedCases === "number" &&
+        Number.isInteger(item.unchangedCases) &&
+        typeof item.passRate === "number" &&
+        Number.isFinite(item.passRate) &&
+        typeof item.improvementRate === "number" &&
+        Number.isFinite(item.improvementRate) &&
+        typeof item.regressionRate === "number" &&
+        Number.isFinite(item.regressionRate) &&
+        typeof item.netDelta === "number" &&
+        Number.isFinite(item.netDelta) &&
+        (item.startedAt === undefined || item.startedAt === null || isISODateString(item.startedAt)) &&
+        (item.finishedAt === undefined || item.finishedAt === null || isISODateString(item.finishedAt)),
+    ) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isRecord(value.summary) &&
+    typeof value.summary.totalRuns === "number" &&
+    typeof value.summary.completedRuns === "number" &&
+    typeof value.summary.failedRuns === "number" &&
+    typeof value.summary.runningRuns === "number" &&
+    typeof value.summary.queuedRuns === "number" &&
+    typeof value.summary.cancelledRuns === "number" &&
+    (value.summary.bestRunId === undefined ||
+      value.summary.bestRunId === null ||
+      typeof value.summary.bestRunId === "string") &&
+    (value.summary.worstRunId === undefined ||
+      value.summary.worstRunId === null ||
+      typeof value.summary.worstRunId === "string") &&
+    (value.summary.bestNetDelta === undefined ||
+      value.summary.bestNetDelta === null ||
+      typeof value.summary.bestNetDelta === "number") &&
+    (value.summary.worstNetDelta === undefined ||
+      value.summary.worstNetDelta === null ||
+      typeof value.summary.worstNetDelta === "number")
+  );
+}
+
+function isOpenPlatformReplayExperimentBatchCompareResponse(
+  value: unknown,
+): value is OpenPlatformReplayExperimentBatchCompareResponse {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.items) &&
+    value.items.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.experimentId === "string" &&
+        typeof item.name === "string" &&
+        typeof item.datasetId === "string" &&
+        (item.status === "draft" ||
+          item.status === "queued" ||
+          item.status === "running" ||
+          item.status === "completed" ||
+          item.status === "failed" ||
+          item.status === "cancelled") &&
+        (item.workflowStage === "draft" ||
+          item.workflowStage === "queued" ||
+          item.workflowStage === "running" ||
+          item.workflowStage === "completed" ||
+          item.workflowStage === "failed" ||
+          item.workflowStage === "cancelled") &&
+        (item.triggerSource === "manual" ||
+          item.triggerSource === "quality_advice" ||
+          item.triggerSource === "automatic") &&
+        (item.sourceAdviceId === undefined ||
+          item.sourceAdviceId === null ||
+          typeof item.sourceAdviceId === "string") &&
+        Array.isArray(item.candidateLabels) &&
+        item.candidateLabels.every((candidate) => typeof candidate === "string") &&
+        typeof item.totalRuns === "number" &&
+        Number.isInteger(item.totalRuns) &&
+        typeof item.completedRuns === "number" &&
+        Number.isInteger(item.completedRuns) &&
+        typeof item.failedRuns === "number" &&
+        Number.isInteger(item.failedRuns) &&
+        typeof item.runningRuns === "number" &&
+        Number.isInteger(item.runningRuns) &&
+        typeof item.queuedRuns === "number" &&
+        Number.isInteger(item.queuedRuns) &&
+        typeof item.totalCases === "number" &&
+        Number.isInteger(item.totalCases) &&
+        typeof item.processedCases === "number" &&
+        Number.isInteger(item.processedCases) &&
+        typeof item.improvedCases === "number" &&
+        Number.isInteger(item.improvedCases) &&
+        typeof item.regressedCases === "number" &&
+        Number.isInteger(item.regressedCases) &&
+        typeof item.improvementRate === "number" &&
+        Number.isFinite(item.improvementRate) &&
+        typeof item.regressionRate === "number" &&
+        Number.isFinite(item.regressionRate) &&
+        typeof item.netDelta === "number" &&
+        Number.isFinite(item.netDelta) &&
+        (item.bestRunId === undefined ||
+          item.bestRunId === null ||
+          typeof item.bestRunId === "string") &&
+        (item.worstRunId === undefined ||
+          item.worstRunId === null ||
+          typeof item.worstRunId === "string") &&
+        Array.isArray(item.runs) &&
+        item.runs.every(
+          (run) =>
+            isRecord(run) &&
+            typeof run.runId === "string" &&
+            typeof run.candidateLabel === "string" &&
+            (run.status === "pending" ||
+              run.status === "running" ||
+              run.status === "completed" ||
+              run.status === "failed" ||
+              run.status === "cancelled") &&
+            typeof run.totalCases === "number" &&
+            Number.isInteger(run.totalCases) &&
+            typeof run.processedCases === "number" &&
+            Number.isInteger(run.processedCases) &&
+            typeof run.improvedCases === "number" &&
+            Number.isInteger(run.improvedCases) &&
+            typeof run.regressedCases === "number" &&
+            Number.isInteger(run.regressedCases) &&
+            typeof run.unchangedCases === "number" &&
+            Number.isInteger(run.unchangedCases) &&
+            typeof run.passRate === "number" &&
+            Number.isFinite(run.passRate) &&
+            typeof run.improvementRate === "number" &&
+            Number.isFinite(run.improvementRate) &&
+            typeof run.regressionRate === "number" &&
+            Number.isFinite(run.regressionRate) &&
+            typeof run.netDelta === "number" &&
+            Number.isFinite(run.netDelta) &&
+            (run.startedAt === undefined ||
+              run.startedAt === null ||
+              isISODateString(run.startedAt)) &&
+            (run.finishedAt === undefined ||
+              run.finishedAt === null ||
+              isISODateString(run.finishedAt)),
+        ) &&
+        isISODateString(item.updatedAt),
+    ) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    isRecord(value.summary) &&
+    typeof value.summary.comparedExperimentCount === "number" &&
+    Number.isInteger(value.summary.comparedExperimentCount) &&
+    isISODateString(value.summary.comparedAt) &&
+    Array.isArray(value.summary.datasets) &&
+    value.summary.datasets.every((dataset) => typeof dataset === "string") &&
+    typeof value.summary.totalRuns === "number" &&
+    Number.isInteger(value.summary.totalRuns) &&
+    typeof value.summary.completedRuns === "number" &&
+    Number.isInteger(value.summary.completedRuns) &&
+    typeof value.summary.failedRuns === "number" &&
+    Number.isInteger(value.summary.failedRuns) &&
+    typeof value.summary.runningRuns === "number" &&
+    Number.isInteger(value.summary.runningRuns) &&
+    typeof value.summary.queuedRuns === "number" &&
+    Number.isInteger(value.summary.queuedRuns) &&
+    typeof value.summary.totalCases === "number" &&
+    Number.isInteger(value.summary.totalCases) &&
+    typeof value.summary.processedCases === "number" &&
+    Number.isInteger(value.summary.processedCases) &&
+    typeof value.summary.improvedCases === "number" &&
+    Number.isInteger(value.summary.improvedCases) &&
+    typeof value.summary.regressedCases === "number" &&
+    Number.isInteger(value.summary.regressedCases) &&
+    (value.summary.bestExperimentId === undefined ||
+      value.summary.bestExperimentId === null ||
+      typeof value.summary.bestExperimentId === "string") &&
+    (value.summary.worstExperimentId === undefined ||
+      value.summary.worstExperimentId === null ||
+      typeof value.summary.worstExperimentId === "string") &&
+    isRecord(value.filters) &&
+    Array.isArray(value.filters.experimentIds) &&
+    value.filters.experimentIds.every((experimentId) => typeof experimentId === "string") &&
+    (value.filters.datasetId === undefined ||
+      value.filters.datasetId === null ||
+      typeof value.filters.datasetId === "string")
+  );
+}
+
+function isOpenPlatformReplayExperimentWorkflowResponse(
+  value: unknown,
+): value is OpenPlatformReplayExperimentWorkflowResponse {
+  return (
+    isRecord(value) &&
+    typeof value.experimentId === "string" &&
+    typeof value.status === "string" &&
+    Array.isArray(value.nodes) &&
+    value.nodes.every(
+      (node) =>
+        isRecord(node) &&
+        typeof node.id === "string" &&
+        (node.type === "experiment" || node.type === "run") &&
+        typeof node.label === "string" &&
+        typeof node.status === "string" &&
+        (node.startedAt === undefined || node.startedAt === null || isISODateString(node.startedAt)) &&
+        (node.finishedAt === undefined || node.finishedAt === null || isISODateString(node.finishedAt)) &&
+        (node.metadata === undefined || node.metadata === null || isRecord(node.metadata)),
+    ) &&
+    Array.isArray(value.edges) &&
+    value.edges.every(
+      (edge) =>
+        isRecord(edge) &&
+        typeof edge.from === "string" &&
+        typeof edge.to === "string" &&
+        typeof edge.label === "string",
+    ) &&
+    isRecord(value.summary) &&
+    typeof value.summary.totalNodes === "number" &&
+    typeof value.summary.totalRuns === "number" &&
+    typeof value.summary.queuedRuns === "number" &&
+    typeof value.summary.runningRuns === "number" &&
+    typeof value.summary.completedRuns === "number" &&
+    typeof value.summary.failedRuns === "number" &&
+    typeof value.summary.cancelledRuns === "number"
   );
 }
 
@@ -1848,11 +3677,10 @@ function isOpenPlatformReplayArtifact(value: unknown): value is OpenPlatformRepl
   if (!isRecord(value)) {
     return false;
   }
+  const runIdOk = value.runId === undefined || value.runId === null || typeof value.runId === "string";
   const nameOk = value.name === undefined || value.name === null || typeof value.name === "string";
   const descriptionOk =
-    value.description === undefined ||
-    value.description === null ||
-    typeof value.description === "string";
+    value.description === undefined || value.description === null || typeof value.description === "string";
   const byteSizeOk =
     value.byteSize === undefined ||
     value.byteSize === null ||
@@ -1865,6 +3693,17 @@ function isOpenPlatformReplayArtifact(value: unknown): value is OpenPlatformRepl
     value.downloadUrl === undefined ||
     value.downloadUrl === null ||
     typeof value.downloadUrl === "string";
+  const checksumOk =
+    value.checksum === undefined || value.checksum === null || typeof value.checksum === "string";
+  const storageBackendOk =
+    value.storageBackend === undefined ||
+    value.storageBackend === null ||
+    value.storageBackend === "local" ||
+    value.storageBackend === "object" ||
+    value.storageBackend === "hybrid";
+  const storageKeyOk =
+    value.storageKey === undefined || value.storageKey === null || typeof value.storageKey === "string";
+  const metadataOk = value.metadata === undefined || value.metadata === null || isRecord(value.metadata);
   const createdAtOk =
     value.createdAt === undefined || value.createdAt === null || isISODateString(value.createdAt);
   const inlineOk =
@@ -1872,6 +3711,7 @@ function isOpenPlatformReplayArtifact(value: unknown): value is OpenPlatformRepl
     value.inline === null ||
     isRecord(value.inline);
   return (
+    runIdOk &&
     typeof value.type === "string" &&
     typeof value.contentType === "string" &&
     nameOk &&
@@ -1879,6 +3719,10 @@ function isOpenPlatformReplayArtifact(value: unknown): value is OpenPlatformRepl
     byteSizeOk &&
     downloadNameOk &&
     downloadUrlOk &&
+    checksumOk &&
+    storageBackendOk &&
+    storageKeyOk &&
+    metadataOk &&
     createdAtOk &&
     inlineOk
   );
@@ -1891,9 +3735,41 @@ function isOpenPlatformReplayArtifactListResponse(
     return false;
   }
   const jobIdOk = value.jobId === undefined || value.jobId === null || typeof value.jobId === "string";
+  const datasetIdOk = value.datasetId === undefined || value.datasetId === null || typeof value.datasetId === "string";
   return (
     typeof value.runId === "string" &&
     jobIdOk &&
+    datasetIdOk &&
+    Array.isArray(value.items) &&
+    value.items.every((item) => isOpenPlatformReplayArtifact(item)) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0
+  );
+}
+
+function isOpenPlatformReplayDatasetVersionCaseListResponse(
+  value: unknown,
+): value is OpenPlatformReplayDatasetVersionCaseListResponse {
+  return (
+    isRecord(value) &&
+    typeof value.datasetId === "string" &&
+    typeof value.versionId === "string" &&
+    Array.isArray(value.items) &&
+    value.items.every((item) => mapOpenPlatformReplayDatasetCase(item) !== null) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0
+  );
+}
+
+function isOpenPlatformReplayExperimentArtifactListResponse(
+  value: unknown,
+): value is OpenPlatformReplayExperimentArtifactListResponse {
+  return (
+    isRecord(value) &&
+    typeof value.experimentId === "string" &&
+    typeof value.datasetId === "string" &&
     Array.isArray(value.items) &&
     value.items.every((item) => isOpenPlatformReplayArtifact(item)) &&
     typeof value.total === "number" &&
@@ -2103,6 +3979,17 @@ function isAlertOrchestrationDispatchMode(
   );
 }
 
+function isAlertOrchestrationEscalationReason(
+  value: unknown
+): value is AlertOrchestrationEscalationReason {
+  return (
+    typeof value === "string" &&
+    ALERT_ORCHESTRATION_ESCALATION_REASONS.includes(
+      value as AlertOrchestrationEscalationReason,
+    )
+  );
+}
+
 function isExportFormat(value: unknown): value is ExportFormat {
   return typeof value === "string" && EXPORT_FORMATS.includes(value as ExportFormat);
 }
@@ -2155,6 +4042,66 @@ function isAlertItem(value: unknown): value is AlertItem {
     return false;
   }
 
+  const externalLinksOk =
+    value.externalLinks === undefined ||
+    (Array.isArray(value.externalLinks) &&
+      value.externalLinks.every((item) => {
+        if (!isRecord(item)) {
+          return false;
+        }
+        const externalStatusOk =
+          item.externalStatus === undefined ||
+          item.externalStatus === null ||
+          typeof item.externalStatus === "string";
+        const pendingExternalStatusOk =
+          item.pendingExternalStatus === undefined ||
+          item.pendingExternalStatus === null ||
+          typeof item.pendingExternalStatus === "string";
+        const publishStatusOk =
+          item.publishStatus === undefined ||
+          item.publishStatus === null ||
+          item.publishStatus === "success" ||
+          item.publishStatus === "failed";
+        const publishErrorOk =
+          item.publishError === undefined ||
+          item.publishError === null ||
+          typeof item.publishError === "string";
+        const lastSyncResultOk =
+          item.lastSyncResult === undefined ||
+          item.lastSyncResult === null ||
+          item.lastSyncResult === "success" ||
+          item.lastSyncResult === "failed";
+        const lastSyncErrorOk =
+          item.lastSyncError === undefined ||
+          item.lastSyncError === null ||
+          typeof item.lastSyncError === "string";
+        const lastSyncFailureStageOk =
+          item.lastSyncFailureStage === undefined ||
+          item.lastSyncFailureStage === null ||
+          typeof item.lastSyncFailureStage === "string";
+        const lastSyncFailureCodeOk =
+          item.lastSyncFailureCode === undefined ||
+          item.lastSyncFailureCode === null ||
+          typeof item.lastSyncFailureCode === "string";
+        return (
+          typeof item.id === "string" &&
+          (item.externalType === "ticket" ||
+            item.externalType === "case" ||
+            item.externalType === "incident") &&
+          typeof item.externalSystem === "string" &&
+          typeof item.externalId === "string" &&
+          externalStatusOk &&
+          pendingExternalStatusOk &&
+          isISODateString(item.lastSyncedAt) &&
+          publishStatusOk &&
+          publishErrorOk &&
+          lastSyncResultOk &&
+          lastSyncErrorOk &&
+          lastSyncFailureStageOk &&
+          lastSyncFailureCodeOk
+        );
+      }));
+
   return (
     typeof value.id === "string" &&
     typeof value.tenantId === "string" &&
@@ -2170,7 +4117,8 @@ function isAlertItem(value: unknown): value is AlertItem {
     Number.isFinite(value.value) &&
     isISODateString(value.createdAt) &&
     isISODateString(value.updatedAt) &&
-    isRecord(value.metadata)
+    isRecord(value.metadata) &&
+    externalLinksOk
   );
 }
 
@@ -2187,6 +4135,364 @@ function isAlertListResponse(value: unknown): value is AlertListResponse {
     value.total >= 0 &&
     filtersOk &&
     nextCursorOk
+  );
+}
+
+function isAlertExternalLinkOpsItem(value: unknown): value is AlertExternalLinkOpsItem {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const alertIdOk =
+    value.alertId === undefined ||
+    value.alertId === null ||
+    typeof value.alertId === "string";
+  const alertStatusOk =
+    value.alertStatus === undefined ||
+    value.alertStatus === null ||
+    value.alertStatus === "open" ||
+    value.alertStatus === "acknowledged" ||
+    value.alertStatus === "resolved";
+  const externalStatusOk =
+    value.externalStatus === undefined ||
+    value.externalStatus === null ||
+    typeof value.externalStatus === "string";
+  const pendingExternalStatusOk =
+    value.pendingExternalStatus === undefined ||
+    value.pendingExternalStatus === null ||
+    typeof value.pendingExternalStatus === "string";
+  const publishStatusOk =
+    value.publishStatus === undefined ||
+    value.publishStatus === null ||
+    value.publishStatus === "success" ||
+    value.publishStatus === "failed";
+  const publishErrorOk =
+    value.publishError === undefined ||
+    value.publishError === null ||
+    typeof value.publishError === "string";
+  const lastSyncResultOk =
+    value.lastSyncResult === undefined ||
+    value.lastSyncResult === null ||
+    value.lastSyncResult === "success" ||
+    value.lastSyncResult === "failed";
+  const lastSyncErrorOk =
+    value.lastSyncError === undefined ||
+    value.lastSyncError === null ||
+    typeof value.lastSyncError === "string";
+  const lastSyncFailureStageOk =
+    value.lastSyncFailureStage === undefined ||
+    value.lastSyncFailureStage === null ||
+    typeof value.lastSyncFailureStage === "string";
+  const lastSyncFailureCodeOk =
+    value.lastSyncFailureCode === undefined ||
+    value.lastSyncFailureCode === null ||
+    typeof value.lastSyncFailureCode === "string";
+  const updatedAtOk =
+    value.updatedAt === undefined ||
+    value.updatedAt === null ||
+    (typeof value.updatedAt === "string" && isISODateString(value.updatedAt));
+  return (
+    typeof value.id === "string" &&
+    alertIdOk &&
+    alertStatusOk &&
+    (value.externalType === "ticket" ||
+      value.externalType === "case" ||
+      value.externalType === "incident") &&
+    typeof value.externalSystem === "string" &&
+    typeof value.externalId === "string" &&
+    externalStatusOk &&
+    pendingExternalStatusOk &&
+    typeof value.lastSyncedAt === "string" &&
+    isISODateString(value.lastSyncedAt) &&
+    publishStatusOk &&
+    publishErrorOk &&
+    lastSyncResultOk &&
+    lastSyncErrorOk &&
+    lastSyncFailureStageOk &&
+    lastSyncFailureCodeOk &&
+    (value.syncState === "synced" ||
+      value.syncState === "pending" ||
+      value.syncState === "failed") &&
+    typeof value.retryable === "boolean" &&
+    updatedAtOk
+  );
+}
+
+function isAlertExternalLinkOpsResponse(value: unknown): value is AlertExternalLinkOpsResponse {
+  if (!isRecord(value) || !isRecord(value.summary) || !isRecord(value.filters)) {
+    return false;
+  }
+  const externalTypeOk =
+    value.filters.externalType === undefined ||
+    value.filters.externalType === "ticket" ||
+    value.filters.externalType === "case" ||
+    value.filters.externalType === "incident";
+  const onlyFailedOk =
+    value.filters.onlyFailed === undefined ||
+    typeof value.filters.onlyFailed === "boolean";
+  return (
+    typeof value.alertId === "string" &&
+    typeof value.summary.total === "number" &&
+    typeof value.summary.pending === "number" &&
+    typeof value.summary.failed === "number" &&
+    Array.isArray(value.items) &&
+    value.items.every((item) => isAlertExternalLinkOpsItem(item)) &&
+    externalTypeOk &&
+    onlyFailedOk
+  );
+}
+
+function isAlertExternalLinkBatchRetryResponse(
+  value: unknown,
+): value is AlertExternalLinkBatchRetryResponse {
+  return (
+    isRecord(value) &&
+    typeof value.alertId === "string" &&
+    typeof value.retriedCount === "number" &&
+    typeof value.published === "number" &&
+    typeof value.failed === "number" &&
+    Array.isArray(value.items) &&
+    value.items.every((item) => isAlertExternalLinkOpsItem(item))
+  );
+}
+
+function isIntegrationDlqMessage(value: unknown): value is IntegrationDlqMessageListResponse["items"][number] {
+  return (
+    isRecord(value) &&
+    typeof value.messageId === "string" &&
+    typeof value.stream === "string" &&
+    typeof value.subject === "string" &&
+    typeof value.eventType === "string" &&
+    (value.channel === undefined || value.channel === null || typeof value.channel === "string") &&
+    (value.callbackId === undefined || value.callbackId === null || typeof value.callbackId === "string") &&
+    (value.tenantId === undefined || value.tenantId === null || typeof value.tenantId === "string") &&
+    (value.alertId === undefined || value.alertId === null || typeof value.alertId === "string") &&
+    (value.externalType === undefined || value.externalType === null || typeof value.externalType === "string") &&
+    (value.externalId === undefined || value.externalId === null || typeof value.externalId === "string") &&
+    typeof value.failedAt === "string" &&
+    isISODateString(value.failedAt) &&
+    typeof value.attempt === "number" &&
+    Number.isInteger(value.attempt) &&
+    typeof value.error === "string" &&
+    typeof value.retryable === "boolean" &&
+    isRecord(value.payload)
+  );
+}
+
+function isIntegrationDlqMessageListResponse(
+  value: unknown,
+): value is IntegrationDlqMessageListResponse {
+  return (
+    isRecord(value) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    Array.isArray(value.items) &&
+    value.items.every((item) => isIntegrationDlqMessage(item)) &&
+    isRecord(value.filters)
+  );
+}
+
+function isIntegrationDlqReplayResponse(
+  value: unknown,
+): value is IntegrationDlqReplayResponse {
+  return (
+    isRecord(value) &&
+    typeof value.replayedCount === "number" &&
+    typeof value.failedCount === "number" &&
+    Array.isArray(value.items) &&
+    value.items.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.messageId === "string" &&
+        (item.status === "replayed" || item.status === "failed") &&
+        (item.error === undefined || item.error === null || typeof item.error === "string"),
+    )
+  );
+}
+
+function isIntegrationDlqRecoveryJob(
+  value: unknown,
+): value is IntegrationDlqRecoveryJob {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.tenantId === "string" &&
+    (value.status === "queued" ||
+      value.status === "running" ||
+      value.status === "completed" ||
+      value.status === "failed") &&
+    typeof value.requestedAt === "string" &&
+    isISODateString(value.requestedAt) &&
+    (value.startedAt === undefined ||
+      value.startedAt === null ||
+      (typeof value.startedAt === "string" && isISODateString(value.startedAt))) &&
+    (value.finishedAt === undefined ||
+      value.finishedAt === null ||
+      (typeof value.finishedAt === "string" && isISODateString(value.finishedAt))) &&
+    Array.isArray(value.messageIds) &&
+    value.messageIds.every((item) => typeof item === "string") &&
+    isRecord(value.summary) &&
+    typeof value.summary.total === "number" &&
+    typeof value.summary.replayed === "number" &&
+    typeof value.summary.failed === "number" &&
+    Array.isArray(value.items) &&
+    value.items.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.messageId === "string" &&
+        (item.status === "replayed" || item.status === "failed") &&
+        (item.error === undefined || item.error === null || typeof item.error === "string"),
+    ) &&
+    (value.error === undefined || value.error === null || typeof value.error === "string")
+  );
+}
+
+function isIntegrationDlqRecoveryJobListResponse(
+  value: unknown,
+): value is IntegrationDlqRecoveryJobListResponse {
+  return (
+    isRecord(value) &&
+    typeof value.total === "number" &&
+    Number.isInteger(value.total) &&
+    value.total >= 0 &&
+    Array.isArray(value.items) &&
+    value.items.every((item) => isIntegrationDlqRecoveryJob(item)) &&
+    isRecord(value.filters)
+  );
+}
+
+function isIntegrationAlertFailureReportResponse(
+  value: unknown,
+): value is IntegrationAlertFailureReportResponse {
+  return (
+    isRecord(value) &&
+    isRecord(value.summary) &&
+    Array.isArray(value.items) &&
+    value.items.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.occurredAt === "string" &&
+        isISODateString(item.occurredAt) &&
+        typeof item.action === "string" &&
+        typeof item.actionType === "string" &&
+        (item.alertId === undefined || item.alertId === null || typeof item.alertId === "string") &&
+        (item.externalSystem === undefined || item.externalSystem === null || typeof item.externalSystem === "string") &&
+        (item.stage === undefined || item.stage === null || typeof item.stage === "string") &&
+        (item.code === undefined || item.code === null || typeof item.code === "string") &&
+        (item.status === "requested" || item.status === "success" || item.status === "failed") &&
+        isRecord(item.metadata),
+    ) &&
+    isRecord(value.filters)
+  );
+}
+
+function isIntegrationAlertFailureTrendResponse(
+  value: unknown,
+): value is IntegrationAlertFailureTrendResponse {
+  return (
+    isRecord(value) &&
+    isRecord(value.summary) &&
+    typeof value.summary.totalEvents === "number" &&
+    typeof value.summary.requestedEvents === "number" &&
+    typeof value.summary.successEvents === "number" &&
+    typeof value.summary.failedEvents === "number" &&
+    typeof value.summary.days === "number" &&
+    typeof value.summary.averageEventsPerDay === "number" &&
+    (value.summary.peakDate === undefined ||
+      value.summary.peakDate === null ||
+      typeof value.summary.peakDate === "string") &&
+    typeof value.summary.peakCount === "number" &&
+    Array.isArray(value.daily) &&
+    value.daily.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.date === "string" &&
+        typeof item.totalEvents === "number" &&
+        typeof item.requestedEvents === "number" &&
+        typeof item.successEvents === "number" &&
+        typeof item.failedEvents === "number" &&
+        typeof item.uniqueAlerts === "number" &&
+        typeof item.retryRequested === "number" &&
+        typeof item.retryCompleted === "number" &&
+        typeof item.retryFailed === "number" &&
+        typeof item.dlqQueried === "number" &&
+        typeof item.dlqReplayed === "number" &&
+        typeof item.recoveryJobsCreated === "number" &&
+        typeof item.recoveryJobsCompleted === "number" &&
+        typeof item.recoveryJobsFailed === "number",
+    ) &&
+    isRecord(value.capacity) &&
+    Array.isArray(value.capacity.externalSystems) &&
+    value.capacity.externalSystems.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.name === "string" &&
+        typeof item.totalEvents === "number" &&
+        typeof item.requestedEvents === "number" &&
+        typeof item.successEvents === "number" &&
+        typeof item.failedEvents === "number" &&
+        typeof item.uniqueAlerts === "number" &&
+        (item.lastOccurredAt === undefined ||
+          item.lastOccurredAt === null ||
+          isISODateString(item.lastOccurredAt)),
+    ) &&
+    Array.isArray(value.capacity.stages) &&
+    value.capacity.stages.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.name === "string" &&
+        typeof item.totalEvents === "number" &&
+        typeof item.requestedEvents === "number" &&
+        typeof item.successEvents === "number" &&
+        typeof item.failedEvents === "number" &&
+        typeof item.uniqueAlerts === "number" &&
+        (item.lastOccurredAt === undefined ||
+          item.lastOccurredAt === null ||
+          isISODateString(item.lastOccurredAt)),
+    ) &&
+    isRecord(value.filters) &&
+    typeof value.filters.top === "number"
+  );
+}
+
+function isAlertExternalLinkFailureResponse(
+  value: unknown,
+): value is AlertExternalLinkFailureResponse {
+  if (!isRecord(value) || !isRecord(value.summary) || !isRecord(value.filters)) {
+    return false;
+  }
+  const externalTypeOk =
+    value.filters.externalType === undefined ||
+    value.filters.externalType === "ticket" ||
+    value.filters.externalType === "case" ||
+    value.filters.externalType === "incident";
+  const syncStateOk =
+    value.filters.syncState === undefined ||
+    value.filters.syncState === "synced" ||
+    value.filters.syncState === "pending" ||
+    value.filters.syncState === "failed";
+  const alertIdOk =
+    value.filters.alertId === undefined ||
+    typeof value.filters.alertId === "string";
+  const externalSystemOk =
+    value.filters.externalSystem === undefined ||
+    typeof value.filters.externalSystem === "string";
+  const limitOk =
+    value.filters.limit === undefined ||
+    (typeof value.filters.limit === "number" &&
+      Number.isInteger(value.filters.limit) &&
+      value.filters.limit > 0);
+  return (
+    typeof value.summary.total === "number" &&
+    typeof value.summary.pending === "number" &&
+    typeof value.summary.failed === "number" &&
+    Array.isArray(value.items) &&
+    value.items.every((item) => isAlertExternalLinkOpsItem(item)) &&
+    alertIdOk &&
+    externalTypeOk &&
+    externalSystemOk &&
+    syncStateOk &&
+    limitOk
   );
 }
 
@@ -2265,6 +4571,21 @@ function isAlertOrchestrationExecutionLog(
   const alertIdOk = value.alertId === undefined || value.alertId === null || typeof value.alertId === "string";
   const severityOk = value.severity === undefined || value.severity === null || isAlertSeverity(value.severity);
   const sourceIdOk = value.sourceId === undefined || value.sourceId === null || typeof value.sourceId === "string";
+  const escalationReasonOk =
+    value.escalationReason === undefined ||
+    value.escalationReason === null ||
+    isAlertOrchestrationEscalationReason(value.escalationReason);
+  const escalationTargetChannelsOk =
+    value.escalationTargetChannels === undefined ||
+    value.escalationTargetChannels === null ||
+    (Array.isArray(value.escalationTargetChannels) &&
+      value.escalationTargetChannels.every((channel) => isAlertOrchestrationChannel(channel)));
+  const slaMinutesOk =
+    value.slaMinutes === undefined ||
+    value.slaMinutes === null ||
+    (typeof value.slaMinutes === "number" &&
+      Number.isInteger(value.slaMinutes) &&
+      value.slaMinutes >= 0);
   return (
     typeof value.id === "string" &&
     typeof value.tenantId === "string" &&
@@ -2281,6 +4602,10 @@ function isAlertOrchestrationExecutionLog(
     typeof value.dedupeHit === "boolean" &&
     typeof value.suppressed === "boolean" &&
     typeof value.simulated === "boolean" &&
+    typeof value.escalated === "boolean" &&
+    escalationReasonOk &&
+    escalationTargetChannelsOk &&
+    slaMinutesOk &&
     isRecord(value.metadata) &&
     isISODateString(value.createdAt)
   );
@@ -2303,6 +4628,10 @@ function isAlertOrchestrationExecutionListInput(
     value.dispatchMode === undefined || isAlertOrchestrationDispatchMode(value.dispatchMode);
   const hasConflictOk = value.hasConflict === undefined || typeof value.hasConflict === "boolean";
   const simulatedOk = value.simulated === undefined || typeof value.simulated === "boolean";
+  const escalatedOk = value.escalated === undefined || typeof value.escalated === "boolean";
+  const escalationReasonOk =
+    value.escalationReason === undefined ||
+    isAlertOrchestrationEscalationReason(value.escalationReason);
   const fromOk = value.from === undefined || isISODateString(value.from);
   const toOk = value.to === undefined || isISODateString(value.to);
   const limitOk =
@@ -2319,6 +4648,8 @@ function isAlertOrchestrationExecutionListInput(
     dispatchModeOk &&
     hasConflictOk &&
     simulatedOk &&
+    escalatedOk &&
+    escalationReasonOk &&
     fromOk &&
     toOk &&
     limitOk
@@ -3190,13 +5521,17 @@ function isAuthProviderItem(value: unknown): value is AuthProviderItem {
   const issuerOk = value.issuer === undefined || typeof value.issuer === "string";
   const authorizationUrlOk =
     value.authorizationUrl === undefined || typeof value.authorizationUrl === "string";
+  const requireMfaOk =
+    value.requireMfa === undefined || typeof value.requireMfa === "boolean";
   return (
     typeof value.id === "string" &&
     typeof value.type === "string" &&
+    ["local", "oauth2", "oidc", "sso", "saml"].includes(value.type) &&
     typeof value.displayName === "string" &&
     typeof value.enabled === "boolean" &&
     issuerOk &&
-    authorizationUrlOk
+    authorizationUrlOk &&
+    requireMfaOk
   );
 }
 
@@ -3877,6 +6212,380 @@ export async function updateAlertStatus(
   return result;
 }
 
+export async function retryAlertExternalLinkSync(
+  alertId: string,
+  input: {
+    externalType: "ticket" | "case" | "incident";
+    externalId: string;
+  },
+  signal?: AbortSignal,
+): Promise<AlertItem> {
+  const normalizedAlertId = alertId.trim();
+  const normalizedExternalId = input.externalId.trim();
+  if (!normalizedAlertId) {
+    throw new Error("alertId 不能为空。");
+  }
+  if (
+    input.externalType !== "ticket" &&
+    input.externalType !== "case" &&
+    input.externalType !== "incident"
+  ) {
+    throw new Error("externalType 必须是 ticket/case/incident 之一。");
+  }
+  if (!normalizedExternalId) {
+    throw new Error("externalId 不能为空。");
+  }
+
+  const result = await requestJson<unknown>(
+    `/api/v1/alerts/${encodeURIComponent(normalizedAlertId)}/external-links/retry-sync`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        externalType: input.externalType,
+        externalId: normalizedExternalId,
+      }),
+    },
+    signal,
+  );
+
+  if (!isAlertItem(result)) {
+    throw new Error("alerts.external-links.retry-sync 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchAlertExternalLinkOps(
+  alertId: string,
+  input: {
+    externalType?: "ticket" | "case" | "incident";
+    onlyFailed?: boolean;
+  } = {},
+  signal?: AbortSignal,
+): Promise<AlertExternalLinkOpsResponse> {
+  const normalizedAlertId = alertId.trim();
+  if (!normalizedAlertId) {
+    throw new Error("alertId 不能为空。");
+  }
+  const query = new URLSearchParams();
+  if (input.externalType) {
+    query.set("externalType", input.externalType);
+  }
+  if (typeof input.onlyFailed === "boolean") {
+    query.set("onlyFailed", input.onlyFailed ? "true" : "false");
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const result = await requestJson<unknown>(
+    `/api/v1/alerts/${encodeURIComponent(normalizedAlertId)}/external-links${suffix}`,
+    undefined,
+    signal,
+  );
+  if (!isAlertExternalLinkOpsResponse(result)) {
+    throw new Error("alerts.external-links 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchAlertExternalLinkFailures(
+  input: {
+    alertId?: string;
+    externalType?: "ticket" | "case" | "incident";
+    externalSystem?: string;
+    syncState?: "synced" | "pending" | "failed";
+    limit?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<AlertExternalLinkFailureResponse> {
+  const query = new URLSearchParams();
+  if (input.alertId?.trim()) {
+    query.set("alertId", input.alertId.trim());
+  }
+  if (input.externalType) {
+    query.set("externalType", input.externalType);
+  }
+  if (input.externalSystem?.trim()) {
+    query.set("externalSystem", input.externalSystem.trim());
+  }
+  if (input.syncState) {
+    query.set("syncState", input.syncState);
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit > 0) {
+    query.set("limit", String(input.limit));
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const result = await requestJson<unknown>(
+    `/api/v1/alerts/external-links/failures${suffix}`,
+    undefined,
+    signal,
+  );
+  if (!isAlertExternalLinkFailureResponse(result)) {
+    throw new Error("alerts.external-links.failures 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchIntegrationDlqMessages(
+  input: {
+    eventType?: string;
+    channel?: string;
+    callbackId?: string;
+    alertId?: string;
+    limit?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<IntegrationDlqMessageListResponse> {
+  const query = new URLSearchParams();
+  if (input.eventType?.trim()) {
+    query.set("eventType", input.eventType.trim());
+  }
+  if (input.channel?.trim()) {
+    query.set("channel", input.channel.trim());
+  }
+  if (input.callbackId?.trim()) {
+    query.set("callbackId", input.callbackId.trim());
+  }
+  if (input.alertId?.trim()) {
+    query.set("alertId", input.alertId.trim());
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit > 0) {
+    query.set("limit", String(input.limit));
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const result = await requestJson<unknown>(
+    `/api/v1/integrations/dlq/messages${suffix}`,
+    undefined,
+    signal,
+  );
+  if (!isIntegrationDlqMessageListResponse(result)) {
+    throw new Error("integrations.dlq.messages 返回结构不合法");
+  }
+  return result;
+}
+
+export async function replayIntegrationDlqMessages(
+  messageIds: string[],
+  signal?: AbortSignal,
+): Promise<IntegrationDlqReplayResponse> {
+  const normalizedMessageIds = messageIds
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  if (normalizedMessageIds.length === 0) {
+    throw new Error("messageIds 至少需要 1 条。");
+  }
+  const result = await requestJson<unknown>(
+    "/api/v1/integrations/dlq/messages/replay",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        messageIds: normalizedMessageIds,
+      }),
+    },
+    signal,
+  );
+  if (!isIntegrationDlqReplayResponse(result)) {
+    throw new Error("integrations.dlq.messages.replay 返回结构不合法");
+  }
+  return result;
+}
+
+export async function createIntegrationDlqRecoveryJob(
+  input: {
+    messageIds?: string[];
+    filters?: {
+      eventType?: string;
+      channel?: string;
+      callbackId?: string;
+      alertId?: string;
+      limit?: number;
+    };
+  },
+  signal?: AbortSignal,
+): Promise<IntegrationDlqRecoveryJob> {
+  const result = await requestJson<unknown>(
+    "/api/v1/integrations/dlq/recovery-jobs",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    signal,
+  );
+  if (!isIntegrationDlqRecoveryJob(result)) {
+    throw new Error("integrations.dlq.recovery-jobs.create 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchIntegrationDlqRecoveryJobs(
+  input: {
+    status?: "queued" | "running" | "completed" | "failed";
+    limit?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<IntegrationDlqRecoveryJobListResponse> {
+  const query = new URLSearchParams();
+  if (input.status) {
+    query.set("status", input.status);
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit > 0) {
+    query.set("limit", String(input.limit));
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const result = await requestJson<unknown>(
+    `/api/v1/integrations/dlq/recovery-jobs${suffix}`,
+    undefined,
+    signal,
+  );
+  if (!isIntegrationDlqRecoveryJobListResponse(result)) {
+    throw new Error("integrations.dlq.recovery-jobs 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchIntegrationDlqRecoveryJobDetail(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<IntegrationDlqRecoveryJob> {
+  const normalizedJobId = jobId.trim();
+  if (!normalizedJobId) {
+    throw new Error("jobId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/integrations/dlq/recovery-jobs/${encodeURIComponent(normalizedJobId)}`,
+    undefined,
+    signal,
+  );
+  if (!isIntegrationDlqRecoveryJob(result)) {
+    throw new Error("integrations.dlq.recovery-jobs.detail 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchIntegrationAlertFailureReport(
+  input: {
+    from?: string;
+    to?: string;
+    externalSystem?: string;
+    stage?: string;
+    actionType?:
+      | "retry_requested"
+      | "retry_completed"
+      | "retry_failed"
+      | "dlq_queried"
+      | "dlq_replayed"
+      | "recovery_job_created"
+      | "recovery_job_completed"
+      | "recovery_job_failed";
+    limit?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<IntegrationAlertFailureReportResponse> {
+  const query = new URLSearchParams();
+  if (input.from?.trim()) {
+    query.set("from", input.from.trim());
+  }
+  if (input.to?.trim()) {
+    query.set("to", input.to.trim());
+  }
+  if (input.externalSystem?.trim()) {
+    query.set("externalSystem", input.externalSystem.trim());
+  }
+  if (input.stage?.trim()) {
+    query.set("stage", input.stage.trim());
+  }
+  if (input.actionType) {
+    query.set("actionType", input.actionType);
+  }
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit > 0) {
+    query.set("limit", String(input.limit));
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const result = await requestJson<unknown>(
+    `/api/v1/integrations/failure-reports/alerts${suffix}`,
+    undefined,
+    signal,
+  );
+  if (!isIntegrationAlertFailureReportResponse(result)) {
+    throw new Error("integrations.failure-reports.alerts 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchIntegrationAlertFailureTrends(
+  input: {
+    from?: string;
+    to?: string;
+    externalSystem?: string;
+    stage?: string;
+    actionType?:
+      | "retry_requested"
+      | "retry_completed"
+      | "retry_failed"
+      | "dlq_queried"
+      | "dlq_replayed"
+      | "recovery_job_created"
+      | "recovery_job_completed"
+      | "recovery_job_failed";
+    top?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<IntegrationAlertFailureTrendResponse> {
+  const query = new URLSearchParams();
+  if (input.from?.trim()) {
+    query.set("from", input.from.trim());
+  }
+  if (input.to?.trim()) {
+    query.set("to", input.to.trim());
+  }
+  if (input.externalSystem?.trim()) {
+    query.set("externalSystem", input.externalSystem.trim());
+  }
+  if (input.stage?.trim()) {
+    query.set("stage", input.stage.trim());
+  }
+  if (input.actionType) {
+    query.set("actionType", input.actionType);
+  }
+  if (typeof input.top === "number" && Number.isInteger(input.top) && input.top > 0) {
+    query.set("top", String(input.top));
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const result = await requestJson<unknown>(
+    `/api/v1/integrations/failure-reports/alerts/trends${suffix}`,
+    undefined,
+    signal,
+  );
+  if (!isIntegrationAlertFailureTrendResponse(result)) {
+    throw new Error("integrations.failure-reports.alerts.trends 返回结构不合法");
+  }
+  return result;
+}
+
+export async function retryAlertExternalLinkSyncBatch(
+  alertId: string,
+  input: {
+    externalType?: "ticket" | "case" | "incident";
+  } = {},
+  signal?: AbortSignal,
+): Promise<AlertExternalLinkBatchRetryResponse> {
+  const normalizedAlertId = alertId.trim();
+  if (!normalizedAlertId) {
+    throw new Error("alertId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/alerts/${encodeURIComponent(normalizedAlertId)}/external-links/retry-sync-batch`,
+    {
+      method: "POST",
+      body: JSON.stringify(
+        input.externalType ? { externalType: input.externalType } : {},
+      ),
+    },
+    signal,
+  );
+  if (!isAlertExternalLinkBatchRetryResponse(result)) {
+    throw new Error("alerts.external-links.retry-sync-batch 返回结构不合法");
+  }
+  return result;
+}
+
 export async function fetchAlertOrchestrationRules(
   input?: AlertOrchestrationRuleListInput,
   signal?: AbortSignal
@@ -4275,6 +6984,70 @@ export async function upsertResidencyPolicy(
   return result;
 }
 
+export async function fetchResidencyKmsKeyMappings(
+  signal?: AbortSignal
+): Promise<ResidencyKmsKeyMappingListResponse> {
+  const result = await requestJson<unknown>(
+    "/api/v2/residency/kms-key-mappings",
+    undefined,
+    signal
+  );
+  if (!isResidencyKmsKeyMappingListResponse(result)) {
+    throw new Error("residency.kms-key-mappings 返回结构不合法");
+  }
+  return result;
+}
+
+export async function upsertResidencyKmsKeyMappings(
+  input: ResidencyKmsKeyMappingUpsertInput,
+  signal?: AbortSignal
+): Promise<ResidencyKmsKeyMappingListResponse> {
+  const result = await requestJson<unknown>(
+    "/api/v2/residency/kms-key-mappings",
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+  if (!isResidencyKmsKeyMappingListResponse(result)) {
+    throw new Error("residency.kms-key-mappings.upsert 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchResidencyArchiveRegionPolicies(
+  signal?: AbortSignal
+): Promise<ResidencyArchiveRegionPolicyListResponse> {
+  const result = await requestJson<unknown>(
+    "/api/v2/residency/archive-region-policies",
+    undefined,
+    signal
+  );
+  if (!isResidencyArchiveRegionPolicyListResponse(result)) {
+    throw new Error("residency.archive-region-policies 返回结构不合法");
+  }
+  return result;
+}
+
+export async function upsertResidencyArchiveRegionPolicies(
+  input: ResidencyArchiveRegionPolicyUpsertInput,
+  signal?: AbortSignal
+): Promise<ResidencyArchiveRegionPolicyListResponse> {
+  const result = await requestJson<unknown>(
+    "/api/v2/residency/archive-region-policies",
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+  if (!isResidencyArchiveRegionPolicyListResponse(result)) {
+    throw new Error("residency.archive-region-policies.upsert 返回结构不合法");
+  }
+  return result;
+}
+
 export async function fetchReplicationJobs(
   input?: ReplicationJobListInput,
   signal?: AbortSignal
@@ -4350,6 +7123,253 @@ export async function approveReplicationJob(
   );
   if (!isReplicationJob(result)) {
     throw new Error("residency.replications.approve 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchSystemConfigPackages(
+  limit = 50,
+  signal?: AbortSignal,
+): Promise<SystemConfigPackageListResponse> {
+  const normalizedLimit = Number.isInteger(limit) && limit > 0 ? limit : 50;
+  const result = await requestJson<unknown>(
+    `/api/v1/system/config/packages?limit=${normalizedLimit}`,
+    undefined,
+    signal,
+  );
+  if (!isSystemConfigPackageListResponse(result)) {
+    throw new Error("system.config.packages 返回结构不合法");
+  }
+  return result;
+}
+
+export async function createSystemConfigPackage(
+  input: SystemConfigPackageCreateInput,
+  signal?: AbortSignal,
+): Promise<SystemConfigPackage> {
+  if (!isSystemConfigPackageCreateInput(input)) {
+    throw new Error("system.config.packages.create 输入不合法");
+  }
+  const result = await requestJson<unknown>(
+    "/api/v1/system/config/packages",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    signal,
+  );
+  if (!isSystemConfigPackage(result)) {
+    throw new Error("system.config.packages.create 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchSystemConfigPackageApprovals(
+  packageId: string,
+  signal?: AbortSignal,
+): Promise<SystemConfigPackageApprovalListResponse> {
+  const normalizedPackageId = packageId.trim();
+  if (!normalizedPackageId) {
+    throw new Error("packageId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/system/config/packages/${encodeURIComponent(normalizedPackageId)}/approvals`,
+    undefined,
+    signal,
+  );
+  if (!isSystemConfigPackageApprovalListResponse(result)) {
+    throw new Error("system.config.packages.approvals 返回结构不合法");
+  }
+  return result;
+}
+
+export async function createSystemConfigPackageApproval(
+  packageId: string,
+  input: SystemConfigPackageApprovalCreateInput,
+  signal?: AbortSignal,
+): Promise<SystemConfigPackageApproval> {
+  const normalizedPackageId = packageId.trim();
+  if (!normalizedPackageId) {
+    throw new Error("packageId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/system/config/packages/${encodeURIComponent(normalizedPackageId)}/approvals`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    signal,
+  );
+  if (!isSystemConfigPackageApproval(result)) {
+    throw new Error("system.config.packages.approvals.create 返回结构不合法");
+  }
+  return result;
+}
+
+export async function publishSystemConfigPackage(
+  packageId: string,
+  signal?: AbortSignal,
+): Promise<SystemConfigPackage> {
+  const normalizedPackageId = packageId.trim();
+  if (!normalizedPackageId) {
+    throw new Error("packageId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/system/config/packages/${encodeURIComponent(normalizedPackageId)}/publish`,
+    {
+      method: "POST",
+    },
+    signal,
+  );
+  if (!isSystemConfigPackage(result)) {
+    throw new Error("system.config.packages.publish 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchSystemConfigWatchLatest(
+  input: SystemConfigWatchLatestInput,
+  signal?: AbortSignal,
+): Promise<SystemConfigWatchLatestResponse> {
+  const query = new URLSearchParams();
+  if (input.agentId?.trim()) {
+    query.set("agentId", input.agentId.trim());
+  }
+  if (input.deviceId?.trim()) {
+    query.set("deviceId", input.deviceId.trim());
+  }
+  if (input.channel?.trim()) {
+    query.set("channel", input.channel.trim());
+  }
+  if (input.hostname?.trim()) {
+    query.set("hostname", input.hostname.trim());
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const result = await requestJson<unknown>(
+    `/api/v1/system/config/packages/watch/latest${suffix}`,
+    undefined,
+    signal,
+  );
+  if (!isSystemConfigPackage(result)) {
+    throw new Error("system.config.packages.watch.latest 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchAgentRuntimeViews(
+  signal?: AbortSignal,
+): Promise<AgentRuntimeViewListResponse> {
+  const result = await requestJson<unknown>(
+    "/api/v1/system/config/agents/views",
+    undefined,
+    signal,
+  );
+  if (!isAgentRuntimeViewListResponse(result)) {
+    throw new Error("system.config.agents.views 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchAgentRuntimeConfig(
+  agentId: string,
+  signal?: AbortSignal,
+): Promise<AgentRuntimeConfigResponse> {
+  const normalizedAgentId = agentId.trim();
+  if (!normalizedAgentId) {
+    throw new Error("agentId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/system/config/agent-runtime?agentId=${encodeURIComponent(normalizedAgentId)}`,
+    undefined,
+    signal,
+  );
+  if (!isAgentRuntimeConfigResponse(result)) {
+    throw new Error("system.config.agent-runtime 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchAgentReleases(
+  input?: {
+    limit?: number;
+    channel?: AgentReleaseChannel;
+    os?: string;
+    arch?: string;
+  },
+  signal?: AbortSignal,
+): Promise<AgentReleaseListResponse> {
+  const query = new URLSearchParams();
+  if (input?.limit && Number.isInteger(input.limit) && input.limit > 0) {
+    query.set("limit", String(input.limit));
+  }
+  if (input?.channel) {
+    query.set("channel", input.channel);
+  }
+  if (input?.os?.trim()) {
+    query.set("os", input.os.trim());
+  }
+  if (input?.arch?.trim()) {
+    query.set("arch", input.arch.trim());
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const result = await requestJson<unknown>(
+    `/api/v1/system/agent-releases${suffix}`,
+    undefined,
+    signal,
+  );
+  if (!isAgentReleaseListResponse(result)) {
+    throw new Error("system.agent-releases 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchAgentReleaseCheckPreview(
+  input: AgentReleaseCheckPreviewInput,
+  signal?: AbortSignal,
+): Promise<AgentReleaseCheckPreviewResponse> {
+  const query = new URLSearchParams({
+    currentVersion: input.currentVersion,
+    channel: input.channel,
+    os: input.os,
+    arch: input.arch,
+  });
+  if (input.agentId?.trim()) {
+    query.set("agentId", input.agentId.trim());
+  }
+  if (input.deviceId?.trim()) {
+    query.set("deviceId", input.deviceId.trim());
+  }
+  if (input.hostname?.trim()) {
+    query.set("hostname", input.hostname.trim());
+  }
+  if (input.ring?.trim()) {
+    query.set("ring", input.ring.trim());
+  }
+  const result = await requestJson<unknown>(
+    `/api/v1/system/agent-releases/check?${query.toString()}`,
+    undefined,
+    signal,
+  );
+  if (!isAgentReleaseCheckPreviewResponse(result)) {
+    throw new Error("system.agent-releases.check 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchAgentReleaseCheckBatchPreview(
+  input: AgentReleaseCheckBatchPreviewInput,
+  signal?: AbortSignal,
+): Promise<AgentReleaseCheckBatchPreviewResponse> {
+  const result = await requestJson<unknown>(
+    "/api/v1/system/agent-releases/check/batch",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    signal,
+  );
+  if (!isAgentReleaseBatchCheckPreviewResponse(result)) {
+    throw new Error("system.agent-releases.check.batch 返回结构不合法");
   }
   return result;
 }
@@ -4616,7 +7636,7 @@ export async function fetchMcpApprovals(
 }
 
 export async function createMcpApproval(
-  input: { toolId: string; reason?: string },
+  input: McpApprovalCreateInput,
   signal?: AbortSignal
 ): Promise<McpApprovalRequest> {
   const result = await requestJson<unknown>(
@@ -4828,6 +7848,12 @@ function mapOpenPlatformReplayJob(value: unknown): OpenPlatformReplayJob | null 
   const createdAt = asIsoDateString(value.createdAt);
   const updatedAt = asIsoDateString(value.updatedAt) ?? undefined;
   const summary = isRecord(value.summary) ? value.summary : undefined;
+  const baselineVersionId =
+    asString(value.baselineVersionId) ??
+    (summary ? asString(summary.baselineVersionId) : undefined) ??
+    (summary && isRecord(summary.metadata)
+      ? asString(summary.metadata.baselineVersionId)
+      : undefined);
   if (
     !runId ||
     !datasetId ||
@@ -4851,6 +7877,7 @@ function mapOpenPlatformReplayJob(value: unknown): OpenPlatformReplayJob | null 
     ...(jobId ? { jobId } : {}),
     datasetId,
     ...(baselineId ? { baselineId } : {}),
+    ...(baselineVersionId ? { baselineVersionId } : {}),
     candidateLabel,
     status,
     totalCases: Math.max(0, Math.round(totalCases)),
@@ -4881,6 +7908,8 @@ function mapOpenPlatformReplayBaseline(value: unknown): OpenPlatformReplayBaseli
   const promptVersion = asString(value.promptVersion) ?? undefined;
   const sampleCount = asFiniteNumber(value.sampleCount);
   const caseCount = asFiniteNumber(value.caseCount) ?? sampleCount;
+  const currentVersionId = asString(value.currentVersionId) ?? undefined;
+  const currentVersionNumber = asFiniteNumber(value.currentVersionNumber);
   const createdAt = asIsoDateString(value.createdAt);
   const updatedAt = asIsoDateString(value.updatedAt);
   if (!datasetId || !name || !model || !createdAt || !updatedAt) {
@@ -4896,10 +7925,49 @@ function mapOpenPlatformReplayBaseline(value: unknown): OpenPlatformReplayBaseli
     ...(promptVersion ? { promptVersion } : {}),
     ...(sampleCount !== null ? { sampleCount: Math.max(0, Math.round(sampleCount)) } : {}),
     ...(caseCount !== null ? { caseCount: Math.max(0, Math.round(caseCount)) } : {}),
+    ...(currentVersionId ? { currentVersionId } : {}),
+    ...(currentVersionNumber !== null ? { currentVersionNumber: Math.max(1, Math.round(currentVersionNumber)) } : {}),
     ...(description ? { description } : {}),
     ...(isRecord(value.metadata) ? { metadata: value.metadata } : {}),
     createdAt,
     updatedAt,
+  };
+}
+
+function mapOpenPlatformReplayDatasetVersion(
+  value: unknown,
+  datasetIdFallback?: string,
+): OpenPlatformReplayDatasetVersion | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const rawDatasetId = asString(value.datasetId) ?? asString(value.baselineId);
+  const datasetId = datasetIdFallback ?? rawDatasetId;
+  const version = asFiniteNumber(value.version);
+  const sampleCount =
+    asFiniteNumber(value.sampleCount) ?? asFiniteNumber(value.scenarioCount) ?? 0;
+  const createdAt = asIsoDateString(value.createdAt);
+  const promotedAt =
+    value.promotedAt === null ? null : asIsoDateString(value.promotedAt) ?? undefined;
+  if (!datasetId || !asString(value.id) || version === null || !asString(value.model) || !createdAt) {
+    return null;
+  }
+  const datasetRef =
+    asString(value.datasetRef) ??
+    (rawDatasetId && rawDatasetId !== datasetId ? rawDatasetId : undefined);
+  return {
+    id: asString(value.id) ?? "",
+    ...(asString(value.tenantId) ? { tenantId: asString(value.tenantId) ?? undefined } : {}),
+    datasetId,
+    version: Math.max(1, Math.round(version)),
+    ...(datasetRef ? { datasetRef } : {}),
+    model: asString(value.model) ?? "",
+    ...(asString(value.promptVersion) ? { promptVersion: asString(value.promptVersion) ?? undefined } : {}),
+    sampleCount: Math.max(0, Math.round(sampleCount)),
+    ...(isRecord(value.metadata) ? { metadata: value.metadata } : {}),
+    ...(asString(value.note) ? { note: asString(value.note) ?? undefined } : {}),
+    createdAt,
+    ...(promotedAt !== undefined ? { promotedAt } : {}),
   };
 }
 
@@ -4939,6 +8007,7 @@ function mapOpenPlatformReplayArtifact(value: unknown): OpenPlatformReplayArtifa
     return null;
   }
   return {
+    ...(asString(value.runId) ? { runId: asString(value.runId) ?? undefined } : {}),
     type,
     contentType,
     name: asString(value.name) ?? undefined,
@@ -4949,6 +8018,15 @@ function mapOpenPlatformReplayArtifact(value: unknown): OpenPlatformReplayArtifa
         : undefined,
     downloadName: asString(value.downloadName) ?? undefined,
     downloadUrl: asString(value.downloadUrl) ?? undefined,
+    checksum: asString(value.checksum) ?? undefined,
+    storageBackend:
+      value.storageBackend === "local" ||
+      value.storageBackend === "object" ||
+      value.storageBackend === "hybrid"
+        ? value.storageBackend
+        : undefined,
+    storageKey: asString(value.storageKey) ?? undefined,
+    metadata: isRecord(value.metadata) ? value.metadata : undefined,
     createdAt: asIsoDateString(value.createdAt) ?? undefined,
     inline: isRecord(value.inline) ? value.inline : undefined,
   };
@@ -5520,6 +8598,190 @@ export async function fetchOpenPlatformQualityProjectTrends(
   return payload;
 }
 
+export async function fetchOpenPlatformAutomationPolicy(
+  signal?: AbortSignal
+): Promise<OpenPlatformAutomationPolicy> {
+  const result = await requestJson<unknown>(
+    "/api/v2/quality/automation-policy",
+    undefined,
+    signal
+  );
+  if (!isOpenPlatformAutomationPolicy(result)) {
+    throw new Error("quality.automation-policy 返回结构不合法");
+  }
+  return result;
+}
+
+export async function upsertOpenPlatformAutomationPolicy(
+  input: OpenPlatformAutomationPolicyUpsertInput,
+  signal?: AbortSignal
+): Promise<OpenPlatformAutomationPolicy> {
+  const result = await requestJson<unknown>(
+    "/api/v2/quality/automation-policy",
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+    },
+    signal
+  );
+  if (!isOpenPlatformAutomationPolicy(result)) {
+    throw new Error("quality.automation-policy.upsert 返回结构不合法");
+  }
+  return result;
+}
+
+export async function simulateOpenPlatformAutomationPolicy(
+  input: OpenPlatformAutomationPolicySimulationInput,
+  signal?: AbortSignal,
+): Promise<OpenPlatformAutomationPolicySimulationResponse> {
+  const result = await requestJson<unknown>(
+    "/api/v2/quality/automation-policy/simulate",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    signal,
+  );
+  if (!isOpenPlatformAutomationPolicySimulationResponse(result)) {
+    throw new Error("quality.automation-policy.simulate 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchOpenPlatformQualityForecast(
+  input: {
+    from?: string;
+    to?: string;
+    metric?: string;
+    provider?: string;
+    workflow?: string;
+    limit?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<OpenPlatformQualityForecastResponse> {
+  const query = new URLSearchParams();
+  if (input.from) query.set("from", input.from);
+  if (input.to) query.set("to", input.to);
+  if (input.metric) query.set("metric", input.metric);
+  if (input.provider) query.set("provider", input.provider);
+  if (input.workflow) query.set("workflow", input.workflow);
+  if (typeof input.limit === "number") query.set("limit", String(input.limit));
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const result = await requestJson<unknown>(
+    `/api/v2/quality/reports/forecast${suffix}`,
+    undefined,
+    signal,
+  );
+  if (!isOpenPlatformQualityForecastResponse(result)) {
+    throw new Error("quality.forecast 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchOpenPlatformQualityAdvice(
+  input: {
+    from?: string;
+    to?: string;
+    provider?: string;
+    workflow?: string;
+  } = {},
+  signal?: AbortSignal,
+): Promise<OpenPlatformQualityAdviceResponse> {
+  const query = new URLSearchParams();
+  if (input.from) query.set("from", input.from);
+  if (input.to) query.set("to", input.to);
+  if (input.provider) query.set("provider", input.provider);
+  if (input.workflow) query.set("workflow", input.workflow);
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const result = await requestJson<unknown>(
+    `/api/v2/quality/reports/advice${suffix}`,
+    undefined,
+    signal,
+  );
+  if (!isOpenPlatformQualityAdviceResponse(result)) {
+    throw new Error("quality.advice 返回结构不合法");
+  }
+  return result;
+}
+
+export async function executeOpenPlatformQualityAdvice(
+  adviceId: string,
+  input: {
+    project: string;
+    severity: "info" | "warn" | "critical";
+    actionType: "scorecard_adjustment" | "replay_experiment";
+    metric?: string;
+    datasetId?: string;
+    candidateLabels?: string[];
+    triggerSource?: "manual" | "automatic";
+  },
+  signal?: AbortSignal,
+): Promise<OpenPlatformQualityAdviceExecution> {
+  const normalizedAdviceId = adviceId.trim();
+  if (!normalizedAdviceId) {
+    throw new Error("adviceId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v2/quality/advice/${encodeURIComponent(normalizedAdviceId)}/execute`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+    signal,
+  );
+  if (!isOpenPlatformQualityAdviceExecution(result)) {
+    throw new Error("quality.advice.execute 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchOpenPlatformQualityAdviceExecutions(
+  input: {
+    adviceId?: string;
+    actionType?: "scorecard_adjustment" | "replay_experiment";
+    status?: "pending" | "running" | "completed" | "failed" | "cancelled";
+    limit?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<OpenPlatformQualityAdviceExecutionListResponse> {
+  const query = new URLSearchParams();
+  if (input.adviceId) query.set("adviceId", input.adviceId);
+  if (input.actionType) query.set("actionType", input.actionType);
+  if (input.status) query.set("status", input.status);
+  if (typeof input.limit === "number") query.set("limit", String(input.limit));
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const result = await requestJson<unknown>(
+    `/api/v2/quality/advice/executions${suffix}`,
+    undefined,
+    signal,
+  );
+  if (!isOpenPlatformQualityAdviceExecutionListResponse(result)) {
+    throw new Error("quality.advice.executions 返回结构不合法");
+  }
+  return result;
+}
+
+export async function cancelOpenPlatformQualityAdviceExecution(
+  executionId: string,
+  signal?: AbortSignal,
+): Promise<OpenPlatformQualityAdviceExecution> {
+  const normalizedExecutionId = executionId.trim();
+  if (!normalizedExecutionId) {
+    throw new Error("executionId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v2/quality/advice/executions/${encodeURIComponent(normalizedExecutionId)}/cancel`,
+    {
+      method: "POST",
+    },
+    signal,
+  );
+  if (!isOpenPlatformQualityAdviceExecution(result)) {
+    throw new Error("quality.advice.executions.cancel 返回结构不合法");
+  }
+  return result;
+}
+
 export async function fetchOpenPlatformReplayDatasets(
   input?: OpenPlatformReplayDatasetListInput,
   signal?: AbortSignal
@@ -5576,6 +8838,122 @@ export async function createOpenPlatformReplayDataset(
     throw new Error("replay.datasets.create 返回结构不合法");
   }
   return mapped;
+}
+
+export async function fetchOpenPlatformReplayDatasetVersions(
+  datasetId: string,
+  signal?: AbortSignal,
+): Promise<OpenPlatformReplayDatasetVersionListResponse> {
+  const normalizedDatasetId = datasetId.trim();
+  if (!normalizedDatasetId) {
+    throw new Error("datasetId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    "/api/v2/replay/datasets/" + encodeURIComponent(normalizedDatasetId) + "/versions",
+    undefined,
+    signal,
+  );
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    throw new Error("replay.dataset-versions 返回结构不合法");
+  }
+  const items = result.items
+    .map((item) => mapOpenPlatformReplayDatasetVersion(item, normalizedDatasetId))
+    .filter((item): item is OpenPlatformReplayDatasetVersion => Boolean(item));
+  const payload: OpenPlatformReplayDatasetVersionListResponse = {
+    datasetId: normalizedDatasetId,
+    items,
+    total:
+      typeof result.total === "number" && Number.isInteger(result.total)
+        ? result.total
+        : items.length,
+    ...(result.currentVersionId === null
+      ? { currentVersionId: null }
+      : asString(result.currentVersionId)
+        ? { currentVersionId: asString(result.currentVersionId) ?? undefined }
+        : {}),
+    ...(typeof result.currentVersionNumber === "number" &&
+    Number.isInteger(result.currentVersionNumber) &&
+    result.currentVersionNumber >= 1
+      ? { currentVersionNumber: result.currentVersionNumber }
+      : result.currentVersionNumber === null
+        ? { currentVersionNumber: null }
+        : {}),
+  };
+  if (!isOpenPlatformReplayDatasetVersionListResponse(payload)) {
+    throw new Error("replay.dataset-versions 解析后结构不合法");
+  }
+  return payload;
+}
+
+export async function createOpenPlatformReplayDatasetVersion(
+  datasetId: string,
+  input: OpenPlatformReplayDatasetVersionCreateInput,
+  signal?: AbortSignal,
+): Promise<OpenPlatformReplayDatasetVersion> {
+  const normalizedDatasetId = datasetId.trim();
+  if (!normalizedDatasetId) {
+    throw new Error("datasetId 不能为空。");
+  }
+  const datasetRef = input.datasetRef?.trim() ?? input.datasetId?.trim();
+  if (!datasetRef) {
+    throw new Error("datasetRef 不能为空。");
+  }
+  const { datasetId: _legacyDatasetId, datasetRef: _inputDatasetRef, ...rest } = input;
+  const result = await requestJson<unknown>(
+    "/api/v2/replay/datasets/" + encodeURIComponent(normalizedDatasetId) + "/versions",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...rest,
+        datasetRef,
+      }),
+    },
+    signal,
+  );
+  const mapped = mapOpenPlatformReplayDatasetVersion(result, normalizedDatasetId);
+  if (!mapped) {
+    throw new Error("replay.dataset-versions.create 返回结构不合法");
+  }
+  return mapped;
+}
+
+export async function promoteOpenPlatformReplayDatasetVersion(
+  datasetId: string,
+  input: OpenPlatformReplayDatasetVersionPromoteInput,
+  signal?: AbortSignal,
+): Promise<OpenPlatformReplayDatasetVersionPromoteResponse> {
+  const normalizedDatasetId = datasetId.trim();
+  if (!normalizedDatasetId) {
+    throw new Error("datasetId 不能为空。");
+  }
+  const versionId = input.versionId.trim();
+  if (!versionId) {
+    throw new Error("versionId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    "/api/v2/replay/datasets/" + encodeURIComponent(normalizedDatasetId) + "/promote",
+    {
+      method: "POST",
+      body: JSON.stringify({ versionId }),
+    },
+    signal,
+  );
+  if (!isRecord(result)) {
+    throw new Error("replay.dataset-versions.promote 返回结构不合法");
+  }
+  const mappedVersion = mapOpenPlatformReplayDatasetVersion(result.version, normalizedDatasetId);
+  const mappedDataset = mapOpenPlatformReplayBaseline(result.dataset ?? result.baseline);
+  if (!mappedVersion) {
+    throw new Error("replay.dataset-versions.promote 返回结构不合法");
+  }
+  const payload: OpenPlatformReplayDatasetVersionPromoteResponse = {
+    ...(mappedDataset ? { dataset: mappedDataset } : {}),
+    version: mappedVersion,
+  };
+  if (!isOpenPlatformReplayDatasetVersionPromoteResponse(payload)) {
+    throw new Error("replay.dataset-versions.promote 解析后结构不合法");
+  }
+  return payload;
 }
 
 export async function fetchOpenPlatformReplayDatasetCases(
@@ -5756,6 +9134,199 @@ export async function fetchOpenPlatformReplayRuns(
 
 export const fetchOpenPlatformReplayJobs = fetchOpenPlatformReplayRuns;
 
+export async function createOpenPlatformReplayExperiment(
+  input: {
+    name: string;
+    datasetId: string;
+    baselineId?: string;
+    baselineVersionId?: string;
+    runIds?: string[];
+    candidateLabels?: string[];
+    autoRun?: boolean;
+    triggerSource?: "manual" | "quality_advice" | "automatic";
+    sourceAdviceId?: string;
+  },
+  signal?: AbortSignal,
+): Promise<OpenPlatformReplayExperiment> {
+  const { baselineVersionId, ...rest } = input;
+  const result = await requestJson<unknown>(
+    "/api/v2/replay/experiments",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...rest,
+        ...(baselineVersionId?.trim()
+          ? { baselineVersionId: baselineVersionId.trim() }
+          : {}),
+      }),
+    },
+    signal,
+  );
+  if (!isOpenPlatformReplayExperiment(result)) {
+    throw new Error("replay.experiments.create 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchOpenPlatformReplayExperiments(
+  input?: { datasetId?: string; limit?: number },
+  signal?: AbortSignal,
+): Promise<OpenPlatformReplayExperimentListResponse> {
+  const query = new URLSearchParams();
+  if (input?.datasetId) query.set("datasetId", input.datasetId);
+  if (typeof input?.limit === "number") query.set("limit", String(input.limit));
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/experiments${suffix}`,
+    undefined,
+    signal,
+  );
+  if (!isOpenPlatformReplayExperimentListResponse(result)) {
+    throw new Error("replay.experiments 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchOpenPlatformReplayExperimentsBatchCompare(
+  input: { experimentIds: string[]; datasetId?: string },
+  signal?: AbortSignal,
+): Promise<OpenPlatformReplayExperimentBatchCompareResponse> {
+  const experimentIds = Array.from(
+    new Set(input.experimentIds.map((item) => item.trim()).filter(Boolean)),
+  );
+  if (experimentIds.length < 2) {
+    throw new Error("experimentIds 至少需要 2 个。");
+  }
+  const query = new URLSearchParams();
+  query.set("experimentIds", experimentIds.join(","));
+  if (input.datasetId?.trim()) {
+    query.set("datasetId", input.datasetId.trim());
+  }
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/experiments/compare?${query.toString()}`,
+    undefined,
+    signal,
+  );
+  if (!isOpenPlatformReplayExperimentBatchCompareResponse(result)) {
+    throw new Error("replay.experiments.compare 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchOpenPlatformReplayExperiment(
+  experimentId: string,
+  signal?: AbortSignal,
+): Promise<OpenPlatformReplayExperiment> {
+  const normalizedExperimentId = experimentId.trim();
+  if (!normalizedExperimentId) {
+    throw new Error("experimentId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/experiments/${encodeURIComponent(normalizedExperimentId)}`,
+    undefined,
+    signal,
+  );
+  if (!isOpenPlatformReplayExperiment(result)) {
+    throw new Error("replay.experiment 返回结构不合法");
+  }
+  return result;
+}
+
+export async function runOpenPlatformReplayExperiment(
+  experimentId: string,
+  signal?: AbortSignal,
+): Promise<OpenPlatformReplayExperiment> {
+  const normalizedExperimentId = experimentId.trim();
+  if (!normalizedExperimentId) {
+    throw new Error("experimentId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/experiments/${encodeURIComponent(normalizedExperimentId)}/run`,
+    { method: "POST" },
+    signal,
+  );
+  if (!isOpenPlatformReplayExperiment(result)) {
+    throw new Error("replay.experiment.run 返回结构不合法");
+  }
+  return result;
+}
+
+export async function cancelOpenPlatformReplayExperiment(
+  experimentId: string,
+  signal?: AbortSignal,
+): Promise<OpenPlatformReplayExperiment> {
+  const normalizedExperimentId = experimentId.trim();
+  if (!normalizedExperimentId) {
+    throw new Error("experimentId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/experiments/${encodeURIComponent(normalizedExperimentId)}/cancel`,
+    { method: "POST" },
+    signal,
+  );
+  if (!isOpenPlatformReplayExperiment(result)) {
+    throw new Error("replay.experiment.cancel 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchOpenPlatformReplayExperimentResults(
+  experimentId: string,
+  signal?: AbortSignal,
+): Promise<OpenPlatformReplayExperiment> {
+  const normalizedExperimentId = experimentId.trim();
+  if (!normalizedExperimentId) {
+    throw new Error("experimentId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/experiments/${encodeURIComponent(normalizedExperimentId)}/results`,
+    undefined,
+    signal,
+  );
+  if (!isOpenPlatformReplayExperiment(result)) {
+    throw new Error("replay.experiment.results 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchOpenPlatformReplayExperimentCompare(
+  experimentId: string,
+  signal?: AbortSignal,
+): Promise<OpenPlatformReplayExperimentCompareResponse> {
+  const normalizedExperimentId = experimentId.trim();
+  if (!normalizedExperimentId) {
+    throw new Error("experimentId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/experiments/${encodeURIComponent(normalizedExperimentId)}/compare`,
+    undefined,
+    signal,
+  );
+  if (!isOpenPlatformReplayExperimentCompareResponse(result)) {
+    throw new Error("replay.experiment.compare 返回结构不合法");
+  }
+  return result;
+}
+
+export async function fetchOpenPlatformReplayExperimentWorkflow(
+  experimentId: string,
+  signal?: AbortSignal,
+): Promise<OpenPlatformReplayExperimentWorkflowResponse> {
+  const normalizedExperimentId = experimentId.trim();
+  if (!normalizedExperimentId) {
+    throw new Error("experimentId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/experiments/${encodeURIComponent(normalizedExperimentId)}/workflow`,
+    undefined,
+    signal,
+  );
+  if (!isOpenPlatformReplayExperimentWorkflowResponse(result)) {
+    throw new Error("replay.experiment.workflow 返回结构不合法");
+  }
+  return result;
+}
+
 export async function createOpenPlatformReplayRun(
   input: OpenPlatformReplayRunCreateInput,
   signal?: AbortSignal
@@ -5764,7 +9335,8 @@ export async function createOpenPlatformReplayRun(
   if (!datasetId) {
     throw new Error("datasetId 不能为空。");
   }
-  const { baselineId: _legacyBaselineId, datasetId: _inputDatasetId, ...rest } = input;
+  const baselineVersionId = input.baselineVersionId?.trim();
+  const { baselineId: _legacyBaselineId, datasetId: _inputDatasetId, baselineVersionId: _inputBaselineVersionId, ...rest } = input;
   const result = await requestJson<unknown>(
     "/api/v2/replay/runs",
     {
@@ -5772,6 +9344,7 @@ export async function createOpenPlatformReplayRun(
       body: JSON.stringify({
         ...rest,
         datasetId,
+        ...(baselineVersionId ? { baselineVersionId } : {}),
       }),
     },
     signal
@@ -5878,11 +9451,76 @@ export async function fetchOpenPlatformReplayArtifacts(
   const payload: OpenPlatformReplayArtifactListResponse = {
     runId: responseRunId,
     jobId: asString(result.jobId) ?? responseRunId,
+    ...(asString(result.datasetId) ? { datasetId: asString(result.datasetId) ?? undefined } : {}),
     items,
     total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
   };
   if (!isOpenPlatformReplayArtifactListResponse(payload)) {
     throw new Error("replay.artifacts 解析后结构不合法");
+  }
+  return payload;
+}
+
+export async function fetchOpenPlatformReplayDatasetVersionCases(
+  datasetId: string,
+  versionId: string,
+  signal?: AbortSignal,
+): Promise<OpenPlatformReplayDatasetVersionCaseListResponse> {
+  const normalizedDatasetId = datasetId.trim();
+  const normalizedVersionId = versionId.trim();
+  if (!normalizedDatasetId || !normalizedVersionId) {
+    throw new Error("datasetId 与 versionId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/datasets/${encodeURIComponent(normalizedDatasetId)}/versions/${encodeURIComponent(normalizedVersionId)}/cases`,
+    undefined,
+    signal,
+  );
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    throw new Error("replay.dataset-version-cases 返回结构不合法");
+  }
+  const items = result.items
+    .map((item) => mapOpenPlatformReplayDatasetCase(item))
+    .filter((item): item is OpenPlatformReplayDatasetCase => Boolean(item));
+  const payload: OpenPlatformReplayDatasetVersionCaseListResponse = {
+    datasetId: asString(result.datasetId) ?? normalizedDatasetId,
+    versionId: asString(result.versionId) ?? normalizedVersionId,
+    items,
+    total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
+  };
+  if (!isOpenPlatformReplayDatasetVersionCaseListResponse(payload)) {
+    throw new Error("replay.dataset-version-cases 解析后结构不合法");
+  }
+  return payload;
+}
+
+export async function fetchOpenPlatformReplayExperimentArtifacts(
+  experimentId: string,
+  signal?: AbortSignal,
+): Promise<OpenPlatformReplayExperimentArtifactListResponse> {
+  const normalizedExperimentId = experimentId.trim();
+  if (!normalizedExperimentId) {
+    throw new Error("experimentId 不能为空。");
+  }
+  const result = await requestJson<unknown>(
+    `/api/v2/replay/experiments/${encodeURIComponent(normalizedExperimentId)}/artifacts`,
+    undefined,
+    signal,
+  );
+  if (!isRecord(result) || !Array.isArray(result.items)) {
+    throw new Error("replay.experiment.artifacts 返回结构不合法");
+  }
+  const items = result.items
+    .map((item) => mapOpenPlatformReplayArtifact(item))
+    .filter((item): item is OpenPlatformReplayArtifact => Boolean(item));
+  const payload: OpenPlatformReplayExperimentArtifactListResponse = {
+    experimentId: asString(result.experimentId) ?? normalizedExperimentId,
+    datasetId: asString(result.datasetId) ?? "unknown",
+    items,
+    total: typeof result.total === "number" && Number.isInteger(result.total) ? result.total : items.length,
+  };
+  if (!isOpenPlatformReplayExperimentArtifactListResponse(payload)) {
+    throw new Error("replay.experiment.artifacts 解析后结构不合法");
   }
   return payload;
 }

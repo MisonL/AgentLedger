@@ -1,20 +1,52 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+  approveMcpApproval,
+  createIntegrationDlqRecoveryJob,
+  createMcpApproval,
   backfillSourceRegions,
+  cancelOpenPlatformQualityAdviceExecution,
+  cancelOpenPlatformReplayExperiment,
   clearAuthTokens,
   createOpenPlatformReplayDataset,
+  createOpenPlatformReplayDatasetVersion,
+  createOpenPlatformReplayExperiment,
   createOpenPlatformReplayRun,
   deleteOpenPlatformWebhook,
   downloadOpenPlatformReplayArtifact,
+  evaluateMcpTool,
+  executeOpenPlatformQualityAdvice,
   exportSessions,
   exportUsage,
   exchangeExternalAuthCode,
+  fetchAgentRuntimeConfig,
+  fetchAgentRuntimeViews,
+  fetchAlertExternalLinkFailures,
   fetchAlerts,
   fetchAuthProviders,
+  fetchIntegrationAlertFailureReport,
+  fetchIntegrationAlertFailureTrends,
+  fetchIntegrationDlqRecoveryJobDetail,
+  fetchIntegrationDlqRecoveryJobs,
+  fetchIntegrationDlqMessages,
+  fetchMcpApprovals,
+  fetchMcpInvocations,
+  fetchMcpPolicies,
   fetchPricingCatalog,
+  fetchOpenPlatformAutomationPolicy,
+  fetchOpenPlatformQualityAdvice,
+  fetchOpenPlatformQualityAdviceExecutions,
+  fetchOpenPlatformQualityForecast,
   fetchOpenPlatformQualityProjectTrends,
+  fetchOpenPlatformReplayExperimentsBatchCompare,
+  fetchOpenPlatformReplayExperimentCompare,
+  fetchOpenPlatformReplayExperimentResults,
+  fetchOpenPlatformReplayExperimentArtifacts,
+  fetchOpenPlatformReplayExperiments,
+  fetchOpenPlatformReplayExperimentWorkflow,
   fetchOpenPlatformReplayArtifacts,
   fetchOpenPlatformReplayDatasetCases,
+  fetchOpenPlatformReplayDatasetVersionCases,
+  fetchOpenPlatformReplayDatasetVersions,
   fetchOpenPlatformReplayDatasets,
   fetchOpenPlatformReplayDiffs,
   fetchOpenPlatformReplayRuns,
@@ -32,14 +64,19 @@ import {
   getAccessToken,
   hasAccessToken,
   replayOpenPlatformWebhook,
+  runOpenPlatformReplayExperiment,
   replaceOpenPlatformReplayDatasetCases,
+  promoteOpenPlatformReplayDatasetVersion,
   revokeOpenPlatformApiKey,
   searchSessions,
   setAuthTokens,
   setUnauthorizedHandler,
+  simulateOpenPlatformAutomationPolicy,
   testSourceConnection,
   updateSource,
   updateAlertStatus,
+  upsertMcpPolicy,
+  upsertOpenPlatformAutomationPolicy,
   upsertPricingCatalog,
 } from "../src/api";
 import type { SessionSearchInput } from "../src/types";
@@ -1137,6 +1174,461 @@ describe("api mock fallback gate", () => {
     });
   });
 
+  test("fetchAlertExternalLinkFailures 会携带查询参数并解析结果", async () => {
+    env.DEV = false;
+    setAuthTokens({
+      accessToken: "access-token-alert-failures",
+      refreshToken: "refresh-token-alert-failures",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (
+        url.includes("/api/v1/alerts/external-links/failures") &&
+        method === "GET"
+      ) {
+        return mockJsonResponse({
+          summary: {
+            total: 1,
+            pending: 0,
+            failed: 1,
+          },
+          items: [
+            {
+              id: "link-failure-1",
+              alertId: "alert-3",
+              alertStatus: "resolved",
+              externalType: "ticket",
+              externalSystem: "jira",
+              externalId: "INC-1001",
+              externalStatus: "acknowledged",
+              pendingExternalStatus: "resolved",
+              lastSyncedAt: "2026-03-01T11:00:00.000Z",
+              publishStatus: "success",
+              lastSyncResult: "failed",
+              lastSyncError: "downstream timeout",
+              lastSyncFailureStage: "dispatch_http",
+              lastSyncFailureCode: "downstream_http_5xx",
+              syncState: "failed",
+              retryable: true,
+              updatedAt: "2026-03-01T11:01:00.000Z",
+            },
+          ],
+          filters: {
+            alertId: "alert-3",
+            externalSystem: "jira",
+            syncState: "failed",
+            limit: 10,
+          },
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    await expect(
+      fetchAlertExternalLinkFailures({
+        alertId: "alert-3",
+        externalSystem: "jira",
+        syncState: "failed",
+        limit: 10,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          failed: 1,
+        }),
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            alertId: "alert-3",
+            externalSystem: "jira",
+            syncState: "failed",
+          }),
+        ]),
+      }),
+    );
+
+    const [requestUrl] = fetchSpy.mock.calls[0] ?? [];
+    const parsedUrl = new URL(toUrl(requestUrl), "http://localhost");
+    expect(parsedUrl.searchParams.get("alertId")).toBe("alert-3");
+    expect(parsedUrl.searchParams.get("externalSystem")).toBe("jira");
+    expect(parsedUrl.searchParams.get("syncState")).toBe("failed");
+    expect(parsedUrl.searchParams.get("limit")).toBe("10");
+  });
+
+  test("Integration DLQ recovery job helper 支持查询、创建与详情加载", async () => {
+    env.DEV = false;
+    setAuthTokens({
+      accessToken: "access-token-integration-dlq",
+      refreshToken: "refresh-token-integration-dlq",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (url.includes("/api/v1/integrations/dlq/messages?") && method === "GET") {
+        return mockJsonResponse({
+          items: [
+            {
+              messageId: "INTEGRATION_DISPATCH_DLQ:101",
+              stream: "INTEGRATION_DISPATCH_DLQ",
+              subject: "integration.alert.external_status_sync",
+              eventType: "alert_external_status_sync",
+              channel: "ticket",
+              callbackId: "sync-result:1",
+              tenantId: "default",
+              alertId: "alert-3",
+              externalType: "ticket",
+              externalId: "INC-1001",
+              failedAt: "2026-03-01T11:00:00.000Z",
+              attempt: 4,
+              error: "downstream timeout",
+              retryable: true,
+              payload: {
+                event_type: "alert_external_status_sync",
+              },
+            },
+          ],
+          total: 1,
+          filters: {
+            eventType: "alert_external_status_sync",
+            channel: "ticket",
+            alertId: "alert-3",
+            callbackId: "sync-result:1",
+            limit: 10,
+          },
+        });
+      }
+      if (url.endsWith("/api/v1/integrations/dlq/recovery-jobs") && method === "POST") {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+          messageIds: ["INTEGRATION_DISPATCH_DLQ:101"],
+        });
+        return mockJsonResponse({
+          id: "dlq-job-1",
+          tenantId: "default",
+          status: "queued",
+          requestedAt: "2026-03-01T11:10:00.000Z",
+          messageIds: ["INTEGRATION_DISPATCH_DLQ:101"],
+          summary: {
+            total: 1,
+            replayed: 0,
+            failed: 0,
+          },
+          items: [],
+        }, 202);
+      }
+      if (url.includes("/api/v1/integrations/dlq/recovery-jobs?") && method === "GET") {
+        return mockJsonResponse({
+          items: [
+            {
+              id: "dlq-job-1",
+              tenantId: "default",
+              status: "completed",
+              requestedAt: "2026-03-01T11:10:00.000Z",
+              startedAt: "2026-03-01T11:10:01.000Z",
+              finishedAt: "2026-03-01T11:10:02.000Z",
+              messageIds: ["INTEGRATION_DISPATCH_DLQ:101"],
+              summary: {
+                total: 1,
+                replayed: 1,
+                failed: 0,
+              },
+              items: [
+                {
+                  messageId: "INTEGRATION_DISPATCH_DLQ:101",
+                  status: "replayed",
+                },
+              ],
+            },
+          ],
+          total: 1,
+          filters: {
+            limit: 10,
+          },
+        });
+      }
+      if (url.endsWith("/api/v1/integrations/dlq/recovery-jobs/dlq-job-1") && method === "GET") {
+        return mockJsonResponse({
+          id: "dlq-job-1",
+          tenantId: "default",
+          status: "completed",
+          requestedAt: "2026-03-01T11:10:00.000Z",
+          startedAt: "2026-03-01T11:10:01.000Z",
+          finishedAt: "2026-03-01T11:10:02.000Z",
+          messageIds: ["INTEGRATION_DISPATCH_DLQ:101"],
+          summary: {
+            total: 1,
+            replayed: 1,
+            failed: 0,
+          },
+          items: [
+            {
+              messageId: "INTEGRATION_DISPATCH_DLQ:101",
+              status: "replayed",
+            },
+          ],
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    await expect(
+      fetchIntegrationDlqMessages({
+        eventType: "alert_external_status_sync",
+        channel: "ticket",
+        alertId: "alert-3",
+        callbackId: "sync-result:1",
+        limit: 10,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        total: 1,
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            messageId: "INTEGRATION_DISPATCH_DLQ:101",
+            alertId: "alert-3",
+          }),
+        ]),
+      }),
+    );
+
+    await expect(
+      createIntegrationDlqRecoveryJob({
+        messageIds: ["INTEGRATION_DISPATCH_DLQ:101"],
+      }),
+    ).resolves.toEqual({
+      id: "dlq-job-1",
+      tenantId: "default",
+      status: "queued",
+      requestedAt: "2026-03-01T11:10:00.000Z",
+      messageIds: ["INTEGRATION_DISPATCH_DLQ:101"],
+      summary: {
+        total: 1,
+        replayed: 0,
+        failed: 0,
+      },
+      items: [],
+    });
+
+    await expect(
+      fetchIntegrationDlqRecoveryJobs({ limit: 10 }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        total: 1,
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            id: "dlq-job-1",
+            status: "completed",
+          }),
+        ]),
+      }),
+    );
+
+    await expect(
+      fetchIntegrationDlqRecoveryJobDetail("dlq-job-1"),
+    ).resolves.toEqual({
+      id: "dlq-job-1",
+      tenantId: "default",
+      status: "completed",
+      requestedAt: "2026-03-01T11:10:00.000Z",
+      startedAt: "2026-03-01T11:10:01.000Z",
+      finishedAt: "2026-03-01T11:10:02.000Z",
+      messageIds: ["INTEGRATION_DISPATCH_DLQ:101"],
+      summary: {
+        total: 1,
+        replayed: 1,
+        failed: 0,
+      },
+      items: [
+        {
+          messageId: "INTEGRATION_DISPATCH_DLQ:101",
+          status: "replayed",
+        },
+      ],
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
+  test("fetchIntegrationAlertFailureReport 支持查询与解析结果", async () => {
+    env.DEV = false;
+    setAuthTokens({
+      accessToken: "access-token-failure-report",
+      refreshToken: "refresh-token-failure-report",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (
+        url.includes("/api/v1/integrations/failure-reports/alerts?") &&
+        method === "GET"
+      ) {
+        return mockJsonResponse({
+          summary: {
+            totalEvents: 2,
+            retryRequested: 1,
+            retryCompleted: 0,
+            retryFailed: 1,
+            dlqQueried: 0,
+            dlqReplayed: 0,
+            recoveryJobsCreated: 0,
+            recoveryJobsCompleted: 0,
+            recoveryJobsFailed: 0,
+          },
+          items: [
+            {
+              occurredAt: "2026-03-01T11:00:00.000Z",
+              action: "control_plane.alert_external_link_retry_failed",
+              actionType: "retry_failed",
+              alertId: "alert-1",
+              externalSystem: "ticket",
+              stage: "dispatch_http",
+              code: "downstream_http_5xx",
+              status: "failed",
+              metadata: {},
+            },
+          ],
+          filters: {
+            externalSystem: "ticket",
+            limit: 10,
+          },
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    await expect(
+      fetchIntegrationAlertFailureReport({
+        externalSystem: "ticket",
+        limit: 10,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          retryFailed: 1,
+        }),
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            actionType: "retry_failed",
+            externalSystem: "ticket",
+          }),
+        ]),
+      }),
+    );
+  });
+
+  test("fetchIntegrationAlertFailureTrends 支持查询与解析结果", async () => {
+    env.DEV = false;
+    setAuthTokens({
+      accessToken: "access-token-failure-trends",
+      refreshToken: "refresh-token-failure-trends",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (
+        url.includes("/api/v1/integrations/failure-reports/alerts/trends?") &&
+        method === "GET"
+      ) {
+        return mockJsonResponse({
+          summary: {
+            totalEvents: 3,
+            requestedEvents: 1,
+            successEvents: 1,
+            failedEvents: 1,
+            days: 2,
+            averageEventsPerDay: 1.5,
+            peakDate: "2026-03-01",
+            peakCount: 2,
+          },
+          daily: [
+            {
+              date: "2026-03-01",
+              totalEvents: 2,
+              requestedEvents: 0,
+              successEvents: 1,
+              failedEvents: 1,
+              uniqueAlerts: 1,
+              retryRequested: 0,
+              retryCompleted: 0,
+              retryFailed: 1,
+              dlqQueried: 0,
+              dlqReplayed: 0,
+              recoveryJobsCreated: 0,
+              recoveryJobsCompleted: 1,
+              recoveryJobsFailed: 0,
+            },
+          ],
+          capacity: {
+            externalSystems: [
+              {
+                name: "ticket",
+                totalEvents: 2,
+                requestedEvents: 0,
+                successEvents: 1,
+                failedEvents: 1,
+                uniqueAlerts: 1,
+                lastOccurredAt: "2026-03-01T11:00:00.000Z",
+              },
+            ],
+            stages: [
+              {
+                name: "dispatch_http",
+                totalEvents: 1,
+                requestedEvents: 0,
+                successEvents: 0,
+                failedEvents: 1,
+                uniqueAlerts: 1,
+                lastOccurredAt: "2026-03-01T10:00:00.000Z",
+              },
+            ],
+          },
+          filters: {
+            externalSystem: "ticket",
+            top: 5,
+          },
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    await expect(
+      fetchIntegrationAlertFailureTrends({
+        externalSystem: "ticket",
+        top: 5,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          peakDate: "2026-03-01",
+          peakCount: 2,
+        }),
+        capacity: expect.objectContaining({
+          externalSystems: expect.arrayContaining([
+            expect.objectContaining({
+              name: "ticket",
+              totalEvents: 2,
+            }),
+          ]),
+        }),
+      }),
+    );
+  });
+
   test("open platform 支持吊销 API Key、删除 Webhook 与回放 Webhook", async () => {
     env.DEV = false;
     setAuthTokens({
@@ -1338,6 +1830,91 @@ describe("api mock fallback gate", () => {
         });
       }
 
+      if (url.pathname === "/api/v2/replay/datasets/baseline-op-1/versions" && method === "GET") {
+        return mockJsonResponse({
+          items: [
+            {
+              id: "baseline-op-1:v1",
+              tenantId: "default",
+              datasetId: "dataset-op-1",
+              version: 1,
+              model: "gpt-5-codex",
+              promptVersion: "v3",
+              sampleCount: 20,
+              metadata: {},
+              createdAt: "2026-03-03T12:10:00.000Z",
+              promotedAt: "2026-03-03T12:10:00.000Z",
+            },
+          ],
+          total: 1,
+          currentVersionId: "baseline-op-1:v1",
+          currentVersionNumber: 1,
+        });
+      }
+
+      if (url.pathname === "/api/v2/replay/datasets/baseline-op-1/versions" && method === "POST") {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+          datasetRef: "dataset-op-2",
+          model: "gpt-5-codex-mini",
+          promptVersion: "v4",
+          sampleCount: 12,
+          note: "candidate rollout",
+        });
+        return mockJsonResponse(
+          {
+            id: "baseline-op-1:v2",
+            tenantId: "default",
+            datasetId: "dataset-op-2",
+            baselineId: "baseline-op-1",
+            version: 2,
+            model: "gpt-5-codex-mini",
+            promptVersion: "v4",
+            sampleCount: 12,
+            metadata: { rollout: "candidate" },
+            note: "candidate rollout",
+            createdAt: "2026-03-03T12:11:00.000Z",
+            promotedAt: null,
+          },
+          201,
+        );
+      }
+
+      if (url.pathname === "/api/v2/replay/datasets/baseline-op-1/promote" && method === "POST") {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+          versionId: "baseline-op-1:v2",
+        });
+        return mockJsonResponse({
+          dataset: {
+            id: "baseline-op-1",
+            tenantId: "default",
+            name: "baseline smoke",
+            datasetId: "dataset-op-2",
+            model: "gpt-5-codex-mini",
+            promptVersion: "v4",
+            caseCount: 12,
+            sampleCount: 12,
+            currentVersionId: "baseline-op-1:v2",
+            currentVersionNumber: 2,
+            metadata: { rollout: "candidate" },
+            createdAt: "2026-03-03T12:10:00.000Z",
+            updatedAt: "2026-03-03T12:12:00.000Z",
+          },
+          version: {
+            id: "baseline-op-1:v2",
+            tenantId: "default",
+            datasetId: "dataset-op-2",
+            version: 2,
+            model: "gpt-5-codex-mini",
+            promptVersion: "v4",
+            sampleCount: 12,
+            metadata: { rollout: "candidate" },
+            note: "candidate rollout",
+            createdAt: "2026-03-03T12:11:00.000Z",
+            promotedAt: "2026-03-03T12:12:00.000Z",
+          },
+        });
+      }
+
       if (url.pathname === "/api/v2/replay/datasets/baseline-op-1/cases" && method === "GET") {
         return mockJsonResponse({
           datasetId: "baseline-op-1",
@@ -1390,6 +1967,7 @@ describe("api mock fallback gate", () => {
       if (url.pathname === "/api/v2/replay/runs" && method === "POST") {
         expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
           datasetId: "baseline-op-1",
+          baselineVersionId: "baseline-op-1:v2",
           candidateLabel: "candidate-v3",
           sampleLimit: 20,
         });
@@ -1401,6 +1979,7 @@ describe("api mock fallback gate", () => {
             tenantId: "default",
             datasetId: "baseline-op-1",
             baselineId: "baseline-op-1",
+            baselineVersionId: "baseline-op-1:v2",
             candidateLabel: "candidate-v3",
             status: "pending",
             totalCases: 20,
@@ -1408,7 +1987,9 @@ describe("api mock fallback gate", () => {
             improvedCases: 0,
             regressedCases: 0,
             unchangedCases: 0,
-            summary: {},
+            summary: {
+              baselineVersionId: "baseline-op-1:v2",
+            },
             diffs: [],
             createdAt: "2026-03-03T12:20:00.000Z",
             updatedAt: "2026-03-03T12:20:00.000Z",
@@ -1484,9 +2065,30 @@ describe("api mock fallback gate", () => {
         });
       }
 
+      if (url.pathname === "/api/v2/replay/datasets/baseline-op-1/versions/baseline-op-1%3Av2/cases" && method === "GET") {
+        return mockJsonResponse({
+          datasetId: "baseline-op-1",
+          versionId: "baseline-op-1:v2",
+          items: [
+            {
+              datasetId: "baseline-op-1",
+              caseId: "case-v2-1",
+              sortOrder: 0,
+              input: "What changed in v2?",
+              expectedOutput: "A concise delta summary",
+              metadata: { version: "v2" },
+              createdAt: "2026-03-03T12:11:00.000Z",
+              updatedAt: "2026-03-03T12:11:00.000Z",
+            },
+          ],
+          total: 1,
+        });
+      }
+
       if (url.pathname === "/api/v2/replay/runs/run-op-1/artifacts" && method === "GET") {
         return mockJsonResponse({
           runId: "run-op-1",
+          datasetId: "baseline-op-1",
           items: [
             {
               type: "summary",
@@ -1495,6 +2097,10 @@ describe("api mock fallback gate", () => {
               downloadName: "summary.json",
               downloadUrl: "/api/v2/replay/runs/run-op-1/artifacts/summary/download",
               byteSize: 128,
+              checksum: "sha256:summary",
+              storageBackend: "local",
+              storageKey: "/tmp/run-op-1/summary.json",
+              metadata: { source: "run" },
               createdAt: "2026-03-03T12:25:00.000Z",
               inline: { totalCases: 20 },
             },
@@ -1520,6 +2126,31 @@ describe("api mock fallback gate", () => {
             },
           ],
           total: 3,
+        });
+      }
+
+      if (url.pathname === "/api/v2/replay/experiments/exp-1/artifacts" && method === "GET") {
+        return mockJsonResponse({
+          experimentId: "exp-1",
+          datasetId: "baseline-op-1",
+          items: [
+            {
+              runId: "run-op-1",
+              type: "summary",
+              name: "summary.json",
+              contentType: "application/json",
+              downloadName: "summary.json",
+              downloadUrl: "/api/v2/replay/runs/run-op-1/artifacts/summary/download",
+              byteSize: 128,
+              checksum: "sha256:summary",
+              storageBackend: "local",
+              storageKey: "/tmp/run-op-1/summary.json",
+              metadata: { source: "experiment" },
+              createdAt: "2026-03-03T12:25:00.000Z",
+              inline: { totalCases: 20 },
+            },
+          ],
+          total: 1,
         });
       }
 
@@ -1590,9 +2221,65 @@ describe("api mock fallback gate", () => {
       })
     );
 
+    await expect(fetchOpenPlatformReplayDatasetVersions("baseline-op-1")).resolves.toEqual(
+      expect.objectContaining({
+        datasetId: "baseline-op-1",
+        total: 1,
+        currentVersionId: "baseline-op-1:v1",
+        currentVersionNumber: 1,
+        items: [
+          expect.objectContaining({
+            id: "baseline-op-1:v1",
+            version: 1,
+            datasetId: "baseline-op-1",
+            model: "gpt-5-codex",
+          }),
+        ],
+      }),
+    );
+
+    await expect(
+      createOpenPlatformReplayDatasetVersion("baseline-op-1", {
+        datasetRef: "dataset-op-2",
+        model: "gpt-5-codex-mini",
+        promptVersion: "v4",
+        sampleCount: 12,
+        note: "candidate rollout",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: "baseline-op-1:v2",
+        version: 2,
+        datasetId: "baseline-op-1",
+        datasetRef: "dataset-op-2",
+        model: "gpt-5-codex-mini",
+        note: "candidate rollout",
+      }),
+    );
+
+    await expect(
+      promoteOpenPlatformReplayDatasetVersion("baseline-op-1", {
+        versionId: "baseline-op-1:v2",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        dataset: expect.objectContaining({
+          datasetId: "baseline-op-1",
+          currentVersionId: "baseline-op-1:v2",
+          currentVersionNumber: 2,
+        }),
+        version: expect.objectContaining({
+          id: "baseline-op-1:v2",
+          version: 2,
+          promotedAt: "2026-03-03T12:12:00.000Z",
+        }),
+      }),
+    );
+
     await expect(
       createOpenPlatformReplayRun({
         datasetId: "baseline-op-1",
+        baselineVersionId: "baseline-op-1:v2",
         candidateLabel: "candidate-v3",
         sampleLimit: 20,
       })
@@ -1603,8 +2290,20 @@ describe("api mock fallback gate", () => {
         jobId: "run-op-1",
         datasetId: "baseline-op-1",
         baselineId: "baseline-op-1",
+        baselineVersionId: "baseline-op-1:v2",
         status: "pending",
         totalCases: 20,
+      })
+    );
+
+    await expect(
+      fetchOpenPlatformReplayDatasetVersionCases("baseline-op-1", "baseline-op-1:v2")
+    ).resolves.toEqual(
+      expect.objectContaining({
+        datasetId: "baseline-op-1",
+        versionId: "baseline-op-1:v2",
+        total: 1,
+        items: [expect.objectContaining({ caseId: "case-v2-1" })],
       })
     );
 
@@ -1686,11 +2385,14 @@ describe("api mock fallback gate", () => {
       expect.objectContaining({
         runId: "run-op-1",
         jobId: "run-op-1",
+        datasetId: "baseline-op-1",
         total: 3,
         items: expect.arrayContaining([
           expect.objectContaining({
             type: "summary",
             byteSize: 128,
+            checksum: "sha256:summary",
+            storageBackend: "local",
             downloadUrl: "/api/v2/replay/runs/run-op-1/artifacts/summary/download",
           }),
           expect.objectContaining({
@@ -1699,6 +2401,17 @@ describe("api mock fallback gate", () => {
             downloadUrl: "/api/v2/replay/runs/run-op-1/artifacts/cases/download",
           }),
         ]),
+      })
+    );
+
+    await expect(
+      fetchOpenPlatformReplayExperimentArtifacts("exp-1")
+    ).resolves.toEqual(
+      expect.objectContaining({
+        experimentId: "exp-1",
+        datasetId: "baseline-op-1",
+        total: 1,
+        items: [expect.objectContaining({ runId: "run-op-1", type: "summary" })],
       })
     );
 
@@ -1719,6 +2432,665 @@ describe("api mock fallback gate", () => {
         "/api/v2/replay/runs/run-op-1/artifacts/summary/download"
       )
     ).toBe(true);
+  });
+
+  test("open platform 支持 quality advice execution 与 replay experiment workflow", async () => {
+    env.DEV = false;
+    setAuthTokens({
+      accessToken: "access-token-open-platform-advanced",
+      refreshToken: "refresh-token-open-platform-advanced",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = new URL(toUrl(input), "http://localhost");
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.pathname === "/api/v2/quality/automation-policy" && method === "GET") {
+        return mockJsonResponse({
+          tenantId: "default",
+          toolId: "quality.replay.advice.execute",
+          scope: "quality_replay_advice",
+          riskLevel: "high",
+          decision: "require_approval",
+          reason: "质量高风险命中矩阵时需要审批",
+          evaluationScoreThreshold: 78,
+          triggerOnEvaluationFailure: true,
+          triggerOnReplayRegression: true,
+          defaultActionType: "scorecard_adjustment",
+          strategyMatrix: [
+            {
+              id: "critical-replay",
+              metric: "accuracy",
+              severity: "critical",
+              trendDirection: "down",
+              provider: "github",
+              workflow: "ci-main",
+              projectPattern: "agentledger/*",
+              minConfidence: 0.6,
+              regressionProbabilityAtLeast: 0.5,
+              replayRegressionAtLeast: 1,
+              actionType: "replay_experiment",
+              requiresApproval: true,
+              cooldownMinutes: 30,
+              reason: "高风险优先回放",
+            },
+          ],
+          updatedAt: "2026-03-08T09:59:00.000Z",
+        });
+      }
+      if (url.pathname === "/api/v2/quality/automation-policy" && method === "PUT") {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+          riskLevel: "high",
+          decision: "require_approval",
+          reason: "质量高风险命中矩阵时需要审批",
+          evaluationScoreThreshold: 78,
+          triggerOnEvaluationFailure: true,
+          triggerOnReplayRegression: true,
+          strategyMatrix: [
+            {
+              id: "critical-replay",
+              metric: "accuracy",
+              severity: "critical",
+              trendDirection: "down",
+              provider: "github",
+              workflow: "ci-main",
+              projectPattern: "agentledger/*",
+              minConfidence: 0.6,
+              regressionProbabilityAtLeast: 0.5,
+              replayRegressionAtLeast: 1,
+              actionType: "replay_experiment",
+              requiresApproval: true,
+              cooldownMinutes: 30,
+              reason: "高风险优先回放",
+            },
+          ],
+        });
+        return mockJsonResponse({
+          tenantId: "default",
+          toolId: "quality.replay.advice.execute",
+          scope: "quality_replay_advice",
+          riskLevel: "high",
+          decision: "require_approval",
+          reason: "质量高风险命中矩阵时需要审批",
+          evaluationScoreThreshold: 78,
+          triggerOnEvaluationFailure: true,
+          triggerOnReplayRegression: true,
+          defaultActionType: "scorecard_adjustment",
+          strategyMatrix: [
+            {
+              id: "critical-replay",
+              metric: "accuracy",
+              severity: "critical",
+              trendDirection: "down",
+              provider: "github",
+              workflow: "ci-main",
+              projectPattern: "agentledger/*",
+              minConfidence: 0.6,
+              regressionProbabilityAtLeast: 0.5,
+              replayRegressionAtLeast: 1,
+              actionType: "replay_experiment",
+              requiresApproval: true,
+              cooldownMinutes: 30,
+              reason: "高风险优先回放",
+            },
+          ],
+          updatedAt: "2026-03-08T10:00:00.000Z",
+        });
+      }
+      if (
+        url.pathname === "/api/v2/quality/automation-policy/simulate" &&
+        method === "POST"
+      ) {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+          metric: "accuracy",
+          score: 63,
+          trendDirection: "down",
+          confidence: 0.82,
+          regressionProbability: 0.73,
+          replayRegressionCount: 2,
+        });
+        return mockJsonResponse({
+          metric: "accuracy",
+          severity: "critical",
+          confidence: 0.82,
+          trendDirection: "down",
+          regressionProbability: 0.73,
+          replayRegressionCount: 2,
+          matchedRuleId: "critical-replay",
+          resolvedAction: "replay_experiment",
+          requiresApproval: true,
+          blockingReasons: [],
+        });
+      }
+      if (url.pathname === "/api/v2/quality/reports/forecast" && method === "GET") {
+        return mockJsonResponse({
+          items: [
+            {
+              project: "agentledger/main",
+              metric: "accuracy",
+              modelVersion: "quality-heuristic-v2",
+              forecastHorizonDays: 7,
+              predictedScore: 88.5,
+              expectedScoreRange: {
+                lower: 86.3,
+                upper: 90.7,
+              },
+              confidence: 0.82,
+              trendDirection: "down",
+              regressionProbability: 0.61,
+              rationale: "passRate 回落",
+              featureContributions: [
+                {
+                  feature: "passRateGap",
+                  impact: -0.52,
+                  direction: "negative",
+                },
+              ],
+              windowComparisons: {
+                currentWindow: { averageScore: 88.5 },
+                previousWindow: { averageScore: 91.1 },
+              },
+              basis: {},
+            },
+          ],
+          total: 1,
+          filters: {},
+        });
+      }
+      if (url.pathname === "/api/v2/quality/reports/advice" && method === "GET") {
+        return mockJsonResponse({
+          items: [
+            {
+              id: "advice-1",
+              project: "agentledger/main",
+              severity: "warn",
+              title: "质量波动",
+              recommendation: "建议执行回放实验",
+              explanation: "质量开始回落，建议按矩阵先补回放。",
+              strategyMatrixMatch: "critical-replay",
+              autoExecutionDecision: "approval_required",
+              blockingReasons: ["dataset_required_for_replay_experiment"],
+              basis: {},
+              relatedMetrics: ["avgScore"],
+              suggestedActions: ["replay_experiment"],
+              latestExecutionStatus: "completed",
+            },
+          ],
+          total: 1,
+          filters: {},
+        });
+      }
+      if (url.pathname === "/api/v2/quality/advice/advice-1/execute" && method === "POST") {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+          project: "agentledger/main",
+          severity: "warn",
+          actionType: "replay_experiment",
+          datasetId: "dataset-op-1",
+          candidateLabels: ["candidate-a", "candidate-b"],
+        });
+        return mockJsonResponse(
+          {
+            id: "advice-exec-1",
+            tenantId: "default",
+            adviceId: "advice-1",
+            project: "agentledger/main",
+            severity: "warn",
+            actionType: "replay_experiment",
+            triggerSource: "manual",
+            status: "completed",
+            datasetId: "dataset-op-1",
+            experimentId: "exp-1",
+            candidateLabels: ["candidate-a", "candidate-b"],
+            resultSummary: { experimentId: "exp-1" },
+            requestedAt: "2026-03-08T10:00:00.000Z",
+            startedAt: "2026-03-08T10:00:01.000Z",
+            finishedAt: "2026-03-08T10:00:02.000Z",
+            updatedAt: "2026-03-08T10:00:02.000Z",
+          },
+          201,
+        );
+      }
+      if (url.pathname === "/api/v2/quality/advice/executions" && method === "GET") {
+        return mockJsonResponse({
+          items: [
+            {
+              id: "advice-exec-1",
+              tenantId: "default",
+              adviceId: "advice-1",
+              project: "agentledger/main",
+              severity: "warn",
+              actionType: "replay_experiment",
+              triggerSource: "manual",
+              status: "completed",
+              experimentId: "exp-1",
+              requestedAt: "2026-03-08T10:00:00.000Z",
+              updatedAt: "2026-03-08T10:00:02.000Z",
+            },
+          ],
+          total: 1,
+          filters: {},
+        });
+      }
+      if (url.pathname === "/api/v2/quality/advice/executions/advice-exec-1/cancel" && method === "POST") {
+        return mockJsonResponse({
+          id: "advice-exec-1",
+          tenantId: "default",
+          adviceId: "advice-1",
+          project: "agentledger/main",
+          severity: "warn",
+          actionType: "replay_experiment",
+          triggerSource: "manual",
+          status: "cancelled",
+          requestedAt: "2026-03-08T10:00:00.000Z",
+          updatedAt: "2026-03-08T10:00:03.000Z",
+        });
+      }
+      if (url.pathname === "/api/v2/replay/experiments" && method === "POST") {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+          name: "Experiment",
+          datasetId: "dataset-op-1",
+          baselineVersionId: "dataset-op-1:v2",
+          candidateLabels: ["candidate-a", "candidate-b"],
+          autoRun: true,
+          triggerSource: "quality_advice",
+        });
+        return mockJsonResponse(
+          {
+            id: "exp-1",
+            tenantId: "default",
+            name: "Experiment",
+            datasetId: "dataset-op-1",
+            baselineVersionId: "dataset-op-1:v2",
+            status: "queued",
+            triggerSource: "quality_advice",
+            executionMode: "automatic",
+            candidateLabels: ["candidate-a", "candidate-b"],
+            runIds: ["run-1", "run-2"],
+            summary: {},
+            runs: [],
+            createdAt: "2026-03-08T10:00:00.000Z",
+            updatedAt: "2026-03-08T10:00:00.000Z",
+          },
+          201,
+        );
+      }
+      if (url.pathname === "/api/v2/replay/experiments" && method === "GET") {
+        return mockJsonResponse({
+          items: [
+            {
+              id: "exp-1",
+              tenantId: "default",
+              name: "Experiment",
+              datasetId: "dataset-op-1",
+              baselineVersionId: "dataset-op-1:v2",
+              status: "queued",
+              triggerSource: "quality_advice",
+              executionMode: "automatic",
+              candidateLabels: ["candidate-a", "candidate-b"],
+              runIds: ["run-1", "run-2"],
+              summary: {},
+              runs: [],
+              createdAt: "2026-03-08T10:00:00.000Z",
+              updatedAt: "2026-03-08T10:00:00.000Z",
+            },
+          ],
+          total: 1,
+        });
+      }
+      if (url.pathname === "/api/v2/replay/experiments/compare" && method === "GET") {
+        expect(url.searchParams.get("experimentIds")).toBe("exp-1,exp-2");
+        expect(url.searchParams.get("datasetId")).toBe("dataset-op-1");
+        return mockJsonResponse({
+          items: [
+            {
+              experimentId: "exp-1",
+              name: "Experiment",
+              datasetId: "dataset-op-1",
+              status: "completed",
+              workflowStage: "completed",
+              triggerSource: "quality_advice",
+              sourceAdviceId: "advice-1",
+              candidateLabels: ["candidate-a", "candidate-b"],
+              totalRuns: 2,
+              completedRuns: 2,
+              failedRuns: 0,
+              runningRuns: 0,
+              queuedRuns: 0,
+              totalCases: 24,
+              processedCases: 24,
+              improvedCases: 8,
+              regressedCases: 2,
+              improvementRate: 0.3333,
+              regressionRate: 0.0833,
+              netDelta: 6,
+              bestRunId: "run-1",
+              worstRunId: "run-2",
+              runs: [],
+              updatedAt: "2026-03-08T10:10:00.000Z",
+            },
+            {
+              experimentId: "exp-2",
+              name: "Experiment 2",
+              datasetId: "dataset-op-1",
+              status: "completed",
+              workflowStage: "completed",
+              triggerSource: "manual",
+              sourceAdviceId: null,
+              candidateLabels: ["candidate-c"],
+              totalRuns: 1,
+              completedRuns: 1,
+              failedRuns: 0,
+              runningRuns: 0,
+              queuedRuns: 0,
+              totalCases: 12,
+              processedCases: 12,
+              improvedCases: 2,
+              regressedCases: 4,
+              improvementRate: 0.1667,
+              regressionRate: 0.3333,
+              netDelta: -2,
+              bestRunId: "run-3",
+              worstRunId: "run-3",
+              runs: [],
+              updatedAt: "2026-03-08T10:12:00.000Z",
+            },
+          ],
+          total: 2,
+          summary: {
+            comparedExperimentCount: 2,
+            comparedAt: "2026-03-08T10:15:00.000Z",
+            datasets: ["dataset-op-1"],
+            totalRuns: 3,
+            completedRuns: 3,
+            failedRuns: 0,
+            runningRuns: 0,
+            queuedRuns: 0,
+            totalCases: 36,
+            processedCases: 36,
+            improvedCases: 10,
+            regressedCases: 6,
+            bestExperimentId: "exp-1",
+            worstExperimentId: "exp-2",
+          },
+          filters: {
+            experimentIds: ["exp-1", "exp-2"],
+            datasetId: "dataset-op-1",
+          },
+        });
+      }
+      if (url.pathname === "/api/v2/replay/experiments/exp-1/results" && method === "GET") {
+        return mockJsonResponse({
+          id: "exp-1",
+          tenantId: "default",
+          name: "Experiment",
+          datasetId: "dataset-op-1",
+          status: "completed",
+          triggerSource: "quality_advice",
+          executionMode: "automatic",
+          candidateLabels: ["candidate-a", "candidate-b"],
+          runIds: ["run-1", "run-2"],
+          summary: { totalRuns: 2 },
+          runs: [],
+          createdAt: "2026-03-08T10:00:00.000Z",
+          updatedAt: "2026-03-08T10:10:00.000Z",
+        });
+      }
+      if (url.pathname === "/api/v2/replay/experiments/exp-1/compare" && method === "GET") {
+        return mockJsonResponse({
+          experimentId: "exp-1",
+          datasetId: "dataset-op-1",
+          items: [
+            {
+              runId: "run-1",
+              candidateLabel: "candidate-a",
+              status: "completed",
+              totalCases: 12,
+              processedCases: 12,
+              improvedCases: 4,
+              regressedCases: 1,
+              unchangedCases: 7,
+              passRate: 0.9167,
+              improvementRate: 0.3333,
+              regressionRate: 0.0833,
+              netDelta: 3,
+              startedAt: "2026-03-08T10:00:00.000Z",
+              finishedAt: "2026-03-08T10:02:00.000Z",
+            },
+          ],
+          total: 1,
+          summary: {
+            totalRuns: 1,
+            completedRuns: 1,
+            failedRuns: 0,
+            runningRuns: 0,
+            queuedRuns: 0,
+            cancelledRuns: 0,
+            bestRunId: "run-1",
+            worstRunId: "run-1",
+            bestNetDelta: 3,
+            worstNetDelta: 3,
+          },
+        });
+      }
+      if (url.pathname === "/api/v2/replay/experiments/exp-1/workflow" && method === "GET") {
+        return mockJsonResponse({
+          experimentId: "exp-1",
+          status: "completed",
+          nodes: [
+            {
+              id: "experiment:exp-1",
+              type: "experiment",
+              label: "Experiment",
+              status: "completed",
+              startedAt: "2026-03-08T10:00:00.000Z",
+              finishedAt: "2026-03-08T10:10:00.000Z",
+              metadata: {
+                datasetId: "dataset-op-1",
+              },
+            },
+            {
+              id: "run:run-1",
+              type: "run",
+              label: "候选 candidate-a",
+              status: "completed",
+              startedAt: "2026-03-08T10:00:00.000Z",
+              finishedAt: "2026-03-08T10:02:00.000Z",
+              metadata: {
+                runId: "run-1",
+              },
+            },
+          ],
+          edges: [
+            {
+              from: "experiment:exp-1",
+              to: "run:run-1",
+              label: "dispatches",
+            },
+          ],
+          summary: {
+            totalNodes: 2,
+            totalRuns: 1,
+            queuedRuns: 0,
+            runningRuns: 0,
+            completedRuns: 1,
+            failedRuns: 0,
+            cancelledRuns: 0,
+          },
+        });
+      }
+      if (url.pathname === "/api/v2/replay/experiments/exp-1/run" && method === "POST") {
+        return mockJsonResponse({
+          id: "exp-1",
+          tenantId: "default",
+          name: "Experiment",
+          datasetId: "dataset-op-1",
+          status: "queued",
+          triggerSource: "quality_advice",
+          executionMode: "automatic",
+          candidateLabels: ["candidate-a", "candidate-b"],
+          runIds: ["run-1", "run-2", "run-3"],
+          summary: {},
+          runs: [],
+          createdAt: "2026-03-08T10:00:00.000Z",
+          updatedAt: "2026-03-08T10:11:00.000Z",
+        });
+      }
+      if (url.pathname === "/api/v2/replay/experiments/exp-1/cancel" && method === "POST") {
+        return mockJsonResponse({
+          id: "exp-1",
+          tenantId: "default",
+          name: "Experiment",
+          datasetId: "dataset-op-1",
+          status: "cancelled",
+          triggerSource: "quality_advice",
+          executionMode: "automatic",
+          candidateLabels: ["candidate-a", "candidate-b"],
+          runIds: ["run-1", "run-2"],
+          summary: {},
+          runs: [],
+          createdAt: "2026-03-08T10:00:00.000Z",
+          updatedAt: "2026-03-08T10:12:00.000Z",
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url.pathname}`);
+    });
+
+    await expect(fetchOpenPlatformAutomationPolicy()).resolves.toEqual(
+      expect.objectContaining({
+        strategyMatrix: [expect.objectContaining({ id: "critical-replay" })],
+      }),
+    );
+    await expect(
+      upsertOpenPlatformAutomationPolicy({
+        riskLevel: "high",
+        decision: "require_approval",
+        reason: "质量高风险命中矩阵时需要审批",
+        evaluationScoreThreshold: 78,
+        triggerOnEvaluationFailure: true,
+        triggerOnReplayRegression: true,
+        strategyMatrix: [
+          {
+            id: "critical-replay",
+            metric: "accuracy",
+            severity: "critical",
+            trendDirection: "down",
+            provider: "github",
+            workflow: "ci-main",
+            projectPattern: "agentledger/*",
+            minConfidence: 0.6,
+            regressionProbabilityAtLeast: 0.5,
+            replayRegressionAtLeast: 1,
+            actionType: "replay_experiment",
+            requiresApproval: true,
+            cooldownMinutes: 30,
+            reason: "高风险优先回放",
+          },
+        ],
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        strategyMatrix: [expect.objectContaining({ id: "critical-replay" })],
+      }),
+    );
+    await expect(
+      simulateOpenPlatformAutomationPolicy({
+        metric: "accuracy",
+        score: 63,
+        trendDirection: "down",
+        confidence: 0.82,
+        regressionProbability: 0.73,
+        replayRegressionCount: 2,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        matchedRuleId: "critical-replay",
+        resolvedAction: "replay_experiment",
+        requiresApproval: true,
+      }),
+    );
+    await expect(fetchOpenPlatformQualityForecast()).resolves.toEqual(
+      expect.objectContaining({
+        items: [
+          expect.objectContaining({
+            trendDirection: "down",
+            modelVersion: "quality-heuristic-v2",
+            regressionProbability: 0.61,
+          }),
+        ],
+      }),
+    );
+    await expect(fetchOpenPlatformQualityAdvice()).resolves.toEqual(
+      expect.objectContaining({
+        items: [
+          expect.objectContaining({
+            id: "advice-1",
+            strategyMatrixMatch: "critical-replay",
+            autoExecutionDecision: "approval_required",
+          }),
+        ],
+      }),
+    );
+    await expect(
+      executeOpenPlatformQualityAdvice("advice-1", {
+        project: "agentledger/main",
+        severity: "warn",
+        actionType: "replay_experiment",
+        datasetId: "dataset-op-1",
+        candidateLabels: ["candidate-a", "candidate-b"],
+      }),
+    ).resolves.toEqual(expect.objectContaining({ experimentId: "exp-1" }));
+    await expect(fetchOpenPlatformQualityAdviceExecutions()).resolves.toEqual(
+      expect.objectContaining({ total: 1 }),
+    );
+    await expect(cancelOpenPlatformQualityAdviceExecution("advice-exec-1")).resolves.toEqual(
+      expect.objectContaining({ status: "cancelled" }),
+    );
+    await expect(
+      createOpenPlatformReplayExperiment({
+        name: "Experiment",
+        datasetId: "dataset-op-1",
+        baselineVersionId: "dataset-op-1:v2",
+        candidateLabels: ["candidate-a", "candidate-b"],
+        autoRun: true,
+        triggerSource: "quality_advice",
+      }),
+    ).resolves.toEqual(expect.objectContaining({ status: "queued" }));
+    await expect(fetchOpenPlatformReplayExperiments()).resolves.toEqual(
+      expect.objectContaining({ total: 1 }),
+    );
+    await expect(
+      fetchOpenPlatformReplayExperimentsBatchCompare({
+        experimentIds: ["exp-1", "exp-2"],
+        datasetId: "dataset-op-1",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        total: 2,
+        summary: expect.objectContaining({ bestExperimentId: "exp-1" }),
+      }),
+    );
+    await expect(fetchOpenPlatformReplayExperimentResults("exp-1")).resolves.toEqual(
+      expect.objectContaining({ status: "completed" }),
+    );
+    await expect(fetchOpenPlatformReplayExperimentCompare("exp-1")).resolves.toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({ bestRunId: "run-1" }),
+      }),
+    );
+    await expect(fetchOpenPlatformReplayExperimentWorkflow("exp-1")).resolves.toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({ totalNodes: 2 }),
+      }),
+    );
+    await expect(runOpenPlatformReplayExperiment("exp-1")).resolves.toEqual(
+      expect.objectContaining({ runIds: ["run-1", "run-2", "run-3"] }),
+    );
+    await expect(cancelOpenPlatformReplayExperiment("exp-1")).resolves.toEqual(
+      expect.objectContaining({ status: "cancelled" }),
+    );
   });
 
   test("exportSessions 与 exportUsage 支持 csv 下载", async () => {
@@ -1787,5 +3159,574 @@ describe("api mock fallback gate", () => {
         dimension: "invalid" as never,
       })
     ).rejects.toThrow("dimension 必须是 daily/weekly/monthly/models/sessions/heatmap。");
+  });
+
+  test("fetchAgentRuntimeViews 与 fetchAgentRuntimeConfig 命中 system-config runtime 接口", async () => {
+    env.DEV = false;
+    setAuthTokens({
+      accessToken: "access-token-agent-runtime",
+      refreshToken: "refresh-token-agent-runtime",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) => {
+        const url = toUrl(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+
+        if (url.endsWith("/api/v1/system/config/agents/views") && method === "GET") {
+          return mockJsonResponse({
+            items: [
+              {
+                id: "agent-1",
+                agentId: "agent-1",
+                tenantId: "default",
+                displayName: "Agent One",
+                hostname: "host-1",
+                version: "0.1.0",
+                sourceCount: 1,
+                sourceIds: ["source-1"],
+                sourceNames: ["Source One"],
+                runtimeStatus: "online",
+                lastHeartbeatAt: "2026-03-09T01:00:00.000Z",
+                lastConfigFetchedAt: "2026-03-09T00:59:30.000Z",
+                lastConfigVersion: "cfg:test-001",
+                lastIngestStatusCode: 202,
+                lastAccepted: 5,
+                lastRejected: 0,
+                heartbeatIntervalSeconds: 30,
+                staleAfterSeconds: 90,
+                ingestProtocol: "http",
+                ingestEndpoint: "http://127.0.0.1:8081/v1/ingest",
+                updatedAt: "2026-03-09T01:00:00.000Z",
+              },
+            ],
+            total: 1,
+            generatedAt: "2026-03-09T01:00:01.000Z",
+          });
+        }
+
+        if (
+          url.includes("/api/v1/system/config/agent-runtime?agentId=agent-1") &&
+          method === "GET"
+        ) {
+          return mockJsonResponse({
+            tenantId: "default",
+            agent: {
+              agentId: "agent-1",
+              hostname: "host-1",
+              version: "0.1.0",
+              displayName: "Agent One",
+            },
+            runtime: {
+              heartbeatIntervalSeconds: 30,
+              staleAfterSeconds: 90,
+              ingestProtocol: "http",
+              ingestEndpoint: "http://127.0.0.1:8081/v1/ingest",
+              sampleGenerateCount: 5,
+            },
+            bindings: {
+              sourceCount: 1,
+              sourceIds: ["source-1"],
+              sources: [
+                {
+                  sourceId: "source-1",
+                  name: "Source One",
+                  accessMode: "realtime",
+                  enabled: true,
+                  location: "/var/log/agent",
+                  sourceRegion: "cn-shanghai",
+                },
+              ],
+            },
+            configVersion: "cfg:test-001",
+            updatedAt: "2026-03-09T01:00:01.000Z",
+          });
+        }
+
+        throw new Error(`unexpected call: ${method} ${url}`);
+      });
+
+    await expect(fetchAgentRuntimeViews()).resolves.toEqual(
+      expect.objectContaining({
+        items: [expect.objectContaining({ agentId: "agent-1" })],
+        total: 1,
+      }),
+    );
+    await expect(fetchAgentRuntimeConfig("agent-1")).resolves.toEqual(
+      expect.objectContaining({
+        configVersion: "cfg:test-001",
+        bindings: expect.objectContaining({
+          sources: [expect.objectContaining({ sourceId: "source-1" })],
+        }),
+      }),
+    );
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/system/config/agents/views"),
+      expect.any(Object),
+    );
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/system/config/agent-runtime?agentId=agent-1"),
+      expect.any(Object),
+    );
+  });
+
+  test("fetchAgentRuntimeConfig 缺少 agentId 时抛错", async () => {
+    await expect(fetchAgentRuntimeConfig("")).rejects.toThrow("agentId 不能为空。");
+  });
+});
+
+describe("mcp api helpers", () => {
+  beforeEach(() => {
+    env.DEV = false;
+    delete env.VITE_ENABLE_MOCK_FALLBACK;
+    clearAuthTokens();
+    setUnauthorizedHandler(null);
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    clearAuthTokens();
+    setUnauthorizedHandler(null);
+    vi.restoreAllMocks();
+  });
+
+  test("fetchMcpPolicies 与 upsertMcpPolicy 保留 approvalStages 的 nodeId/label", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET" && url.includes("/api/v1/mcp/policies")) {
+        expect(url).toContain("riskLevel=high");
+        expect(url).toContain("decision=require_approval");
+        expect(url).toContain("keyword=github");
+        expect(url).toContain("limit=10");
+        return mockJsonResponse({
+          items: [
+            {
+              tenantId: "tenant-a",
+              toolId: "github.rotate_key",
+              riskLevel: "high",
+              decision: "require_approval",
+              approvalMode: "two_stage",
+              approvalStages: [
+                {
+                  nodeId: "maintainer-review",
+                  stage: "stage1",
+                  label: "Maintainer Review",
+                  requiredApprovals: 1,
+                  roles: ["maintainer"],
+                },
+                {
+                  nodeId: "owner-review",
+                  stage: "stage2",
+                  label: "Owner Review",
+                  requiredApprovals: 1,
+                  roles: ["owner"],
+                },
+              ],
+              updatedAt: "2026-03-09T10:00:00.000Z",
+            },
+          ],
+          total: 1,
+          filters: {
+            riskLevel: "high",
+            decision: "require_approval",
+            keyword: "github",
+            limit: 10,
+          },
+        });
+      }
+      if (method === "PUT" && url.endsWith("/api/v1/mcp/policies/github.rotate_key")) {
+        const payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        expect(payload).toEqual(
+          expect.objectContaining({
+            approvalMode: "two_stage",
+            approvalStages: [
+              {
+                nodeId: "maintainer-review",
+                stage: "stage1",
+                label: "Maintainer Review",
+                requiredApprovals: 1,
+                roles: ["maintainer"],
+              },
+              {
+                nodeId: "owner-review",
+                stage: "stage2",
+                label: "Owner Review",
+                requiredApprovals: 1,
+                roles: ["owner"],
+              },
+            ],
+          }),
+        );
+        return mockJsonResponse({
+          tenantId: "tenant-a",
+          toolId: "github.rotate_key",
+          riskLevel: "high",
+          decision: "require_approval",
+          approvalMode: "two_stage",
+          approvalStages: payload.approvalStages,
+          updatedAt: "2026-03-09T10:01:00.000Z",
+        });
+      }
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    await expect(
+      fetchMcpPolicies({
+        riskLevel: "high",
+        decision: "require_approval",
+        keyword: "github",
+        limit: 10,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        total: 1,
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            toolId: "github.rotate_key",
+            approvalStages: expect.arrayContaining([
+              expect.objectContaining({
+                nodeId: "maintainer-review",
+                label: "Maintainer Review",
+              }),
+            ]),
+          }),
+        ]),
+      }),
+    );
+
+    await expect(
+      upsertMcpPolicy("github.rotate_key", {
+        toolId: "github.rotate_key",
+        riskLevel: "high",
+        decision: "require_approval",
+        approvalMode: "two_stage",
+        approvalStages: [
+          {
+            nodeId: "maintainer-review",
+            stage: "stage1",
+            label: "Maintainer Review",
+            requiredApprovals: 1,
+            roles: ["maintainer"],
+          },
+          {
+            nodeId: "owner-review",
+            stage: "stage2",
+            label: "Owner Review",
+            requiredApprovals: 1,
+            roles: ["owner"],
+          },
+        ],
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        approvalStages: [
+          expect.objectContaining({
+            nodeId: "maintainer-review",
+            label: "Maintainer Review",
+          }),
+          expect.objectContaining({
+            nodeId: "owner-review",
+            label: "Owner Review",
+          }),
+        ],
+      }),
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  test("create/approve/evaluate/fetch MCP helpers 支持多阶段节点与路径字段", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "POST" && url.endsWith("/api/v1/mcp/approvals")) {
+        const payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        expect(payload).toEqual(
+          expect.objectContaining({
+            toolId: "github.freeze_window",
+            approvalConfig: expect.objectContaining({
+              mode: "multi_stage",
+              approvalWorkflow: expect.objectContaining({
+                entryNodeId: "stage1-node",
+              }),
+            }),
+          }),
+        );
+        return mockJsonResponse({
+          id: "mcp-approval-1",
+          tenantId: "tenant-a",
+          toolId: "github.freeze_window",
+          status: "pending",
+          approvalMode: "multi_stage",
+          currentNodeId: "stage1-node",
+          currentStage: "stage1",
+          pathHistory: ["stage1-node"],
+          remainingApprovals: 1,
+          approvalStages: [
+            {
+              nodeId: "stage1-node",
+              stage: "stage1",
+              requiredApprovals: 1,
+              roles: ["owner"],
+              approvedApprovals: 0,
+              approvedByUserIds: [],
+            },
+          ],
+          requestedByUserId: "user-a",
+          requestedByEmail: "user@example.com",
+          createdAt: "2026-03-09T10:10:00.000Z",
+          updatedAt: "2026-03-09T10:10:00.000Z",
+        }, 201);
+      }
+
+      if (method === "POST" && url.endsWith("/api/v1/mcp/approvals/mcp-approval-1/approve")) {
+        return mockJsonResponse({
+          id: "mcp-approval-1",
+          tenantId: "tenant-a",
+          toolId: "github.freeze_window",
+          status: "approved",
+          approvalMode: "multi_stage",
+          currentNodeId: "approved",
+          currentStage: null,
+          pathHistory: ["stage1-node", "approved"],
+          remainingApprovals: 0,
+          approvalStages: [
+            {
+              nodeId: "stage1-node",
+              stage: "stage1",
+              requiredApprovals: 1,
+              roles: ["owner"],
+              approvedApprovals: 1,
+              approvedByUserIds: ["user-a"],
+            },
+          ],
+          requestedByUserId: "user-a",
+          requestedByEmail: "user@example.com",
+          reviewedByUserId: "owner-a",
+          reviewReason: "approved",
+          createdAt: "2026-03-09T10:10:00.000Z",
+          updatedAt: "2026-03-09T10:11:00.000Z",
+        });
+      }
+
+      if (method === "POST" && url.endsWith("/api/v1/mcp/evaluate")) {
+        const payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        expect(payload).toEqual(
+          expect.objectContaining({
+            toolId: "github.freeze_window",
+            evaluationTimestamp: "2026-03-09T10:12:00.000Z",
+          }),
+        );
+        return mockJsonResponse({
+          toolId: "github.freeze_window",
+          decision: "require_approval",
+          result: "blocked",
+          approvalRequestId: "mcp-approval-1",
+          approvalRequired: true,
+          approvalMode: "multi_stage",
+          currentNodeId: "stage1-node",
+          currentStage: "stage1",
+          pathHistory: ["stage1-node"],
+          nextTransitionPreview: {
+            fromNodeId: "stage1-node",
+            toNodeId: "stage2-node",
+            matched: true,
+            matchedBy: "condition",
+            condition: {
+              timeWindow: {
+                timezone: "Asia/Shanghai",
+                weekdays: [1, 2, 3, 4, 5],
+                startTime: "09:00",
+                endTime: "18:00",
+              },
+            },
+          },
+          approvalStages: [
+            {
+              nodeId: "stage1-node",
+              stage: "stage1",
+              requiredApprovals: 1,
+              roles: ["owner"],
+              approvedApprovals: 0,
+              approvedByUserIds: [],
+            },
+          ],
+          remainingApprovals: 1,
+          approvalConditionMatched: true,
+          enforced: true,
+          evaluatedDecision: "require_approval",
+          policy: {
+            tenantId: "tenant-a",
+            toolId: "github.freeze_window",
+            riskLevel: "high",
+            decision: "require_approval",
+            approvalMode: "multi_stage",
+            updatedAt: "2026-03-09T10:00:00.000Z",
+          },
+          invocation: {
+            id: "mcp-invocation-1",
+            tenantId: "tenant-a",
+            toolId: "github.freeze_window",
+            decision: "require_approval",
+            result: "blocked",
+            approvalRequestId: "mcp-approval-1",
+            enforced: true,
+            evaluatedDecision: "require_approval",
+            approvalMode: "multi_stage",
+            approvalStage: "stage1",
+            approvalSatisfied: false,
+            approvalConditionMatched: true,
+            metadata: { source: "mcp.evaluate" },
+            createdAt: "2026-03-09T10:12:00.000Z",
+          },
+          evaluatedAt: "2026-03-09T10:12:00.000Z",
+        });
+      }
+
+      if (method === "GET" && url.includes("/api/v1/mcp/approvals")) {
+        return mockJsonResponse({
+          items: [
+            {
+              id: "mcp-approval-1",
+              tenantId: "tenant-a",
+              toolId: "github.freeze_window",
+              status: "pending",
+              approvalMode: "multi_stage",
+              currentNodeId: "stage1-node",
+              currentStage: "stage1",
+              pathHistory: ["stage1-node"],
+              remainingApprovals: 1,
+              approvalStages: [
+                {
+                  nodeId: "stage1-node",
+                  stage: "stage1",
+                  requiredApprovals: 1,
+                  roles: ["owner"],
+                  approvedApprovals: 0,
+                  approvedByUserIds: [],
+                },
+              ],
+              requestedByUserId: "user-a",
+              createdAt: "2026-03-09T10:10:00.000Z",
+              updatedAt: "2026-03-09T10:10:00.000Z",
+            },
+          ],
+          total: 1,
+          filters: { status: "pending", limit: 20 },
+        });
+      }
+
+      if (method === "GET" && url.includes("/api/v1/mcp/invocations")) {
+        return mockJsonResponse({
+          items: [
+            {
+              id: "mcp-invocation-1",
+              tenantId: "tenant-a",
+              toolId: "github.freeze_window",
+              decision: "require_approval",
+              result: "blocked",
+              approvalRequestId: "mcp-approval-1",
+              enforced: true,
+              evaluatedDecision: "require_approval",
+              approvalMode: "multi_stage",
+              approvalStage: "stage1",
+              approvalSatisfied: false,
+              approvalConditionMatched: true,
+              metadata: { source: "mcp.evaluate" },
+              createdAt: "2026-03-09T10:12:00.000Z",
+            },
+          ],
+          total: 1,
+          filters: { toolId: "github.freeze_window", limit: 20 },
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    await expect(
+      createMcpApproval({
+        toolId: "github.freeze_window",
+        approvalConfig: {
+          mode: "multi_stage",
+          approvalWorkflow: {
+            entryNodeId: "stage1-node",
+            nodes: [
+              {
+                nodeId: "stage1-node",
+                kind: "approval",
+                stage: "stage1",
+                requiredApprovals: 1,
+                roles: ["owner"],
+              },
+              {
+                nodeId: "approved",
+                kind: "terminal_approved",
+              },
+              {
+                nodeId: "rejected",
+                kind: "terminal_rejected",
+              },
+            ],
+            transitions: [
+              {
+                fromNodeId: "stage1-node",
+                toNodeId: "approved",
+                condition: { default: true },
+              },
+            ],
+          },
+        },
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: "mcp-approval-1",
+        currentNodeId: "stage1-node",
+        pathHistory: ["stage1-node"],
+      }),
+    );
+
+    await expect(
+      approveMcpApproval("mcp-approval-1", { nodeId: "stage1-node", reason: "approved" }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "approved",
+        currentNodeId: "approved",
+        pathHistory: ["stage1-node", "approved"],
+      }),
+    );
+
+    await expect(
+      evaluateMcpTool({
+        toolId: "github.freeze_window",
+        evaluationTimestamp: "2026-03-09T10:12:00.000Z",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        currentNodeId: "stage1-node",
+        nextTransitionPreview: expect.objectContaining({
+          toNodeId: "stage2-node",
+        }),
+      }),
+    );
+
+    await expect(fetchMcpApprovals({ status: "pending", limit: 20 })).resolves.toEqual(
+      expect.objectContaining({
+        total: 1,
+      }),
+    );
+    await expect(
+      fetchMcpInvocations({ toolId: "github.freeze_window", limit: 20 }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        total: 1,
+      }),
+    );
   });
 });

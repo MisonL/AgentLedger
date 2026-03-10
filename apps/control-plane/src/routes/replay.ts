@@ -2,11 +2,14 @@ import { createHash } from "node:crypto";
 import { Hono, type Context } from "hono";
 import {
   validateReplayBaselineCreateInput,
+  validateReplayBaselineVersionCreateInput,
+  validateReplayBaselineVersionPromoteInput,
   validateReplayJobCreateInput,
 } from "../contracts";
 import type {
   AppendAuditLogInput,
   ReplayBaseline,
+  ReplayBaselineVersion,
   ReplayJob,
   ReplayJobStatus,
 } from "../data/repository";
@@ -202,9 +205,34 @@ function mapReplayBaseline(baseline: ReplayBaseline) {
     model: firstNonEmptyString(metadata.model) ?? "unknown",
     promptVersion: firstNonEmptyString(metadata.promptVersion),
     sampleCount: baseline.scenarioCount,
+    currentVersionId: firstNonEmptyString(
+      baseline.currentVersionId,
+      metadata.currentVersionId,
+    ),
+    currentVersionNumber: toInteger(
+      baseline.currentVersionNumber,
+      toInteger(metadata.currentVersionNumber, 1),
+    ),
     metadata,
     createdAt: baseline.createdAt,
     updatedAt: baseline.updatedAt,
+  };
+}
+
+function mapReplayBaselineVersion(version: ReplayBaselineVersion) {
+  return {
+    id: version.id,
+    tenantId: version.tenantId,
+    baselineId: version.baselineId,
+    version: version.version,
+    datasetId: version.datasetRef ?? "",
+    model: version.model,
+    promptVersion: version.promptVersion,
+    sampleCount: version.scenarioCount,
+    metadata: normalizeRecord(version.metadata),
+    note: version.note,
+    createdAt: version.createdAt,
+    promotedAt: version.promotedAt ?? null,
   };
 }
 
@@ -595,6 +623,52 @@ async function persistReplayArtifacts(input: {
   await repository.upsertReplayArtifacts(input.tenantId, input.replayJob.id, items);
 }
 
+async function loadReplayCasesForExecution(input: {
+  tenantId: string;
+  datasetId: string;
+  baselineVersionId?: string;
+  limit: number;
+}) {
+  if (!input.baselineVersionId) {
+    return repository.listReplayDatasetCases(input.tenantId, input.datasetId, {
+      limit: input.limit,
+    });
+  }
+  let versionCases = await repository.listReplayDatasetVersionCases(
+    input.tenantId,
+    input.datasetId,
+    input.baselineVersionId,
+    { limit: input.limit },
+  );
+  if (versionCases.length > 0) {
+    return versionCases;
+  }
+  const baseline = await repository.getReplayBaselineById(input.tenantId, input.datasetId);
+  const currentVersionId = firstNonEmptyString(baseline?.currentVersionId);
+  if (currentVersionId !== input.baselineVersionId) {
+    return [] as Awaited<ReturnType<typeof repository.listReplayDatasetCases>>;
+  }
+  const currentCases = await repository.listReplayDatasetCases(input.tenantId, input.datasetId, {
+    limit: input.limit,
+  });
+  if (currentCases.length === 0) {
+    return currentCases;
+  }
+  await repository.replaceReplayDatasetVersionCases(
+    input.tenantId,
+    input.datasetId,
+    input.baselineVersionId,
+    currentCases,
+  );
+  versionCases = await repository.listReplayDatasetVersionCases(
+    input.tenantId,
+    input.datasetId,
+    input.baselineVersionId,
+    { limit: input.limit },
+  );
+  return versionCases;
+}
+
 function toReplayExecutionErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     const message = error.message.trim();
@@ -620,11 +694,18 @@ async function defaultReplayJobExecutionHandler(input: {
     Number.isInteger(sampleLimitRaw) && sampleLimitRaw > 0
       ? sampleLimitRaw
       : Number.MAX_SAFE_INTEGER;
-  const persistedCases = await repository.listReplayDatasetCases(
-    input.tenantId,
-    input.replayJob.baselineId,
-    { limit: sampleLimit }
+  const baselineVersionId = firstNonEmptyString(
+    parameters.baselineVersionId,
+    parameters.baseline_version_id,
+    summary.baselineVersionId,
+    summary.baseline_version_id,
   );
+  const persistedCases = await loadReplayCasesForExecution({
+    tenantId: input.tenantId,
+    datasetId: input.replayJob.baselineId,
+    baselineVersionId,
+    limit: sampleLimit,
+  });
   const selectedCases =
     requestedExecutionSource === "synthetic"
       ? Array.from({ length: resolveReplayTotalCases(input.replayJob) }, (_, index) =>
@@ -650,6 +731,7 @@ async function defaultReplayJobExecutionHandler(input: {
         unchangedCases: 0,
         executionSource: requestedExecutionSource ?? "dataset_cases",
         materializedCaseCount: 0,
+        ...(baselineVersionId ? { baselineVersionId } : {}),
         sourceSummary: {},
       },
       {
@@ -703,6 +785,7 @@ async function defaultReplayJobExecutionHandler(input: {
       unchangedCases: summaryCounts.unchangedCases,
       executionSource,
       materializedCaseCount: totalCases,
+      ...(baselineVersionId ? { baselineVersionId } : {}),
       sourceSummary,
     },
     {
@@ -1211,6 +1294,147 @@ replayRoutes.get("/replay/baselines", async (c) => {
       to: toRaw,
       limit,
     },
+  });
+});
+
+replayRoutes.get("/replay/baselines/:id/versions", async (c) => {
+  const auth = await requireTenantAccess(c, "read");
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const baselineId = c.req.param("id")?.trim();
+  if (!baselineId) {
+    return c.json({ message: "baselineId 必填且必须为非空字符串。" }, 400);
+  }
+
+  const baseline = await repository.getReplayBaselineById(auth.tenantId, baselineId);
+  if (!baseline) {
+    return c.json({ message: "回放基线不存在。" }, 404);
+  }
+
+  const versions = await repository.listReplayBaselineVersions(auth.tenantId, baselineId);
+  return c.json({
+    items: versions.map(mapReplayBaselineVersion),
+    total: versions.length,
+    currentVersionId: baseline.currentVersionId ?? null,
+    currentVersionNumber: baseline.currentVersionNumber ?? null,
+  });
+});
+
+replayRoutes.post("/replay/baselines/:id/versions", async (c) => {
+  const auth = await requireTenantAccess(c, "write");
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const baselineId = c.req.param("id")?.trim();
+  if (!baselineId) {
+    return c.json({ message: "baselineId 必填且必须为非空字符串。" }, 400);
+  }
+
+  const baseline = await repository.getReplayBaselineById(auth.tenantId, baselineId);
+  if (!baseline) {
+    return c.json({ message: "回放基线不存在。" }, 404);
+  }
+
+  const body = await c.req.json().catch(() => undefined);
+  const validation = validateReplayBaselineVersionCreateInput({
+    ...normalizeRecord(body),
+    tenantId: auth.tenantId,
+    baselineId,
+  });
+  if (!validation.success) {
+    return c.json({ message: validation.error }, 400);
+  }
+
+  const version = await repository.createReplayBaselineVersion(auth.tenantId, baselineId, {
+    datasetRef: validation.data.datasetId,
+    model: validation.data.model,
+    promptVersion: validation.data.promptVersion,
+    scenarioCount: validation.data.sampleCount,
+    metadata: validation.data.metadata,
+    note: validation.data.note,
+  });
+
+  const requestId = c.get("requestId");
+  await appendAuditLogSafely({
+    tenantId: auth.tenantId,
+    eventId: `cp:${requestId}`,
+    action: "control_plane.replay.baseline_version_created",
+    level: "info",
+    detail: `Created replay baseline version ${version.id} for baseline ${baselineId}.`,
+    metadata: {
+      requestId,
+      tenantId: auth.tenantId,
+      baselineId,
+      versionId: version.id,
+      version: version.version,
+      datasetId: version.datasetRef,
+      model: version.model,
+    },
+  });
+
+  return c.json(mapReplayBaselineVersion(version), 201);
+});
+
+replayRoutes.post("/replay/baselines/:id/promote", async (c) => {
+  const auth = await requireTenantAccess(c, "write");
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const baselineId = c.req.param("id")?.trim();
+  if (!baselineId) {
+    return c.json({ message: "baselineId 必填且必须为非空字符串。" }, 400);
+  }
+
+  const baseline = await repository.getReplayBaselineById(auth.tenantId, baselineId);
+  if (!baseline) {
+    return c.json({ message: "回放基线不存在。" }, 404);
+  }
+
+  const body = await c.req.json().catch(() => undefined);
+  const validation = validateReplayBaselineVersionPromoteInput({
+    ...normalizeRecord(body),
+    tenantId: auth.tenantId,
+    baselineId,
+  });
+  if (!validation.success) {
+    return c.json({ message: validation.error }, 400);
+  }
+
+  const promotedVersion = await repository.promoteReplayBaselineVersion(
+    auth.tenantId,
+    baselineId,
+    validation.data.versionId,
+  );
+  if (!promotedVersion) {
+    return c.json({ message: "回放基线版本不存在。" }, 404);
+  }
+
+  const updatedBaseline = await repository.getReplayBaselineById(auth.tenantId, baselineId);
+  const requestId = c.get("requestId");
+  await appendAuditLogSafely({
+    tenantId: auth.tenantId,
+    eventId: `cp:${requestId}`,
+    action: "control_plane.replay.baseline_version_promoted",
+    level: "info",
+    detail: `Promoted replay baseline version ${promotedVersion.id} for baseline ${baselineId}.`,
+    metadata: {
+      requestId,
+      tenantId: auth.tenantId,
+      baselineId,
+      versionId: promotedVersion.id,
+      version: promotedVersion.version,
+      datasetId: promotedVersion.datasetRef,
+      model: promotedVersion.model,
+    },
+  });
+
+  return c.json({
+    baseline: updatedBaseline ? mapReplayBaseline(updatedBaseline) : null,
+    version: mapReplayBaselineVersion(promotedVersion),
   });
 });
 

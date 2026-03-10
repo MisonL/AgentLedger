@@ -139,6 +139,172 @@ func TestDetectOrchestrationConflicts(t *testing.T) {
 	}
 }
 
+func TestBuildSLAEscalationPlanFiltersRulesByDueSeverityAndSource(t *testing.T) {
+	createdAt := time.Date(2026, 3, 9, 10, 0, 0, 0, time.UTC)
+	sourceID := "src-1"
+	alert := alertEvent{
+		AlertID:   501,
+		TenantID:  "tenant-a",
+		BudgetID:  "budget-a",
+		SourceID:  &sourceID,
+		Severity:  "critical",
+		DedupeKey: "dedupe-a",
+		CreatedAt: createdAt,
+	}
+
+	plan := buildSLAEscalationPlan(alert, createdAt.Add(10*time.Minute), []alertOrchestrationRule{
+		{
+			ID:         "rule-due",
+			EventType:  "alert",
+			Severity:   "critical",
+			SourceID:   "src-1",
+			SLAMinutes: 5,
+			Channels:   []string{"ticket", "email"},
+		},
+		{
+			ID:         "rule-not-due",
+			EventType:  "alert",
+			Severity:   "critical",
+			SourceID:   "src-1",
+			SLAMinutes: 15,
+			Channels:   []string{"wecom"},
+		},
+		{
+			ID:         "rule-wrong-severity",
+			EventType:  "alert",
+			Severity:   "warning",
+			SourceID:   "src-1",
+			SLAMinutes: 1,
+			Channels:   []string{"webhook"},
+		},
+		{
+			ID:         "rule-wrong-source",
+			EventType:  "alert",
+			Severity:   "critical",
+			SourceID:   "src-2",
+			SLAMinutes: 1,
+			Channels:   []string{"email"},
+		},
+		{
+			ID:         "rule-missing-sla",
+			EventType:  "alert",
+			Severity:   "critical",
+			SourceID:   "src-1",
+			SLAMinutes: 0,
+			Channels:   []string{"ticket"},
+		},
+	})
+
+	if !plan.EscalationDue {
+		t.Fatalf("expected escalation due")
+	}
+	if len(plan.DueRules) != 1 || plan.DueRules[0].ID != "rule-due" {
+		t.Fatalf("due rules mismatch: got %+v", plan.DueRules)
+	}
+	if len(plan.MatchedRuleIDs) != 1 || plan.MatchedRuleIDs[0] != "rule-due" {
+		t.Fatalf("matched rule ids mismatch: got %v want %v", plan.MatchedRuleIDs, []string{"rule-due"})
+	}
+	if len(plan.TargetChannels) != 2 || plan.TargetChannels[0] != "ticket" || plan.TargetChannels[1] != "email" {
+		t.Fatalf("target channels mismatch: got %v want %v", plan.TargetChannels, []string{"ticket", "email"})
+	}
+	if plan.NormalizedAlertID != "501" {
+		t.Fatalf("normalized alert id mismatch: got %q want %q", plan.NormalizedAlertID, "501")
+	}
+	if plan.NormalizedSource != "src-1" {
+		t.Fatalf("normalized source mismatch: got %q want %q", plan.NormalizedSource, "src-1")
+	}
+	if plan.NormalizedMatchKey != "alert:dedupe-a:sla" {
+		t.Fatalf("normalized match key mismatch: got %q want %q", plan.NormalizedMatchKey, "alert:dedupe-a:sla")
+	}
+}
+
+func TestBuildSLAEscalationPlanNormalizesAndDeduplicatesChannels(t *testing.T) {
+	createdAt := time.Date(2026, 3, 9, 10, 0, 0, 0, time.UTC)
+	alert := alertEvent{
+		AlertID:   502,
+		TenantID:  "tenant-b",
+		BudgetID:  "budget-b",
+		Severity:  "critical",
+		CreatedAt: createdAt,
+	}
+
+	plan := buildSLAEscalationPlan(alert, createdAt.Add(20*time.Minute), []alertOrchestrationRule{
+		{
+			ID:         "rule-a",
+			EventType:  "alert",
+			Severity:   "critical",
+			SLAMinutes: 5,
+			Channels:   []string{" Ticket ", "email", "ticket"},
+		},
+		{
+			ID:         "rule-b",
+			EventType:  "alert",
+			Severity:   "critical",
+			SLAMinutes: 5,
+			Channels:   []string{"EMAIL", "wecom", " "},
+		},
+	})
+
+	if !plan.EscalationDue {
+		t.Fatalf("expected escalation due")
+	}
+	if got := plan.MatchedRuleIDs; len(got) != 2 || got[0] != "rule-a" || got[1] != "rule-b" {
+		t.Fatalf("matched rule ids mismatch: got %v want %v", got, []string{"rule-a", "rule-b"})
+	}
+	if got := plan.TargetChannels; len(got) != 3 || got[0] != "ticket" || got[1] != "email" || got[2] != "wecom" {
+		t.Fatalf("target channels mismatch: got %v want %v", got, []string{"ticket", "email", "wecom"})
+	}
+	if got := plan.ConflictRuleIDs["rule-a"]; len(got) != 1 || got[0] != "rule-b" {
+		t.Fatalf("rule-a conflicts mismatch: got %v want %v", got, []string{"rule-b"})
+	}
+	if got := plan.ConflictRuleIDs["rule-b"]; len(got) != 1 || got[0] != "rule-a" {
+		t.Fatalf("rule-b conflicts mismatch: got %v want %v", got, []string{"rule-a"})
+	}
+}
+
+func TestBuildSLAEscalationPlanReturnsNoTargetsWhenNoDueRulesOrChannels(t *testing.T) {
+	createdAt := time.Date(2026, 3, 9, 10, 0, 0, 0, time.UTC)
+	alert := alertEvent{
+		AlertID:   503,
+		TenantID:  "tenant-c",
+		BudgetID:  "budget-c",
+		Severity:  "warning",
+		CreatedAt: createdAt,
+	}
+
+	notDuePlan := buildSLAEscalationPlan(alert, createdAt.Add(2*time.Minute), []alertOrchestrationRule{
+		{
+			ID:         "rule-later",
+			EventType:  "alert",
+			Severity:   "warning",
+			SLAMinutes: 5,
+			Channels:   []string{"ticket"},
+		},
+	})
+	if notDuePlan.EscalationDue {
+		t.Fatalf("expected escalation not due, got %+v", notDuePlan)
+	}
+	if len(notDuePlan.TargetChannels) != 0 {
+		t.Fatalf("expected no target channels for not-due plan, got %v", notDuePlan.TargetChannels)
+	}
+
+	emptyChannelPlan := buildSLAEscalationPlan(alert, createdAt.Add(10*time.Minute), []alertOrchestrationRule{
+		{
+			ID:         "rule-empty-channel",
+			EventType:  "alert",
+			Severity:   "warning",
+			SLAMinutes: 5,
+			Channels:   []string{" ", ""},
+		},
+	})
+	if !emptyChannelPlan.EscalationDue {
+		t.Fatalf("expected escalation due with empty channel rule")
+	}
+	if len(emptyChannelPlan.TargetChannels) != 0 {
+		t.Fatalf("expected empty target channels, got %v", emptyChannelPlan.TargetChannels)
+	}
+}
+
 func TestResolveWeeklyReportWindow(t *testing.T) {
 	schedule := weeklyReportSchedule{Weekday: time.Monday, Hour: 9, Minute: 0}
 
@@ -548,6 +714,70 @@ func TestBuildAlertDispatchedAuditLogIncludesTenantAndCriticalLevel(t *testing.T
 	}
 }
 
+func TestBuildAlertEscalatedAuditLogIncludesEscalationMetadata(t *testing.T) {
+	createdAt := time.Date(2026, 3, 2, 13, 30, 0, 0, time.UTC)
+	sourceID := "src-9"
+	alert := alertEvent{
+		AlertID:               19,
+		TenantID:              " tenant-escalated ",
+		BudgetID:              "budget-escalated",
+		SourceID:              &sourceID,
+		Stage:                 budgetStageCritical,
+		ThresholdSnapshot:     thresholdSnapshot{Warning: 0.5, Escalated: 0.8, Critical: 1},
+		Severity:              " critical ",
+		Status:                "open",
+		DedupeKey:             "dedupe-escalated",
+		WindowStart:           createdAt.Add(-time.Hour),
+		WindowEnd:             createdAt,
+		CreatedAt:             createdAt.Add(-5 * time.Minute),
+		GovernanceStateBefore: governanceStateActive,
+		GovernanceStateAfter:  governanceStateFrozen,
+		Orchestration: &eventOrchestration{
+			MatchedRuleIDs:   []string{" rule-a ", "rule-b"},
+			Channels:         []string{"Ticket", "email", "ticket"},
+			Escalated:        true,
+			EscalationReason: orchestrationEscalationReasonSLA,
+		},
+	}
+
+	entry, err := buildAlertEscalatedAuditLog(alert, false, createdAt)
+	if err != nil {
+		t.Fatalf("buildAlertEscalatedAuditLog() error = %v", err)
+	}
+	if entry.Action != alertEscalatedAuditAction {
+		t.Fatalf("action mismatch: got %q want %q", entry.Action, alertEscalatedAuditAction)
+	}
+	if entry.EventID != alertEscalationMessageID(alert.AlertID) {
+		t.Fatalf("event id mismatch: got %q want %q", entry.EventID, alertEscalationMessageID(alert.AlertID))
+	}
+	if entry.TenantID != "tenant-escalated" {
+		t.Fatalf("tenant mismatch: got %q want %q", entry.TenantID, "tenant-escalated")
+	}
+	if entry.Level != "critical" {
+		t.Fatalf("level mismatch: got %q want %q", entry.Level, "critical")
+	}
+
+	var metadata map[string]any
+	if err := json.Unmarshal(entry.Metadata, &metadata); err != nil {
+		t.Fatalf("unmarshal metadata failed: %v", err)
+	}
+	if gotReason, ok := metadata["escalationReason"].(string); !ok || gotReason != orchestrationEscalationReasonSLA {
+		t.Fatalf("metadata escalationReason mismatch: got %#v want %q", metadata["escalationReason"], orchestrationEscalationReasonSLA)
+	}
+	if gotStage, ok := metadata["stage"].(string); !ok || gotStage != budgetStageCritical {
+		t.Fatalf("metadata stage mismatch: got %#v want %q", metadata["stage"], budgetStageCritical)
+	}
+	if gotAfter, ok := metadata["governance_state_after"].(string); !ok || gotAfter != governanceStateFrozen {
+		t.Fatalf("metadata governance_state_after mismatch: got %#v want %q", metadata["governance_state_after"], governanceStateFrozen)
+	}
+	if got := asInterfaceSlice(metadata["escalationTargetChannels"]); len(got) != 2 || got[0] != "ticket" || got[1] != "email" {
+		t.Fatalf("metadata escalationTargetChannels mismatch: got %#v want %v", got, []string{"ticket", "email"})
+	}
+	if got := asInterfaceSlice(metadata["matchedRuleIds"]); len(got) != 2 || got[0] != "rule-a" || got[1] != "rule-b" {
+		t.Fatalf("metadata matchedRuleIds mismatch: got %#v want %v", got, []string{"rule-a", "rule-b"})
+	}
+}
+
 func TestBuildBudgetFrozenAuditLogUsesGovernanceAction(t *testing.T) {
 	now := time.Date(2026, 3, 2, 13, 0, 0, 0, time.UTC)
 	budget := budgetRecord{
@@ -587,6 +817,11 @@ func float64Ptr(v float64) *float64 {
 
 func strPtr(v string) *string {
 	return &v
+}
+
+func asInterfaceSlice(value any) []any {
+	items, _ := value.([]any)
+	return items
 }
 
 func sameBudgetScopeFilter(a, b *budgetScopeFilter) bool {

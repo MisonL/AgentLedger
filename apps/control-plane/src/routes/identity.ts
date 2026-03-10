@@ -1,5 +1,8 @@
 import { Hono, type Context } from "hono";
 import {
+  type AgentLifecycleEventItem,
+  validateAgentLifecycleEventCreateInput,
+  validateAgentLifecycleEventListInput,
   validateAddTenantMemberInput,
   validateCreateAgentInput,
   validateCreateDeviceInput,
@@ -12,6 +15,7 @@ import {
 } from "../contracts";
 import {
   getControlPlaneRepository,
+  type AppendAuditLogInput,
   type AgentBinding,
   type DeviceBinding,
   type SourceBinding,
@@ -23,6 +27,9 @@ import type { AppEnv } from "../types";
 export const identityRoutes = new Hono<AppEnv>();
 const repository = getControlPlaneRepository();
 const WRITABLE_ROLES = new Set(["owner", "maintainer"]);
+const AGENT_LIFECYCLE_EVENT_DEFAULT_LIMIT = 50;
+const SCIM_BEARER_TOKEN_ENV = "SCIM_BEARER_TOKEN";
+const memoryAgentLifecycleEvents = new Map<string, AgentLifecycleEventItem[]>();
 
 interface TenantMemberView extends TenantMember {
   email: string;
@@ -58,6 +65,30 @@ function normalizeString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function resolveScimBearerToken(): string | undefined {
+  return normalizeString(Bun.env[SCIM_BEARER_TOKEN_ENV]);
+}
+
+function unauthorizedScim(c: Context<AppEnv>) {
+  return c.json({ message: "SCIM 未认证：缺少或无效的 Bearer Token。" }, 401);
+}
+
+function requireScimBearer(c: Context<AppEnv>) {
+  const configured = resolveScimBearerToken();
+  if (!configured) {
+    return c.json({ message: "服务端未配置 SCIM_BEARER_TOKEN。" }, 503);
+  }
+  const header = c.req.header("authorization");
+  if (!header?.startsWith("Bearer ")) {
+    return unauthorizedScim(c);
+  }
+  const token = header.slice("Bearer ".length).trim();
+  if (token !== configured) {
+    return unauthorizedScim(c);
+  }
+  return null;
+}
+
 function hasMismatchedBodyTenant(body: unknown, tenantId: string): boolean {
   return (
     isRecord(body) &&
@@ -91,7 +122,109 @@ function buildIdentityMetadata(base: Record<string, unknown>): Record<string, un
   return metadata;
 }
 
-function toDeviceItem(binding: DeviceBinding) {
+async function appendIdentityAuditLogSafely(
+  input: AppendAuditLogInput
+): Promise<void> {
+  try {
+    await repository.appendAuditLog(input);
+  } catch (error) {
+    console.warn("[control-plane] 写入 identity 审计日志失败。", error);
+  }
+}
+
+function cloneAgentLifecycleEvent(
+  item: AgentLifecycleEventItem
+): AgentLifecycleEventItem {
+  return {
+    ...item,
+    metadata: JSON.parse(JSON.stringify(item.metadata)) as Record<string, unknown>,
+  };
+}
+
+function createAgentLifecycleEventRecord(
+  tenantId: string,
+  input: {
+    agentId: string;
+    deviceId?: string;
+    hostname?: string;
+    version?: string;
+    action: AgentLifecycleEventItem["action"];
+    result: AgentLifecycleEventItem["result"];
+    occurredAt?: string;
+    metadata?: Record<string, unknown>;
+  }
+): AgentLifecycleEventItem {
+  const now = new Date().toISOString();
+  return {
+    id: crypto.randomUUID(),
+    tenantId,
+    agentId: input.agentId,
+    deviceId: input.deviceId,
+    hostname: input.hostname,
+    version: input.version,
+    action: input.action,
+    result: input.result,
+    occurredAt: input.occurredAt ?? now,
+    createdAt: now,
+    metadata: input.metadata
+      ? (JSON.parse(JSON.stringify(input.metadata)) as Record<string, unknown>)
+      : {},
+  };
+}
+
+function saveAgentLifecycleEvent(
+  tenantId: string,
+  input: {
+    agentId: string;
+    deviceId?: string;
+    hostname?: string;
+    version?: string;
+    action: AgentLifecycleEventItem["action"];
+    result: AgentLifecycleEventItem["result"];
+    occurredAt?: string;
+    metadata?: Record<string, unknown>;
+  }
+): AgentLifecycleEventItem {
+  const currentItems = memoryAgentLifecycleEvents.get(tenantId) ?? [];
+  const record = createAgentLifecycleEventRecord(tenantId, input);
+  memoryAgentLifecycleEvents.set(tenantId, [record, ...currentItems]);
+  return cloneAgentLifecycleEvent(record);
+}
+
+function listAgentLifecycleEvents(
+  tenantId: string,
+  input: {
+    agentId?: string;
+    action?: AgentLifecycleEventItem["action"];
+    result?: AgentLifecycleEventItem["result"];
+    limit?: number;
+  }
+) {
+  const limit = input.limit ?? AGENT_LIFECYCLE_EVENT_DEFAULT_LIMIT;
+  const filtered = (memoryAgentLifecycleEvents.get(tenantId) ?? [])
+    .filter((item) => (input.agentId ? item.agentId === input.agentId : true))
+    .filter((item) => (input.action ? item.action === input.action : true))
+    .filter((item) => (input.result ? item.result === input.result : true))
+    .slice()
+    .sort(
+      (a, b) =>
+        b.occurredAt.localeCompare(a.occurredAt) ||
+        b.createdAt.localeCompare(a.createdAt) ||
+        b.id.localeCompare(a.id)
+    );
+  return {
+    items: filtered.slice(0, limit).map(cloneAgentLifecycleEvent),
+    total: filtered.length,
+    filters: {
+      agentId: input.agentId,
+      action: input.action,
+      result: input.result,
+      limit,
+    },
+  };
+}
+
+function toDeviceItem(binding: DeviceBinding, lastSeenAt?: string) {
   const metadata = isRecord(binding.metadata) ? binding.metadata : {};
   const hostname = normalizeString(metadata.hostname) ?? binding.displayName ?? binding.deviceId;
   const fingerprint = normalizeString(metadata.fingerprint) ?? binding.deviceId;
@@ -105,12 +238,13 @@ function toDeviceItem(binding: DeviceBinding) {
     fingerprint,
     platform: normalizeString(metadata.platform),
     active: toBooleanWithDefault(metadata.active, true),
+    lastSeenAt,
     createdAt: binding.createdAt,
     updatedAt: binding.updatedAt,
   };
 }
 
-function toAgentItem(binding: AgentBinding) {
+function toAgentItem(binding: AgentBinding, lastSeenAt?: string) {
   const metadata = isRecord(binding.metadata) ? binding.metadata : {};
   const hostname = normalizeString(metadata.hostname) ?? binding.displayName ?? binding.agentId;
   return {
@@ -123,6 +257,7 @@ function toAgentItem(binding: AgentBinding) {
     hostname,
     version: normalizeString(metadata.version),
     active: toBooleanWithDefault(metadata.active, true),
+    lastSeenAt,
     createdAt: binding.createdAt,
     updatedAt: binding.updatedAt,
   };
@@ -144,6 +279,53 @@ function toSourceBindingItem(binding: SourceBinding) {
     active: toBooleanWithDefault(metadata.active, true),
     createdAt: binding.createdAt,
     updatedAt: binding.updatedAt,
+  };
+}
+
+function toScimUserResource(input: {
+  userId: string;
+  email: string;
+  displayName: string;
+  tenantRole?: string;
+  active?: boolean;
+  organizationId?: string;
+}) {
+  return {
+    schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+    id: input.userId,
+    userName: input.email,
+    displayName: input.displayName,
+    active: input.active ?? true,
+    emails: [
+      {
+        value: input.email,
+        primary: true,
+      },
+    ],
+    roles: input.tenantRole ? [{ value: input.tenantRole }] : [],
+    meta: {
+      resourceType: "User",
+      ...(input.organizationId ? { organizationId: input.organizationId } : {}),
+    },
+  };
+}
+
+function toScimGroupResource(input: {
+  organizationId: string;
+  name: string;
+  members: Array<{ userId: string; email: string }>;
+}) {
+  return {
+    schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+    id: input.organizationId,
+    displayName: input.name,
+    members: input.members.map((member) => ({
+      value: member.userId,
+      display: member.email,
+    })),
+    meta: {
+      resourceType: "Group",
+    },
   };
 }
 
@@ -249,7 +431,229 @@ async function createOrganizationHandler(c: Context<AppEnv>) {
   }
 }
 
+identityRoutes.get("/tenants/:tenantId/scim/users", async (c) => {
+  const scimAuth = requireScimBearer(c);
+  if (scimAuth) {
+    return scimAuth;
+  }
+  const tenantId = resolveTenantId(c.req.param("tenantId"));
+  if (!tenantId) {
+    return c.json({ message: "tenantId 必须为非空字符串。" }, 400);
+  }
+  const memberships = await repository.listTenantMembers(tenantId);
+  const resources = await Promise.all(
+    memberships.map(async (membership) => {
+      const user = await repository.getUserById(membership.userId);
+      if (!user) {
+        return null;
+      }
+      return toScimUserResource({
+        userId: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        tenantRole: membership.tenantRole,
+        organizationId: membership.organizationId,
+      });
+    }),
+  );
+  const items = resources.filter(Boolean);
+  return c.json({
+    schemas: ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+    totalResults: items.length,
+    startIndex: 1,
+    itemsPerPage: items.length,
+    Resources: items,
+  });
+});
+
+identityRoutes.post("/tenants/:tenantId/scim/users", async (c) => {
+  const scimAuth = requireScimBearer(c);
+  if (scimAuth) {
+    return scimAuth;
+  }
+  const tenantId = resolveTenantId(c.req.param("tenantId"));
+  if (!tenantId) {
+    return c.json({ message: "tenantId 必须为非空字符串。" }, 400);
+  }
+  const body = (await c.req.json().catch(() => undefined)) as Record<string, unknown> | undefined;
+  const userName = normalizeString(body?.userName) ?? normalizeString(body?.email);
+  const displayName = normalizeString(body?.displayName) ?? userName;
+  const tenantRole = normalizeString(body?.tenantRole) as
+    | "owner"
+    | "maintainer"
+    | "member"
+    | "readonly"
+    | undefined;
+  const organizationId = normalizeString(body?.organizationId);
+  const orgRole = normalizeString(body?.orgRole) as
+    | "owner"
+    | "maintainer"
+    | "member"
+    | "readonly"
+    | undefined;
+  if (!userName || !displayName) {
+    return c.json({ message: "SCIM userName/email 与 displayName 必填。" }, 400);
+  }
+  const existingUser = await repository.getLocalUserByEmail(userName);
+  const user =
+    existingUser ??
+    (await repository.createLocalUser({
+      email: userName,
+      passwordHash: await Bun.password.hash(`scim:${tenantId}:${userName}`),
+      displayName,
+    }));
+  const membership = await repository.addTenantMember({
+    tenantId,
+    userId: user.id,
+    tenantRole: tenantRole ?? "member",
+    organizationId,
+    orgRole: organizationId ? orgRole ?? "member" : undefined,
+  });
+  await appendIdentityAuditLogSafely({
+    tenantId,
+    eventId: `cp:scim:${tenantId}:${user.id}`,
+    action: "identity.scim.user_upserted",
+    level: "info",
+    detail: "SCIM 用户同步完成。",
+    metadata: {
+      tenantId,
+      userId: user.id,
+      email: user.email,
+      tenantRole: membership.tenantRole,
+      organizationId: membership.organizationId,
+    },
+  });
+  return c.json(
+    toScimUserResource({
+      userId: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      tenantRole: membership.tenantRole,
+      organizationId: membership.organizationId,
+    }),
+    201,
+  );
+});
+
+identityRoutes.get("/tenants/:tenantId/scim/groups", async (c) => {
+  const scimAuth = requireScimBearer(c);
+  if (scimAuth) {
+    return scimAuth;
+  }
+  const tenantId = resolveTenantId(c.req.param("tenantId"));
+  if (!tenantId) {
+    return c.json({ message: "tenantId 必须为非空字符串。" }, 400);
+  }
+  const organizations = await repository.listOrganizations(tenantId);
+  const memberships = await repository.listTenantMembers(tenantId);
+  const resources = await Promise.all(
+    organizations.map(async (organization) => {
+      const members = await Promise.all(
+        memberships
+          .filter((membership) => membership.organizationId === organization.id)
+          .map(async (membership) => {
+            const user = await repository.getUserById(membership.userId);
+            if (!user) {
+              return null;
+            }
+            return {
+              userId: user.id,
+              email: user.email,
+            };
+          }),
+      );
+      return toScimGroupResource({
+        organizationId: organization.id,
+        name: organization.name,
+        members: members.filter(Boolean) as Array<{ userId: string; email: string }>,
+      });
+    }),
+  );
+  return c.json({
+    schemas: ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+    totalResults: resources.length,
+    startIndex: 1,
+    itemsPerPage: resources.length,
+    Resources: resources,
+  });
+});
+
 identityRoutes.use("*", authMiddleware);
+
+identityRoutes.post("/agents/lifecycle-events", async (c) => {
+  const actorUserId = getActorUserId(c);
+  if (actorUserId instanceof Response) {
+    return actorUserId;
+  }
+
+  const auth = c.get("auth");
+  if (!auth) {
+    return unauthorized(c);
+  }
+
+  const body = await c.req.json().catch(() => undefined);
+  const result = validateAgentLifecycleEventCreateInput(body);
+  if (!result.success) {
+    return c.json({ message: result.error }, 400);
+  }
+  if (result.data.tenantId && result.data.tenantId !== auth.tenantId) {
+    return c.json({ message: "请求体 tenantId 与当前租户不一致。" }, 403);
+  }
+
+  const membership = await repository.getTenantMemberByUser(auth.tenantId, actorUserId);
+  if (!membership) {
+    return forbiddenCrossTenant(c);
+  }
+
+  const item = saveAgentLifecycleEvent(auth.tenantId, result.data);
+  const requestId = c.get("requestId");
+  await appendIdentityAuditLogSafely({
+    tenantId: auth.tenantId,
+    eventId: `cp:${requestId}:agent-lifecycle-create`,
+    action: "identity.agent_lifecycle_event.created",
+    level: "info",
+    detail: `记录 agent 生命周期事件：${item.agentId}/${item.action}/${item.result}`,
+    metadata: {
+      tenantId: auth.tenantId,
+      userId: actorUserId,
+      requestId,
+      route: "/api/v1/agents/lifecycle-events",
+      agentId: item.agentId,
+      deviceId: item.deviceId,
+      hostname: item.hostname,
+      version: item.version,
+      actionName: item.action,
+      result: item.result,
+      occurredAt: item.occurredAt,
+    },
+  });
+
+  return c.json(item, 201);
+});
+
+identityRoutes.get("/agents/lifecycle-events", async (c) => {
+  const actorUserId = getActorUserId(c);
+  if (actorUserId instanceof Response) {
+    return actorUserId;
+  }
+
+  const auth = c.get("auth");
+  if (!auth) {
+    return unauthorized(c);
+  }
+
+  const membership = await repository.getTenantMemberByUser(auth.tenantId, actorUserId);
+  if (!membership) {
+    return forbiddenCrossTenant(c);
+  }
+
+  const result = validateAgentLifecycleEventListInput(c.req.query());
+  if (!result.success) {
+    return c.json({ message: result.error }, 400);
+  }
+
+  return c.json(listAgentLifecycleEvents(auth.tenantId, result.data));
+});
 
 identityRoutes.get("/tenants", async (c) => {
   const actorUserId = getActorUserId(c);
@@ -422,8 +826,30 @@ identityRoutes.get("/tenants/:tenantId/devices", async (c) => {
     return access;
   }
 
-  const bindings = await repository.listDeviceBindings(tenantId);
-  const items = bindings.map((binding) => toDeviceItem(binding));
+  const [bindings, agentBindings, heartbeats] = await Promise.all([
+    repository.listDeviceBindings(tenantId),
+    repository.listAgentBindings(tenantId),
+    repository.listAgentRuntimeHeartbeats(tenantId),
+  ]);
+  const deviceIdByAgentId = new Map(
+    agentBindings
+      .filter((binding) => binding.deviceId)
+      .map((binding) => [binding.agentId, binding.deviceId as string] as const)
+  );
+  const lastSeenAtByDeviceId = new Map<string, string>();
+  for (const heartbeat of heartbeats) {
+    const deviceId = deviceIdByAgentId.get(heartbeat.agentId);
+    if (!deviceId) {
+      continue;
+    }
+    const currentLastSeenAt = lastSeenAtByDeviceId.get(deviceId);
+    if (!currentLastSeenAt || heartbeat.occurredAt > currentLastSeenAt) {
+      lastSeenAtByDeviceId.set(deviceId, heartbeat.occurredAt);
+    }
+  }
+  const items = bindings.map((binding) =>
+    toDeviceItem(binding, lastSeenAtByDeviceId.get(binding.deviceId))
+  );
   return c.json({
     items,
     total: items.length,
@@ -568,8 +994,16 @@ identityRoutes.get("/tenants/:tenantId/agents", async (c) => {
     return access;
   }
 
-  const bindings = await repository.listAgentBindings(tenantId);
-  const items = bindings.map((binding) => toAgentItem(binding));
+  const [bindings, heartbeats] = await Promise.all([
+    repository.listAgentBindings(tenantId),
+    repository.listAgentRuntimeHeartbeats(tenantId),
+  ]);
+  const lastSeenAtByAgentId = new Map(
+    heartbeats.map((heartbeat) => [heartbeat.agentId, heartbeat.occurredAt] as const)
+  );
+  const items = bindings.map((binding) =>
+    toAgentItem(binding, lastSeenAtByAgentId.get(binding.agentId))
+  );
   return c.json({
     items,
     total: items.length,

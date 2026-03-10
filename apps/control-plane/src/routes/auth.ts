@@ -33,9 +33,16 @@ const AUTH_DISABLE_LOCAL_LOGIN_ENV = "AUTH_DISABLE_LOCAL_LOGIN";
 const AUTH_EXTERNAL_PROVIDERS_JSON_ENV = "AUTH_EXTERNAL_PROVIDERS_JSON";
 const AUTH_EXTERNAL_ASSERTION_SECRET_ENV = "AUTH_EXTERNAL_ASSERTION_SECRET";
 const AUTH_EXTERNAL_ASSERTION_TTL_SECONDS_ENV = "AUTH_EXTERNAL_ASSERTION_TTL_SECONDS";
+const AUTH_EXTERNAL_RISK_MODE_ENV = "AUTH_EXTERNAL_RISK_MODE";
+const AUTH_LOCAL_MFA_REQUIRED_ENV = "AUTH_LOCAL_MFA_REQUIRED";
+const AUTH_LOCAL_MFA_STATIC_CODE_ENV = "AUTH_LOCAL_MFA_STATIC_CODE";
+const AUTH_RISK_LEVEL_HEADER = "x-agentledger-risk-level";
+const AUTH_RISK_SIGNALS_HEADER = "x-agentledger-risk-signals";
 const DEFAULT_AUTH_EXTERNAL_ASSERTION_TTL_SECONDS = 300;
 const MAX_AUTH_EXTERNAL_ASSERTION_TTL_SECONDS = 3600;
 const MAX_EXTERNAL_ASSERTION_NONCE_CACHE_SIZE = 20_000;
+const EXTERNAL_LOGIN_ROUTE = "/api/v1/auth/external/login";
+const EXTERNAL_EXCHANGE_ROUTE = "/api/v1/auth/external/exchange";
 const externalAssertionNonceCache = new Map<string, number>();
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -58,10 +65,49 @@ interface RefreshFailureAuditContext {
 
 interface ExternalLoginFailureAuditContext {
   providerId?: string;
+  providerType?: AuthProviderType;
   externalUserId?: string;
   email?: string;
   tenantId?: string;
   reason: string;
+  riskLevel?: ExternalAuthRiskLevel;
+  riskSignals?: string[];
+  failureStage?: string;
+}
+
+type ExternalAuthRiskLevel = "low" | "medium" | "high";
+type ExternalAuthRiskMode = "audit_only" | "block";
+type ExternalRiskDecision = "allowed" | "allow_with_risk" | "blocked";
+
+interface ExternalExchangeFailureAuditContext {
+  providerId?: string;
+  providerType?: AuthProviderType;
+  externalUserId?: string;
+  email?: string;
+  tenantId?: string;
+  reason: string;
+  state?: string;
+  riskLevel?: ExternalAuthRiskLevel;
+  riskSignals?: string[];
+  failureStage?: string;
+}
+
+interface ExternalAuthAuditMetadataContext {
+  route: string;
+  flow: "external_login" | "external_exchange";
+  result: "success" | "failed";
+  providerId?: string;
+  providerType?: AuthProviderType;
+  externalUserId?: string;
+  email?: string;
+  tenantId?: string;
+  userId?: string;
+  state?: string;
+  reason?: string;
+  riskLevel: ExternalAuthRiskLevel;
+  riskSignals: string[];
+  riskDecision?: ExternalRiskDecision;
+  failureStage?: string;
 }
 
 interface VerifyRefreshSessionOptions {
@@ -74,6 +120,7 @@ interface ExternalAuthProviderConfig extends AuthProviderItem {
   clientId?: string;
   clientSecret?: string;
   scopes?: string[];
+  requireMfa?: boolean;
 }
 
 interface ExternalUserInfoProfile {
@@ -179,7 +226,24 @@ function normalizeProviderType(value: unknown): AuthProviderType | undefined {
     case "oauth2":
     case "oidc":
     case "sso":
+    case "saml":
       return normalized;
+    default:
+      return undefined;
+  }
+}
+
+function normalizeProviderBinding(
+  value: unknown,
+): AuthProviderItem["binding"] | undefined {
+  const normalized = normalizeOptionalString(value)?.toLowerCase();
+  switch (normalized) {
+    case "redirect":
+    case "http-redirect":
+      return "redirect";
+    case "post":
+    case "http-post":
+      return "post";
     default:
       return undefined;
   }
@@ -227,8 +291,27 @@ function normalizeExternalAuthProvider(value: unknown): ExternalAuthProviderConf
   }
 
   const issuer = normalizeOptionalString(record.issuer);
+  const metadataUrl =
+    normalizeOptionalString(record.metadataUrl) ??
+    normalizeOptionalString(record.metadataURL) ??
+    normalizeOptionalString(record.metadataUri);
+  const ssoUrl =
+    normalizeOptionalString(record.ssoUrl) ??
+    normalizeOptionalString(record.loginUrl) ??
+    normalizeOptionalString(record.singleSignOnUrl) ??
+    normalizeOptionalString(record.singleSignOnURL);
   const authorizationUrl =
-    normalizeOptionalString(record.authorizationUrl) ?? normalizeOptionalString(record.authUrl);
+    normalizeOptionalString(record.authorizationUrl) ??
+    normalizeOptionalString(record.authUrl) ??
+    ssoUrl;
+  const acsUrl =
+    normalizeOptionalString(record.acsUrl) ??
+    normalizeOptionalString(record.assertionConsumerServiceUrl) ??
+    normalizeOptionalString(record.assertionConsumerServiceURL);
+  const binding =
+    normalizeProviderBinding(record.binding) ??
+    normalizeProviderBinding(record.ssoBinding) ??
+    normalizeProviderBinding(record.singleSignOnBinding);
   const enabled = typeof record.enabled === "boolean" ? record.enabled : true;
   const tokenUrl =
     normalizeOptionalString(record.tokenUrl) ?? normalizeOptionalString(record.tokenEndpoint);
@@ -239,6 +322,11 @@ function normalizeExternalAuthProvider(value: unknown): ExternalAuthProviderConf
   const clientId = normalizeOptionalString(record.clientId);
   const clientSecret = normalizeOptionalString(record.clientSecret);
   const scopes = normalizeProviderScopes(record.scopes);
+  const requireMfa = typeof record.requireMfa === "boolean" ? record.requireMfa : undefined;
+
+  if (type === "saml" && !authorizationUrl && !metadataUrl) {
+    return undefined;
+  }
 
   return {
     id,
@@ -247,11 +335,16 @@ function normalizeExternalAuthProvider(value: unknown): ExternalAuthProviderConf
     enabled,
     issuer,
     authorizationUrl,
+    metadataUrl,
+    ssoUrl,
+    acsUrl,
+    binding,
     tokenUrl,
     userInfoUrl,
     clientId,
     clientSecret,
     scopes,
+    requireMfa,
   };
 }
 
@@ -263,6 +356,11 @@ function toPublicAuthProviderItem(provider: ExternalAuthProviderConfig): AuthPro
     enabled: provider.enabled,
     issuer: provider.issuer,
     authorizationUrl: provider.authorizationUrl,
+    metadataUrl: provider.metadataUrl,
+    ssoUrl: provider.ssoUrl,
+    acsUrl: provider.acsUrl,
+    binding: provider.binding,
+    requireMfa: provider.requireMfa,
   };
 }
 
@@ -361,6 +459,10 @@ function findEnabledExternalExchangeProvider(
       typeof item.userInfoUrl === "string" &&
       typeof item.clientId === "string"
   );
+}
+
+function findConfiguredExternalProvider(providerId: string): ExternalAuthProviderConfig | undefined {
+  return resolveExternalAuthProvidersFromEnv().find((item) => item.id === providerId);
 }
 
 async function parseJSONRecordSafely(
@@ -613,15 +715,184 @@ async function appendAuditLogSafely(input: AppendAuditLogInput): Promise<void> {
   }
 }
 
+function resolveAuditTenantId(tenantId?: string): string {
+  return typeof tenantId === "string" && tenantId.trim().length > 0
+    ? tenantId
+    : DEFAULT_TENANT_ID;
+}
+
+function normalizeRiskSignals(signals: Array<string | undefined>): string[] {
+  const normalized = signals
+    .map((signal) => normalizeOptionalString(signal))
+    .filter((signal): signal is string => typeof signal === "string");
+  return normalized.length > 0 ? Array.from(new Set(normalized)) : ["unspecified"];
+}
+
+function extractClientIpFromHeader(value: string | undefined): string | undefined {
+  const normalized = normalizeOptionalString(value);
+  if (!normalized) {
+    return undefined;
+  }
+  const firstHop = normalized.split(",")[0]?.trim();
+  return firstHop && firstHop.length > 0 ? firstHop : undefined;
+}
+
+function resolveRequestClientIp(c: Context<AppEnv>): string | undefined {
+  return (
+    extractClientIpFromHeader(c.req.header("cf-connecting-ip")) ??
+    extractClientIpFromHeader(c.req.header("x-forwarded-for")) ??
+    extractClientIpFromHeader(c.req.header("x-real-ip"))
+  );
+}
+
+function resolveExternalAuthProviderType(
+  providerId?: string,
+  providerType?: AuthProviderType
+): AuthProviderType | "unknown" {
+  if (providerType) {
+    return providerType;
+  }
+  if (!providerId) {
+    return "unknown";
+  }
+  return findConfiguredExternalProvider(providerId)?.type ?? "unknown";
+}
+
+function resolveExternalRiskMode(): ExternalAuthRiskMode {
+  const raw = normalizeOptionalString(Bun.env[AUTH_EXTERNAL_RISK_MODE_ENV])?.toLowerCase();
+  return raw === "block" ? "block" : "audit_only";
+}
+
+function isLocalMfaRequired(): boolean {
+  return parseBooleanEnv(Bun.env[AUTH_LOCAL_MFA_REQUIRED_ENV]);
+}
+
+function resolveLocalMfaStaticCode(): string | undefined {
+  return normalizeOptionalString(Bun.env[AUTH_LOCAL_MFA_STATIC_CODE_ENV]);
+}
+
+function parseRiskLevelHeader(value: string | undefined): ExternalAuthRiskLevel | undefined {
+  const normalized = normalizeOptionalString(value)?.toLowerCase();
+  if (normalized === "low" || normalized === "medium" || normalized === "high") {
+    return normalized;
+  }
+  return undefined;
+}
+
+function parseRiskSignalsHeader(value: string | undefined): string[] {
+  const normalized = normalizeOptionalString(value);
+  if (!normalized) {
+    return [];
+  }
+  return Array.from(
+    new Set(
+      normalized
+        .split(/[,\s]+/)
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0),
+    ),
+  );
+}
+
+function evaluateRequestRisk(c: Context<AppEnv>): {
+  riskLevel: ExternalAuthRiskLevel;
+  riskSignals: string[];
+  riskDecision: ExternalRiskDecision;
+} {
+  const headerLevel = parseRiskLevelHeader(c.req.header(AUTH_RISK_LEVEL_HEADER));
+  const headerSignals = parseRiskSignalsHeader(c.req.header(AUTH_RISK_SIGNALS_HEADER));
+  const inferredSignals: string[] = [];
+  if (!normalizeOptionalString(c.req.header("user-agent"))) {
+    inferredSignals.push("missing_user_agent");
+  }
+  if (!resolveRequestClientIp(c)) {
+    inferredSignals.push("missing_client_ip");
+  }
+  const mergedSignals = Array.from(new Set([...headerSignals, ...inferredSignals]));
+  const riskLevel =
+    headerLevel ??
+    (mergedSignals.some((signal) => signal.includes("high") || signal.includes("suspicious"))
+      ? "high"
+      : mergedSignals.length > 0
+        ? "medium"
+        : "low");
+  return {
+    riskLevel,
+    riskSignals: mergedSignals.length > 0 ? mergedSignals : ["no_additional_risk_signals"],
+    riskDecision:
+      resolveExternalRiskMode() === "block" && riskLevel === "high"
+        ? "blocked"
+        : riskLevel === "low"
+          ? "allowed"
+          : "allow_with_risk",
+  };
+}
+
+function buildExternalAuthAuditMetadata(
+  c: Context<AppEnv>,
+  context: ExternalAuthAuditMetadataContext
+): Record<string, unknown> {
+  const requestId = c.get("requestId");
+  const tenantId = resolveAuditTenantId(context.tenantId);
+
+  return {
+    requestId,
+    route: context.route,
+    flow: context.flow,
+    result: context.result,
+    providerId: context.providerId,
+    providerType: resolveExternalAuthProviderType(
+      context.providerId,
+      context.providerType,
+    ),
+    externalUserId: context.externalUserId,
+    email: context.email,
+    tenantId,
+    userId: context.userId,
+    state: context.state,
+    reason: context.reason,
+    clientIp: resolveRequestClientIp(c),
+    userAgent: normalizeOptionalString(c.req.header("user-agent")),
+    riskLevel: context.riskLevel,
+    riskSignals: normalizeRiskSignals(context.riskSignals),
+    riskDecision: context.riskDecision,
+    failureStage: context.failureStage,
+  };
+}
+
+async function appendExternalAuthAuditLog(
+  c: Context<AppEnv>,
+  input: {
+    tenantId?: string;
+    eventSuffix: string;
+    action: string;
+    level: "info" | "warning";
+    detail: string;
+    metadata: ExternalAuthAuditMetadataContext;
+  }
+): Promise<void> {
+  const requestId = c.get("requestId");
+  const tenantId = resolveAuditTenantId(input.tenantId ?? input.metadata.tenantId);
+
+  await appendAuditLogSafely({
+    tenantId,
+    eventId: `cp:${requestId}:${input.eventSuffix}`,
+    action: input.action,
+    level: input.level,
+    detail: input.detail,
+    metadata: buildExternalAuthAuditMetadata(c, {
+      ...input.metadata,
+      tenantId,
+    }),
+  });
+}
+
 async function appendRefreshFailureAuditLog(
   c: Context<AppEnv>,
   context: RefreshFailureAuditContext
 ): Promise<void> {
   const requestId = c.get("requestId");
-  const tenantId =
-    typeof context.tenantId === "string" && context.tenantId.trim().length > 0
-      ? context.tenantId
-      : DEFAULT_TENANT_ID;
+  const tenantId = resolveAuditTenantId(context.tenantId);
   const userId =
     typeof context.userId === "string" && context.userId.trim().length > 0
       ? context.userId
@@ -652,26 +923,61 @@ async function appendExternalLoginFailureAuditLog(
   c: Context<AppEnv>,
   context: ExternalLoginFailureAuditContext
 ): Promise<void> {
-  const requestId = c.get("requestId");
-  const tenantId =
-    typeof context.tenantId === "string" && context.tenantId.trim().length > 0
-      ? context.tenantId
-      : DEFAULT_TENANT_ID;
+  const tenantId = resolveAuditTenantId(context.tenantId);
+  const riskMode = resolveExternalRiskMode();
 
-  await appendAuditLogSafely({
+  await appendExternalAuthAuditLog(c, {
     tenantId,
-    eventId: `cp:${requestId}:auth-external-login`,
+    eventSuffix: "auth-external-login-failed",
     action: "auth.external_login_failed",
     level: "warning",
     detail: `外部登录失败：${context.reason}`,
     metadata: {
-      requestId,
-      reason: context.reason,
+      route: EXTERNAL_LOGIN_ROUTE,
+      flow: "external_login",
+      result: "failed",
       providerId: context.providerId,
+      providerType: context.providerType,
       externalUserId: context.externalUserId,
       email: context.email,
       tenantId,
-      route: "/api/v1/auth/external/login",
+      reason: context.reason,
+      riskLevel: context.riskLevel ?? "medium",
+      riskSignals: context.riskSignals ?? ["assertion_login_failed"],
+      riskDecision: riskMode === "block" ? "blocked" : "allow_with_risk",
+      failureStage: context.failureStage,
+    },
+  });
+}
+
+async function appendExternalExchangeFailureAuditLog(
+  c: Context<AppEnv>,
+  context: ExternalExchangeFailureAuditContext
+): Promise<void> {
+  const tenantId = resolveAuditTenantId(context.tenantId);
+  const riskMode = resolveExternalRiskMode();
+
+  await appendExternalAuthAuditLog(c, {
+    tenantId,
+    eventSuffix: "auth-external-exchange-failed",
+    action: "auth.external_exchange_failed",
+    level: "warning",
+    detail: `外部授权码登录失败：${context.reason}`,
+    metadata: {
+      route: EXTERNAL_EXCHANGE_ROUTE,
+      flow: "external_exchange",
+      result: "failed",
+      providerId: context.providerId,
+      providerType: context.providerType,
+      externalUserId: context.externalUserId,
+      email: context.email,
+      tenantId,
+      state: context.state,
+      reason: context.reason,
+      riskLevel: context.riskLevel ?? "medium",
+      riskSignals: context.riskSignals ?? ["authorization_code_exchange_failed"],
+      riskDecision: riskMode === "block" ? "blocked" : "allow_with_risk",
+      failureStage: context.failureStage,
     },
   });
 }
@@ -923,6 +1229,15 @@ authRoutes.post("/login", async (c) => {
   if (!passwordMatched) {
     return unauthorized(c, "邮箱或密码错误。");
   }
+  if (isLocalMfaRequired()) {
+    const configuredOtpCode = resolveLocalMfaStaticCode();
+    if (!configuredOtpCode) {
+      return forbidden(c, "本地 MFA 已启用，但服务端未配置静态验证码。");
+    }
+    if (result.data.otpCode !== configuredOtpCode) {
+      return unauthorized(c, "本地登录需要有效的 MFA 验证码。");
+    }
+  }
 
   const tenantAccess = await resolvePrimaryTenantAccess(user.id);
   const session = await createSessionForUser(user.id, tenantAccess.tenantId);
@@ -944,12 +1259,37 @@ authRoutes.post("/external/exchange", async (c) => {
   const body = await c.req.json().catch(() => undefined);
   const result = validateAuthExternalExchangeInput(body);
   if (!result.success) {
+    await appendExternalExchangeFailureAuditLog(c, {
+      providerId: isRecord(body) ? normalizeProviderId(body.providerId) : undefined,
+      reason: result.error,
+      riskLevel: "medium",
+      riskSignals: ["invalid_input", "authorization_code_exchange_failed"],
+      failureStage: "validation",
+    });
     return badRequest(c, result.error);
   }
 
+  const configuredProvider = findConfiguredExternalProvider(result.data.providerId);
   const provider = findEnabledExternalExchangeProvider(result.data.providerId);
+  const externalRiskMode = resolveExternalRiskMode();
   if (!provider) {
-    return unauthorized(c, "外部登录提供方不可用或未启用授权码交换。");
+    await appendExternalExchangeFailureAuditLog(c, {
+      providerId: result.data.providerId,
+      providerType: configuredProvider?.type,
+      reason: "外部登录提供方不可用或未启用授权码交换。",
+      state: result.data.state,
+      riskLevel: "medium",
+      riskSignals: ["provider_unavailable", "authorization_code_exchange_failed"],
+      failureStage: "provider_resolution",
+    });
+    return c.json(
+      {
+        message: "外部登录提供方不可用或未启用授权码交换。",
+        requestId: c.get("requestId"),
+        riskDecision: externalRiskMode === "block" ? "blocked" : "allow_with_risk",
+      },
+      401,
+    );
   }
 
   const tokenResult = await exchangeExternalAuthorizationCode(provider, {
@@ -961,7 +1301,23 @@ authRoutes.post("/external/exchange", async (c) => {
     console.warn(
       `[control-plane] 外部授权码交换 token 失败(provider=${provider.id})：${tokenResult.reason}`
     );
-    return badGateway(c, "外部身份提供方响应异常，请稍后重试。");
+    await appendExternalExchangeFailureAuditLog(c, {
+      providerId: provider.id,
+      providerType: provider.type,
+      reason: tokenResult.reason,
+      state: result.data.state,
+      riskLevel: "medium",
+      riskSignals: ["upstream_token_failed", "authorization_code_exchange_failed"],
+      failureStage: "token_endpoint",
+    });
+    return c.json(
+      {
+        message: "外部身份提供方响应异常，请稍后重试。",
+        requestId: c.get("requestId"),
+        riskDecision: externalRiskMode === "block" ? "blocked" : "allow_with_risk",
+      },
+      502,
+    );
   }
 
   const userInfoResult = await fetchExternalUserInfo(provider, tokenResult.accessToken);
@@ -969,7 +1325,23 @@ authRoutes.post("/external/exchange", async (c) => {
     console.warn(
       `[control-plane] 外部授权码交换 userinfo 失败(provider=${provider.id})：${userInfoResult.reason}`
     );
-    return badGateway(c, "外部身份提供方响应异常，请稍后重试。");
+    await appendExternalExchangeFailureAuditLog(c, {
+      providerId: provider.id,
+      providerType: provider.type,
+      reason: userInfoResult.reason,
+      state: result.data.state,
+      riskLevel: "medium",
+      riskSignals: ["upstream_userinfo_failed", "authorization_code_exchange_failed"],
+      failureStage: "userinfo_endpoint",
+    });
+    return c.json(
+      {
+        message: "外部身份提供方响应异常，请稍后重试。",
+        requestId: c.get("requestId"),
+        riskDecision: externalRiskMode === "block" ? "blocked" : "allow_with_risk",
+      },
+      502,
+    );
   }
 
   let user = await repository.getLocalUserByEmail(userInfoResult.profile.email);
@@ -986,25 +1358,80 @@ authRoutes.post("/external/exchange", async (c) => {
     });
   }
 
+  if (provider.requireMfa && result.data.mfaVerified !== true) {
+    await appendExternalExchangeFailureAuditLog(c, {
+      providerId: provider.id,
+      providerType: provider.type,
+      externalUserId: userInfoResult.profile.externalUserId,
+      email: userInfoResult.profile.email,
+      reason: "外部授权码登录需要上游 MFA 验证。",
+      state: result.data.state,
+      riskLevel: "medium",
+      riskSignals: ["mfa_required", "authorization_code_exchange_failed"],
+      failureStage: "mfa_validation",
+    });
+    return c.json(
+      {
+        message: "外部授权码登录需要完成上游 MFA 验证。",
+        requestId: c.get("requestId"),
+        riskDecision: externalRiskMode === "block" ? "blocked" : "allow_with_risk",
+        mfaRequired: true,
+      },
+      401,
+    );
+  }
+
+  const riskAssessment = evaluateRequestRisk(c);
+  if (riskAssessment.riskDecision === "blocked") {
+    await appendExternalExchangeFailureAuditLog(c, {
+      providerId: provider.id,
+      providerType: provider.type,
+      externalUserId: userInfoResult.profile.externalUserId,
+      email: userInfoResult.profile.email,
+      reason: "外部授权码登录被风险策略阻断。",
+      state: result.data.state,
+      riskLevel: riskAssessment.riskLevel,
+      riskSignals: riskAssessment.riskSignals,
+      failureStage: "risk_evaluation",
+    });
+    return c.json(
+      {
+        message: "外部授权码登录被风险策略阻断。",
+        requestId: c.get("requestId"),
+        riskDecision: "blocked",
+      },
+      403,
+    );
+  }
+
   const tenantAccess = await resolvePrimaryTenantAccess(user.id);
   const session = await createSessionForUser(user.id, tenantAccess.tenantId);
   const tokens = issueAuthTokens(user.id, tenantAccess.tenantId, session);
-  const requestId = c.get("requestId");
-
-  await appendAuditLogSafely({
+  await appendExternalAuthAuditLog(c, {
     tenantId: tenantAccess.tenantId,
-    eventId: `cp:${requestId}:auth-external-exchange`,
+    eventSuffix: "auth-external-exchange",
     action: "auth.external_exchange",
     level: "info",
     detail: `外部授权码登录成功(provider=${provider.id}, user=${user.id})`,
     metadata: {
-      requestId,
+      route: EXTERNAL_EXCHANGE_ROUTE,
+      flow: "external_exchange",
+      result: "success",
       providerId: provider.id,
       providerType: provider.type,
       externalUserId: userInfoResult.profile.externalUserId,
+      email: user.email,
       userId: user.id,
       tenantId: tenantAccess.tenantId,
       state: result.data.state,
+      riskLevel: riskAssessment.riskLevel,
+      riskSignals: [
+        "authorization_code_exchange_succeeded",
+        "upstream_token_succeeded",
+        "upstream_userinfo_succeeded",
+        ...riskAssessment.riskSignals,
+      ],
+      riskDecision: riskAssessment.riskDecision,
     },
   });
 
@@ -1022,29 +1449,53 @@ authRoutes.post("/external/exchange", async (c) => {
       displayName: provider.displayName,
     },
     tokens,
+    riskDecision: riskAssessment.riskDecision,
   });
 });
 
 authRoutes.post("/external/login", async (c) => {
   const body = await c.req.json().catch(() => undefined);
   const result = validateAuthExternalLoginInput(body);
+  const externalRiskMode = resolveExternalRiskMode();
   if (!result.success) {
     await appendExternalLoginFailureAuditLog(c, {
       reason: result.error,
+      riskLevel: "medium",
+      riskSignals: ["invalid_input", "assertion_login_failed"],
+      failureStage: "validation",
     });
-    return badRequest(c, result.error);
+    return c.json(
+      {
+        message: result.error,
+        requestId: c.get("requestId"),
+        riskDecision: externalRiskMode === "block" ? "blocked" : "allow_with_risk",
+      },
+      400,
+    );
   }
 
+  const configuredProvider = findConfiguredExternalProvider(result.data.providerId);
   const provider = findEnabledExternalProvider(result.data.providerId);
   if (!provider) {
     await appendExternalLoginFailureAuditLog(c, {
       providerId: result.data.providerId,
+      providerType: configuredProvider?.type,
       externalUserId: result.data.externalUserId,
       email: result.data.email,
       tenantId: result.data.tenantId,
       reason: "外部登录提供方未启用或不存在。",
+      riskLevel: "medium",
+      riskSignals: ["provider_unavailable", "assertion_login_failed"],
+      failureStage: "provider_resolution",
     });
-    return unauthorized(c, "外部登录提供方未启用或不存在。");
+    return c.json(
+      {
+        message: "外部登录提供方未启用或不存在。",
+        requestId: c.get("requestId"),
+        riskDecision: externalRiskMode === "block" ? "blocked" : "allow_with_risk",
+      },
+      401,
+    );
   }
 
   const assertionSecret = resolveExternalAssertionSecret();
@@ -1054,15 +1505,24 @@ authRoutes.post("/external/login", async (c) => {
     );
     await appendExternalLoginFailureAuditLog(c, {
       providerId: result.data.providerId,
+      providerType: configuredProvider?.type,
       externalUserId: result.data.externalUserId,
       email: result.data.email,
       tenantId: result.data.tenantId,
       reason: "外部登录签名密钥未配置。",
+      riskLevel: "high",
+      riskSignals: [
+        "server_misconfiguration",
+        "assertion_secret_missing",
+        "assertion_login_failed",
+      ],
+      failureStage: "configuration",
     });
     return c.json(
       {
         message: "外部登录暂不可用，请联系管理员配置签名密钥。",
         requestId: c.get("requestId"),
+        riskDecision: externalRiskMode === "block" ? "blocked" : "allow_with_risk",
       },
       503
     );
@@ -1072,12 +1532,23 @@ authRoutes.post("/external/login", async (c) => {
   if (!Number.isFinite(timestampMs)) {
     await appendExternalLoginFailureAuditLog(c, {
       providerId: result.data.providerId,
+      providerType: provider.type,
       externalUserId: result.data.externalUserId,
       email: result.data.email,
       tenantId: result.data.tenantId,
       reason: "外部登录断言时间戳非法。",
+      riskLevel: "high",
+      riskSignals: ["timestamp_invalid", "assertion_login_failed"],
+      failureStage: "timestamp_validation",
     });
-    return unauthorized(c, "外部登录断言时间戳非法。");
+    return c.json(
+      {
+        message: "外部登录断言时间戳非法。",
+        requestId: c.get("requestId"),
+        riskDecision: externalRiskMode === "block" ? "blocked" : "allow_with_risk",
+      },
+      401,
+    );
   }
 
   const ttlSeconds = resolveExternalAssertionTTLSeconds();
@@ -1086,12 +1557,23 @@ authRoutes.post("/external/login", async (c) => {
   if (Math.abs(nowMs - timestampMs) > ttlMs) {
     await appendExternalLoginFailureAuditLog(c, {
       providerId: result.data.providerId,
+      providerType: provider.type,
       externalUserId: result.data.externalUserId,
       email: result.data.email,
       tenantId: result.data.tenantId,
       reason: "外部登录断言已过期。",
+      riskLevel: "high",
+      riskSignals: ["timestamp_out_of_window", "assertion_login_failed"],
+      failureStage: "timestamp_validation",
     });
-    return unauthorized(c, "外部登录断言已过期。");
+    return c.json(
+      {
+        message: "外部登录断言已过期。",
+        requestId: c.get("requestId"),
+        riskDecision: externalRiskMode === "block" ? "blocked" : "allow_with_risk",
+      },
+      401,
+    );
   }
 
   const canonicalPayload = buildExternalAssertionCanonicalPayload({
@@ -1111,23 +1593,45 @@ authRoutes.post("/external/login", async (c) => {
   ) {
     await appendExternalLoginFailureAuditLog(c, {
       providerId: result.data.providerId,
+      providerType: provider.type,
       externalUserId: result.data.externalUserId,
       email: result.data.email,
       tenantId: result.data.tenantId,
       reason: "外部登录签名校验失败。",
+      riskLevel: "high",
+      riskSignals: ["signature_invalid", "assertion_login_failed"],
+      failureStage: "signature_validation",
     });
-    return unauthorized(c, "外部登录签名校验失败。");
+    return c.json(
+      {
+        message: "外部登录签名校验失败。",
+        requestId: c.get("requestId"),
+        riskDecision: externalRiskMode === "block" ? "blocked" : "allow_with_risk",
+      },
+      401,
+    );
   }
 
   if (!claimExternalAssertionNonce(result.data.providerId, result.data.nonce, nowMs, ttlMs)) {
     await appendExternalLoginFailureAuditLog(c, {
       providerId: result.data.providerId,
+      providerType: provider.type,
       externalUserId: result.data.externalUserId,
       email: result.data.email,
       tenantId: result.data.tenantId,
       reason: "外部登录请求疑似重放。",
+      riskLevel: "high",
+      riskSignals: ["nonce_replay_detected", "assertion_login_failed"],
+      failureStage: "nonce_validation",
     });
-    return unauthorized(c, "外部登录请求疑似重放，已拒绝。");
+    return c.json(
+      {
+        message: "外部登录请求疑似重放，已拒绝。",
+        requestId: c.get("requestId"),
+        riskDecision: externalRiskMode === "block" ? "blocked" : "allow_with_risk",
+      },
+      401,
+    );
   }
 
   let user = await repository.getLocalUserByEmail(result.data.email);
@@ -1143,19 +1647,70 @@ authRoutes.post("/external/login", async (c) => {
     });
   }
 
+  if (provider.requireMfa && result.data.mfaVerified !== true) {
+    await appendExternalLoginFailureAuditLog(c, {
+      providerId: result.data.providerId,
+      providerType: provider.type,
+      externalUserId: result.data.externalUserId,
+      email: result.data.email,
+      tenantId: result.data.tenantId,
+      reason: "外部登录需要上游 MFA 验证。",
+      riskLevel: "medium",
+      riskSignals: ["mfa_required", "assertion_login_failed"],
+      failureStage: "mfa_validation",
+    });
+    return c.json(
+      {
+        message: "外部登录需要完成上游 MFA 验证。",
+        requestId: c.get("requestId"),
+        riskDecision: externalRiskMode === "block" ? "blocked" : "allow_with_risk",
+        mfaRequired: true,
+      },
+      401,
+    );
+  }
+
+  const riskAssessment = evaluateRequestRisk(c);
+  if (riskAssessment.riskDecision === "blocked") {
+    await appendExternalLoginFailureAuditLog(c, {
+      providerId: result.data.providerId,
+      providerType: provider.type,
+      externalUserId: result.data.externalUserId,
+      email: result.data.email,
+      tenantId: result.data.tenantId,
+      reason: "外部登录被风险策略阻断。",
+      riskLevel: riskAssessment.riskLevel,
+      riskSignals: riskAssessment.riskSignals,
+      failureStage: "risk_evaluation",
+    });
+    return c.json(
+      {
+        message: "外部登录被风险策略阻断。",
+        requestId: c.get("requestId"),
+        riskDecision: "blocked",
+      },
+      403,
+    );
+  }
+
   const tenantAccess = await resolveTenantAccessForLogin(user.id, result.data.tenantId);
   if (!tenantAccess) {
     await appendExternalLoginFailureAuditLog(c, {
       providerId: result.data.providerId,
+      providerType: provider.type,
       externalUserId: result.data.externalUserId,
       email: result.data.email,
       tenantId: result.data.tenantId,
       reason: "外部账号未绑定到指定租户。",
+      riskLevel: "medium",
+      riskSignals: ["tenant_binding_missing", "assertion_login_failed"],
+      failureStage: "tenant_resolution",
     });
     return c.json(
       {
         message: "外部账号未绑定到指定租户，无法登录。",
         requestId: c.get("requestId"),
+        riskDecision: externalRiskMode === "block" ? "blocked" : "allow_with_risk",
       },
       403
     );
@@ -1163,21 +1718,25 @@ authRoutes.post("/external/login", async (c) => {
 
   const session = await createSessionForUser(user.id, tenantAccess.tenantId);
   const tokens = issueAuthTokens(user.id, tenantAccess.tenantId, session);
-  const requestId = c.get("requestId");
-
-  await appendAuditLogSafely({
+  await appendExternalAuthAuditLog(c, {
     tenantId: tenantAccess.tenantId,
-    eventId: `cp:${requestId}:auth-external-login`,
+    eventSuffix: "auth-external-login",
     action: "auth.external_login",
     level: "info",
     detail: `外部登录成功(provider=${provider.id}, user=${user.id})`,
     metadata: {
-      requestId,
+      route: EXTERNAL_LOGIN_ROUTE,
+      flow: "external_login",
+      result: "success",
       providerId: provider.id,
       providerType: provider.type,
       externalUserId: result.data.externalUserId,
+      email: user.email,
       userId: user.id,
       tenantId: tenantAccess.tenantId,
+      riskLevel: riskAssessment.riskLevel,
+      riskSignals: ["assertion_login_succeeded", "signature_verified", ...riskAssessment.riskSignals],
+      riskDecision: riskAssessment.riskDecision,
     },
   });
 
@@ -1195,6 +1754,7 @@ authRoutes.post("/external/login", async (c) => {
       displayName: provider.displayName,
     },
     tokens,
+    riskDecision: riskAssessment.riskDecision,
   });
 });
 

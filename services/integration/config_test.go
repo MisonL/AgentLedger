@@ -18,8 +18,8 @@ func TestParseChannels(t *testing.T) {
 	}{
 		{
 			name: "all channels",
-			raw:  "webhook,wecom,dingtalk,feishu,email,email_webhook,ticket",
-			want: []integrationChannel{channelWebhook, channelWeCom, channelDingTalk, channelFeishu, channelEmail, channelEmailWebhook, channelTicket},
+			raw:  "webhook,wecom,dingtalk,feishu,email,email_webhook,incident,ticket",
+			want: []integrationChannel{channelWebhook, channelWeCom, channelDingTalk, channelFeishu, channelEmail, channelEmailWebhook, channelIncident, channelTicket},
 		},
 		{
 			name: "trim and dedupe",
@@ -275,6 +275,39 @@ func TestLoadIntegrationConfigTicketChannelValid(t *testing.T) {
 	}
 	if cfg.ChannelURLs[channelTicket] != "https://example.com/ticket" {
 		t.Fatalf("ticket webhook url mismatch: got %q", cfg.ChannelURLs[channelTicket])
+	}
+}
+
+func TestLoadIntegrationConfigIncidentChannelValidation(t *testing.T) {
+	setBaseIntegrationEnvs(t)
+
+	t.Setenv("INTEGRATION_CHANNELS", "incident")
+	t.Setenv("INTEGRATION_INCIDENT_WEBHOOK_URL", "")
+
+	_, err := loadIntegrationConfig()
+	if err == nil {
+		t.Fatal("expected missing incident webhook url to fail")
+	}
+	if !strings.Contains(err.Error(), "INTEGRATION_INCIDENT_WEBHOOK_URL") {
+		t.Fatalf("error mismatch: %v", err)
+	}
+}
+
+func TestLoadIntegrationConfigIncidentChannelValid(t *testing.T) {
+	setBaseIntegrationEnvs(t)
+
+	t.Setenv("INTEGRATION_CHANNELS", "incident")
+	t.Setenv("INTEGRATION_INCIDENT_WEBHOOK_URL", "https://example.com/incident")
+
+	cfg, err := loadIntegrationConfig()
+	if err != nil {
+		t.Fatalf("loadIntegrationConfig returned error: %v", err)
+	}
+	if !reflect.DeepEqual(cfg.Channels, []integrationChannel{channelIncident}) {
+		t.Fatalf("incident channels mismatch: got %v", cfg.Channels)
+	}
+	if cfg.ChannelURLs[channelIncident] != "https://example.com/incident" {
+		t.Fatalf("incident webhook url mismatch: got %q", cfg.ChannelURLs[channelIncident])
 	}
 }
 

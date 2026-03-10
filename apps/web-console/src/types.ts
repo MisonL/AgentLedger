@@ -32,6 +32,72 @@ export interface SourceListResponse {
   total: number;
 }
 
+export type AgentRuntimeStatus = "online" | "stale" | "never_seen";
+
+export interface AgentRuntimeView {
+  id: string;
+  agentId: string;
+  tenantId: string;
+  deviceId?: string;
+  displayName: string;
+  hostname: string;
+  version?: string;
+  sourceCount: number;
+  sourceIds: string[];
+  sourceNames: string[];
+  runtimeStatus: AgentRuntimeStatus;
+  lastHeartbeatAt: string | null;
+  lastConfigFetchedAt: string | null;
+  lastConfigVersion?: string;
+  lastError?: string;
+  lastIngestStatusCode: number | null;
+  lastAccepted: number;
+  lastRejected: number;
+  heartbeatIntervalSeconds: number;
+  staleAfterSeconds: number;
+  ingestProtocol: "http" | "grpc";
+  ingestEndpoint?: string;
+  updatedAt: string;
+}
+
+export interface AgentRuntimeViewListResponse {
+  items: AgentRuntimeView[];
+  total: number;
+  generatedAt: string;
+}
+
+export interface AgentRuntimeConfigResponse {
+  tenantId: string;
+  agent: {
+    agentId: string;
+    deviceId?: string;
+    hostname: string;
+    version?: string;
+    displayName: string;
+  };
+  runtime: {
+    heartbeatIntervalSeconds: number;
+    staleAfterSeconds: number;
+    ingestProtocol: "http" | "grpc";
+    ingestEndpoint?: string;
+    sampleGenerateCount: number;
+  };
+  bindings: {
+    sourceCount: number;
+    sourceIds: string[];
+    sources: Array<{
+      sourceId: string;
+      name: string;
+      accessMode: string;
+      enabled: boolean;
+      location: string;
+      sourceRegion?: string;
+    }>;
+  };
+  configVersion: string;
+  updatedAt: string;
+}
+
 export interface CreateSourceInput {
   name: string;
   type: SourceType;
@@ -266,6 +332,7 @@ export type AlertSeverity = "warning" | "critical";
 export type AlertStatus = "open" | "acknowledged" | "resolved";
 export type AlertMutableStatus = "acknowledged" | "resolved";
 export type AlertOrchestrationEventType = "alert" | "weekly";
+export type AlertOrchestrationEscalationReason = "sla_timeout";
 export type AlertOrchestrationChannel =
   | "webhook"
   | "wecom"
@@ -273,6 +340,7 @@ export type AlertOrchestrationChannel =
   | "feishu"
   | "email"
   | "email_webhook"
+  | "incident"
   | "ticket";
 
 export interface AlertListInput {
@@ -301,6 +369,264 @@ export interface AlertItem {
   createdAt: string;
   updatedAt: string;
   metadata: Record<string, unknown>;
+  externalLinks?: Array<{
+    id: string;
+    externalType: "ticket" | "case" | "incident";
+    externalSystem: string;
+    externalId: string;
+    externalStatus?: string;
+    pendingExternalStatus?: string;
+    lastSyncedAt: string;
+    publishStatus?: "success" | "failed";
+    publishError?: string;
+    lastSyncResult?: "success" | "failed";
+    lastSyncError?: string;
+    lastSyncFailureStage?: string;
+    lastSyncFailureCode?: string;
+  }>;
+}
+
+export interface AlertExternalLinkOpsItem {
+  id: string;
+  alertId?: string;
+  alertStatus?: AlertStatus;
+  externalType: "ticket" | "case" | "incident";
+  externalSystem: string;
+  externalId: string;
+  externalStatus?: string;
+  pendingExternalStatus?: string;
+  lastSyncedAt: string;
+  publishStatus?: "success" | "failed";
+  publishError?: string;
+  lastSyncResult?: "success" | "failed";
+  lastSyncError?: string;
+  lastSyncFailureStage?: string;
+  lastSyncFailureCode?: string;
+  syncState: "synced" | "pending" | "failed";
+  retryable: boolean;
+  updatedAt?: string;
+}
+
+export interface AlertExternalLinkOpsResponse {
+  alertId: string;
+  summary: {
+    total: number;
+    pending: number;
+    failed: number;
+  };
+  items: AlertExternalLinkOpsItem[];
+  filters: {
+    externalType?: "ticket" | "case" | "incident";
+    onlyFailed?: boolean;
+  };
+}
+
+export interface AlertExternalLinkBatchRetryResponse {
+  alertId: string;
+  retriedCount: number;
+  published: number;
+  failed: number;
+  items: AlertExternalLinkOpsItem[];
+}
+
+export interface AlertExternalLinkFailureResponse {
+  summary: {
+    total: number;
+    pending: number;
+    failed: number;
+  };
+  items: AlertExternalLinkOpsItem[];
+  filters: {
+    alertId?: string;
+    externalType?: "ticket" | "case" | "incident";
+    externalSystem?: string;
+    syncState?: "synced" | "pending" | "failed";
+    limit?: number;
+  };
+}
+
+export interface IntegrationDlqMessage {
+  messageId: string;
+  stream: string;
+  subject: string;
+  eventType: string;
+  channel?: string;
+  callbackId?: string;
+  tenantId?: string;
+  alertId?: string;
+  externalType?: string;
+  externalId?: string;
+  failedAt: string;
+  attempt: number;
+  error: string;
+  retryable: boolean;
+  payload: Record<string, unknown>;
+}
+
+export interface IntegrationDlqMessageListResponse {
+  items: IntegrationDlqMessage[];
+  total: number;
+  filters: {
+    eventType?: string;
+    channel?: string;
+    callbackId?: string;
+    alertId?: string;
+    limit?: number;
+  };
+}
+
+export interface IntegrationDlqReplayResponse {
+  replayedCount: number;
+  failedCount: number;
+  items: Array<{
+    messageId: string;
+    status: "replayed" | "failed";
+    error?: string;
+  }>;
+}
+
+export type IntegrationDlqRecoveryJobStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed";
+
+export interface IntegrationDlqRecoveryJob {
+  id: string;
+  tenantId: string;
+  status: IntegrationDlqRecoveryJobStatus;
+  requestedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  filters?: {
+    eventType?: string;
+    channel?: string;
+    callbackId?: string;
+    alertId?: string;
+    limit?: number;
+  };
+  messageIds: string[];
+  summary: {
+    total: number;
+    replayed: number;
+    failed: number;
+  };
+  items: Array<{
+    messageId: string;
+    status: "replayed" | "failed";
+    error?: string;
+  }>;
+  error?: string;
+}
+
+export interface IntegrationDlqRecoveryJobListResponse {
+  items: IntegrationDlqRecoveryJob[];
+  total: number;
+  filters: {
+    status?: IntegrationDlqRecoveryJobStatus;
+    limit?: number;
+  };
+}
+
+export type IntegrationAlertFailureReportActionType =
+  | "retry_requested"
+  | "retry_completed"
+  | "retry_failed"
+  | "dlq_queried"
+  | "dlq_replayed"
+  | "recovery_job_created"
+  | "recovery_job_completed"
+  | "recovery_job_failed";
+
+export interface IntegrationAlertFailureReportItem {
+  occurredAt: string;
+  action: string;
+  actionType: IntegrationAlertFailureReportActionType;
+  alertId?: string;
+  externalSystem?: string;
+  externalType?: string;
+  externalId?: string;
+  stage?: string;
+  code?: string;
+  status: "requested" | "success" | "failed";
+  requestId?: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface IntegrationAlertFailureReportResponse {
+  summary: {
+    totalEvents: number;
+    retryRequested: number;
+    retryCompleted: number;
+    retryFailed: number;
+    dlqQueried: number;
+    dlqReplayed: number;
+    recoveryJobsCreated: number;
+    recoveryJobsCompleted: number;
+    recoveryJobsFailed: number;
+  };
+  items: IntegrationAlertFailureReportItem[];
+  filters: {
+    from?: string;
+    to?: string;
+    externalSystem?: string;
+    stage?: string;
+    actionType?: IntegrationAlertFailureReportActionType;
+    limit?: number;
+  };
+}
+
+export interface IntegrationAlertFailureTrendPoint {
+  date: string;
+  totalEvents: number;
+  requestedEvents: number;
+  successEvents: number;
+  failedEvents: number;
+  uniqueAlerts: number;
+  retryRequested: number;
+  retryCompleted: number;
+  retryFailed: number;
+  dlqQueried: number;
+  dlqReplayed: number;
+  recoveryJobsCreated: number;
+  recoveryJobsCompleted: number;
+  recoveryJobsFailed: number;
+}
+
+export interface IntegrationAlertFailureTrendCapacityBucket {
+  name: string;
+  totalEvents: number;
+  requestedEvents: number;
+  successEvents: number;
+  failedEvents: number;
+  uniqueAlerts: number;
+  lastOccurredAt?: string;
+}
+
+export interface IntegrationAlertFailureTrendResponse {
+  summary: {
+    totalEvents: number;
+    requestedEvents: number;
+    successEvents: number;
+    failedEvents: number;
+    days: number;
+    averageEventsPerDay: number;
+    peakDate?: string;
+    peakCount: number;
+  };
+  daily: IntegrationAlertFailureTrendPoint[];
+  capacity: {
+    externalSystems: IntegrationAlertFailureTrendCapacityBucket[];
+    stages: IntegrationAlertFailureTrendCapacityBucket[];
+  };
+  filters: {
+    from?: string;
+    to?: string;
+    externalSystem?: string;
+    stage?: string;
+    actionType?: IntegrationAlertFailureReportActionType;
+    top: number;
+  };
 }
 
 export interface AlertListResponse {
@@ -367,6 +693,10 @@ export interface AlertOrchestrationExecutionLog {
   dedupeHit: boolean;
   suppressed: boolean;
   simulated: boolean;
+  escalated: boolean;
+  escalationReason?: AlertOrchestrationEscalationReason;
+  escalationTargetChannels?: AlertOrchestrationChannel[];
+  slaMinutes?: number;
   metadata: Record<string, unknown>;
   createdAt: string;
 }
@@ -382,6 +712,8 @@ export interface AlertOrchestrationExecutionListInput {
   dispatchMode?: AlertOrchestrationDispatchMode;
   hasConflict?: boolean;
   simulated?: boolean;
+  escalated?: boolean;
+  escalationReason?: AlertOrchestrationEscalationReason;
   from?: string;
   to?: string;
   limit?: number;
@@ -418,6 +750,8 @@ export type RuleLifecycleStatus = "draft" | "published" | "deprecated";
 export type RuleApprovalDecision = "approved" | "rejected";
 export type McpRiskLevel = "low" | "medium" | "high";
 export type McpToolDecision = "allow" | "deny" | "require_approval";
+export type McpApprovalMode = "single_stage" | "two_stage" | "multi_stage";
+export type McpApprovalStage = `stage${number}`;
 export type McpApprovalStatus = "pending" | "approved" | "rejected";
 
 export interface RegionDescriptor {
@@ -440,6 +774,54 @@ export interface TenantResidencyPolicy {
   allowCrossRegionTransfer: boolean;
   requireTransferApproval: boolean;
   updatedAt: string;
+}
+
+export interface ResidencyKmsKeyMapping {
+  tenantId: string;
+  regionId: string;
+  keyProvider: string;
+  keyRef: string;
+  enabled: boolean;
+  updatedAt: string;
+}
+
+export interface ResidencyKmsKeyMappingUpsertInput {
+  items: Array<{
+    regionId: string;
+    keyProvider: string;
+    keyRef: string;
+    enabled: boolean;
+  }>;
+  updatedAt?: string;
+}
+
+export interface ResidencyKmsKeyMappingListResponse {
+  items: ResidencyKmsKeyMapping[];
+  total: number;
+}
+
+export interface ResidencyArchiveRegionPolicy {
+  tenantId: string;
+  sourceRegion: string;
+  archiveRegion: string;
+  archiveClass: string;
+  enabled: boolean;
+  updatedAt: string;
+}
+
+export interface ResidencyArchiveRegionPolicyUpsertInput {
+  items: Array<{
+    sourceRegion: string;
+    archiveRegion: string;
+    archiveClass: string;
+    enabled: boolean;
+  }>;
+  updatedAt?: string;
+}
+
+export interface ResidencyArchiveRegionPolicyListResponse {
+  items: ResidencyArchiveRegionPolicy[];
+  total: number;
 }
 
 export interface ReplicationJob {
@@ -484,6 +866,175 @@ export interface ReplicationJobCancelInput {
 
 export interface ReplicationJobApproveInput {
   reason?: string;
+}
+
+export interface SystemConfigPackageTargetSelectors {
+  agentIds?: string[];
+  deviceIds?: string[];
+  channels?: string[];
+  hostnames?: string[];
+}
+
+export type SystemConfigPackageRequiredApprovals = 0 | 1 | 2;
+export type SystemConfigPackageApprovalDecision = "approved" | "rejected";
+
+export interface SystemConfigPackage {
+  packageId: string;
+  tenantId: string;
+  version: string;
+  issuedAt?: string;
+  signatureStatus: string;
+  payload: Record<string, unknown>;
+  targetSelectors: SystemConfigPackageTargetSelectors;
+  requiresApproval: boolean;
+  requiredApprovals: SystemConfigPackageRequiredApprovals;
+  isPublished: boolean;
+  publishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SystemConfigPackageListResponse {
+  items: SystemConfigPackage[];
+  total: number;
+  filters: {
+    limit?: number;
+  };
+}
+
+export interface SystemConfigPackageCreateInput {
+  version: string;
+  issuedAt?: string;
+  signatureStatus?: string;
+  requiresApproval: boolean;
+  requiredApprovals: SystemConfigPackageRequiredApprovals;
+  targetSelectors?: SystemConfigPackageTargetSelectors;
+  payload?: Record<string, unknown>;
+}
+
+export interface SystemConfigPackageApproval {
+  approvalId: string;
+  tenantId: string;
+  packageId: string;
+  version: string;
+  approverUserId: string;
+  decision: SystemConfigPackageApprovalDecision;
+  comment?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SystemConfigPackageApprovalListResponse {
+  items: SystemConfigPackageApproval[];
+  total: number;
+}
+
+export interface SystemConfigPackageApprovalCreateInput {
+  decision: SystemConfigPackageApprovalDecision;
+  comment?: string;
+}
+
+export interface SystemConfigWatchLatestInput {
+  agentId?: string;
+  deviceId?: string;
+  channel?: string;
+  hostname?: string;
+}
+
+export type SystemConfigWatchLatestResponse = SystemConfigPackage;
+
+export type AgentReleaseChannel = "stable" | "beta" | "canary";
+
+export interface AgentReleaseArtifact {
+  os: string;
+  arch: string;
+  downloadUrl: string;
+  checksumSha256?: string;
+  signature?: string;
+  signatureAlgorithm?: "ed25519";
+  rolloutRing?: string;
+  rolloutPercentage?: number;
+  minAgentVersion?: string;
+  fileName?: string;
+  installHint?: string;
+}
+
+export interface AgentRelease {
+  releaseId: string;
+  tenantId: string;
+  version: string;
+  channel: AgentReleaseChannel;
+  notes?: string;
+  publishedAt: string;
+  artifacts: AgentReleaseArtifact[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentReleaseListResponse {
+  items: AgentRelease[];
+  total: number;
+  filters: {
+    limit?: number;
+    channel?: AgentReleaseChannel;
+    os?: string;
+    arch?: string;
+  };
+}
+
+export type AgentReleaseCheckSelectionReason =
+  | "matched"
+  | "no_candidate"
+  | "ring_mismatch"
+  | "rollout_percentage_blocked"
+  | "min_agent_version_blocked";
+
+export interface AgentReleaseCheckPreviewInput {
+  currentVersion: string;
+  channel: AgentReleaseChannel;
+  os: string;
+  arch: string;
+  agentId?: string;
+  deviceId?: string;
+  hostname?: string;
+  ring?: string;
+}
+
+export interface AgentReleaseCheckPreviewResponse {
+  checkedAt: string;
+  currentVersion: string;
+  channel: AgentReleaseChannel;
+  os: string;
+  arch: string;
+  updateAvailable: boolean;
+  comparison: "upgrade_available" | "up_to_date" | "ahead_of_latest" | "no_release";
+  latestRelease: AgentRelease | null;
+  selectedArtifact: AgentReleaseArtifact | null;
+  instructions: string;
+  evaluatedRing?: string;
+  rolloutBucket?: number;
+  selectionReason?: AgentReleaseCheckSelectionReason;
+}
+
+export interface AgentReleaseBatchCheckSampleInput {
+  label: string;
+  currentVersion: string;
+  agentId?: string;
+  deviceId?: string;
+  hostname?: string;
+  ring?: string;
+}
+
+export interface AgentReleaseCheckBatchPreviewInput {
+  channel: AgentReleaseChannel;
+  os: string;
+  arch: string;
+  samples: AgentReleaseBatchCheckSampleInput[];
+}
+
+export interface AgentReleaseCheckBatchPreviewResponse {
+  items: Array<AgentReleaseCheckPreviewResponse & { label: string }>;
+  total: number;
 }
 
 export interface RuleScopeBinding {
@@ -611,6 +1162,19 @@ export interface McpToolPolicy {
   toolId: string;
   riskLevel: McpRiskLevel;
   decision: McpToolDecision;
+  approvalMode?: McpApprovalMode;
+  approvalWorkflow?: McpApprovalWorkflow;
+  approvalStages?: McpApprovalStageConfig[];
+  stage1RequiredApprovals?: number;
+  stage2RequiredApprovals?: number;
+  stage1Roles?: string[];
+  stage2Roles?: string[];
+  approvalCondition?: {
+    riskLevelAtLeast?: McpRiskLevel;
+    toolIds?: string[];
+    tenantRoles?: string[];
+  };
+  metadata?: Record<string, unknown>;
   reason?: string;
   updatedAt: string;
 }
@@ -631,6 +1195,15 @@ export interface McpToolPolicyListResponse {
 export interface McpToolPolicyUpsertInput {
   riskLevel: McpRiskLevel;
   decision: McpToolDecision;
+  approvalMode?: McpApprovalMode;
+  approvalWorkflow?: McpApprovalWorkflow;
+  approvalStages?: McpApprovalStageConfig[];
+  stage1RequiredApprovals?: number;
+  stage2RequiredApprovals?: number;
+  stage1Roles?: string[];
+  stage2Roles?: string[];
+  approvalCondition?: McpApprovalWorkflowCondition;
+  metadata?: Record<string, unknown>;
   reason?: string;
 }
 
@@ -639,6 +1212,22 @@ export interface McpApprovalRequest {
   tenantId: string;
   toolId: string;
   status: McpApprovalStatus;
+  approvalMode?: McpApprovalMode;
+  currentNodeId?: string;
+  currentStage?: McpApprovalStage;
+  approvalWorkflow?: McpApprovalWorkflow;
+  approvalNodes?: McpApprovalWorkflowNodeSnapshot[];
+  pathHistory?: string[];
+  nextTransitionPreview?: McpApprovalWorkflowTransitionPreview;
+  approvalStages?: McpApprovalStageSnapshot[];
+  stage1RequiredApprovals?: number;
+  stage2RequiredApprovals?: number;
+  stage1ApprovedCount?: number;
+  stage2ApprovedCount?: number;
+  remainingApprovals?: number;
+  stage1Roles?: string[];
+  stage2Roles?: string[];
+  approvalConditionMatched?: boolean;
   requestedByUserId: string;
   requestedByEmail?: string;
   reason?: string;
@@ -647,6 +1236,87 @@ export interface McpApprovalRequest {
   reviewReason?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface McpApprovalStageConfig {
+  nodeId?: string;
+  stage?: McpApprovalStage;
+  label?: string;
+  requiredApprovals: number;
+  roles: string[];
+}
+
+export interface McpApprovalStageSnapshot extends McpApprovalStageConfig {
+  nodeId?: string;
+  label?: string;
+  stage: McpApprovalStage;
+  approvedApprovals: number;
+  approvedByUserIds: string[];
+  rejectedByUserId?: string;
+}
+
+export type McpApprovalWorkflowNodeKind =
+  | "approval"
+  | "terminal_approved"
+  | "terminal_rejected";
+
+export interface McpApprovalWorkflowTimeWindow {
+  timezone: string;
+  weekdays?: number[];
+  startTime: string;
+  endTime: string;
+}
+
+export interface McpApprovalWorkflowCondition {
+  riskLevelAtLeast?: McpRiskLevel;
+  toolIds?: string[];
+  tenantRoles?: string[];
+  timeWindow?: McpApprovalWorkflowTimeWindow;
+  default?: boolean;
+}
+
+export interface McpApprovalWorkflowNode {
+  nodeId: string;
+  kind: McpApprovalWorkflowNodeKind;
+  label?: string;
+  stage?: McpApprovalStage;
+  requiredApprovals?: number;
+  roles?: string[];
+}
+
+export interface McpApprovalWorkflowTransition {
+  fromNodeId: string;
+  toNodeId: string;
+  condition?: McpApprovalWorkflowCondition;
+}
+
+export interface McpApprovalWorkflow {
+  entryNodeId: string;
+  nodes: McpApprovalWorkflowNode[];
+  transitions: McpApprovalWorkflowTransition[];
+}
+
+export interface McpApprovalWorkflowNodeSnapshot
+  extends McpApprovalWorkflowNode {
+  approvedApprovals: number;
+  approvedByUserIds: string[];
+  rejectedByUserId?: string;
+}
+
+export interface McpApprovalWorkflowTransitionPreview {
+  fromNodeId: string;
+  toNodeId?: string;
+  matched: boolean;
+  matchedBy?: "condition" | "default";
+  condition?: McpApprovalWorkflowCondition;
+}
+
+export interface McpApprovalConfig {
+  mode: McpApprovalMode;
+  approvalWorkflow?: McpApprovalWorkflow;
+  approvalStages?: McpApprovalStageConfig[];
+  stage1?: McpApprovalStageConfig;
+  stage2?: McpApprovalStageConfig;
 }
 
 export interface McpApprovalListInput {
@@ -663,10 +1333,13 @@ export interface McpApprovalListResponse {
 export interface McpApprovalCreateInput {
   toolId: string;
   reason?: string;
+  approvalConfig?: McpApprovalConfig;
 }
 
 export interface McpApprovalReviewInput {
   reason?: string;
+  stage?: McpApprovalStage;
+  nodeId?: string;
 }
 
 export interface McpInvocationAudit {
@@ -678,6 +1351,10 @@ export interface McpInvocationAudit {
   approvalRequestId?: string;
   enforced: boolean;
   evaluatedDecision?: McpToolDecision;
+  approvalMode?: McpApprovalMode;
+  approvalStage?: McpApprovalStage;
+  approvalSatisfied?: boolean;
+  approvalConditionMatched?: boolean;
   metadata: Record<string, unknown>;
   createdAt: string;
 }
@@ -710,6 +1387,8 @@ export interface McpEvaluateInput {
   toolId: string;
   reason?: string;
   approvalRequestId?: string;
+  evaluationTimestamp?: string;
+  approvalConfig?: McpApprovalConfig;
   metadata?: Record<string, unknown>;
 }
 
@@ -718,6 +1397,17 @@ export interface McpEvaluateResult {
   decision: McpToolDecision;
   result: "allowed" | "blocked" | "approved";
   approvalRequestId?: string;
+  approvalRequired?: boolean;
+  approvalMode?: McpApprovalMode;
+  currentNodeId?: string;
+  currentStage?: McpApprovalStage;
+  approvalWorkflow?: McpApprovalWorkflow;
+  approvalNodes?: McpApprovalWorkflowNodeSnapshot[];
+  pathHistory?: string[];
+  nextTransitionPreview?: McpApprovalWorkflowTransitionPreview;
+  approvalStages?: McpApprovalStageSnapshot[];
+  remainingApprovals?: number;
+  approvalConditionMatched?: boolean;
   enforced: true;
   evaluatedDecision: McpToolDecision;
   policy: McpToolPolicy;
@@ -944,6 +1634,187 @@ export interface OpenPlatformQualityProjectTrendResponse {
   };
 }
 
+export interface OpenPlatformAutomationPolicy {
+  tenantId: string;
+  toolId: string;
+  scope: "quality_replay_advice";
+  riskLevel: McpRiskLevel;
+  decision: McpToolDecision;
+  reason?: string;
+  evaluationScoreThreshold: number;
+  triggerOnEvaluationFailure: boolean;
+  triggerOnReplayRegression: boolean;
+  defaultActionType?: "scorecard_adjustment" | "replay_experiment";
+  modelVersion?: string;
+  strategyMatrix?: OpenPlatformAutomationStrategyRule[];
+  updatedAt: string;
+}
+
+export interface OpenPlatformAutomationPolicyUpsertInput {
+  riskLevel: McpRiskLevel;
+  decision: McpToolDecision;
+  reason?: string;
+  evaluationScoreThreshold?: number;
+  triggerOnEvaluationFailure?: boolean;
+  triggerOnReplayRegression?: boolean;
+  strategyMatrix?: OpenPlatformAutomationStrategyRule[];
+}
+
+export interface OpenPlatformAutomationStrategyRule {
+  id: string;
+  metric?: string;
+  severity?: "info" | "warn" | "critical";
+  trendDirection?: "up" | "down" | "flat";
+  provider?: string;
+  workflow?: string;
+  projectPattern?: string;
+  minConfidence?: number;
+  regressionProbabilityAtLeast?: number;
+  replayRegressionAtLeast?: number;
+  actionType: "scorecard_adjustment" | "replay_experiment";
+  requiresApproval: boolean;
+  cooldownMinutes?: number;
+  reason?: string;
+}
+
+export interface OpenPlatformAutomationPolicySimulationInput {
+  metric: string;
+  score: number;
+  sampleCount?: number;
+  trendDirection?: "up" | "down" | "flat";
+  confidence?: number;
+  regressionProbability?: number;
+  replayRegressionCount?: number;
+}
+
+export interface OpenPlatformAutomationPolicySimulationResponse {
+  metric: string;
+  severity: "info" | "warn" | "critical";
+  confidence: number;
+  trendDirection: "up" | "down" | "flat";
+  regressionProbability: number;
+  replayRegressionCount: number;
+  matchedRuleId?: string | null;
+  resolvedAction: "scorecard_adjustment" | "replay_experiment";
+  requiresApproval: boolean;
+  blockingReasons: string[];
+}
+
+export interface OpenPlatformQualityForecastItem {
+  project: string;
+  metric: string;
+  predictedScore: number;
+  confidence: number;
+  confidenceLabel?: "low" | "medium" | "high";
+  modelVersion?: string;
+  forecastHorizonDays?: number;
+  expectedScoreRange?: {
+    lower: number;
+    upper: number;
+  };
+  regressionProbability?: number;
+  featureContributions?: Array<{
+    feature: string;
+    impact: number;
+    direction: "positive" | "negative" | "neutral";
+  }>;
+  windowComparisons?: {
+    currentWindow: Record<string, unknown>;
+    previousWindow: Record<string, unknown>;
+  };
+  trendDirection?: "up" | "down" | "flat";
+  projectedDelta?: number;
+  basisWindowCount?: number;
+  rationale?: string;
+  explanation?: {
+    summary: string;
+    confidenceLabel: "low" | "medium" | "high";
+    primaryDriver: string;
+  };
+  riskDrivers?: string[];
+  recommendedActions?: string[];
+  windowStart?: string | null;
+  windowEnd?: string | null;
+  basis: Record<string, unknown>;
+}
+
+export interface OpenPlatformQualityForecastResponse {
+  items: OpenPlatformQualityForecastItem[];
+  total: number;
+  filters: Record<string, unknown>;
+}
+
+export interface OpenPlatformQualityAdviceItem {
+  id: string;
+  project: string;
+  severity: "info" | "warn" | "critical";
+  title: string;
+  recommendation: string;
+  explanation?: string;
+  confidence?: number;
+  confidenceLabel?: "low" | "medium" | "high";
+  why?: string[];
+  automationReadiness?:
+    | "monitor_only"
+    | "manual_review"
+    | "ready_for_execution"
+    | "execution_in_progress";
+  executionHint?: {
+    recommendedActionType: "scorecard_adjustment" | "replay_experiment";
+    requiresDataset: boolean;
+    priority: "low" | "medium" | "high";
+    reason: string;
+  };
+  executionOptions?: Array<{
+    actionType: "scorecard_adjustment" | "replay_experiment";
+    availability: "recommended" | "available" | "approval_required" | "disabled";
+    reason: string;
+  }>;
+  strategyMatrixMatch?: string | null;
+  recommendedPlan?: Record<string, unknown>;
+  autoExecutionDecision?: string;
+  blockingReasons?: string[];
+  basis: Record<string, unknown>;
+  relatedMetrics: string[];
+  suggestedActions?: Array<"scorecard_adjustment" | "replay_experiment">;
+  latestExecutionId?: string;
+  latestExecutionStatus?: "pending" | "running" | "completed" | "failed" | "cancelled";
+}
+
+export interface OpenPlatformQualityAdviceResponse {
+  items: OpenPlatformQualityAdviceItem[];
+  total: number;
+  filters: Record<string, unknown>;
+}
+
+export interface OpenPlatformQualityAdviceExecution {
+  id: string;
+  tenantId: string;
+  adviceId: string;
+  project: string;
+  severity: "info" | "warn" | "critical";
+  actionType: "scorecard_adjustment" | "replay_experiment";
+  triggerSource: "manual" | "automatic";
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  metric?: string;
+  datasetId?: string;
+  experimentId?: string;
+  candidateLabels?: string[];
+  scorecardKey?: string;
+  resultSummary?: Record<string, unknown>;
+  error?: string;
+  requestedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  updatedAt: string;
+}
+
+export interface OpenPlatformQualityAdviceExecutionListResponse {
+  items: OpenPlatformQualityAdviceExecution[];
+  total: number;
+  filters: Record<string, unknown>;
+}
+
 export interface OpenPlatformReplayDataset {
   id: string;
   name: string;
@@ -953,6 +1824,8 @@ export interface OpenPlatformReplayDataset {
   promptVersion?: string;
   sampleCount?: number;
   caseCount?: number;
+  currentVersionId?: string;
+  currentVersionNumber?: number;
   description?: string;
   metadata?: Record<string, unknown>;
   createdAt: string;
@@ -984,6 +1857,48 @@ export interface OpenPlatformReplayDatasetCreateInput {
 }
 export type OpenPlatformReplayBaselineCreateInput = OpenPlatformReplayDatasetCreateInput;
 
+export interface OpenPlatformReplayDatasetVersion {
+  id: string;
+  tenantId?: string;
+  datasetId: string;
+  version: number;
+  datasetRef?: string;
+  model: string;
+  promptVersion?: string;
+  sampleCount: number;
+  metadata?: Record<string, unknown>;
+  note?: string;
+  createdAt: string;
+  promotedAt?: string | null;
+}
+
+export interface OpenPlatformReplayDatasetVersionListResponse {
+  datasetId: string;
+  items: OpenPlatformReplayDatasetVersion[];
+  total: number;
+  currentVersionId?: string | null;
+  currentVersionNumber?: number | null;
+}
+
+export interface OpenPlatformReplayDatasetVersionCreateInput {
+  datasetId?: string;
+  datasetRef?: string;
+  model: string;
+  promptVersion?: string;
+  sampleCount?: number;
+  metadata?: Record<string, unknown>;
+  note?: string;
+}
+
+export interface OpenPlatformReplayDatasetVersionPromoteInput {
+  versionId: string;
+}
+
+export interface OpenPlatformReplayDatasetVersionPromoteResponse {
+  dataset?: OpenPlatformReplayDataset | null;
+  version: OpenPlatformReplayDatasetVersion;
+}
+
 export interface OpenPlatformReplayDatasetCase {
   datasetId: string;
   caseId: string;
@@ -1010,6 +1925,13 @@ export interface OpenPlatformReplayDatasetCaseWriteInput {
 
 export interface OpenPlatformReplayDatasetCaseListResponse {
   datasetId: string;
+  items: OpenPlatformReplayDatasetCase[];
+  total: number;
+}
+
+export interface OpenPlatformReplayDatasetVersionCaseListResponse {
+  datasetId: string;
+  versionId: string;
   items: OpenPlatformReplayDatasetCase[];
   total: number;
 }
@@ -1062,6 +1984,7 @@ export interface OpenPlatformReplayRun {
   jobId?: string;
   datasetId: string;
   baselineId?: string;
+  baselineVersionId?: string | null;
   candidateLabel: string;
   status: OpenPlatformReplayRunStatus;
   totalCases: number;
@@ -1093,9 +2016,219 @@ export interface OpenPlatformReplayRunListResponse {
 }
 export type OpenPlatformReplayJobListResponse = OpenPlatformReplayRunListResponse;
 
+export interface OpenPlatformReplayExperiment {
+  id: string;
+  tenantId: string;
+  name: string;
+  datasetId: string;
+  baselineId?: string | null;
+  baselineVersionId?: string | null;
+  metadata?: Record<string, unknown>;
+  status?: "draft" | "queued" | "running" | "completed" | "failed" | "cancelled";
+  triggerSource?: "manual" | "quality_advice" | "automatic";
+  executionMode?: "manual" | "automatic";
+  candidateLabels?: string[];
+  sourceAdviceId?: string | null;
+  runIds: string[];
+  runStatusSummary?: Record<string, unknown>;
+  aggregateSummary?: Record<string, unknown>;
+  summary: Record<string, unknown>;
+  runs: OpenPlatformReplayRun[];
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  lastError?: string | null;
+}
+
+export interface OpenPlatformReplayExperimentListResponse {
+  items: OpenPlatformReplayExperiment[];
+  total: number;
+}
+
+export interface OpenPlatformReplayExperimentComparisonItem {
+  runId: string;
+  candidateLabel: string;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  totalCases: number;
+  processedCases: number;
+  improvedCases: number;
+  regressedCases: number;
+  unchangedCases: number;
+  improvementRate: number;
+  regressionRate: number;
+  netDelta: number;
+  verdict: "improved" | "regressed" | "mixed";
+  rank: number;
+  topDiffs: Array<Record<string, unknown>>;
+}
+
+export interface OpenPlatformReplayExperimentComparison {
+  experimentId: string;
+  datasetId: string;
+  comparedAt: string;
+  summary: {
+    totalRuns: number;
+    completedRuns: number;
+    failedRuns: number;
+    totalImprovedCases: number;
+    totalRegressedCases: number;
+    bestCandidateLabel?: string | null;
+    bestRunId?: string | null;
+    bestNetDelta?: number | null;
+  };
+  items: OpenPlatformReplayExperimentComparisonItem[];
+}
+
+export interface OpenPlatformReplayExperimentWorkflowStep {
+  stepId: string;
+  label: string;
+  category: "lifecycle" | "run";
+  status: "pending" | "queued" | "running" | "completed" | "failed" | "cancelled";
+  startedAt: string;
+  finishedAt?: string | null;
+  detail: string;
+}
+
+export interface OpenPlatformReplayExperimentWorkflow {
+  experimentId: string;
+  datasetId: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  summary: {
+    totalSteps: number;
+    completedSteps: number;
+    runningSteps: number;
+    failedSteps: number;
+    cancelledSteps: number;
+    queuedSteps: number;
+  };
+  steps: OpenPlatformReplayExperimentWorkflowStep[];
+}
+
+export interface OpenPlatformReplayExperimentCompareItem {
+  runId: string;
+  candidateLabel: string;
+  status: OpenPlatformReplayRunStatus;
+  totalCases: number;
+  processedCases: number;
+  improvedCases: number;
+  regressedCases: number;
+  unchangedCases: number;
+  passRate: number;
+  improvementRate: number;
+  regressionRate: number;
+  netDelta: number;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+}
+
+export interface OpenPlatformReplayExperimentCompareResponse {
+  experimentId: string;
+  datasetId: string;
+  items: OpenPlatformReplayExperimentCompareItem[];
+  total: number;
+  summary: {
+    totalRuns: number;
+    completedRuns: number;
+    failedRuns: number;
+    runningRuns: number;
+    queuedRuns: number;
+    cancelledRuns: number;
+    bestRunId?: string | null;
+    worstRunId?: string | null;
+    bestNetDelta?: number;
+    worstNetDelta?: number;
+  };
+}
+
+export interface OpenPlatformReplayExperimentBatchCompareItem {
+  experimentId: string;
+  name: string;
+  datasetId: string;
+  status: OpenPlatformReplayExperiment["status"];
+  workflowStage: "draft" | "queued" | "running" | "completed" | "failed" | "cancelled";
+  triggerSource: NonNullable<OpenPlatformReplayExperiment["triggerSource"]>;
+  sourceAdviceId?: string | null;
+  candidateLabels: string[];
+  totalRuns: number;
+  completedRuns: number;
+  failedRuns: number;
+  runningRuns: number;
+  queuedRuns: number;
+  totalCases: number;
+  processedCases: number;
+  improvedCases: number;
+  regressedCases: number;
+  improvementRate: number;
+  regressionRate: number;
+  netDelta: number;
+  bestRunId?: string | null;
+  worstRunId?: string | null;
+  runs: OpenPlatformReplayExperimentCompareItem[];
+  updatedAt: string;
+}
+
+export interface OpenPlatformReplayExperimentBatchCompareResponse {
+  items: OpenPlatformReplayExperimentBatchCompareItem[];
+  total: number;
+  summary: {
+    comparedExperimentCount: number;
+    comparedAt: string;
+    datasets: string[];
+    totalRuns: number;
+    completedRuns: number;
+    failedRuns: number;
+    runningRuns: number;
+    queuedRuns: number;
+    totalCases: number;
+    processedCases: number;
+    improvedCases: number;
+    regressedCases: number;
+    bestExperimentId?: string | null;
+    worstExperimentId?: string | null;
+  };
+  filters: {
+    experimentIds: string[];
+    datasetId?: string | null;
+  };
+}
+
+export interface OpenPlatformReplayExperimentWorkflowNode {
+  id: string;
+  type: "experiment" | "run";
+  label: string;
+  status: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface OpenPlatformReplayExperimentWorkflowEdge {
+  from: string;
+  to: string;
+  label: string;
+}
+
+export interface OpenPlatformReplayExperimentWorkflowResponse {
+  experimentId: string;
+  status: string;
+  nodes: OpenPlatformReplayExperimentWorkflowNode[];
+  edges: OpenPlatformReplayExperimentWorkflowEdge[];
+  summary: {
+    totalNodes: number;
+    totalRuns: number;
+    queuedRuns: number;
+    runningRuns: number;
+    completedRuns: number;
+    failedRuns: number;
+    cancelledRuns: number;
+  };
+}
+
 export interface OpenPlatformReplayRunCreateInput {
   datasetId?: string;
   baselineId?: string;
+  baselineVersionId?: string;
   candidateLabel: string;
   from?: string;
   to?: string;
@@ -1133,6 +2266,7 @@ export interface OpenPlatformReplayDiffResponse {
 }
 
 export interface OpenPlatformReplayArtifact {
+  runId?: string;
   type: string;
   contentType: string;
   name?: string;
@@ -1140,6 +2274,10 @@ export interface OpenPlatformReplayArtifact {
   byteSize?: number;
   downloadName?: string;
   downloadUrl?: string;
+  checksum?: string;
+  storageBackend?: "local" | "object" | "hybrid";
+  storageKey?: string;
+  metadata?: Record<string, unknown>;
   createdAt?: string;
   inline?: Record<string, unknown>;
 }
@@ -1147,6 +2285,14 @@ export interface OpenPlatformReplayArtifact {
 export interface OpenPlatformReplayArtifactListResponse {
   runId: string;
   jobId?: string;
+  datasetId?: string;
+  items: OpenPlatformReplayArtifact[];
+  total: number;
+}
+
+export interface OpenPlatformReplayExperimentArtifactListResponse {
+  experimentId: string;
+  datasetId: string;
   items: OpenPlatformReplayArtifact[];
   total: number;
 }
@@ -1325,9 +2471,10 @@ export interface SourceConnectionTestResponse {
 export interface AuthLoginInput {
   email: string;
   password: string;
+  otpCode?: string;
 }
 
-export type AuthProviderType = "local" | "oauth2" | "oidc" | "sso";
+export type AuthProviderType = "local" | "oauth2" | "oidc" | "sso" | "saml";
 
 export interface AuthProviderItem {
   id: string;
@@ -1336,6 +2483,7 @@ export interface AuthProviderItem {
   enabled: boolean;
   issuer?: string;
   authorizationUrl?: string;
+  requireMfa?: boolean;
 }
 
 export interface AuthProviderListResponse {
@@ -1349,6 +2497,7 @@ export interface AuthExternalExchangeInput {
   redirectUri: string;
   codeVerifier?: string;
   state?: string;
+  mfaVerified?: boolean;
 }
 
 export interface AuthRefreshInput {

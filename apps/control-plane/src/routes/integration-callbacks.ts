@@ -290,6 +290,18 @@ integrationCallbackRoutes.post("/integrations/callbacks/alerts", async (c) => {
       callbackResult = {
         alert: updatedAlert,
       };
+      const syncedExternalLinks = await repository.syncAlertExternalLinksStatus(
+        tenantId,
+        alertId,
+        "acknowledged",
+        {
+          syncSource: "integration_callback",
+          action,
+        }
+      );
+      if (syncedExternalLinks.length > 0) {
+        callbackResult.externalLinks = syncedExternalLinks;
+      }
       if (updatedAlert.status === "acknowledged" && updatedAlert.severity === "critical") {
         const budget = await repository.freezeBudget(tenantId, updatedAlert.budgetId, {
           reason: result.data.reason ?? "集成回调确认 critical 告警，预算已冻结。",
@@ -309,6 +321,99 @@ integrationCallbackRoutes.post("/integrations/callbacks/alerts", async (c) => {
       }
       callbackResult = {
         alert: updatedAlert,
+      };
+      const syncedExternalLinks = await repository.syncAlertExternalLinksStatus(
+        tenantId,
+        alertId,
+        "resolved",
+        {
+          syncSource: "integration_callback",
+          action,
+        }
+      );
+      if (syncedExternalLinks.length > 0) {
+        callbackResult.externalLinks = syncedExternalLinks;
+      }
+    } else if (action === "upsert_external_link") {
+      const alertId = result.data.alertId as string;
+      const alert = await repository.getAlertById(tenantId, alertId);
+      if (!alert) {
+        return respondError(404, `未找到告警 ${alertId}。`);
+      }
+      const link = await repository.upsertAlertExternalLink(tenantId, {
+        alertId,
+        externalType: result.data.externalType!,
+        externalSystem:
+          result.data.externalSystem ?? result.data.externalType!,
+        externalId: result.data.externalId!,
+        externalStatus: result.data.externalStatus,
+        metadata: result.data.metadata,
+      });
+      if (!link) {
+        return respondError(400, "外部联动记录保存失败。");
+      }
+      callbackResult = {
+        alertId,
+        link,
+      };
+    } else if (action === "sync_external_link_result") {
+      const alertId = result.data.alertId as string;
+      const alert = await repository.getAlertById(tenantId, alertId);
+      if (!alert) {
+        return respondError(404, `未找到告警 ${alertId}。`);
+      }
+      const matchedLink =
+        alert.externalLinks?.find(
+          (item) =>
+            item.externalType === result.data.externalType &&
+            item.externalId === result.data.externalId,
+        ) ?? null;
+      if (!matchedLink) {
+        return respondError(
+          404,
+          `未找到告警 ${alertId} 对应的外部联动 ${result.data.externalType}:${result.data.externalId}。`,
+        );
+      }
+      const link = await repository.upsertAlertExternalLink(tenantId, {
+        alertId,
+        externalType: matchedLink.externalType,
+        externalSystem:
+          result.data.externalSystem ?? matchedLink.externalSystem,
+        externalId: matchedLink.externalId,
+        externalStatus:
+          result.data.syncResult === "success"
+            ? result.data.externalStatus ?? matchedLink.externalStatus
+            : matchedLink.externalStatus,
+        metadata: {
+          ...matchedLink.metadata,
+          ...(result.data.metadata ?? {}),
+          syncSource: "integration_external_status_sync",
+          pendingExternalStatus:
+            result.data.syncResult === "success"
+              ? null
+              : result.data.externalStatus ??
+                matchedLink.pendingExternalStatus ??
+                matchedLink.metadata.pendingExternalStatus ??
+                matchedLink.metadata.pending_external_status ??
+                null,
+          lastSyncResult: result.data.syncResult,
+          ...(result.data.syncError
+            ? { lastSyncError: result.data.syncError }
+            : { lastSyncError: null }),
+          ...(result.data.failureStage
+            ? { lastSyncFailureStage: result.data.failureStage }
+            : { lastSyncFailureStage: null }),
+          ...(result.data.failureCode
+            ? { lastSyncFailureCode: result.data.failureCode }
+            : { lastSyncFailureCode: null }),
+        },
+      });
+      if (!link) {
+        return respondError(400, "外部状态同步结果写入失败。");
+      }
+      callbackResult = {
+        alertId,
+        link,
       };
     } else if (action === "request_release") {
       const budgetId = result.data.budgetId as string;

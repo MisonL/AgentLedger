@@ -41,6 +41,26 @@ func main() {
 		log.Error("ensure callback stream failed", "error", err)
 		os.Exit(1)
 	}
+	if err := ensureAlertExternalStatusSyncStream(
+		ctx,
+		jetStreamCallbackStreamManager{js: js},
+		cfg.AlertExternalStatusSyncStream,
+		cfg.AlertExternalStatusSyncSubject,
+		log,
+	); err != nil {
+		log.Error("ensure alert external status sync stream failed", "error", err)
+		os.Exit(1)
+	}
+	if err := ensureDLQStream(
+		ctx,
+		jetStreamCallbackStreamManager{js: js},
+		defaultDLQStream,
+		cfg.DLQSubject,
+		log,
+	); err != nil {
+		log.Error("ensure dlq stream failed", "error", err)
+		os.Exit(1)
+	}
 
 	alertsConsumer, err := ensureConsumer(ctx, js, cfg.Stream, cfg.Subject, cfg.Durable, cfg.ConsumerAckWait)
 	if err != nil {
@@ -57,6 +77,18 @@ func main() {
 	callbackConsumer, err := ensureConsumer(ctx, js, cfg.CallbackStream, cfg.CallbackSubject, cfg.CallbackDurable, cfg.ConsumerAckWait)
 	if err != nil {
 		log.Error("ensure callback consumer failed", "error", err)
+		os.Exit(1)
+	}
+	alertExternalStatusSyncConsumer, err := ensureConsumer(
+		ctx,
+		js,
+		cfg.AlertExternalStatusSyncStream,
+		cfg.AlertExternalStatusSyncSubject,
+		cfg.AlertExternalStatusSyncDurable,
+		cfg.ConsumerAckWait,
+	)
+	if err != nil {
+		log.Error("ensure alert external status sync consumer failed", "error", err)
 		os.Exit(1)
 	}
 
@@ -84,6 +116,21 @@ func main() {
 	}
 	defer callbackConsumeCtx.Stop()
 
+	alertExternalStatusSyncConsumeCtx, err := alertExternalStatusSyncConsumer.Consume(
+		dispatcher.handleAlertExternalStatusSyncMessage,
+	)
+	if err != nil {
+		log.Error(
+			"start alert external status sync consumer failed",
+			"error",
+			err,
+			"consumer",
+			cfg.AlertExternalStatusSyncDurable,
+		)
+		os.Exit(1)
+	}
+	defer alertExternalStatusSyncConsumeCtx.Stop()
+
 	mux := http.NewServeMux()
 	health.Register(mux, cfg.Core.ServiceName)
 	mux.Handle("/metrics", metrics.handler())
@@ -102,6 +149,10 @@ func main() {
 		"callback_stream", cfg.CallbackStream,
 		"callback_subject", cfg.CallbackSubject,
 		"callback_consumer", cfg.CallbackDurable,
+		"alert_external_status_sync_stream", cfg.AlertExternalStatusSyncStream,
+		"alert_external_status_sync_subject", cfg.AlertExternalStatusSyncSubject,
+		"alert_external_status_sync_consumer", cfg.AlertExternalStatusSyncDurable,
+		"dlq_stream", defaultDLQStream,
 		"callback_api_path", callbackAPIPath,
 		"control_plane_callback_url", cfg.ControlPlaneCallbackURL,
 		"dlq_subject", cfg.DLQSubject,

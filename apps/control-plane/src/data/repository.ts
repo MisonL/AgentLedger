@@ -1,7 +1,11 @@
 import type {
   Alert,
+  AlertExternalLink,
+  AlertExternalLinkSyncResult,
+  AlertExternalLinkType,
   AlertOrchestrationChannel,
   AlertOrchestrationDispatchMode,
+  AlertOrchestrationEscalationReason,
   AlertOrchestrationExecutionCreateInput,
   AlertOrchestrationExecutionListInput,
   AlertOrchestrationExecutionLog,
@@ -16,6 +20,11 @@ import type {
   AuditItem,
   AuditLevel,
   AuditListInput,
+  LegalHoldCreateInput,
+  LegalHoldItem,
+  LegalHoldListInput,
+  LegalHoldReleaseInput,
+  LegalHoldResourceType,
   TokenPulseRoutePolicy,
   TokenPulseRuntimeEvent,
   TokenPulseRuntimeEventIngestInput,
@@ -37,6 +46,14 @@ import type {
   McpApprovalRequest,
   McpApprovalReviewInput,
   McpApprovalStatus,
+  McpApprovalWorkflow,
+  McpApprovalWorkflowCondition,
+  McpApprovalWorkflowTimeWindow,
+  McpApprovalWorkflowNode,
+  McpApprovalWorkflowNodeKind,
+  McpApprovalWorkflowNodeSnapshot,
+  McpApprovalWorkflowTransition,
+  McpApprovalWorkflowTransitionPreview,
   McpInvocationAudit,
   McpInvocationListInput,
   McpRiskLevel,
@@ -47,6 +64,10 @@ import type {
   PricingCatalog,
   PricingCatalogEntry,
   RegionDescriptor,
+  ResidencyArchiveRegionPolicy,
+  ResidencyArchiveRegionPolicyUpsertInput,
+  ResidencyKmsKeyMapping,
+  ResidencyKmsKeyMappingUpsertInput,
   ReplicationJob,
   ReplicationJobApproveInput,
   ReplicationJobCancelInput,
@@ -111,10 +132,12 @@ const DEFAULT_WEBHOOK_REPLAY_TASK_LIMIT = 100;
 const DEFAULT_WEBHOOK_REPLAY_EVENT_LIMIT = 200;
 const DEFAULT_QUALITY_DAILY_METRIC_LIMIT = 60;
 const DEFAULT_QUALITY_SCORECARD_LIMIT = 100;
+const DEFAULT_QUALITY_ADVICE_EXECUTION_LIMIT = 100;
 const DEFAULT_REPLAY_BASELINE_LIMIT = 100;
 const DEFAULT_REPLAY_JOB_LIMIT = 100;
 const DEFAULT_REPLAY_DATASET_CASE_LIMIT = 1000;
 const DEFAULT_REPLAY_ARTIFACT_LIMIT = 20;
+const DEFAULT_REPLAY_EXPERIMENT_LIMIT = 100;
 const MAX_ALERT_ORCHESTRATION_EXECUTION_LIMIT = 200;
 const SOURCE_TYPES: ReadonlyArray<SourceType> = ["local", "ssh", "sync-cache"];
 const SOURCE_ACCESS_MODES: ReadonlyArray<SourceAccessMode> = ["realtime", "sync", "hybrid"];
@@ -134,7 +157,13 @@ const ALERT_ORCHESTRATION_CHANNELS: ReadonlyArray<AlertOrchestrationChannel> = [
   "feishu",
   "email",
   "email_webhook",
+  "incident",
   "ticket",
+];
+const ALERT_EXTERNAL_LINK_TYPES: ReadonlyArray<AlertExternalLinkType> = [
+  "ticket",
+  "case",
+  "incident",
 ];
 const DATA_RESIDENCY_MODES: ReadonlyArray<DataResidencyMode> = ["single_region", "active_active"];
 const REPLICATION_JOB_STATUSES: ReadonlyArray<ReplicationJobStatus> = [
@@ -196,6 +225,11 @@ const WEBHOOK_EVENT_TYPES: ReadonlyArray<WebhookEventType> = [
   "replay.run.cancelled",
 ];
 const AUDIT_LEVEL_SET: ReadonlyArray<AuditLevel> = ["info", "warning", "error", "critical"];
+const LEGAL_HOLD_RESOURCE_TYPES: ReadonlyArray<LegalHoldResourceType> = [
+  "audit",
+  "audit_export",
+  "evidence_bundle",
+];
 const TENANT_ROLE_SET: ReadonlyArray<TenantRole> = [
   "owner",
   "maintainer",
@@ -208,6 +242,12 @@ const ORG_ROLE_SET: ReadonlyArray<OrgRole> = [
   "member",
   "readonly",
 ];
+const MCP_APPROVAL_WORKFLOW_MODES = [
+  "single_stage",
+  "two_stage",
+  "multi_stage",
+] as const;
+const MCP_RISK_LEVEL_SET: ReadonlyArray<McpRiskLevel> = ["low", "medium", "high"];
 const SYNC_JOB_STATUSES: ReadonlyArray<SyncJobStatus> = [
   "pending",
   "running",
@@ -346,6 +386,11 @@ export interface AuditListResult {
   nextCursor: string | null;
 }
 
+export interface LegalHoldListResult {
+  items: LegalHoldItem[];
+  total: number;
+}
+
 export interface TokenPulseRuntimeEventListResult {
   items: TokenPulseRuntimeEvent[];
   total: number;
@@ -363,6 +408,11 @@ export interface AlertListResult {
   nextCursor: string | null;
 }
 
+export interface AlertExternalLinkListResult {
+  items: AlertExternalLink[];
+  total: number;
+}
+
 export interface AlertOrchestrationRuleListResult {
   items: AlertOrchestrationRule[];
   total: number;
@@ -375,6 +425,16 @@ export interface AlertOrchestrationExecutionListResult {
 
 export interface ReplicationJobListResult {
   items: ReplicationJob[];
+  total: number;
+}
+
+export interface ResidencyKmsKeyMappingListResult {
+  items: ResidencyKmsKeyMapping[];
+  total: number;
+}
+
+export interface ResidencyArchiveRegionPolicyListResult {
+  items: ResidencyArchiveRegionPolicy[];
   total: number;
 }
 
@@ -427,6 +487,18 @@ export interface AppendAuditLogInput {
   detail?: string;
   metadata?: Record<string, unknown>;
   createdAt?: string;
+}
+
+export interface CreateLegalHoldOptions {
+  createdByUserId?: string;
+  createdByEmail?: string;
+  createdAt?: string;
+}
+
+export interface ReleaseLegalHoldOptions {
+  releasedByUserId?: string;
+  releasedByEmail?: string;
+  releasedAt?: string;
 }
 
 export interface CreateTokenPulseRuntimeEventInput
@@ -573,6 +645,8 @@ interface NormalizedAlertOrchestrationExecutionListInput {
   dispatchMode?: AlertOrchestrationDispatchMode;
   hasConflict?: boolean;
   simulated?: boolean;
+  escalated?: boolean;
+  escalationReason?: AlertOrchestrationEscalationReason;
   from?: string;
   to?: string;
   limit: number;
@@ -624,6 +698,14 @@ interface NormalizedAuditListInput {
   cursor?: string;
 }
 
+interface NormalizedLegalHoldListInput {
+  tenantId: string;
+  resourceType?: LegalHoldResourceType;
+  resourceId?: string;
+  active?: boolean;
+  limit: number;
+}
+
 interface NormalizedTokenPulseRuntimeEventListInput {
   tenantId: string;
   traceId?: string;
@@ -662,6 +744,13 @@ interface NormalizedQualityScorecardListInput {
   limit: number;
 }
 
+interface NormalizedQualityAdviceExecutionListInput {
+  adviceId?: string;
+  actionType?: QualityAdviceActionType;
+  status?: QualityAdviceExecutionStatus;
+  limit: number;
+}
+
 interface NormalizedReplayBaselineListInput {
   keyword?: string;
   limit: number;
@@ -685,6 +774,13 @@ interface NormalizedReplayJobListInput {
 interface NormalizedReplayRunListInput {
   datasetId?: string;
   status?: ReplayJobStatus;
+  limit: number;
+}
+
+interface NormalizedReplayExperimentListInput {
+  datasetId?: string;
+  status?: ReplayExperimentStatus;
+  sourceAdviceId?: string;
   limit: number;
 }
 
@@ -784,6 +880,99 @@ export interface ListBudgetReleaseRequestsInput {
 export interface ListMcpApprovalRequestsInput {
   status?: McpApprovalStatus;
   limit?: number;
+}
+
+export type LocalMcpApprovalWorkflowMode =
+  (typeof MCP_APPROVAL_WORKFLOW_MODES)[number];
+
+export type LocalMcpApprovalStage = `stage${number}`;
+
+export interface LocalMcpApprovalStageConfig {
+  nodeId: string;
+  stage: LocalMcpApprovalStage;
+  label?: string;
+  requiredApprovals: number;
+  roles: TenantRole[];
+}
+
+export interface LocalMcpApprovalConfig {
+  mode: LocalMcpApprovalWorkflowMode;
+  approvalStages: LocalMcpApprovalStageConfig[];
+  approvalWorkflow?: McpApprovalWorkflow;
+}
+
+interface LocalMcpApprovalReviewActor {
+  userId: string;
+  email?: string;
+  reason?: string;
+  reviewedAt: string;
+  tenantRole?: TenantRole;
+}
+
+interface LocalMcpApprovalStageState extends LocalMcpApprovalStageConfig {
+  approvals: LocalMcpApprovalReviewActor[];
+  rejectedBy?: LocalMcpApprovalReviewActor;
+}
+
+interface LocalMcpApprovalEvaluationContext {
+  toolId: string;
+  riskLevel: McpRiskLevel;
+  tenantRole?: TenantRole;
+  evaluationTimestamp: string;
+}
+
+interface LocalMcpApprovalWorkflowRecord {
+  approvalRequestId: string;
+  tenantId: string;
+  approvalMode: LocalMcpApprovalWorkflowMode;
+  approvalConditionMatched: boolean;
+  approvalWorkflow: McpApprovalWorkflow;
+  approvalStages: LocalMcpApprovalStageState[];
+  currentNodeId: string | null;
+  pathHistory: string[];
+  evaluationContext: LocalMcpApprovalEvaluationContext;
+}
+
+interface McpApprovalWorkflowRow {
+  approval_request_id: string;
+  tenant_id: string;
+  approval_mode: string;
+  approval_condition_matched: boolean;
+  approval_workflow?: unknown;
+  approval_stages?: unknown;
+  current_node_id?: string | null;
+  path_history?: unknown;
+  evaluation_context?: unknown;
+  stage1_required_approvals: number;
+  stage1_roles: unknown;
+  stage1_approvals: unknown;
+  stage1_rejected_by: unknown;
+  stage2_required_approvals: number | null;
+  stage2_roles: unknown;
+  stage2_approvals: unknown;
+  stage2_rejected_by: unknown;
+}
+
+export interface LocalMcpApprovalStageSnapshot
+  extends LocalMcpApprovalStageConfig {
+  approvedApprovals: number;
+  approvedByUserIds: string[];
+  rejectedByUserId?: string;
+}
+
+export interface LocalMcpApprovalWorkflowSnapshot {
+  approvalRequestId: string;
+  approvalMode: LocalMcpApprovalWorkflowMode;
+  approvalConditionMatched: boolean;
+  currentNodeId: string | null;
+  currentStage: LocalMcpApprovalStage | null;
+  remainingApprovals: number;
+  terminated: boolean;
+  approvalStages: LocalMcpApprovalStageSnapshot[];
+  approvalWorkflow: McpApprovalWorkflow;
+  approvalNodes: McpApprovalWorkflowNodeSnapshot[];
+  pathHistory: string[];
+  nextTransitionPreview?: McpApprovalWorkflowTransitionPreview;
 }
 
 export interface AppendMcpInvocationInput {
@@ -887,6 +1076,49 @@ export interface CreateAgentBindingInput {
   deviceId?: string;
   displayName?: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface AgentRuntimeHeartbeatRecord {
+  tenantId: string;
+  agentId: string;
+  sessionId?: string;
+  hostname?: string;
+  version?: string;
+  daemon: boolean;
+  occurredAt: string;
+  configVersion?: string;
+  configFetchedAt?: string;
+  heartbeatIntervalSec?: number;
+  ingestProtocol?: string;
+  ingestEndpoint?: string;
+  sourceCount: number;
+  sourceIds: string[];
+  lastIngestStatusCode?: number;
+  lastAccepted: number;
+  lastRejected: number;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertAgentRuntimeHeartbeatInput {
+  agentId: string;
+  sessionId?: string;
+  hostname?: string;
+  version?: string;
+  daemon: boolean;
+  occurredAt: string;
+  configVersion?: string;
+  configFetchedAt?: string;
+  heartbeatIntervalSec?: number;
+  ingestProtocol?: string;
+  ingestEndpoint?: string;
+  sourceCount?: number;
+  sourceIds?: string[];
+  lastIngestStatusCode?: number;
+  lastAccepted?: number;
+  lastRejected?: number;
+  lastError?: string;
 }
 
 export interface SourceBinding {
@@ -1156,6 +1388,66 @@ export interface QualityScorecardUpsertInput {
   updatedAt?: string;
 }
 
+export type QualityAdviceSeverity = "info" | "warn" | "critical";
+export type QualityAdviceActionType = "scorecard_adjustment" | "replay_experiment";
+export type QualityAdviceExecutionTriggerSource = "manual" | "automatic";
+export type QualityAdviceExecutionStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface QualityAdviceExecution {
+  id: string;
+  tenantId: string;
+  adviceId: string;
+  project: string;
+  severity: QualityAdviceSeverity;
+  actionType: QualityAdviceActionType;
+  triggerSource: QualityAdviceExecutionTriggerSource;
+  status: QualityAdviceExecutionStatus;
+  metric?: string;
+  datasetId?: string;
+  experimentId?: string;
+  candidateLabels?: string[];
+  scorecardKey?: string;
+  resultSummary?: Record<string, unknown>;
+  error?: string;
+  requestedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  updatedAt: string;
+}
+
+export interface ListQualityAdviceExecutionsInput {
+  adviceId?: string;
+  actionType?: QualityAdviceActionType;
+  status?: QualityAdviceExecutionStatus;
+  limit?: number;
+}
+
+export interface QualityAdviceExecutionUpsertInput {
+  id: string;
+  adviceId: string;
+  project: string;
+  severity: QualityAdviceSeverity;
+  actionType: QualityAdviceActionType;
+  triggerSource: "manual" | "automatic";
+  status: QualityAdviceExecutionStatus;
+  metric?: string;
+  datasetId?: string;
+  experimentId?: string;
+  candidateLabels?: string[];
+  scorecardKey?: string;
+  resultSummary?: Record<string, unknown>;
+  error?: string | null;
+  requestedAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  updatedAt?: string;
+}
+
 export interface ReplayBaseline {
   id: string;
   tenantId: string;
@@ -1164,8 +1456,25 @@ export interface ReplayBaseline {
   datasetRef?: string;
   scenarioCount: number;
   metadata: Record<string, unknown>;
+  currentVersionId?: string;
+  currentVersionNumber?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ReplayBaselineVersion {
+  id: string;
+  tenantId: string;
+  baselineId: string;
+  version: number;
+  datasetRef?: string;
+  model: string;
+  promptVersion?: string;
+  scenarioCount: number;
+  metadata: Record<string, unknown>;
+  note?: string;
+  createdAt: string;
+  promotedAt?: string;
 }
 
 export interface CreateReplayBaselineInput {
@@ -1180,6 +1489,16 @@ export interface CreateReplayBaselineInput {
 export interface ListReplayBaselinesInput {
   keyword?: string;
   limit?: number;
+}
+
+export interface CreateReplayBaselineVersionInput {
+  datasetRef?: string;
+  model?: string;
+  promptVersion?: string;
+  scenarioCount?: number;
+  metadata?: Record<string, unknown>;
+  note?: string;
+  createdAt?: string;
 }
 
 export interface ReplayJob {
@@ -1282,6 +1601,10 @@ export interface ReplayDatasetCaseInput {
   metadata?: Record<string, unknown>;
 }
 
+interface ReplayDatasetVersionCaseRecord extends ReplayDatasetCase {
+  versionId: string;
+}
+
 export interface ListReplayDatasetCasesInput {
   limit?: number;
 }
@@ -1319,6 +1642,46 @@ export interface ListReplayRunsInput {
   limit?: number;
 }
 
+export type ReplayExperimentTriggerSource =
+  | "manual"
+  | "quality_advice"
+  | "automatic";
+export type ReplayExperimentExecutionMode = "manual" | "automatic";
+export type ReplayExperimentStatus =
+  | "draft"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface ReplayExperiment {
+  id: string;
+  tenantId: string;
+  name: string;
+  datasetId: string;
+  baselineId?: string;
+  baselineVersionId?: string;
+  triggerSource: ReplayExperimentTriggerSource;
+  executionMode: ReplayExperimentExecutionMode;
+  status: ReplayExperimentStatus;
+  candidateLabels: string[];
+  sourceAdviceId?: string;
+  runIds: string[];
+  lastError?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListReplayExperimentsInput {
+  datasetId?: string;
+  status?: ReplayExperimentStatus;
+  sourceAdviceId?: string;
+  limit?: number;
+}
+
 export interface UpdateReplayRunInput {
   status?: ReplayJobStatus;
   fromStatuses?: ReplayJobStatus[];
@@ -1327,6 +1690,25 @@ export interface UpdateReplayRunInput {
   error?: string | null;
   startedAt?: string | null;
   finishedAt?: string | null;
+  updatedAt?: string;
+}
+
+export interface ReplayExperimentUpsertInput {
+  id: string;
+  name: string;
+  datasetId: string;
+  baselineId?: string;
+  baselineVersionId?: string;
+  triggerSource: "manual" | "quality_advice" | "automatic";
+  executionMode: "manual" | "automatic";
+  status: ReplayExperimentStatus;
+  candidateLabels?: string[];
+  sourceAdviceId?: string;
+  runIds?: string[];
+  lastError?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  createdAt?: string;
   updatedAt?: string;
 }
 
@@ -1466,6 +1848,10 @@ function toJsonArray(value: unknown): unknown[] {
     }
   }
   return [];
+}
+
+function isRecord(value: unknown): value is DbRow {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function firstNonEmptyString(...values: unknown[]): string | null {
@@ -2147,6 +2533,12 @@ function toIntegrationAlertCallbackAction(value: unknown): IntegrationAlertCallb
   if (value === "reject_release") {
     return "reject_release";
   }
+  if (value === "upsert_external_link") {
+    return "upsert_external_link";
+  }
+  if (value === "sync_external_link_result") {
+    return "sync_external_link_result";
+  }
   return "ack";
 }
 
@@ -2165,6 +2557,25 @@ function toAlertSeverity(value: unknown): AlertSeverity {
     return value as AlertSeverity;
   }
   return "warning";
+}
+
+function toAlertExternalLinkType(value: unknown): AlertExternalLinkType {
+  if (
+    typeof value === "string" &&
+    ALERT_EXTERNAL_LINK_TYPES.includes(value as AlertExternalLinkType)
+  ) {
+    return value as AlertExternalLinkType;
+  }
+  return "ticket";
+}
+
+function toAlertExternalLinkPublishStatus(
+  value: unknown
+): "success" | "failed" | undefined {
+  if (value === "success" || value === "failed") {
+    return value;
+  }
+  return undefined;
 }
 
 function toAlertOrchestrationEventType(value: unknown): AlertOrchestrationEventType {
@@ -2298,6 +2709,16 @@ function toAuditLevel(value: unknown): AuditLevel {
     return value as AuditLevel;
   }
   return "info";
+}
+
+function toLegalHoldResourceType(value: unknown): LegalHoldResourceType {
+  if (
+    typeof value === "string" &&
+    LEGAL_HOLD_RESOURCE_TYPES.includes(value as LegalHoldResourceType)
+  ) {
+    return value as LegalHoldResourceType;
+  }
+  return "audit";
 }
 
 function toTokenPulseRoutePolicy(value: unknown): TokenPulseRoutePolicy {
@@ -2567,8 +2988,69 @@ function mapAlertRow(row: DbRow): Alert {
     threshold: Number(toNumber(row.threshold, 0).toFixed(4)),
     status: toAlertStatus(row.status),
     severity: toAlertSeverity(row.severity),
+    externalLinks: undefined,
     triggeredAt,
     updatedAt: toIsoString(row.updated_at ?? row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapAlertExternalLinkRow(row: DbRow): AlertExternalLink {
+  const metadata = toDbRow(row.metadata) ?? {};
+  return {
+    id: firstNonEmptyString(row.id) ?? crypto.randomUUID(),
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    alertId: firstNonEmptyString(row.alert_id) ?? "",
+    externalType: toAlertExternalLinkType(firstNonEmptyString(row.external_type)),
+    externalSystem:
+      firstNonEmptyString(row.external_system) ??
+      firstNonEmptyString(row.external_type) ??
+      "ticket",
+    externalId: firstNonEmptyString(row.external_id) ?? "",
+    externalStatus: firstNonEmptyString(row.external_status) ?? undefined,
+    pendingExternalStatus:
+      firstNonEmptyString(
+        metadata.pendingExternalStatus,
+        metadata.pending_external_status,
+      ) ?? undefined,
+    metadata,
+    lastSyncedAt:
+      toIsoString(row.last_synced_at) ??
+      toIsoString(row.updated_at) ??
+      new Date().toISOString(),
+    publishStatus: toAlertExternalLinkPublishStatus(
+      firstNonEmptyString(metadata.publishStatus, metadata.publish_status),
+    ),
+    publishError:
+      firstNonEmptyString(metadata.publishError, metadata.publish_error) ??
+      undefined,
+    lastSyncResult:
+      firstNonEmptyString(metadata.lastSyncResult, metadata.last_sync_result) ===
+      "failed"
+        ? "failed"
+        : firstNonEmptyString(metadata.lastSyncResult, metadata.last_sync_result) ===
+            "success"
+          ? "success"
+          : undefined,
+    lastSyncError:
+      firstNonEmptyString(metadata.lastSyncError, metadata.last_sync_error) ??
+      undefined,
+    lastSyncFailureStage:
+      firstNonEmptyString(
+        metadata.lastSyncFailureStage,
+        metadata.last_sync_failure_stage,
+        metadata.failureStage,
+        metadata.failure_stage,
+      ) ?? undefined,
+    lastSyncFailureCode:
+      firstNonEmptyString(
+        metadata.lastSyncFailureCode,
+        metadata.last_sync_failure_code,
+        metadata.failureCode,
+        metadata.failure_code,
+      ) ?? undefined,
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt:
+      toIsoString(row.updated_at ?? row.created_at) ?? new Date().toISOString(),
   };
 }
 
@@ -2614,23 +3096,7 @@ function mapAlertOrchestrationRuleRow(row: DbRow): AlertOrchestrationRule {
 }
 
 function mapAlertOrchestrationExecutionRow(row: DbRow): AlertOrchestrationExecutionLog {
-  const channels: AlertOrchestrationChannel[] = [];
-  const channelSet = new Set<AlertOrchestrationChannel>();
-  for (const channel of toJsonArray(row.channels)) {
-    const normalized = firstNonEmptyString(channel);
-    if (!normalized) {
-      continue;
-    }
-    const mapped = toAlertOrchestrationChannel(normalized.toLowerCase());
-    if (!mapped) {
-      continue;
-    }
-    if (channelSet.has(mapped)) {
-      continue;
-    }
-    channelSet.add(mapped);
-    channels.push(mapped);
-  }
+  const channels = mapAlertOrchestrationChannels(row.channels);
 
   const conflictRuleIds: string[] = [];
   const conflictRuleIdSet = new Set<string>();
@@ -2650,6 +3116,8 @@ function mapAlertOrchestrationExecutionRow(row: DbRow): AlertOrchestrationExecut
   const severityRaw = firstNonEmptyString(row.severity);
   const sourceId = firstNonEmptyString(row.source_id);
   const metadata = toDbRow(row.metadata) ?? {};
+  const escalated = resolveAlertOrchestrationEscalated(metadata);
+  const escalationReason = resolveAlertOrchestrationEscalationReason(metadata);
 
   return {
     id: firstNonEmptyString(row.id) ?? "",
@@ -2665,6 +3133,12 @@ function mapAlertOrchestrationExecutionRow(row: DbRow): AlertOrchestrationExecut
     dedupeHit: toBoolean(row.dedupe_hit, false),
     suppressed: toBoolean(row.suppressed, false),
     simulated: toBoolean(row.simulated, false),
+    escalated,
+    escalationReason,
+    escalationTargetChannels: mapAlertOrchestrationChannels(
+      metadata.escalationTargetChannels ?? metadata.escalation_target_channels
+    ),
+    slaMinutes: resolveAlertOrchestrationSLAMinutes(metadata),
     metadata,
     createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
   };
@@ -2684,6 +3158,47 @@ function resolveAlertOrchestrationDispatchMode(
     return "rule";
   }
   return toBoolean(metadata?.fallback, false) ? "fallback" : "rule";
+}
+
+function mapAlertOrchestrationChannels(value: unknown): AlertOrchestrationChannel[] {
+  const channels: AlertOrchestrationChannel[] = [];
+  const channelSet = new Set<AlertOrchestrationChannel>();
+  for (const channel of toJsonArray(value)) {
+    const normalized = firstNonEmptyString(channel);
+    if (!normalized) {
+      continue;
+    }
+    const mapped = toAlertOrchestrationChannel(normalized.toLowerCase());
+    if (!mapped || channelSet.has(mapped)) {
+      continue;
+    }
+    channelSet.add(mapped);
+    channels.push(mapped);
+  }
+  return channels;
+}
+
+function resolveAlertOrchestrationEscalationReason(
+  metadata: DbRow | null | undefined
+): AlertOrchestrationEscalationReason | undefined {
+  const raw = firstNonEmptyString(
+    metadata?.escalationReason,
+    metadata?.escalation_reason
+  );
+  return raw === "sla_timeout" ? "sla_timeout" : undefined;
+}
+
+function resolveAlertOrchestrationEscalated(metadata: DbRow | null | undefined): boolean {
+  return (
+    toBoolean(metadata?.escalated, false) ||
+    resolveAlertOrchestrationEscalationReason(metadata) !== undefined
+  );
+}
+
+function resolveAlertOrchestrationSLAMinutes(
+  metadata: DbRow | null | undefined
+): number | undefined {
+  return toOptionalNonNegativeInteger(metadata?.slaMinutes ?? metadata?.sla_minutes);
 }
 
 function mapRuleScopeBinding(value: unknown): RuleScopeBinding {
@@ -2722,6 +3237,30 @@ function mapTenantResidencyPolicyRow(row: DbRow): TenantResidencyPolicy {
     replicaRegions,
     allowCrossRegionTransfer: toBoolean(row.allow_cross_region_transfer, false),
     requireTransferApproval: toBoolean(row.require_transfer_approval, false),
+    updatedAt: toIsoString(row.updated_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapResidencyKmsKeyMappingRow(row: DbRow): ResidencyKmsKeyMapping {
+  return {
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    regionId: firstNonEmptyString(row.region_id) ?? "",
+    keyProvider: firstNonEmptyString(row.key_provider) ?? "",
+    keyRef: firstNonEmptyString(row.key_ref) ?? "",
+    enabled: toBoolean(row.enabled, true),
+    updatedAt: toIsoString(row.updated_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapResidencyArchiveRegionPolicyRow(
+  row: DbRow
+): ResidencyArchiveRegionPolicy {
+  return {
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    sourceRegion: firstNonEmptyString(row.source_region) ?? "",
+    archiveRegion: firstNonEmptyString(row.archive_region) ?? "",
+    archiveClass: firstNonEmptyString(row.archive_class) ?? "",
+    enabled: toBoolean(row.enabled, true),
     updatedAt: toIsoString(row.updated_at) ?? new Date().toISOString(),
   };
 }
@@ -2789,12 +3328,440 @@ function mapRuleApprovalRow(row: DbRow): RuleApproval {
   };
 }
 
+function isJsonRecordLike(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeMcpApprovalStageConfigsForPolicy(
+  value: unknown
+): Array<{
+  nodeId?: string;
+  stage: LocalMcpApprovalStage;
+  label?: string;
+  requiredApprovals: number;
+  roles: string[];
+}> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const items: Array<{
+    nodeId?: string;
+    stage: LocalMcpApprovalStage;
+    label?: string;
+    requiredApprovals: number;
+    roles: string[];
+  }> = [];
+  const seen = new Set<string>();
+  for (const [index, item] of value.entries()) {
+    if (!isJsonRecordLike(item)) {
+      continue;
+    }
+    const stage = normalizeLocalMcpApprovalStage(item.stage, index);
+    if (seen.has(stage)) {
+      continue;
+    }
+    seen.add(stage);
+    const nodeId = firstNonEmptyString(item.nodeId) ?? undefined;
+    const label = firstNonEmptyString(item.label) ?? undefined;
+    const roles = normalizeDistinctStringArray(toJsonArray(item.roles));
+    items.push({
+      nodeId,
+      stage,
+      label,
+      requiredApprovals: Math.max(
+        1,
+        toOptionalNonNegativeInteger(item.requiredApprovals) ?? 1,
+      ),
+      roles: roles.length > 0 ? roles : defaultMcpApprovalStageRoles(stage),
+    });
+  }
+  return items;
+}
+
+function toMcpApprovalWorkflowNodeKind(
+  value: unknown,
+): McpApprovalWorkflowNodeKind {
+  if (
+    value === "approval" ||
+    value === "terminal_approved" ||
+    value === "terminal_rejected"
+  ) {
+    return value;
+  }
+  return "approval";
+}
+
+function normalizeMcpApprovalWorkflowTimeWindowValue(
+  value: unknown,
+): McpApprovalWorkflowTimeWindow | undefined {
+  if (!isJsonRecordLike(value)) {
+    return undefined;
+  }
+  const timezone = firstNonEmptyString(value.timezone);
+  const startTime = firstNonEmptyString(value.startTime);
+  const endTime = firstNonEmptyString(value.endTime);
+  if (
+    !timezone ||
+    !startTime ||
+    !/^\d{2}:\d{2}$/.test(startTime) ||
+    !endTime ||
+    !/^\d{2}:\d{2}$/.test(endTime)
+  ) {
+    return undefined;
+  }
+  const weekdays = Array.from(
+    new Set(
+      toJsonArray(value.weekdays)
+        .map((item) => (typeof item === "number" ? item : Number(item)))
+        .filter((item) => Number.isInteger(item) && item >= 1 && item <= 7),
+    ),
+  );
+  return {
+    timezone,
+    ...(weekdays.length > 0 ? { weekdays } : {}),
+    startTime,
+    endTime,
+  };
+}
+
+function normalizeMcpApprovalWorkflowConditionValue(
+  value: unknown,
+): McpApprovalWorkflowCondition | undefined {
+  if (!isJsonRecordLike(value)) {
+    return undefined;
+  }
+  const riskLevelAtLeast = firstNonEmptyString(value.riskLevelAtLeast);
+  const toolIds = normalizeDistinctStringArray(toJsonArray(value.toolIds));
+  const tenantRoles = normalizeDistinctStringArray(toJsonArray(value.tenantRoles));
+  const timeWindow = normalizeMcpApprovalWorkflowTimeWindowValue(value.timeWindow);
+  const defaultFlag = value.default === true;
+  return {
+    ...(riskLevelAtLeast === "low" ||
+    riskLevelAtLeast === "medium" ||
+    riskLevelAtLeast === "high"
+      ? { riskLevelAtLeast }
+      : {}),
+    ...(toolIds.length > 0 ? { toolIds } : {}),
+    ...(tenantRoles.length > 0 ? { tenantRoles } : {}),
+    ...(timeWindow ? { timeWindow } : {}),
+    ...(defaultFlag ? { default: true } : {}),
+  };
+}
+
+function parseWorkflowTimeMinutes(value: string | undefined): number | null {
+  if (!value || !/^\d{2}:\d{2}$/.test(value)) {
+    return null;
+  }
+  const [hour, minute] = value.split(":").map(Number);
+  if (
+    !Number.isInteger(hour) ||
+    !Number.isInteger(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
+  return hour * 60 + minute;
+}
+
+function isSupportedTimeZoneValue(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: value,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getLocalWorkflowDateTimeParts(
+  date: Date,
+  timeZone: string,
+): { year: number; month: number; day: number; hour: number; minute: number } | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(date);
+    const read = (type: Intl.DateTimeFormatPartTypes) =>
+      Number(parts.find((part) => part.type === type)?.value ?? Number.NaN);
+    const year = read("year");
+    const month = read("month");
+    const day = read("day");
+    const hour = read("hour");
+    const minute = read("minute");
+    if (
+      !Number.isInteger(year) ||
+      !Number.isInteger(month) ||
+      !Number.isInteger(day) ||
+      !Number.isInteger(hour) ||
+      !Number.isInteger(minute)
+    ) {
+      return null;
+    }
+    return { year, month, day, hour, minute };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeMcpApprovalWorkflowNodeValue(
+  value: unknown,
+  index: number,
+  approvalIndex: number,
+): McpApprovalWorkflowNode | null {
+  if (!isJsonRecordLike(value)) {
+    return null;
+  }
+  const nodeId = firstNonEmptyString(value.nodeId) ?? `node-${index + 1}`;
+  const kind = toMcpApprovalWorkflowNodeKind(value.kind);
+  const label = firstNonEmptyString(value.label) ?? undefined;
+  if (kind !== "approval") {
+    return {
+      nodeId,
+      kind,
+      label,
+    };
+  }
+  const stage = normalizeLocalMcpApprovalStage(value.stage, approvalIndex);
+  const requiredApprovals = Math.max(
+    1,
+    toOptionalNonNegativeInteger(value.requiredApprovals) ?? 1,
+  );
+  const roles = normalizeDistinctStringArray(toJsonArray(value.roles)).filter(
+    (role): role is TenantRole => TENANT_ROLE_SET.includes(role as TenantRole),
+  );
+  return {
+    nodeId,
+    kind,
+    label,
+    stage,
+    requiredApprovals,
+    roles: roles.length > 0 ? roles : defaultMcpApprovalStageRoles(stage),
+  };
+}
+
+function buildLinearMcpApprovalWorkflowDefinition(
+  stages: LocalMcpApprovalStageConfig[],
+): McpApprovalWorkflow {
+  const normalizedStages = stages.map((stage, index) => ({
+    ...stage,
+    nodeId: stage.nodeId || stage.stage || `stage${index + 1}`,
+  }));
+  const nodes: McpApprovalWorkflowNode[] = normalizedStages.map((stage) => ({
+    nodeId: stage.nodeId,
+    kind: "approval",
+    label: stage.label,
+    stage: stage.stage,
+    requiredApprovals: stage.requiredApprovals,
+    roles: stage.roles,
+  }));
+  const terminalApprovedNodeId = "approved";
+  const terminalRejectedNodeId = "rejected";
+  nodes.push({
+    nodeId: terminalApprovedNodeId,
+    kind: "terminal_approved",
+    label: "Approved",
+  });
+  nodes.push({
+    nodeId: terminalRejectedNodeId,
+    kind: "terminal_rejected",
+    label: "Rejected",
+  });
+  const transitions: McpApprovalWorkflowTransition[] = [];
+  for (const [index, stage] of normalizedStages.entries()) {
+    const nextStage = normalizedStages[index + 1];
+    transitions.push({
+      fromNodeId: stage.nodeId,
+      toNodeId: nextStage?.nodeId ?? terminalApprovedNodeId,
+      condition: { default: true },
+    });
+  }
+  return {
+    entryNodeId: normalizedStages[0]?.nodeId ?? "stage1",
+    nodes,
+    transitions,
+  };
+}
+
+function normalizeMcpApprovalWorkflowDefinition(
+  value: unknown,
+  fallbackStages?: LocalMcpApprovalStageConfig[],
+): McpApprovalWorkflow {
+  if (!isJsonRecordLike(value) || !Array.isArray(value.nodes)) {
+    return buildLinearMcpApprovalWorkflowDefinition(
+      fallbackStages && fallbackStages.length > 0
+        ? fallbackStages
+        : [
+            {
+              nodeId: "stage1",
+              stage: "stage1",
+              requiredApprovals: 1,
+              roles: defaultMcpApprovalStageRoles("stage1"),
+            },
+          ],
+    );
+  }
+  const nodes: McpApprovalWorkflowNode[] = [];
+  let approvalIndex = 0;
+  const seenNodeIds = new Set<string>();
+  for (const [index, item] of value.nodes.entries()) {
+    const node = normalizeMcpApprovalWorkflowNodeValue(item, index, approvalIndex);
+    if (!node || seenNodeIds.has(node.nodeId)) {
+      continue;
+    }
+    seenNodeIds.add(node.nodeId);
+    if (node.kind === "approval") {
+      approvalIndex += 1;
+    }
+    nodes.push(node);
+  }
+  const entryNodeId =
+    firstNonEmptyString(value.entryNodeId) ??
+    nodes.find((item) => item.kind === "approval")?.nodeId ??
+    "stage1";
+  const transitions: McpApprovalWorkflowTransition[] = Array.isArray(value.transitions)
+    ? value.transitions.reduce<McpApprovalWorkflowTransition[]>((items, item) => {
+        if (!isJsonRecordLike(item)) {
+          return items;
+        }
+        const fromNodeId = firstNonEmptyString(item.fromNodeId);
+        const toNodeId = firstNonEmptyString(item.toNodeId);
+        if (!fromNodeId || !toNodeId) {
+          return items;
+        }
+        items.push({
+          fromNodeId,
+          toNodeId,
+          condition: normalizeMcpApprovalWorkflowConditionValue(item.condition),
+        });
+        return items;
+      }, [])
+    : [];
+  return {
+    entryNodeId,
+    nodes,
+    transitions,
+  };
+}
+
+function projectLocalApprovalStagesFromWorkflow(
+  workflow: McpApprovalWorkflow,
+): LocalMcpApprovalStageConfig[] {
+  return workflow.nodes
+    .filter(
+      (
+        node,
+      ): node is McpApprovalWorkflowNode & {
+        kind: "approval";
+        stage: LocalMcpApprovalStage;
+        requiredApprovals: number;
+        roles: TenantRole[];
+      } =>
+        node.kind === "approval" &&
+        isLocalMcpApprovalStage(node.stage) &&
+        typeof node.requiredApprovals === "number" &&
+        Array.isArray(node.roles),
+    )
+    .map((node) => ({
+      nodeId: node.nodeId,
+      stage: node.stage,
+      label: node.label,
+      requiredApprovals: node.requiredApprovals,
+      roles: normalizeDistinctStringArray(node.roles).filter(
+        (role): role is TenantRole => TENANT_ROLE_SET.includes(role as TenantRole),
+      ),
+    }));
+}
+
 function mapMcpToolPolicyRow(row: DbRow): McpToolPolicy {
+  const approvalModeRaw = firstNonEmptyString(row.approval_mode);
+  const legacyStages =
+    normalizeMcpApprovalStageConfigsForPolicy(row.approval_stages).length > 0
+      ? normalizeMcpApprovalStageConfigsForPolicy(row.approval_stages).map((stage) => ({
+          nodeId: stage.nodeId ?? stage.stage,
+          stage: stage.stage,
+          label: stage.label,
+          requiredApprovals: stage.requiredApprovals,
+          roles: stage.roles.filter(
+            (role): role is TenantRole => TENANT_ROLE_SET.includes(role as TenantRole),
+          ),
+        }))
+      : [
+          {
+            nodeId: "stage1",
+            stage: "stage1" as LocalMcpApprovalStage,
+            requiredApprovals:
+              toOptionalNonNegativeInteger(row.stage1_required_approvals) ?? 1,
+            roles:
+              normalizeDistinctStringArray(toJsonArray(row.stage1_roles))
+                .filter((role): role is TenantRole => TENANT_ROLE_SET.includes(role as TenantRole)),
+          },
+          ...(toOptionalNonNegativeInteger(row.stage2_required_approvals) !== undefined ||
+          normalizeDistinctStringArray(toJsonArray(row.stage2_roles)).length > 0
+            ? [
+                {
+                  nodeId: "stage2",
+                  stage: "stage2" as LocalMcpApprovalStage,
+                  requiredApprovals:
+                    toOptionalNonNegativeInteger(row.stage2_required_approvals) ?? 1,
+                  roles:
+                    normalizeDistinctStringArray(toJsonArray(row.stage2_roles))
+                      .filter((role): role is TenantRole =>
+                        TENANT_ROLE_SET.includes(role as TenantRole),
+                      ),
+                },
+              ]
+            : []),
+        ].map((stage) => ({
+          ...stage,
+          roles:
+            stage.roles.length > 0
+              ? stage.roles
+              : defaultMcpApprovalStageRoles(stage.stage),
+        }));
+  const approvalWorkflow = normalizeMcpApprovalWorkflowDefinition(
+    row.approval_workflow,
+    legacyStages,
+  );
+  const approvalStages = projectLocalApprovalStagesFromWorkflow(approvalWorkflow);
+  const approvalMode = normalizeLocalMcpApprovalWorkflowMode(
+    approvalModeRaw,
+    approvalStages.length,
+  );
+  const stage1Roles = normalizeDistinctStringArray(toJsonArray(row.stage1_roles));
+  const stage2Roles = normalizeDistinctStringArray(toJsonArray(row.stage2_roles));
+  const approvalCondition = toDbRow(row.approval_condition) ?? undefined;
   return {
     tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
     toolId: firstNonEmptyString(row.tool_id) ?? "",
     riskLevel: toMcpRiskLevel(row.risk_level),
     decision: toMcpToolDecision(row.decision),
+    approvalMode,
+    approvalWorkflow,
+    approvalStages: approvalStages.length > 0 ? approvalStages : undefined,
+    stage1RequiredApprovals:
+      toOptionalNonNegativeInteger(row.stage1_required_approvals) ?? undefined,
+    stage2RequiredApprovals:
+      toOptionalNonNegativeInteger(row.stage2_required_approvals) ?? undefined,
+    stage1Roles: stage1Roles.length > 0 ? stage1Roles : undefined,
+    stage2Roles: stage2Roles.length > 0 ? stage2Roles : undefined,
+    approvalCondition,
+    metadata: toDbRow(row.metadata) ?? undefined,
     reason: firstNonEmptyString(row.reason) ?? undefined,
     updatedAt: toIsoString(row.updated_at) ?? new Date().toISOString(),
   };
@@ -2819,6 +3786,31 @@ function mapMcpApprovalRequestRow(row: DbRow): McpApprovalRequest {
 
 function mapMcpInvocationAuditRow(row: DbRow): McpInvocationAudit {
   const evaluatedDecisionRaw = firstNonEmptyString(row.evaluated_decision);
+  const metadata = toDbRow(row.metadata) ?? {};
+  const approvalModeRaw = firstNonEmptyString(
+    metadata.approvalMode,
+    metadata.approval_mode,
+  );
+  const approvalStageRaw = firstNonEmptyString(
+    metadata.approvalStage,
+    metadata.currentStage,
+    metadata.approval_stage,
+    metadata.current_stage,
+  );
+  const approvalStage = isLocalMcpApprovalStage(approvalStageRaw)
+    ? (approvalStageRaw.trim() as LocalMcpApprovalStage)
+    : undefined;
+  const approvalStages = Array.isArray(metadata.approvalStages)
+    ? metadata.approvalStages
+    : Array.isArray(metadata.approval_stages)
+      ? metadata.approval_stages
+      : undefined;
+  const approvalMode = approvalModeRaw
+    ? normalizeLocalMcpApprovalWorkflowMode(
+        approvalModeRaw,
+        Array.isArray(approvalStages) ? approvalStages.length : approvalStage ? 2 : 1,
+      )
+    : undefined;
   return {
     id: firstNonEmptyString(row.id) ?? "",
     tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
@@ -2833,8 +3825,270 @@ function mapMcpInvocationAuditRow(row: DbRow): McpInvocationAudit {
     approvalRequestId: firstNonEmptyString(row.approval_request_id) ?? undefined,
     enforced: toBoolean(row.enforced, false),
     evaluatedDecision: evaluatedDecisionRaw ? toMcpToolDecision(evaluatedDecisionRaw) : undefined,
-    metadata: toDbRow(row.metadata) ?? {},
+    approvalMode,
+    approvalStage,
+    approvalSatisfied: toBoolean(
+      metadata.approvalSatisfied ?? metadata.approval_satisfied,
+      false,
+    ),
+    approvalConditionMatched: toBoolean(
+      metadata.approvalConditionMatched ?? metadata.approval_condition_matched,
+      false,
+    ),
+    metadata,
     createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function normalizeMcpApprovalReviewActorValue(
+  value: unknown
+): LocalMcpApprovalReviewActor | null {
+  const row = toDbRow(value);
+  if (!row) {
+    return null;
+  }
+  const userId = firstNonEmptyString(row.userId, row.user_id);
+  const reviewedAt = toIsoString(row.reviewedAt ?? row.reviewed_at);
+  if (!userId || !reviewedAt) {
+    return null;
+  }
+  const tenantRoleRaw = firstNonEmptyString(row.tenantRole, row.tenant_role);
+  return {
+    userId,
+    email: firstNonEmptyString(row.email) ?? undefined,
+    reason: firstNonEmptyString(row.reason) ?? undefined,
+    reviewedAt,
+    tenantRole:
+      tenantRoleRaw && TENANT_ROLE_SET.includes(tenantRoleRaw as TenantRole)
+        ? (tenantRoleRaw as TenantRole)
+        : undefined,
+  };
+}
+
+function normalizeMcpApprovalReviewActors(
+  value: unknown
+): LocalMcpApprovalReviewActor[] {
+  const items: LocalMcpApprovalReviewActor[] = [];
+  for (const item of toJsonArray(value)) {
+    const normalized = normalizeMcpApprovalReviewActorValue(item);
+    if (normalized) {
+      items.push(normalized);
+    }
+  }
+  return items;
+}
+
+function isLocalMcpApprovalStage(value: unknown): value is LocalMcpApprovalStage {
+  return typeof value === "string" && /^stage[1-9]\d*$/.test(value.trim());
+}
+
+function normalizeLocalMcpApprovalStage(
+  value: unknown,
+  fallbackIndex: number
+): LocalMcpApprovalStage {
+  if (isLocalMcpApprovalStage(value)) {
+    return value.trim() as LocalMcpApprovalStage;
+  }
+  return `stage${fallbackIndex + 1}` as LocalMcpApprovalStage;
+}
+
+function normalizeLocalMcpApprovalWorkflowMode(
+  value: unknown,
+  stageCount: number
+): LocalMcpApprovalWorkflowMode {
+  const raw = firstNonEmptyString(value);
+  if (
+    raw === "single_stage" ||
+    raw === "two_stage" ||
+    raw === "multi_stage"
+  ) {
+    return raw;
+  }
+  if (stageCount <= 1) {
+    return "single_stage";
+  }
+  if (stageCount === 2) {
+    return "two_stage";
+  }
+  return "multi_stage";
+}
+
+function defaultMcpApprovalStageRoles(stage: LocalMcpApprovalStage): TenantRole[] {
+  return stage === "stage1" ? ["owner", "maintainer"] : ["owner"];
+}
+
+function buildLegacyMcpApprovalStageState(
+  stage: LocalMcpApprovalStage,
+  requiredApprovals: unknown,
+  rolesValue: unknown,
+  approvalsValue: unknown,
+  rejectedByValue: unknown
+): LocalMcpApprovalStageState {
+  const normalizedRoles = normalizeDistinctStringArray(toJsonArray(rolesValue))
+    .filter((role): role is TenantRole => TENANT_ROLE_SET.includes(role as TenantRole));
+  return {
+    nodeId: stage,
+    stage,
+    requiredApprovals: Math.max(
+      1,
+      toOptionalNonNegativeInteger(requiredApprovals) ?? 1,
+    ),
+    roles:
+      normalizedRoles.length > 0
+        ? normalizedRoles
+        : defaultMcpApprovalStageRoles(stage),
+    approvals: normalizeMcpApprovalReviewActors(approvalsValue),
+    rejectedBy:
+      normalizeMcpApprovalReviewActorValue(rejectedByValue) ?? undefined,
+  };
+}
+
+function normalizeMcpApprovalStageStateValue(
+  value: unknown,
+  index: number
+): LocalMcpApprovalStageState | undefined {
+  if (!isJsonRecordLike(value)) {
+    return undefined;
+  }
+  const stage = normalizeLocalMcpApprovalStage(value.stage, index);
+  return buildLegacyMcpApprovalStageState(
+    stage,
+    value.requiredApprovals,
+    value.roles,
+    value.approvals,
+    value.rejectedBy,
+  );
+}
+
+function normalizeMcpApprovalStageStateArray(
+  value: unknown
+): LocalMcpApprovalStageState[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const items: LocalMcpApprovalStageState[] = [];
+  const seen = new Set<string>();
+  for (const [index, item] of value.entries()) {
+    const normalized = normalizeMcpApprovalStageStateValue(item, index);
+    if (!normalized || seen.has(normalized.stage)) {
+      continue;
+    }
+    seen.add(normalized.stage);
+    items.push(normalized);
+  }
+  return items;
+}
+
+function mapMcpApprovalWorkflowRow(
+  row: DbRow
+): LocalMcpApprovalWorkflowRecord | null {
+  const typedRow = row as unknown as Partial<McpApprovalWorkflowRow>;
+  const approvalRequestId = firstNonEmptyString(typedRow.approval_request_id);
+  const tenantId = firstNonEmptyString(typedRow.tenant_id) ?? DEFAULT_TENANT_ID;
+  if (!approvalRequestId) {
+    return null;
+  }
+  const legacyStages =
+    normalizeMcpApprovalStageStateArray(typedRow.approval_stages).length > 0
+      ? normalizeMcpApprovalStageStateArray(typedRow.approval_stages)
+      : [
+          buildLegacyMcpApprovalStageState(
+            "stage1",
+            typedRow.stage1_required_approvals,
+            typedRow.stage1_roles,
+            typedRow.stage1_approvals,
+            typedRow.stage1_rejected_by,
+          ),
+          ...(toOptionalNonNegativeInteger(typedRow.stage2_required_approvals) !== undefined ||
+          toJsonArray(typedRow.stage2_roles).length > 0 ||
+          toJsonArray(typedRow.stage2_approvals).length > 0 ||
+          typedRow.stage2_rejected_by !== null &&
+            typedRow.stage2_rejected_by !== undefined
+            ? [
+                buildLegacyMcpApprovalStageState(
+                  "stage2",
+                  typedRow.stage2_required_approvals,
+                  typedRow.stage2_roles,
+                  typedRow.stage2_approvals,
+                  typedRow.stage2_rejected_by,
+                ),
+              ]
+            : []),
+        ];
+  if (legacyStages.length === 0) {
+    legacyStages.push(
+      buildLegacyMcpApprovalStageState(
+        "stage1",
+        1,
+        [],
+        [],
+        undefined,
+      ),
+    );
+  }
+  const approvalWorkflow = normalizeMcpApprovalWorkflowDefinition(
+    typedRow.approval_workflow,
+    legacyStages.map((stage) => ({
+      nodeId: stage.nodeId,
+      stage: stage.stage,
+      label: stage.label,
+      requiredApprovals: stage.requiredApprovals,
+      roles: stage.roles,
+    })),
+  );
+  const projectedStages = projectLocalApprovalStagesFromWorkflow(approvalWorkflow);
+  const approvalStages = projectedStages.map((stage) => {
+    const existing = legacyStages.find((item) => item.nodeId === stage.nodeId || item.stage === stage.stage);
+    return {
+      nodeId: stage.nodeId,
+      stage: stage.stage,
+      label: stage.label,
+      requiredApprovals: stage.requiredApprovals,
+      roles: stage.roles,
+      approvals: existing?.approvals ?? [],
+      rejectedBy: existing?.rejectedBy,
+    };
+  });
+  const inferredCurrentNodeId =
+    approvalStages.find((stage) => stage.approvals.length < stage.requiredApprovals)?.nodeId ??
+    approvalWorkflow.entryNodeId;
+
+  return {
+    approvalRequestId,
+    tenantId,
+    approvalMode: normalizeLocalMcpApprovalWorkflowMode(
+      typedRow.approval_mode,
+      approvalStages.length,
+    ),
+    approvalConditionMatched: toBoolean(
+      typedRow.approval_condition_matched,
+      false,
+    ),
+    approvalWorkflow,
+    approvalStages,
+    currentNodeId: firstNonEmptyString(typedRow.current_node_id) ?? inferredCurrentNodeId,
+    pathHistory:
+      toJsonArray(typedRow.path_history)
+        .map((item) => firstNonEmptyString(item))
+        .filter((item): item is string => Boolean(item)).length > 0
+        ? toJsonArray(typedRow.path_history)
+            .map((item) => firstNonEmptyString(item))
+            .filter((item): item is string => Boolean(item))
+        : [approvalWorkflow.entryNodeId],
+    evaluationContext: {
+      toolId:
+        firstNonEmptyString((toDbRow(typedRow.evaluation_context) ?? {}).toolId) ??
+        "unknown",
+      riskLevel:
+        toMcpRiskLevel((toDbRow(typedRow.evaluation_context) ?? {}).riskLevel),
+      tenantRole:
+        firstNonEmptyString((toDbRow(typedRow.evaluation_context) ?? {}).tenantRole) as
+          | TenantRole
+          | undefined,
+      evaluationTimestamp:
+        firstNonEmptyString((toDbRow(typedRow.evaluation_context) ?? {}).evaluationTimestamp) ??
+        new Date().toISOString(),
+    },
   };
 }
 
@@ -2976,6 +4230,36 @@ function mapQualityEventRow(row: DbRow): QualityEvent {
   };
 }
 
+function mapQualityAdviceExecutionRow(row: DbRow): QualityAdviceExecution {
+  const resultSummary = toDbRow(row.result_summary) ?? {};
+  const candidateLabels = normalizeDistinctStringArray(toJsonArray(row.candidate_labels));
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    adviceId: firstNonEmptyString(row.advice_id) ?? "",
+    project: firstNonEmptyString(row.project) ?? "",
+    severity: toQualityAdviceSeverity(row.severity),
+    actionType: toQualityAdviceActionType(row.action_type),
+    triggerSource: row.trigger_source === "automatic" ? "automatic" : "manual",
+    status: toQualityAdviceExecutionStatus(row.status),
+    metric: firstNonEmptyString(row.metric) ?? undefined,
+    datasetId: firstNonEmptyString(row.dataset_id) ?? undefined,
+    experimentId: firstNonEmptyString(row.experiment_id) ?? undefined,
+    candidateLabels: candidateLabels.length > 0 ? candidateLabels : undefined,
+    scorecardKey: firstNonEmptyString(row.scorecard_key) ?? undefined,
+    resultSummary:
+      Object.keys(resultSummary).length > 0 ? resultSummary : undefined,
+    error: firstNonEmptyString(row.error) ?? undefined,
+    requestedAt: toIsoString(row.requested_at) ?? new Date().toISOString(),
+    startedAt: toIsoString(row.started_at) ?? undefined,
+    finishedAt: toIsoString(row.finished_at) ?? undefined,
+    updatedAt:
+      toIsoString(row.updated_at) ??
+      toIsoString(row.requested_at) ??
+      new Date().toISOString(),
+  };
+}
+
 function mapQualityScorecardRow(row: DbRow): QualityScorecard {
   return {
     tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
@@ -2988,6 +4272,42 @@ function mapQualityScorecardRow(row: DbRow): QualityScorecard {
     createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
     updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
   };
+}
+
+function toQualityAdviceSeverity(value: unknown): QualityAdviceSeverity {
+  if (value === "info" || value === "warn" || value === "critical") {
+    return value;
+  }
+  return "warn";
+}
+
+function toQualityAdviceActionType(value: unknown): QualityAdviceActionType {
+  if (value === "scorecard_adjustment" || value === "replay_experiment") {
+    return value;
+  }
+  return "scorecard_adjustment";
+}
+
+function toQualityAdviceExecutionTriggerSource(
+  value: unknown
+): QualityAdviceExecutionTriggerSource {
+  if (value === "automatic") {
+    return "automatic";
+  }
+  return "manual";
+}
+
+function toQualityAdviceExecutionStatus(value: unknown): QualityAdviceExecutionStatus {
+  if (
+    value === "pending" ||
+    value === "running" ||
+    value === "completed" ||
+    value === "failed" ||
+    value === "cancelled"
+  ) {
+    return value;
+  }
+  return "pending";
 }
 
 function mapReplayBaselineRow(row: DbRow): ReplayBaseline {
@@ -3081,6 +4401,59 @@ function mapReplayRunRow(row: DbRow): ReplayRun {
   };
 }
 
+function toReplayExperimentTriggerSource(value: unknown): ReplayExperimentTriggerSource {
+  if (value === "quality_advice" || value === "automatic") {
+    return value;
+  }
+  return "manual";
+}
+
+function toReplayExperimentExecutionMode(value: unknown): ReplayExperimentExecutionMode {
+  if (value === "automatic") {
+    return "automatic";
+  }
+  return "manual";
+}
+
+function toReplayExperimentStatus(value: unknown): ReplayExperimentStatus {
+  if (
+    value === "draft" ||
+    value === "queued" ||
+    value === "running" ||
+    value === "completed" ||
+    value === "failed" ||
+    value === "cancelled"
+  ) {
+    return value;
+  }
+  return "draft";
+}
+
+function mapReplayExperimentRow(
+  row: DbRow,
+  runIds: string[] = []
+): ReplayExperiment {
+  return {
+    id: firstNonEmptyString(row.id) ?? "",
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    name: firstNonEmptyString(row.name, row.id) ?? "",
+    datasetId: firstNonEmptyString(row.dataset_id) ?? "",
+    baselineId: firstNonEmptyString(row.baseline_id) ?? undefined,
+    baselineVersionId: firstNonEmptyString(row.baseline_version_id) ?? undefined,
+    triggerSource: toReplayExperimentTriggerSource(row.trigger_source),
+    executionMode: toReplayExperimentExecutionMode(row.execution_mode),
+    status: toReplayExperimentStatus(row.status),
+    candidateLabels: normalizeDistinctStringArray(toJsonArray(row.candidate_labels)),
+    sourceAdviceId: firstNonEmptyString(row.source_advice_id) ?? undefined,
+    runIds: normalizeDistinctStringArray(runIds),
+    lastError: firstNonEmptyString(row.last_error) ?? undefined,
+    startedAt: toIsoString(row.started_at) ?? undefined,
+    finishedAt: toIsoString(row.finished_at) ?? undefined,
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt: toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
 function toReplayArtifactType(value: unknown): ReplayArtifactType {
   if (value === "summary" || value === "diff" || value === "cases") {
     return value;
@@ -3116,6 +4489,20 @@ function mapReplayArtifactRow(row: DbRow): ReplayArtifact {
 }
 
 function mapReplayDatasetToBaseline(dataset: ReplayDataset): ReplayBaseline {
+  const versions = listReplayBaselineVersionsFromDataset(dataset);
+  const datasetMetadata = toDbRow(dataset.metadata) ?? {};
+  const metadata: Record<string, unknown> = {
+    ...datasetMetadata,
+    model: dataset.model,
+    ...(dataset.promptVersion ? { promptVersion: dataset.promptVersion } : {}),
+  };
+  const currentVersionId =
+    firstNonEmptyString(datasetMetadata.currentVersionId) ??
+    versions[versions.length - 1]?.id;
+  const currentVersionNumber =
+    versions.find((item) => item.id === currentVersionId)?.version ??
+    versions[versions.length - 1]?.version ??
+    1;
   return {
     id: dataset.id,
     tenantId: dataset.tenantId,
@@ -3123,13 +4510,96 @@ function mapReplayDatasetToBaseline(dataset: ReplayDataset): ReplayBaseline {
     description: dataset.description,
     datasetRef: dataset.externalDatasetId,
     scenarioCount: dataset.caseCount,
-    metadata: {
-      model: dataset.model,
-      ...(dataset.promptVersion ? { promptVersion: dataset.promptVersion } : {}),
-      ...dataset.metadata,
-    },
+    metadata,
+    currentVersionId,
+    currentVersionNumber: Math.max(
+      1,
+      Math.trunc(toNumber(datasetMetadata.currentVersionNumber, currentVersionNumber)),
+    ),
     createdAt: dataset.createdAt,
     updatedAt: dataset.updatedAt,
+  };
+}
+
+function listReplayBaselineVersionsFromDataset(
+  dataset: ReplayDataset,
+): ReplayBaselineVersion[] {
+  const metadata = toDbRow(dataset.metadata) ?? {};
+  const rawItems = Array.isArray(metadata.baselineVersions) ? metadata.baselineVersions : [];
+  const items: ReplayBaselineVersion[] = [];
+  for (const [index, item] of rawItems.entries()) {
+    const record = toDbRow(item);
+    if (!record) {
+      continue;
+    }
+    const version = Math.max(1, Math.trunc(toNumber(record.version, index + 1)));
+    items.push({
+      id: firstNonEmptyString(record.id) ?? `${dataset.id}:v${version}`,
+      tenantId: dataset.tenantId,
+      baselineId: dataset.id,
+      version,
+      datasetRef:
+        firstNonEmptyString(record.datasetRef, record.dataset_id, record.externalDatasetId) ??
+        dataset.externalDatasetId,
+      model: firstNonEmptyString(record.model) ?? dataset.model,
+      promptVersion:
+        firstNonEmptyString(record.promptVersion, record.prompt_version) ??
+        dataset.promptVersion,
+      scenarioCount: Math.max(
+        0,
+        Math.trunc(toNumber(record.scenarioCount, dataset.caseCount)),
+      ),
+      metadata: toDbRow(record.metadata) ?? {},
+      note: firstNonEmptyString(record.note) ?? undefined,
+      createdAt: toIsoString(record.createdAt) ?? dataset.createdAt,
+      promotedAt: toIsoString(record.promotedAt) ?? undefined,
+    });
+  }
+  items.sort((left, right) => left.version - right.version);
+
+  if (items.length > 0) {
+    return items;
+  }
+
+  return [
+    {
+      id: firstNonEmptyString(metadata.currentVersionId) ?? `${dataset.id}:v1`,
+      tenantId: dataset.tenantId,
+      baselineId: dataset.id,
+      version: Math.max(1, Math.trunc(toNumber(metadata.currentVersionNumber, 1))),
+      datasetRef: dataset.externalDatasetId,
+      model: dataset.model,
+      promptVersion: dataset.promptVersion,
+      scenarioCount: dataset.caseCount,
+      metadata: {},
+      createdAt: dataset.createdAt,
+      promotedAt: dataset.updatedAt,
+    },
+  ];
+}
+
+function applyReplayBaselineVersionsToMetadata(
+  metadata: Record<string, unknown>,
+  versions: ReplayBaselineVersion[],
+  currentVersionId: string,
+): Record<string, unknown> {
+  const currentVersion = versions.find((item) => item.id === currentVersionId) ?? versions[versions.length - 1];
+  return {
+    ...metadata,
+    currentVersionId: currentVersion?.id ?? currentVersionId,
+    currentVersionNumber: currentVersion?.version ?? 1,
+    baselineVersions: versions.map((item) => ({
+      id: item.id,
+      version: item.version,
+      datasetRef: item.datasetRef ?? null,
+      model: item.model,
+      promptVersion: item.promptVersion ?? null,
+      scenarioCount: item.scenarioCount,
+      metadata: item.metadata,
+      note: item.note ?? null,
+      createdAt: item.createdAt,
+      promotedAt: item.promotedAt ?? null,
+    })),
   };
 }
 
@@ -3208,6 +4678,27 @@ function mapAuditRow(row: DbRow): AuditItem {
     detail: firstNonEmptyString(row.detail) ?? "",
     metadata,
     createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+  };
+}
+
+function mapLegalHoldRow(row: DbRow): LegalHoldItem {
+  return {
+    id: firstNonEmptyString(row.id) ?? crypto.randomUUID(),
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    resourceType: toLegalHoldResourceType(row.resource_type),
+    resourceId: firstNonEmptyString(row.resource_id) ?? "",
+    reason: firstNonEmptyString(row.reason) ?? "",
+    createdByUserId: firstNonEmptyString(row.created_by_user_id) ?? undefined,
+    createdByEmail: firstNonEmptyString(row.created_by_email) ?? undefined,
+    releasedAt: toIsoString(row.released_at) ?? undefined,
+    releasedByUserId: firstNonEmptyString(row.released_by_user_id) ?? undefined,
+    releasedByEmail: firstNonEmptyString(row.released_by_email) ?? undefined,
+    releaseReason: firstNonEmptyString(row.release_reason) ?? undefined,
+    createdAt: toIsoString(row.created_at) ?? new Date().toISOString(),
+    updatedAt:
+      toIsoString(row.updated_at) ??
+      toIsoString(row.created_at) ??
+      new Date().toISOString(),
   };
 }
 
@@ -3331,6 +4822,46 @@ function mapAgentBindingRow(row: DbRow): AgentBinding {
   };
 }
 
+function mapAgentRuntimeHeartbeatRow(row: DbRow): AgentRuntimeHeartbeatRecord {
+  const sourceIds = Array.from(
+    new Set(
+      toJsonArray(row.source_ids)
+        .map((item) => firstNonEmptyString(item))
+        .filter((item): item is string => Boolean(item))
+    )
+  );
+  const occurredAt =
+    toIsoString(row.occurred_at) ??
+    toIsoString(row.updated_at) ??
+    toIsoString(row.created_at) ??
+    new Date().toISOString();
+  return {
+    tenantId: firstNonEmptyString(row.tenant_id) ?? DEFAULT_TENANT_ID,
+    agentId: firstNonEmptyString(row.agent_id) ?? "",
+    sessionId: firstNonEmptyString(row.session_id) ?? undefined,
+    hostname: firstNonEmptyString(row.hostname) ?? undefined,
+    version: firstNonEmptyString(row.version) ?? undefined,
+    daemon: toBoolean(row.daemon, false),
+    occurredAt,
+    configVersion: firstNonEmptyString(row.config_version) ?? undefined,
+    configFetchedAt: toIsoString(row.config_fetched_at) ?? undefined,
+    heartbeatIntervalSec:
+      toOptionalNonNegativeInteger(row.heartbeat_interval_sec) ?? undefined,
+    ingestProtocol: firstNonEmptyString(row.ingest_protocol) ?? undefined,
+    ingestEndpoint: firstNonEmptyString(row.ingest_endpoint) ?? undefined,
+    sourceCount: toOptionalNonNegativeInteger(row.source_count) ?? sourceIds.length,
+    sourceIds,
+    lastIngestStatusCode:
+      toOptionalNonNegativeInteger(row.last_ingest_status_code) ?? undefined,
+    lastAccepted: toOptionalNonNegativeInteger(row.last_accepted) ?? 0,
+    lastRejected: toOptionalNonNegativeInteger(row.last_rejected) ?? 0,
+    lastError: firstNonEmptyString(row.last_error) ?? undefined,
+    createdAt: toIsoString(row.created_at) ?? occurredAt,
+    updatedAt:
+      toIsoString(row.updated_at) ?? toIsoString(row.created_at) ?? occurredAt,
+  };
+}
+
 function mapSourceBindingRow(row: DbRow): SourceBinding {
   const deviceId = firstNonEmptyString(row.device_id);
   const agentId = firstNonEmptyString(row.agent_id);
@@ -3361,6 +4892,15 @@ function cloneAgentBinding(binding: AgentBinding): AgentBinding {
   return {
     ...binding,
     metadata: { ...binding.metadata },
+  };
+}
+
+function cloneAgentRuntimeHeartbeatRecord(
+  record: AgentRuntimeHeartbeatRecord
+): AgentRuntimeHeartbeatRecord {
+  return {
+    ...record,
+    sourceIds: [...record.sourceIds],
   };
 }
 
@@ -3496,6 +5036,11 @@ function normalizeAlertOrchestrationExecutionListInput(
         : undefined,
     hasConflict: typeof input.hasConflict === "boolean" ? input.hasConflict : undefined,
     simulated: typeof input.simulated === "boolean" ? input.simulated : undefined,
+    escalated: typeof input.escalated === "boolean" ? input.escalated : undefined,
+    escalationReason:
+      input.escalationReason === "sla_timeout"
+        ? input.escalationReason
+        : undefined,
     from: from ?? undefined,
     to: to ?? undefined,
     limit,
@@ -3580,6 +5125,22 @@ function normalizeAuditListInput(
     to: input.to,
     limit: input.limit ?? DEFAULT_AUDIT_LIMIT,
     cursor: firstNonEmptyString(input.cursor) ?? undefined,
+  };
+}
+
+function normalizeLegalHoldListInput(
+  tenantId: string,
+  input: LegalHoldListInput = {}
+): NormalizedLegalHoldListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(200, Math.max(1, rawLimit ?? DEFAULT_AUDIT_LIMIT));
+
+  return {
+    tenantId: firstNonEmptyString(tenantId) ?? DEFAULT_TENANT_ID,
+    resourceType: input.resourceType,
+    resourceId: firstNonEmptyString(input.resourceId) ?? undefined,
+    active: typeof input.active === "boolean" ? input.active : undefined,
+    limit,
   };
 }
 
@@ -3668,6 +5229,19 @@ function normalizeQualityScorecardListInput(
   };
 }
 
+function normalizeQualityAdviceExecutionListInput(
+  input: ListQualityAdviceExecutionsInput = {}
+): NormalizedQualityAdviceExecutionListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(200, Math.max(1, rawLimit ?? DEFAULT_QUALITY_ADVICE_EXECUTION_LIMIT));
+  return {
+    adviceId: firstNonEmptyString(input.adviceId) ?? undefined,
+    actionType: input.actionType ? toQualityAdviceActionType(input.actionType) : undefined,
+    status: input.status ? toQualityAdviceExecutionStatus(input.status) : undefined,
+    limit,
+  };
+}
+
 function normalizeReplayBaselineListInput(
   input: ListReplayBaselinesInput = {}
 ): NormalizedReplayBaselineListInput {
@@ -3721,6 +5295,21 @@ function normalizeReplayRunListInput(
   return {
     datasetId: firstNonEmptyString(input.datasetId) ?? undefined,
     status: statusRaw ? toReplayJobStatus(statusRaw) : undefined,
+    limit,
+  };
+}
+
+function normalizeReplayExperimentListInput(
+  input: ListReplayExperimentsInput = {}
+): NormalizedReplayExperimentListInput {
+  const rawLimit = toOptionalNonNegativeInteger(input.limit);
+  const limit = Math.min(200, Math.max(1, rawLimit ?? DEFAULT_REPLAY_EXPERIMENT_LIMIT));
+  return {
+    datasetId: firstNonEmptyString(input.datasetId) ?? undefined,
+    sourceAdviceId: firstNonEmptyString(input.sourceAdviceId) ?? undefined,
+    status: firstNonEmptyString(input.status)
+      ? toReplayExperimentStatus(input.status)
+      : undefined,
     limit,
   };
 }
@@ -4092,21 +5681,29 @@ class ControlPlaneRepository {
   private readonly memorySessionEvents: MemorySessionEventRecord[] = [];
   private readonly memoryBudgets: TenantBudgetRecord[] = [];
   private readonly memoryAlerts: Alert[] = [];
+  private readonly memoryAlertExternalLinks: AlertExternalLink[] = [];
   private readonly memoryAlertOrchestrationRules: AlertOrchestrationRule[] = [];
   private readonly memoryAlertOrchestrationExecutions: AlertOrchestrationExecutionLog[] = [];
   private readonly memoryResidencyPolicies: TenantResidencyPolicy[] = [];
+  private readonly memoryResidencyKmsKeyMappings: ResidencyKmsKeyMapping[] = [];
+  private readonly memoryResidencyArchiveRegionPolicies: ResidencyArchiveRegionPolicy[] = [];
   private readonly memoryReplicationJobs: ReplicationJob[] = [];
   private readonly memoryRuleAssets: RuleAsset[] = [];
   private readonly memoryRuleAssetVersions: RuleAssetVersion[] = [];
   private readonly memoryRuleApprovals: RuleApproval[] = [];
   private readonly memoryMcpToolPolicies: McpToolPolicy[] = [];
   private readonly memoryMcpApprovalRequests: McpApprovalRequest[] = [];
+  private readonly memoryMcpApprovalWorkflows = new Map<
+    string,
+    LocalMcpApprovalWorkflowRecord
+  >();
   private readonly memoryMcpInvocations: McpInvocationAudit[] = [];
   private readonly memoryBudgetReleaseRequests: TenantBudgetReleaseRequestRecord[] = [];
   private readonly memoryIntegrationAlertCallbacks: IntegrationAlertCallbackRecord[] = [];
   private readonly memoryPricingCatalogVersions: PricingCatalogVersionRecord[] = [];
   private readonly memoryPricingCatalogEntries: PricingCatalogEntryRecord[] = [];
   private readonly memoryAudits: AuditItem[] = [];
+  private readonly memoryLegalHolds: LegalHoldItem[] = [];
   private readonly memoryTokenPulseRuntimeEvents: TokenPulseRuntimeEventRecord[] = [];
   private readonly memoryUsers: LocalUser[] = [];
   private readonly memoryTenants: Tenant[] = [];
@@ -4114,6 +5711,7 @@ class ControlPlaneRepository {
   private readonly memoryTenantMembers: TenantMember[] = [];
   private readonly memoryDeviceBindings: DeviceBinding[] = [];
   private readonly memoryAgentBindings: AgentBinding[] = [];
+  private readonly memoryAgentRuntimeHeartbeats: AgentRuntimeHeartbeatRecord[] = [];
   private readonly memorySourceBindings: SourceBinding[] = [];
   private readonly memoryAuthSessions: AuthSession[] = [];
   private readonly memoryApiKeys: ApiKey[] = [];
@@ -4122,9 +5720,12 @@ class ControlPlaneRepository {
   private readonly memoryWebhookReplayTasks: WebhookReplayTask[] = [];
   private readonly memoryQualityEvents: QualityEvent[] = [];
   private readonly memoryQualityScorecards: QualityScorecard[] = [];
+  private readonly memoryQualityAdviceExecutions: QualityAdviceExecution[] = [];
   private readonly memoryReplayDatasets: ReplayDataset[] = [];
   private readonly memoryReplayDatasetCases: ReplayDatasetCase[] = [];
+  private readonly memoryReplayDatasetVersionCases: ReplayDatasetVersionCaseRecord[] = [];
   private readonly memoryReplayRuns: ReplayRun[] = [];
+  private readonly memoryReplayExperiments: ReplayExperiment[] = [];
   private readonly memoryReplayArtifacts: ReplayArtifact[] = [];
   private readonly memoryReplayBaselines: ReplayBaseline[] = [];
   private readonly memoryReplayJobs: ReplayJob[] = [];
@@ -8028,8 +9629,17 @@ class ControlPlaneRepository {
       );
 
       const mappedItems = result.rows.map(mapAlertRow);
+      const externalLinkMap = await this.listAlertExternalLinksByAlertIds(
+        tenantId,
+        mappedItems.map((item) => item.id),
+      );
       const hasMore = mappedItems.length > normalized.limit;
-      const items = hasMore ? mappedItems.slice(0, normalized.limit) : mappedItems;
+      const items = (hasMore ? mappedItems.slice(0, normalized.limit) : mappedItems).map(
+        (item) => ({
+          ...item,
+          externalLinks: externalLinkMap.get(item.id) ?? [],
+        })
+      );
       const cursorRows = hasMore ? result.rows.slice(0, normalized.limit) : result.rows;
       const lastItem = items[items.length - 1];
       const lastCursorRow = cursorRows[cursorRows.length - 1];
@@ -8096,10 +9706,267 @@ class ControlPlaneRepository {
       );
 
       const row = result.rows[0];
-      return row ? mapAlertRow(row) : null;
+      if (!row) {
+        return null;
+      }
+      const alert = mapAlertRow(row);
+      const externalLinkMap = await this.listAlertExternalLinksByAlertIds(
+        tenantId,
+        [alert.id],
+      );
+      return {
+        ...alert,
+        externalLinks: externalLinkMap.get(alert.id) ?? [],
+      };
     } catch (error) {
       this.disableDb(error, "查询单条 alert 失败");
       return this.getAlertByIdFromMemory(tenantId, normalizedAlertId);
+    }
+  }
+
+  async listAlertExternalLinksByAlertIds(
+    tenantId: string,
+    alertIds: string[]
+  ): Promise<Map<string, AlertExternalLink[]>> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAlertIds = Array.from(
+      new Set(alertIds.map((value) => firstNonEmptyString(value) ?? "").filter(Boolean))
+    );
+    if (normalizedAlertIds.length === 0) {
+      return new Map();
+    }
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listAlertExternalLinksByAlertIdsFromMemory(
+        normalizedTenantId,
+        normalizedAlertIds
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                alert_id,
+                external_type,
+                external_system,
+                external_id,
+                external_status,
+                metadata,
+                last_synced_at,
+                created_at,
+                updated_at
+         FROM alert_external_links
+         WHERE tenant_id = $1
+           AND alert_id = ANY($2::text[])
+         ORDER BY updated_at DESC, id DESC`,
+        [normalizedTenantId, normalizedAlertIds]
+      );
+      return this.buildAlertExternalLinkMap(result.rows.map(mapAlertExternalLinkRow));
+    } catch (error) {
+      this.disableDb(error, "查询 alert external links 失败");
+      return this.listAlertExternalLinksByAlertIdsFromMemory(
+        normalizedTenantId,
+        normalizedAlertIds
+      );
+    }
+  }
+
+  async upsertAlertExternalLink(
+    tenantId: string,
+    input: {
+      alertId: string;
+      externalType: AlertExternalLinkType;
+      externalSystem: string;
+      externalId: string;
+      externalStatus?: string;
+      metadata?: Record<string, unknown>;
+      syncedAt?: string;
+    }
+  ): Promise<AlertExternalLink | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const alertId = firstNonEmptyString(input.alertId);
+    if (!alertId) {
+      return null;
+    }
+    const record: AlertExternalLink = {
+      id: crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      alertId,
+      externalType: input.externalType,
+      externalSystem:
+        firstNonEmptyString(input.externalSystem) ?? input.externalType,
+      externalId: firstNonEmptyString(input.externalId) ?? "",
+      externalStatus: firstNonEmptyString(input.externalStatus) ?? undefined,
+      metadata: toDbRow(input.metadata) ?? {},
+      pendingExternalStatus:
+        firstNonEmptyString(
+          input.metadata?.pendingExternalStatus,
+          input.metadata?.pending_external_status,
+        ) ?? undefined,
+      lastSyncedAt: toIsoString(input.syncedAt) ?? new Date().toISOString(),
+      publishStatus: toAlertExternalLinkPublishStatus(
+        firstNonEmptyString(input.metadata?.publishStatus, input.metadata?.publish_status),
+      ),
+      publishError:
+        firstNonEmptyString(input.metadata?.publishError, input.metadata?.publish_error) ??
+        undefined,
+      lastSyncResult:
+        firstNonEmptyString(input.metadata?.lastSyncResult, input.metadata?.last_sync_result) ===
+        "failed"
+          ? "failed"
+          : firstNonEmptyString(input.metadata?.lastSyncResult, input.metadata?.last_sync_result) ===
+              "success"
+            ? "success"
+            : undefined,
+      lastSyncError:
+        firstNonEmptyString(input.metadata?.lastSyncError, input.metadata?.last_sync_error) ??
+        undefined,
+      lastSyncFailureStage:
+        firstNonEmptyString(
+          input.metadata?.lastSyncFailureStage,
+          input.metadata?.last_sync_failure_stage,
+          input.metadata?.failureStage,
+          input.metadata?.failure_stage,
+        ) ?? undefined,
+      lastSyncFailureCode:
+        firstNonEmptyString(
+          input.metadata?.lastSyncFailureCode,
+          input.metadata?.last_sync_failure_code,
+          input.metadata?.failureCode,
+          input.metadata?.failure_code,
+        ) ?? undefined,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.upsertAlertExternalLinkToMemory(record);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO alert_external_links (
+           id,
+           tenant_id,
+           alert_id,
+           external_type,
+           external_system,
+           external_id,
+           external_status,
+           metadata,
+           last_synced_at,
+           created_at,
+           updated_at
+         )
+         VALUES (
+           $1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::timestamptz,$10::timestamptz,$10::timestamptz
+         )
+         ON CONFLICT (tenant_id, alert_id, external_type, external_id)
+         DO UPDATE
+           SET external_system = EXCLUDED.external_system,
+               external_status = EXCLUDED.external_status,
+               metadata = EXCLUDED.metadata,
+               last_synced_at = EXCLUDED.last_synced_at,
+               updated_at = EXCLUDED.updated_at
+         RETURNING id,
+                   tenant_id,
+                   alert_id,
+                   external_type,
+                   external_system,
+                   external_id,
+                   external_status,
+                   metadata,
+                   last_synced_at,
+                   created_at,
+                   updated_at`,
+        [
+          record.id,
+          record.tenantId,
+          record.alertId,
+          record.externalType,
+          record.externalSystem,
+          record.externalId,
+          record.externalStatus ?? null,
+          safeStringifyJson(record.metadata),
+          record.lastSyncedAt,
+          record.updatedAt,
+        ]
+      );
+      const row = result.rows[0];
+      return row ? mapAlertExternalLinkRow(row) : this.upsertAlertExternalLinkToMemory(record);
+    } catch (error) {
+      this.disableDb(error, "写入 alert external link 失败");
+      return this.upsertAlertExternalLinkToMemory(record);
+    }
+  }
+
+  async syncAlertExternalLinksStatus(
+    tenantId: string,
+    alertId: string,
+    externalStatus: string,
+    metadata?: Record<string, unknown>
+  ): Promise<AlertExternalLink[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAlertId = firstNonEmptyString(alertId);
+    const normalizedExternalStatus = firstNonEmptyString(externalStatus);
+    if (!normalizedAlertId || !normalizedExternalStatus) {
+      return [];
+    }
+    const syncedAt = new Date().toISOString();
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.syncAlertExternalLinksStatusInMemory(
+        normalizedTenantId,
+        normalizedAlertId,
+        normalizedExternalStatus,
+        toDbRow(metadata) ?? {},
+        syncedAt
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `UPDATE alert_external_links
+         SET external_status = $3,
+             metadata = CASE
+               WHEN $4::jsonb = '{}'::jsonb THEN metadata
+               ELSE COALESCE(metadata, '{}'::jsonb) || $4::jsonb
+             END,
+             last_synced_at = $5::timestamptz,
+             updated_at = $5::timestamptz
+         WHERE tenant_id = $1
+           AND alert_id = $2
+         RETURNING id,
+                   tenant_id,
+                   alert_id,
+                   external_type,
+                   external_system,
+                   external_id,
+                   external_status,
+                   metadata,
+                   last_synced_at,
+                   created_at,
+                   updated_at`,
+        [
+          normalizedTenantId,
+          normalizedAlertId,
+          normalizedExternalStatus,
+          safeStringifyJson(toDbRow(metadata) ?? {}),
+          syncedAt,
+        ]
+      );
+      return result.rows.map(mapAlertExternalLinkRow);
+    } catch (error) {
+      this.disableDb(error, "同步 alert external link 状态失败");
+      return this.syncAlertExternalLinksStatusInMemory(
+        normalizedTenantId,
+        normalizedAlertId,
+        normalizedExternalStatus,
+        toDbRow(metadata) ?? {},
+        syncedAt
+      );
     }
   }
 
@@ -8152,7 +10019,15 @@ class ControlPlaneRepository {
 
       const row = result.rows[0];
       if (row) {
-        return mapAlertRow(row);
+        const alert = mapAlertRow(row);
+        const externalLinkMap = await this.listAlertExternalLinksByAlertIds(
+          tenantId,
+          [alert.id]
+        );
+        return {
+          ...alert,
+          externalLinks: externalLinkMap.get(alert.id) ?? [],
+        };
       }
 
       const currentResult = await pool.query(
@@ -8446,6 +10321,8 @@ class ControlPlaneRepository {
       const whereClauses: string[] = ["tenant_id = $1"];
       const fallbackDispatchWhereSql =
         "(COALESCE(metadata ->> 'dispatchMode', '') = 'fallback' OR COALESCE(metadata ->> 'fallback', '') = 'true')";
+      const escalatedWhereSql =
+        "(COALESCE(metadata ->> 'escalated', 'false') = 'true' OR COALESCE(metadata ->> 'escalationReason', metadata ->> 'escalation_reason', '') <> '')";
 
       if (normalized.ruleId) {
         params.push(normalized.ruleId);
@@ -8492,6 +10369,17 @@ class ControlPlaneRepository {
       if (normalized.simulated !== undefined) {
         params.push(normalized.simulated);
         whereClauses.push(`simulated = $${params.length}`);
+      }
+      if (normalized.escalated !== undefined) {
+        whereClauses.push(
+          normalized.escalated ? escalatedWhereSql : `NOT ${escalatedWhereSql}`
+        );
+      }
+      if (normalized.escalationReason) {
+        params.push(normalized.escalationReason);
+        whereClauses.push(
+          `COALESCE(metadata ->> 'escalationReason', metadata ->> 'escalation_reason', '') = $${params.length}`
+        );
       }
       if (normalized.from) {
         params.push(normalized.from);
@@ -8577,6 +10465,8 @@ class ControlPlaneRepository {
     const severityRaw = firstNonEmptyString(input.severity);
     const createdAt = toIsoString(input.createdAt) ?? new Date().toISOString();
     const metadata = toDbRow(input.metadata) ?? {};
+    const escalated = resolveAlertOrchestrationEscalated(metadata);
+    const escalationReason = resolveAlertOrchestrationEscalationReason(metadata);
     const execution: AlertOrchestrationExecutionLog = {
       id: firstNonEmptyString(input.id) ?? crypto.randomUUID(),
       tenantId: normalizedTenantId,
@@ -8594,6 +10484,12 @@ class ControlPlaneRepository {
       dedupeHit: input.dedupeHit === true,
       suppressed: input.suppressed === true,
       simulated: input.simulated === true,
+      escalated,
+      escalationReason,
+      escalationTargetChannels: mapAlertOrchestrationChannels(
+        metadata.escalationTargetChannels ?? metadata.escalation_target_channels
+      ),
+      slaMinutes: resolveAlertOrchestrationSLAMinutes(metadata),
       metadata,
       createdAt,
     };
@@ -8804,6 +10700,198 @@ class ControlPlaneRepository {
     } catch (error) {
       this.disableDb(error, "写入租户数据主权策略失败");
       return this.upsertTenantResidencyPolicyToMemory(normalized);
+    }
+  }
+
+  async listResidencyKmsKeyMappings(
+    tenantId: string
+  ): Promise<ResidencyKmsKeyMappingListResult> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listResidencyKmsKeyMappingsFromMemory(normalizedTenantId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT tenant_id,
+                region_id,
+                key_provider,
+                key_ref,
+                enabled,
+                updated_at
+         FROM tenant_residency_kms_key_mappings
+         WHERE tenant_id = $1
+         ORDER BY region_id ASC`,
+        [normalizedTenantId]
+      );
+      const items = result.rows.map(mapResidencyKmsKeyMappingRow);
+      return {
+        items,
+        total: items.length,
+      };
+    } catch (error) {
+      this.disableDb(error, "查询 residency KMS key mappings 失败");
+      return this.listResidencyKmsKeyMappingsFromMemory(normalizedTenantId);
+    }
+  }
+
+  async replaceResidencyKmsKeyMappings(
+    tenantId: string,
+    input: ResidencyKmsKeyMappingUpsertInput
+  ): Promise<ResidencyKmsKeyMappingListResult> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const updatedAt = toIsoString(input.updatedAt) ?? new Date().toISOString();
+    const items = input.items.map((item) => ({
+      tenantId: normalizedTenantId,
+      regionId: firstNonEmptyString(item.regionId) ?? "",
+      keyProvider: firstNonEmptyString(item.keyProvider) ?? "",
+      keyRef: firstNonEmptyString(item.keyRef) ?? "",
+      enabled: item.enabled === true,
+      updatedAt,
+    }));
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.replaceResidencyKmsKeyMappingsInMemory(normalizedTenantId, items);
+    }
+
+    try {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          `DELETE FROM tenant_residency_kms_key_mappings
+           WHERE tenant_id = $1`,
+          [normalizedTenantId]
+        );
+        for (const item of items) {
+          await client.query(
+            `INSERT INTO tenant_residency_kms_key_mappings (
+               tenant_id,
+               region_id,
+               key_provider,
+               key_ref,
+               enabled,
+               updated_at
+             )
+             VALUES ($1, $2, $3, $4, $5, $6::timestamptz)`,
+            [
+              item.tenantId,
+              item.regionId,
+              item.keyProvider,
+              item.keyRef,
+              item.enabled,
+              item.updatedAt,
+            ]
+          );
+        }
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+      return this.listResidencyKmsKeyMappings(normalizedTenantId);
+    } catch (error) {
+      this.disableDb(error, "写入 residency KMS key mappings 失败");
+      return this.replaceResidencyKmsKeyMappingsInMemory(normalizedTenantId, items);
+    }
+  }
+
+  async listResidencyArchiveRegionPolicies(
+    tenantId: string
+  ): Promise<ResidencyArchiveRegionPolicyListResult> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listResidencyArchiveRegionPoliciesFromMemory(normalizedTenantId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT tenant_id,
+                source_region,
+                archive_region,
+                archive_class,
+                enabled,
+                updated_at
+         FROM tenant_residency_archive_region_policies
+         WHERE tenant_id = $1
+         ORDER BY source_region ASC`,
+        [normalizedTenantId]
+      );
+      const items = result.rows.map(mapResidencyArchiveRegionPolicyRow);
+      return {
+        items,
+        total: items.length,
+      };
+    } catch (error) {
+      this.disableDb(error, "查询 residency archive region policies 失败");
+      return this.listResidencyArchiveRegionPoliciesFromMemory(normalizedTenantId);
+    }
+  }
+
+  async replaceResidencyArchiveRegionPolicies(
+    tenantId: string,
+    input: ResidencyArchiveRegionPolicyUpsertInput
+  ): Promise<ResidencyArchiveRegionPolicyListResult> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const updatedAt = toIsoString(input.updatedAt) ?? new Date().toISOString();
+    const items = input.items.map((item) => ({
+      tenantId: normalizedTenantId,
+      sourceRegion: firstNonEmptyString(item.sourceRegion) ?? "",
+      archiveRegion: firstNonEmptyString(item.archiveRegion) ?? "",
+      archiveClass: firstNonEmptyString(item.archiveClass) ?? "",
+      enabled: item.enabled === true,
+      updatedAt,
+    }));
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.replaceResidencyArchiveRegionPoliciesInMemory(normalizedTenantId, items);
+    }
+
+    try {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          `DELETE FROM tenant_residency_archive_region_policies
+           WHERE tenant_id = $1`,
+          [normalizedTenantId]
+        );
+        for (const item of items) {
+          await client.query(
+            `INSERT INTO tenant_residency_archive_region_policies (
+               tenant_id,
+               source_region,
+               archive_region,
+               archive_class,
+               enabled,
+               updated_at
+             )
+             VALUES ($1, $2, $3, $4, $5, $6::timestamptz)`,
+            [
+              item.tenantId,
+              item.sourceRegion,
+              item.archiveRegion,
+              item.archiveClass,
+              item.enabled,
+              item.updatedAt,
+            ]
+          );
+        }
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+      return this.listResidencyArchiveRegionPolicies(normalizedTenantId);
+    } catch (error) {
+      this.disableDb(error, "写入 residency archive region policies 失败");
+      return this.replaceResidencyArchiveRegionPoliciesInMemory(normalizedTenantId, items);
     }
   }
 
@@ -9896,6 +11984,15 @@ class ControlPlaneRepository {
                 tool_id,
                 risk_level,
                 decision,
+                approval_mode,
+                approval_workflow,
+                approval_stages,
+                stage1_required_approvals,
+                stage2_required_approvals,
+                stage1_roles,
+                stage2_roles,
+                approval_condition,
+                metadata,
                 reason,
                 updated_at
          FROM mcp_tool_policies
@@ -9936,6 +12033,15 @@ class ControlPlaneRepository {
                 tool_id,
                 risk_level,
                 decision,
+                approval_mode,
+                approval_workflow,
+                approval_stages,
+                stage1_required_approvals,
+                stage2_required_approvals,
+                stage1_roles,
+                stage2_roles,
+                approval_condition,
+                metadata,
                 reason,
                 updated_at
          FROM mcp_tool_policies
@@ -9963,9 +12069,87 @@ class ControlPlaneRepository {
       toolId: firstNonEmptyString(input.toolId) ?? "unknown",
       riskLevel: toMcpRiskLevel(input.riskLevel),
       decision: toMcpToolDecision(input.decision),
+      approvalMode: undefined,
+      approvalStages: undefined,
+      stage1RequiredApprovals: undefined,
+      stage2RequiredApprovals: undefined,
+      stage1Roles: undefined,
+      stage2Roles: undefined,
+      approvalCondition: toDbRow(input.approvalCondition) ?? undefined,
+      metadata: toDbRow(input.metadata) ?? undefined,
       reason: firstNonEmptyString(input.reason) ?? undefined,
       updatedAt,
     };
+    const explicitStages = normalizeMcpApprovalStageConfigsForPolicy(input.approvalStages);
+    let localStages: LocalMcpApprovalStageConfig[];
+    let approvalWorkflow: McpApprovalWorkflow;
+    if (explicitStages.length > 0) {
+      localStages = explicitStages.map((stage) => ({
+        nodeId: stage.nodeId ?? stage.stage,
+        stage: stage.stage,
+        label: stage.label,
+        requiredApprovals: stage.requiredApprovals,
+        roles: stage.roles.filter(
+          (role): role is TenantRole => TENANT_ROLE_SET.includes(role as TenantRole),
+        ),
+      }));
+      approvalWorkflow = normalizeMcpApprovalWorkflowDefinition(
+        input.approvalWorkflow,
+        localStages,
+      );
+      policy.approvalStages = projectLocalApprovalStagesFromWorkflow(approvalWorkflow);
+      policy.approvalMode = normalizeLocalMcpApprovalWorkflowMode(
+        input.approvalMode,
+        policy.approvalStages.length,
+      );
+    } else {
+      localStages = [
+        {
+          nodeId: "stage1",
+          stage: "stage1" as LocalMcpApprovalStage,
+          requiredApprovals:
+            toOptionalNonNegativeInteger(input.stage1RequiredApprovals) ?? 1,
+          roles:
+            normalizeDistinctStringArray(input.stage1Roles).length > 0
+              ? normalizeDistinctStringArray(input.stage1Roles).filter(
+                  (role): role is TenantRole =>
+                    TENANT_ROLE_SET.includes(role as TenantRole),
+                )
+              : defaultMcpApprovalStageRoles("stage1"),
+        },
+        ...(input.approvalMode === "two_stage" || input.stage2RequiredApprovals !== undefined || (input.stage2Roles?.length ?? 0) > 0
+          ? [
+              {
+                nodeId: "stage2",
+                stage: "stage2" as LocalMcpApprovalStage,
+                requiredApprovals:
+                  toOptionalNonNegativeInteger(input.stage2RequiredApprovals) ?? 1,
+                roles:
+                  normalizeDistinctStringArray(input.stage2Roles).length > 0
+                    ? normalizeDistinctStringArray(input.stage2Roles).filter(
+                        (role): role is TenantRole =>
+                          TENANT_ROLE_SET.includes(role as TenantRole),
+                      )
+                    : defaultMcpApprovalStageRoles("stage2"),
+              },
+            ]
+          : []),
+      ];
+      approvalWorkflow = normalizeMcpApprovalWorkflowDefinition(
+        input.approvalWorkflow,
+        localStages,
+      );
+      policy.approvalStages = projectLocalApprovalStagesFromWorkflow(approvalWorkflow);
+      policy.approvalMode = normalizeLocalMcpApprovalWorkflowMode(
+        input.approvalMode,
+        policy.approvalStages.length,
+      );
+    }
+    policy.approvalWorkflow = approvalWorkflow;
+    policy.stage1RequiredApprovals = policy.approvalStages?.[0]?.requiredApprovals;
+    policy.stage2RequiredApprovals = policy.approvalStages?.[1]?.requiredApprovals;
+    policy.stage1Roles = policy.approvalStages?.[0]?.roles;
+    policy.stage2Roles = policy.approvalStages?.[1]?.roles;
 
     const pool = await this.getPool();
     if (!pool) {
@@ -9979,20 +12163,47 @@ class ControlPlaneRepository {
            tool_id,
            risk_level,
            decision,
+           approval_mode,
+           approval_workflow,
+           approval_stages,
+           stage1_required_approvals,
+           stage2_required_approvals,
+           stage1_roles,
+           stage2_roles,
+           approval_condition,
+           metadata,
            reason,
            updated_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6::timestamptz)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14, $15::timestamptz)
          ON CONFLICT (tenant_id, tool_id)
          DO UPDATE
            SET risk_level = EXCLUDED.risk_level,
                decision = EXCLUDED.decision,
+               approval_mode = EXCLUDED.approval_mode,
+               approval_workflow = EXCLUDED.approval_workflow,
+               approval_stages = EXCLUDED.approval_stages,
+               stage1_required_approvals = EXCLUDED.stage1_required_approvals,
+               stage2_required_approvals = EXCLUDED.stage2_required_approvals,
+               stage1_roles = EXCLUDED.stage1_roles,
+               stage2_roles = EXCLUDED.stage2_roles,
+               approval_condition = EXCLUDED.approval_condition,
+               metadata = EXCLUDED.metadata,
                reason = EXCLUDED.reason,
                updated_at = EXCLUDED.updated_at
          RETURNING tenant_id,
                    tool_id,
                    risk_level,
                    decision,
+                   approval_mode,
+                   approval_workflow,
+                   approval_stages,
+                   stage1_required_approvals,
+                   stage2_required_approvals,
+                   stage1_roles,
+                   stage2_roles,
+                   approval_condition,
+                   metadata,
                    reason,
                    updated_at`,
         [
@@ -10000,6 +12211,15 @@ class ControlPlaneRepository {
           policy.toolId,
           policy.riskLevel,
           policy.decision,
+          policy.approvalMode ?? null,
+          safeStringifyJson(policy.approvalWorkflow ?? null),
+          safeStringifyJson(policy.approvalStages ?? []),
+          policy.stage1RequiredApprovals ?? null,
+          policy.stage2RequiredApprovals ?? null,
+          safeStringifyJson(policy.stage1Roles ?? []),
+          safeStringifyJson(policy.stage2Roles ?? []),
+          safeStringifyJson(policy.approvalCondition ?? {}),
+          safeStringifyJson(policy.metadata ?? {}),
           policy.reason ?? null,
           policy.updatedAt,
         ]
@@ -10115,8 +12335,16 @@ class ControlPlaneRepository {
     options: {
       requestedByUserId: string;
       requestedByEmail?: string;
+      requestedByTenantRole?: TenantRole;
+      approvalConfig?: LocalMcpApprovalConfig;
+      approvalConditionMatched?: boolean;
+      riskLevel?: McpRiskLevel;
+      evaluationTimestamp?: string;
     }
-  ): Promise<McpApprovalRequest> {
+  ): Promise<{
+    approval: McpApprovalRequest;
+    workflow: LocalMcpApprovalWorkflowSnapshot;
+  }> {
     const normalizedTenantId = normalizeScopedTenantId(tenantId);
     const now = new Date().toISOString();
     const record: McpApprovalRequest = {
@@ -10133,61 +12361,71 @@ class ControlPlaneRepository {
       createdAt: now,
       updatedAt: now,
     };
+    const workflowRecord = this.createMcpApprovalWorkflowRecord(record, {
+      approvalConfig: options.approvalConfig,
+      approvalConditionMatched: options.approvalConditionMatched === true,
+      requestedByTenantRole: options.requestedByTenantRole,
+      riskLevel: options.riskLevel,
+      evaluationTimestamp: options.evaluationTimestamp,
+    });
 
     const pool = await this.getPool();
     if (!pool) {
-      return this.saveMcpApprovalRequestToMemory(record);
+      const approval = this.saveMcpApprovalRequestToMemory(record);
+      const persistedWorkflow = await this.saveMcpApprovalWorkflowRecord(
+        workflowRecord
+      );
+      return {
+        approval,
+        workflow: this.buildMcpApprovalWorkflowSnapshot(approval, persistedWorkflow),
+      };
     }
 
     try {
-      const result = await pool.query(
-        `INSERT INTO mcp_approval_requests (
-           id,
-           tenant_id,
-           tool_id,
-           status,
-           requested_by_user_id,
-           requested_by_email,
-           reason,
-           reviewed_by_user_id,
-           reviewed_by_email,
-           review_reason,
-           created_at,
-           updated_at
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL, $8::timestamptz, $8::timestamptz)
-         RETURNING id,
-                   tenant_id,
-                   tool_id,
-                   status,
-                   requested_by_user_id,
-                   requested_by_email,
-                   reason,
-                   reviewed_by_user_id,
-                   reviewed_by_email,
-                   review_reason,
-                   created_at,
-                   updated_at`,
-        [
-          record.id,
-          record.tenantId,
-          record.toolId,
-          record.status,
-          record.requestedByUserId,
-          record.requestedByEmail ?? null,
-          record.reason ?? null,
-          record.createdAt,
-        ]
+      const approval = await this.withTransaction(pool, async (client) => {
+        const persistedApproval = await this.insertMcpApprovalRequestWithQuerier(
+          client,
+          record
+        );
+        await this.upsertMcpApprovalWorkflowRecordWithQuerier(
+          client,
+          workflowRecord
+        );
+        return persistedApproval;
+      });
+      const persistedWorkflow = this.saveMcpApprovalWorkflowRecordToMemory(
+        workflowRecord
       );
-      const row = result.rows[0];
-      if (!row) {
-        return this.saveMcpApprovalRequestToMemory(record);
-      }
-      return mapMcpApprovalRequestRow(row);
+      return {
+        approval,
+        workflow: this.buildMcpApprovalWorkflowSnapshot(approval, persistedWorkflow),
+      };
     } catch (error) {
       this.disableDb(error, "创建 MCP 审批请求失败");
-      return this.saveMcpApprovalRequestToMemory(record);
+      const approval = this.saveMcpApprovalRequestToMemory(record);
+      const persistedWorkflow = await this.saveMcpApprovalWorkflowRecord(
+        workflowRecord
+      );
+      return {
+        approval,
+        workflow: this.buildMcpApprovalWorkflowSnapshot(approval, persistedWorkflow),
+      };
     }
+  }
+
+  async getMcpApprovalWorkflowState(
+    tenantId: string,
+    approvalRequestId: string,
+    approvalRequest?: McpApprovalRequest | null
+  ): Promise<LocalMcpApprovalWorkflowSnapshot | null> {
+    const approval =
+      approvalRequest ??
+      (await this.getMcpApprovalRequestById(tenantId, approvalRequestId));
+    if (!approval) {
+      return null;
+    }
+    const workflowRecord = await this.ensureMcpApprovalWorkflowRecord(approval);
+    return this.buildMcpApprovalWorkflowSnapshot(approval, workflowRecord);
   }
 
   async reviewMcpApprovalRequest(
@@ -10198,8 +12436,14 @@ class ControlPlaneRepository {
     options: {
       reviewedByUserId: string;
       reviewedByEmail?: string;
+      reviewedByTenantRole?: TenantRole;
+      stage?: LocalMcpApprovalStage;
+      nodeId?: string;
     }
-  ): Promise<McpApprovalRequest | null> {
+  ): Promise<{
+    approval: McpApprovalRequest;
+    workflow: LocalMcpApprovalWorkflowSnapshot;
+  } | null> {
     const normalizedTenantId = normalizeScopedTenantId(tenantId);
     const requestId = firstNonEmptyString(approvalRequestId);
     if (!requestId) {
@@ -10211,90 +12455,379 @@ class ControlPlaneRepository {
     }
     const updatedAt = new Date().toISOString();
     const reviewReason = firstNonEmptyString(input.reason) ?? undefined;
-
-    const pool = await this.getPool();
-    if (!pool) {
-      return this.reviewMcpApprovalRequestInMemory(
+    const current = await this.getMcpApprovalRequestById(
+      normalizedTenantId,
+      requestId
+    );
+    if (!current) {
+      return null;
+    }
+    const workflowRecord = await this.ensureMcpApprovalWorkflowRecord(current);
+    const activeNodeId = options.nodeId ?? workflowRecord.currentNodeId;
+    const activeNode = this.findMcpWorkflowNode(workflowRecord, activeNodeId);
+    const currentStage = this.resolveCurrentMcpApprovalStage(current, workflowRecord);
+    if (!activeNode || activeNode.kind !== "approval") {
+      return {
+        approval: current,
+        workflow: this.buildMcpApprovalWorkflowSnapshot(current, workflowRecord),
+      };
+    }
+    const stageState = this.findMcpApprovalStageStateByNodeId(
+      workflowRecord,
+      activeNode.nodeId,
+    );
+    if (!stageState) {
+      return {
+        approval: current,
+        workflow: this.buildMcpApprovalWorkflowSnapshot(current, workflowRecord),
+      };
+    }
+    const reviewer: LocalMcpApprovalReviewActor = {
+      userId: reviewedByUserId,
+      email: firstNonEmptyString(options.reviewedByEmail) ?? undefined,
+      reason: reviewReason,
+      reviewedAt: updatedAt,
+      tenantRole: options.reviewedByTenantRole,
+    };
+    if (nextStatus === "rejected") {
+      stageState.rejectedBy = reviewer;
+      workflowRecord.currentNodeId = "rejected";
+      workflowRecord.pathHistory = [...workflowRecord.pathHistory, "rejected"];
+      return this.persistMcpApprovalRequestReviewWithWorkflow(
         normalizedTenantId,
         requestId,
-        nextStatus,
+        "rejected",
+        workflowRecord,
         reviewedByUserId,
         firstNonEmptyString(options.reviewedByEmail) ?? undefined,
         reviewReason,
         updatedAt
       );
+    }
+    stageState.approvals.push(reviewer);
+    let nextRequestStatus: McpApprovalStatus = "pending";
+    if (stageState.approvals.length >= stageState.requiredApprovals) {
+      const nextTransition = this.resolveNextMcpWorkflowTransition(
+        workflowRecord,
+        activeNode.nodeId,
+      );
+      const nextNode = this.findMcpWorkflowNode(
+        workflowRecord,
+        nextTransition?.toNodeId ?? null,
+      );
+      if (nextNode) {
+        workflowRecord.currentNodeId = nextNode.nodeId;
+        workflowRecord.pathHistory = [
+          ...workflowRecord.pathHistory,
+          nextNode.nodeId,
+        ];
+        if (nextNode.kind === "terminal_approved") {
+          nextRequestStatus = "approved";
+        } else if (nextNode.kind === "terminal_rejected") {
+          nextRequestStatus = "rejected";
+        }
+      }
+    }
+    return this.persistMcpApprovalRequestReviewWithWorkflow(
+      normalizedTenantId,
+      requestId,
+      nextRequestStatus,
+      workflowRecord,
+      reviewedByUserId,
+      firstNonEmptyString(options.reviewedByEmail) ?? undefined,
+      reviewReason,
+      updatedAt
+    );
+  }
+
+  private async persistMcpApprovalRequestReviewWithWorkflow(
+    tenantId: string,
+    approvalRequestId: string,
+    nextStatus: McpApprovalStatus,
+    workflowRecord: LocalMcpApprovalWorkflowRecord,
+    reviewedByUserId: string,
+    reviewedByEmail: string | undefined,
+    reviewReason: string | undefined,
+    updatedAt: string
+  ): Promise<{
+    approval: McpApprovalRequest;
+    workflow: LocalMcpApprovalWorkflowSnapshot;
+  } | null> {
+    const pool = await this.getPool();
+    if (!pool) {
+      const approval = this.reviewMcpApprovalRequestInMemory(
+        tenantId,
+        approvalRequestId,
+        nextStatus,
+        reviewedByUserId,
+        reviewedByEmail,
+        reviewReason,
+        updatedAt
+      );
+      if (!approval) {
+        return null;
+      }
+      const persistedWorkflow = this.saveMcpApprovalWorkflowRecordToMemory(
+        workflowRecord
+      );
+      return {
+        approval,
+        workflow: this.buildMcpApprovalWorkflowSnapshot(approval, persistedWorkflow),
+      };
     }
 
     try {
-      const result = await pool.query(
-        `UPDATE mcp_approval_requests
-         SET status = $3,
-             reviewed_by_user_id = $4,
-             reviewed_by_email = $5,
-             review_reason = $6,
-             updated_at = $7::timestamptz
-         WHERE tenant_id = $1
-           AND id = $2
-           AND status = 'pending'
-         RETURNING id,
-                   tenant_id,
-                   tool_id,
-                   status,
-                   requested_by_user_id,
-                   requested_by_email,
-                   reason,
-                   reviewed_by_user_id,
-                   reviewed_by_email,
-                   review_reason,
-                   created_at,
-                   updated_at`,
-        [
-          normalizedTenantId,
-          requestId,
-          nextStatus,
-          reviewedByUserId,
-          firstNonEmptyString(options.reviewedByEmail) ?? null,
-          reviewReason ?? null,
-          updatedAt,
-        ]
-      );
-      const row = result.rows[0];
-      if (row) {
-        return mapMcpApprovalRequestRow(row);
+      const approval = await this.withTransaction(pool, async (client) => {
+        const persistedApproval =
+          await this.persistMcpApprovalRequestReviewWithQuerier(
+            client,
+            tenantId,
+            approvalRequestId,
+            nextStatus,
+            reviewedByUserId,
+            reviewedByEmail,
+            reviewReason,
+            updatedAt
+          );
+        if (!persistedApproval) {
+          return null;
+        }
+        await this.upsertMcpApprovalWorkflowRecordWithQuerier(
+          client,
+          workflowRecord
+        );
+        return persistedApproval;
+      });
+      if (!approval) {
+        return null;
       }
-      const currentResult = await pool.query(
-        `SELECT id,
-                tenant_id,
-                tool_id,
-                status,
-                requested_by_user_id,
-                requested_by_email,
-                reason,
-                reviewed_by_user_id,
-                reviewed_by_email,
-                review_reason,
-                created_at,
-                updated_at
-         FROM mcp_approval_requests
-         WHERE tenant_id = $1
-           AND id = $2
-         LIMIT 1`,
-        [normalizedTenantId, requestId]
+      const persistedWorkflow = this.saveMcpApprovalWorkflowRecordToMemory(
+        workflowRecord
       );
-      const currentRow = currentResult.rows[0];
-      return currentRow ? mapMcpApprovalRequestRow(currentRow) : null;
+      return {
+        approval,
+        workflow: this.buildMcpApprovalWorkflowSnapshot(approval, persistedWorkflow),
+      };
     } catch (error) {
       this.disableDb(error, "审批 MCP 请求失败");
-      return this.reviewMcpApprovalRequestInMemory(
-        normalizedTenantId,
-        requestId,
+      const approval = this.reviewMcpApprovalRequestInMemory(
+        tenantId,
+        approvalRequestId,
         nextStatus,
         reviewedByUserId,
-        firstNonEmptyString(options.reviewedByEmail) ?? undefined,
+        reviewedByEmail,
         reviewReason,
         updatedAt
       );
+      if (!approval) {
+        return null;
+      }
+      const persistedWorkflow = this.saveMcpApprovalWorkflowRecordToMemory(
+        workflowRecord
+      );
+      return {
+        approval,
+        workflow: this.buildMcpApprovalWorkflowSnapshot(approval, persistedWorkflow),
+      };
     }
+  }
+
+  private async persistMcpApprovalRequestReviewWithQuerier(
+    queryable: PgQueryable,
+    tenantId: string,
+    approvalRequestId: string,
+    nextStatus: McpApprovalStatus,
+    reviewedByUserId: string,
+    reviewedByEmail: string | undefined,
+    reviewReason: string | undefined,
+    updatedAt: string
+  ): Promise<McpApprovalRequest | null> {
+    const result = await queryable.query(
+      `UPDATE mcp_approval_requests
+       SET status = $3,
+           reviewed_by_user_id = $4,
+           reviewed_by_email = $5,
+           review_reason = $6,
+           updated_at = $7::timestamptz
+       WHERE tenant_id = $1
+         AND id = $2
+         AND status = 'pending'
+       RETURNING id,
+                 tenant_id,
+                 tool_id,
+                 status,
+                 requested_by_user_id,
+                 requested_by_email,
+                 reason,
+                 reviewed_by_user_id,
+                 reviewed_by_email,
+                 review_reason,
+                 created_at,
+                 updated_at`,
+      [
+        tenantId,
+        approvalRequestId,
+        nextStatus,
+        reviewedByUserId,
+        reviewedByEmail ?? null,
+        reviewReason ?? null,
+        updatedAt,
+      ]
+    );
+    const row = result.rows[0];
+    if (row) {
+      return mapMcpApprovalRequestRow(row);
+    }
+    return this.loadMcpApprovalRequestByIdWithQuerier(
+      queryable,
+      tenantId,
+      approvalRequestId
+    );
+  }
+
+  private async insertMcpApprovalRequestWithQuerier(
+    queryable: PgQueryable,
+    record: McpApprovalRequest
+  ): Promise<McpApprovalRequest> {
+    const result = await queryable.query(
+      `INSERT INTO mcp_approval_requests (
+         id,
+         tenant_id,
+         tool_id,
+         status,
+         requested_by_user_id,
+         requested_by_email,
+         reason,
+         reviewed_by_user_id,
+         reviewed_by_email,
+         review_reason,
+         created_at,
+         updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL, $8::timestamptz, $8::timestamptz)
+       RETURNING id,
+                 tenant_id,
+                 tool_id,
+                 status,
+                 requested_by_user_id,
+                 requested_by_email,
+                 reason,
+                 reviewed_by_user_id,
+                 reviewed_by_email,
+                 review_reason,
+                 created_at,
+                 updated_at`,
+      [
+        record.id,
+        record.tenantId,
+        record.toolId,
+        record.status,
+        record.requestedByUserId,
+        record.requestedByEmail ?? null,
+        record.reason ?? null,
+        record.createdAt,
+      ]
+    );
+    const row = result.rows[0];
+    return row ? mapMcpApprovalRequestRow(row) : this.saveMcpApprovalRequestToMemory(record);
+  }
+
+  private async loadMcpApprovalRequestByIdWithQuerier(
+    queryable: PgQueryable,
+    tenantId: string,
+    requestId: string
+  ): Promise<McpApprovalRequest | null> {
+    const result = await queryable.query(
+      `SELECT id,
+              tenant_id,
+              tool_id,
+              status,
+              requested_by_user_id,
+              requested_by_email,
+              reason,
+              reviewed_by_user_id,
+              reviewed_by_email,
+              review_reason,
+              created_at,
+              updated_at
+       FROM mcp_approval_requests
+       WHERE tenant_id = $1
+         AND id = $2
+       LIMIT 1`,
+      [tenantId, requestId]
+    );
+    const row = result.rows[0];
+    return row ? mapMcpApprovalRequestRow(row) : null;
+  }
+
+  private async upsertMcpApprovalWorkflowRecordWithQuerier(
+    queryable: PgQueryable,
+    workflow: LocalMcpApprovalWorkflowRecord
+  ): Promise<void> {
+    const cloned = this.cloneLocalMcpApprovalWorkflowRecord(workflow);
+    await queryable.query(
+      `INSERT INTO mcp_approval_workflows (
+         tenant_id,
+         approval_request_id,
+         approval_mode,
+         approval_condition_matched,
+         approval_workflow,
+         approval_stages,
+         current_node_id,
+         path_history,
+         evaluation_context,
+         stage1_required_approvals,
+         stage1_roles,
+         stage1_approvals,
+         stage1_rejected_by,
+         stage2_required_approvals,
+         stage2_roles,
+         stage2_approvals,
+         stage2_rejected_by,
+         updated_at
+       )
+       VALUES (
+         $1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9::jsonb,
+         $10, $11::jsonb, $12::jsonb, $13::jsonb, $14, $15::jsonb, $16::jsonb, $17::jsonb, NOW()
+       )
+       ON CONFLICT (tenant_id, approval_request_id)
+       DO UPDATE
+         SET approval_mode = EXCLUDED.approval_mode,
+             approval_condition_matched = EXCLUDED.approval_condition_matched,
+             approval_workflow = EXCLUDED.approval_workflow,
+             approval_stages = EXCLUDED.approval_stages,
+             current_node_id = EXCLUDED.current_node_id,
+             path_history = EXCLUDED.path_history,
+             evaluation_context = EXCLUDED.evaluation_context,
+             stage1_required_approvals = EXCLUDED.stage1_required_approvals,
+             stage1_roles = EXCLUDED.stage1_roles,
+             stage1_approvals = EXCLUDED.stage1_approvals,
+             stage1_rejected_by = EXCLUDED.stage1_rejected_by,
+             stage2_required_approvals = EXCLUDED.stage2_required_approvals,
+             stage2_roles = EXCLUDED.stage2_roles,
+             stage2_approvals = EXCLUDED.stage2_approvals,
+             stage2_rejected_by = EXCLUDED.stage2_rejected_by,
+             updated_at = NOW()`,
+      [
+        cloned.tenantId,
+        cloned.approvalRequestId,
+        cloned.approvalMode,
+        cloned.approvalConditionMatched,
+        safeStringifyJson(cloned.approvalWorkflow),
+        safeStringifyJson(cloned.approvalStages),
+        cloned.currentNodeId,
+        safeStringifyJson(cloned.pathHistory),
+        safeStringifyJson(cloned.evaluationContext),
+        cloned.approvalStages[0]?.requiredApprovals ?? 1,
+        safeStringifyJson(cloned.approvalStages[0]?.roles ?? []),
+        safeStringifyJson(cloned.approvalStages[0]?.approvals ?? []),
+        safeStringifyJson(cloned.approvalStages[0]?.rejectedBy ?? null),
+        cloned.approvalStages[1]?.requiredApprovals ?? null,
+        safeStringifyJson(cloned.approvalStages[1]?.roles ?? []),
+        safeStringifyJson(cloned.approvalStages[1]?.approvals ?? []),
+        safeStringifyJson(cloned.approvalStages[1]?.rejectedBy ?? null),
+      ]
+    );
   }
 
   async appendMcpInvocationAudit(
@@ -10305,6 +12838,31 @@ class ControlPlaneRepository {
     const enforced = input.enforced === true;
     const evaluatedDecision =
       firstNonEmptyString(input.evaluatedDecision) ?? (enforced ? input.decision : undefined);
+    const metadata = toDbRow(input.metadata) ?? {};
+    const approvalModeRaw = firstNonEmptyString(
+      metadata.approvalMode,
+      metadata.approval_mode,
+    );
+    const approvalStages = Array.isArray(metadata.approvalStages)
+      ? metadata.approvalStages
+      : Array.isArray(metadata.approval_stages)
+        ? metadata.approval_stages
+        : undefined;
+    const approvalMode = approvalModeRaw
+      ? normalizeLocalMcpApprovalWorkflowMode(
+          approvalModeRaw,
+          Array.isArray(approvalStages) ? approvalStages.length : 1,
+        )
+      : undefined;
+    const approvalStageRaw = firstNonEmptyString(
+      metadata.approvalStage,
+      metadata.currentStage,
+      metadata.approval_stage,
+      metadata.current_stage,
+    );
+    const approvalStage = isLocalMcpApprovalStage(approvalStageRaw)
+      ? (approvalStageRaw.trim() as LocalMcpApprovalStage)
+      : undefined;
     const invocation: McpInvocationAudit = {
       id: crypto.randomUUID(),
       tenantId: normalizedTenantId,
@@ -10315,7 +12873,17 @@ class ControlPlaneRepository {
       approvalRequestId: firstNonEmptyString(input.approvalRequestId) ?? undefined,
       enforced,
       evaluatedDecision: evaluatedDecision ? toMcpToolDecision(evaluatedDecision) : undefined,
-      metadata: toDbRow(input.metadata) ?? {},
+      approvalMode,
+      approvalStage,
+      approvalSatisfied: toBoolean(
+        metadata.approvalSatisfied ?? metadata.approval_satisfied,
+        false,
+      ),
+      approvalConditionMatched: toBoolean(
+        metadata.approvalConditionMatched ?? metadata.approval_condition_matched,
+        false,
+      ),
+      metadata,
       createdAt: toIsoString(input.createdAt) ?? new Date().toISOString(),
     };
 
@@ -10620,6 +13188,379 @@ class ControlPlaneRepository {
     } catch (error) {
       this.disableDb(error, "查询 audit_logs 失败");
       return this.listAuditsFromMemory(normalized);
+    }
+  }
+
+  async getAuditById(tenantId: string, auditId: string): Promise<AuditItem | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAuditId = firstNonEmptyString(auditId);
+    if (!normalizedAuditId) {
+      return null;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getAuditByIdFromMemory(normalizedTenantId, normalizedAuditId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                event_id,
+                action,
+                level,
+                detail,
+                metadata,
+                created_at
+         FROM audit_logs
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedAuditId]
+      );
+      const row = result.rows[0];
+      return row ? mapAuditRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询单条 audit_logs 失败");
+      return this.getAuditByIdFromMemory(normalizedTenantId, normalizedAuditId);
+    }
+  }
+
+  async deleteAudit(tenantId: string, auditId: string): Promise<boolean> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAuditId = firstNonEmptyString(auditId);
+    if (!normalizedAuditId) {
+      return false;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.deleteAuditFromMemory(normalizedTenantId, normalizedAuditId);
+    }
+
+    try {
+      const result = await pool.query(
+        `DELETE FROM audit_logs
+         WHERE tenant_id = $1
+           AND id = $2
+         RETURNING id`,
+        [normalizedTenantId, normalizedAuditId]
+      );
+      return result.rows.length > 0;
+    } catch (error) {
+      this.disableDb(error, "删除 audit_logs 失败");
+      return this.deleteAuditFromMemory(normalizedTenantId, normalizedAuditId);
+    }
+  }
+
+  async createLegalHold(
+    tenantId: string,
+    input: LegalHoldCreateInput,
+    options: CreateLegalHoldOptions = {}
+  ): Promise<LegalHoldItem> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const now = toIsoString(options.createdAt) ?? new Date().toISOString();
+    const hold: LegalHoldItem = {
+      id: crypto.randomUUID(),
+      tenantId: normalizedTenantId,
+      resourceType: toLegalHoldResourceType(input.resourceType),
+      resourceId: firstNonEmptyString(input.resourceId) ?? "",
+      reason: firstNonEmptyString(input.reason) ?? "",
+      createdByUserId: firstNonEmptyString(options.createdByUserId) ?? undefined,
+      createdByEmail: firstNonEmptyString(options.createdByEmail) ?? undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.createLegalHoldToMemory(hold);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO legal_holds (
+           id,
+           tenant_id,
+           resource_type,
+           resource_id,
+           reason,
+           created_by_user_id,
+           created_by_email,
+           created_at,
+           updated_at
+         )
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6,
+           $7,
+           $8::timestamptz,
+           $8::timestamptz
+         )
+         RETURNING id,
+                   tenant_id,
+                   resource_type,
+                   resource_id,
+                   reason,
+                   created_by_user_id,
+                   created_by_email,
+                   released_at,
+                   released_by_user_id,
+                   released_by_email,
+                   release_reason,
+                   created_at,
+                   updated_at`,
+        [
+          hold.id,
+          hold.tenantId,
+          hold.resourceType,
+          hold.resourceId,
+          hold.reason,
+          hold.createdByUserId ?? null,
+          hold.createdByEmail ?? null,
+          hold.createdAt,
+        ]
+      );
+      const row = result.rows[0];
+      return row ? mapLegalHoldRow(row) : this.createLegalHoldToMemory(hold);
+    } catch (error) {
+      this.disableDb(error, "写入 legal_holds 失败");
+      return this.createLegalHoldToMemory(hold);
+    }
+  }
+
+  async listLegalHolds(
+    tenantId: string,
+    input: LegalHoldListInput = {}
+  ): Promise<LegalHoldListResult> {
+    const normalized = normalizeLegalHoldListInput(tenantId, input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listLegalHoldsFromMemory(normalized);
+    }
+
+    try {
+      const params: unknown[] = [normalized.tenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+
+      if (normalized.resourceType) {
+        params.push(normalized.resourceType);
+        whereClauses.push(`resource_type = $${params.length}`);
+      }
+      if (normalized.resourceId) {
+        params.push(normalized.resourceId);
+        whereClauses.push(`resource_id = $${params.length}`);
+      }
+      if (normalized.active === true) {
+        whereClauses.push("released_at IS NULL");
+      } else if (normalized.active === false) {
+        whereClauses.push("released_at IS NOT NULL");
+      }
+
+      const whereSql = `WHERE ${whereClauses.join(" AND ")}`;
+      const countResult = await pool.query(
+        `SELECT COUNT(*)::int AS total
+         FROM legal_holds
+         ${whereSql}`,
+        params
+      );
+
+      const listParams = [...params, normalized.limit];
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                resource_type,
+                resource_id,
+                reason,
+                created_by_user_id,
+                created_by_email,
+                released_at,
+                released_by_user_id,
+                released_by_email,
+                release_reason,
+                created_at,
+                updated_at
+         FROM legal_holds
+         ${whereSql}
+         ORDER BY created_at DESC, id DESC
+         LIMIT $${listParams.length}`,
+        listParams
+      );
+
+      return {
+        items: result.rows.map(mapLegalHoldRow),
+        total: Math.max(0, Math.trunc(toNumber(countResult.rows[0]?.total, 0))),
+      };
+    } catch (error) {
+      this.disableDb(error, "查询 legal_holds 失败");
+      return this.listLegalHoldsFromMemory(normalized);
+    }
+  }
+
+  async getLegalHoldById(tenantId: string, holdId: string): Promise<LegalHoldItem | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedHoldId = firstNonEmptyString(holdId);
+    if (!normalizedHoldId) {
+      return null;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getLegalHoldByIdFromMemory(normalizedTenantId, normalizedHoldId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                resource_type,
+                resource_id,
+                reason,
+                created_by_user_id,
+                created_by_email,
+                released_at,
+                released_by_user_id,
+                released_by_email,
+                release_reason,
+                created_at,
+                updated_at
+         FROM legal_holds
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedHoldId]
+      );
+      const row = result.rows[0];
+      return row ? mapLegalHoldRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询单条 legal_holds 失败");
+      return this.getLegalHoldByIdFromMemory(normalizedTenantId, normalizedHoldId);
+    }
+  }
+
+  async getActiveLegalHoldByResource(
+    tenantId: string,
+    resourceType: LegalHoldResourceType,
+    resourceId: string
+  ): Promise<LegalHoldItem | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedResourceId = firstNonEmptyString(resourceId);
+    if (!normalizedResourceId) {
+      return null;
+    }
+
+    const normalizedResourceType = toLegalHoldResourceType(resourceType);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getActiveLegalHoldByResourceFromMemory(
+        normalizedTenantId,
+        normalizedResourceType,
+        normalizedResourceId
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                resource_type,
+                resource_id,
+                reason,
+                created_by_user_id,
+                created_by_email,
+                released_at,
+                released_by_user_id,
+                released_by_email,
+                release_reason,
+                created_at,
+                updated_at
+         FROM legal_holds
+         WHERE tenant_id = $1
+           AND resource_type = $2
+           AND resource_id = $3
+           AND released_at IS NULL
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1`,
+        [normalizedTenantId, normalizedResourceType, normalizedResourceId]
+      );
+      const row = result.rows[0];
+      return row ? mapLegalHoldRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询 legal_holds active 记录失败");
+      return this.getActiveLegalHoldByResourceFromMemory(
+        normalizedTenantId,
+        normalizedResourceType,
+        normalizedResourceId
+      );
+    }
+  }
+
+  async releaseLegalHold(
+    tenantId: string,
+    holdId: string,
+    input: LegalHoldReleaseInput = {},
+    options: ReleaseLegalHoldOptions = {}
+  ): Promise<LegalHoldItem | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedHoldId = firstNonEmptyString(holdId);
+    if (!normalizedHoldId) {
+      return null;
+    }
+
+    const releasedAt = toIsoString(options.releasedAt) ?? new Date().toISOString();
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.releaseLegalHoldToMemory(normalizedTenantId, normalizedHoldId, input, {
+        ...options,
+        releasedAt,
+      });
+    }
+
+    try {
+      const result = await pool.query(
+        `UPDATE legal_holds
+         SET released_at = $3::timestamptz,
+             released_by_user_id = $4,
+             released_by_email = $5,
+             release_reason = $6,
+             updated_at = $3::timestamptz
+         WHERE tenant_id = $1
+           AND id = $2
+           AND released_at IS NULL
+         RETURNING id,
+                   tenant_id,
+                   resource_type,
+                   resource_id,
+                   reason,
+                   created_by_user_id,
+                   created_by_email,
+                   released_at,
+                   released_by_user_id,
+                   released_by_email,
+                   release_reason,
+                   created_at,
+                   updated_at`,
+        [
+          normalizedTenantId,
+          normalizedHoldId,
+          releasedAt,
+          firstNonEmptyString(options.releasedByUserId) ?? null,
+          firstNonEmptyString(options.releasedByEmail) ?? null,
+          firstNonEmptyString(input.reason) ?? null,
+        ]
+      );
+      const row = result.rows[0];
+      return row ? mapLegalHoldRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "释放 legal_holds 失败");
+      return this.releaseLegalHoldToMemory(normalizedTenantId, normalizedHoldId, input, {
+        ...options,
+        releasedAt,
+      });
     }
   }
 
@@ -11639,6 +14580,290 @@ class ControlPlaneRepository {
     } catch (error) {
       this.disableDb(error, "删除 identity_agent_bindings 失败");
       return this.deleteAgentBindingFromMemory(normalizedTenantId, normalizedAgentId);
+    }
+  }
+
+  async upsertAgentRuntimeHeartbeat(
+    tenantId: string,
+    input: UpsertAgentRuntimeHeartbeatInput
+  ): Promise<AgentRuntimeHeartbeatRecord> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAgentId = firstNonEmptyString(input.agentId);
+    if (!normalizedAgentId) {
+      throw new Error("agent_runtime_heartbeat_agent_id_required");
+    }
+
+    const normalizedSourceIds = Array.from(
+      new Set(
+        (input.sourceIds ?? [])
+          .map((item) => firstNonEmptyString(item))
+          .filter((item): item is string => Boolean(item))
+      )
+    );
+    const occurredAt = toIsoString(input.occurredAt);
+    if (!occurredAt) {
+      throw new Error("agent_runtime_heartbeat_occurred_at_invalid");
+    }
+
+    const now = new Date().toISOString();
+    const record: AgentRuntimeHeartbeatRecord = {
+      tenantId: normalizedTenantId,
+      agentId: normalizedAgentId,
+      sessionId: firstNonEmptyString(input.sessionId) ?? undefined,
+      hostname: firstNonEmptyString(input.hostname) ?? undefined,
+      version: firstNonEmptyString(input.version) ?? undefined,
+      daemon: input.daemon === true,
+      occurredAt,
+      configVersion: firstNonEmptyString(input.configVersion) ?? undefined,
+      configFetchedAt: toIsoString(input.configFetchedAt) ?? undefined,
+      heartbeatIntervalSec:
+        input.heartbeatIntervalSec !== undefined &&
+        Number.isInteger(input.heartbeatIntervalSec) &&
+        input.heartbeatIntervalSec > 0
+          ? input.heartbeatIntervalSec
+          : undefined,
+      ingestProtocol: firstNonEmptyString(input.ingestProtocol) ?? undefined,
+      ingestEndpoint: firstNonEmptyString(input.ingestEndpoint) ?? undefined,
+      sourceCount:
+        typeof input.sourceCount === "number" &&
+        Number.isInteger(input.sourceCount) &&
+        input.sourceCount >= 0
+          ? input.sourceCount
+          : normalizedSourceIds.length,
+      sourceIds: normalizedSourceIds,
+      lastIngestStatusCode:
+        typeof input.lastIngestStatusCode === "number" &&
+        Number.isInteger(input.lastIngestStatusCode) &&
+        input.lastIngestStatusCode >= 0
+          ? input.lastIngestStatusCode
+          : undefined,
+      lastAccepted:
+        typeof input.lastAccepted === "number" &&
+        Number.isInteger(input.lastAccepted) &&
+        input.lastAccepted >= 0
+          ? input.lastAccepted
+          : 0,
+      lastRejected:
+        typeof input.lastRejected === "number" &&
+        Number.isInteger(input.lastRejected) &&
+        input.lastRejected >= 0
+          ? input.lastRejected
+          : 0,
+      lastError: firstNonEmptyString(input.lastError) ?? undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.upsertAgentRuntimeHeartbeatInMemory(record);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO agent_runtime_heartbeats (
+           tenant_id,
+           agent_id,
+           session_id,
+           hostname,
+           version,
+           daemon,
+           occurred_at,
+           config_version,
+           config_fetched_at,
+           heartbeat_interval_sec,
+           ingest_protocol,
+           ingest_endpoint,
+           source_count,
+           source_ids,
+           last_ingest_status_code,
+           last_accepted,
+           last_rejected,
+           last_error,
+           created_at,
+           updated_at
+         )
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6,
+           $7::timestamptz,
+           $8,
+           $9::timestamptz,
+           $10,
+           $11,
+           $12,
+           $13,
+           $14::jsonb,
+           $15,
+           $16,
+           $17,
+           $18,
+           $19::timestamptz,
+           $20::timestamptz
+         )
+         ON CONFLICT (tenant_id, agent_id)
+         DO UPDATE SET
+           session_id = EXCLUDED.session_id,
+           hostname = EXCLUDED.hostname,
+           version = EXCLUDED.version,
+           daemon = EXCLUDED.daemon,
+           occurred_at = EXCLUDED.occurred_at,
+           config_version = EXCLUDED.config_version,
+           config_fetched_at = EXCLUDED.config_fetched_at,
+           heartbeat_interval_sec = EXCLUDED.heartbeat_interval_sec,
+           ingest_protocol = EXCLUDED.ingest_protocol,
+           ingest_endpoint = EXCLUDED.ingest_endpoint,
+           source_count = EXCLUDED.source_count,
+           source_ids = EXCLUDED.source_ids,
+           last_ingest_status_code = EXCLUDED.last_ingest_status_code,
+           last_accepted = EXCLUDED.last_accepted,
+           last_rejected = EXCLUDED.last_rejected,
+           last_error = EXCLUDED.last_error,
+           updated_at = EXCLUDED.updated_at
+         RETURNING tenant_id,
+                   agent_id,
+                   session_id,
+                   hostname,
+                   version,
+                   daemon,
+                   occurred_at,
+                   config_version,
+                   config_fetched_at,
+                   heartbeat_interval_sec,
+                   ingest_protocol,
+                   ingest_endpoint,
+                   source_count,
+                   source_ids,
+                   last_ingest_status_code,
+                   last_accepted,
+                   last_rejected,
+                   last_error,
+                   created_at,
+                   updated_at`,
+        [
+          record.tenantId,
+          record.agentId,
+          record.sessionId ?? null,
+          record.hostname ?? null,
+          record.version ?? null,
+          record.daemon,
+          record.occurredAt,
+          record.configVersion ?? null,
+          record.configFetchedAt ?? null,
+          record.heartbeatIntervalSec ?? null,
+          record.ingestProtocol ?? null,
+          record.ingestEndpoint ?? null,
+          record.sourceCount,
+          JSON.stringify(record.sourceIds),
+          record.lastIngestStatusCode ?? null,
+          record.lastAccepted,
+          record.lastRejected,
+          record.lastError ?? null,
+          record.createdAt,
+          record.updatedAt,
+        ]
+      );
+      const row = result.rows[0];
+      return row ? mapAgentRuntimeHeartbeatRow(row) : record;
+    } catch (error) {
+      this.disableDb(error, "写入 agent_runtime_heartbeats 失败");
+      return this.upsertAgentRuntimeHeartbeatInMemory(record);
+    }
+  }
+
+  async getAgentRuntimeHeartbeat(
+    tenantId: string,
+    agentId: string
+  ): Promise<AgentRuntimeHeartbeatRecord | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAgentId = firstNonEmptyString(agentId);
+    if (!normalizedAgentId) {
+      return null;
+    }
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getAgentRuntimeHeartbeatFromMemory(normalizedTenantId, normalizedAgentId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT tenant_id,
+                agent_id,
+                session_id,
+                hostname,
+                version,
+                daemon,
+                occurred_at,
+                config_version,
+                config_fetched_at,
+                heartbeat_interval_sec,
+                ingest_protocol,
+                ingest_endpoint,
+                source_count,
+                source_ids,
+                last_ingest_status_code,
+                last_accepted,
+                last_rejected,
+                last_error,
+                created_at,
+                updated_at
+         FROM agent_runtime_heartbeats
+         WHERE tenant_id = $1
+           AND agent_id = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedAgentId]
+      );
+      const row = result.rows[0];
+      return row ? mapAgentRuntimeHeartbeatRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询 agent_runtime_heartbeats 失败");
+      return this.getAgentRuntimeHeartbeatFromMemory(normalizedTenantId, normalizedAgentId);
+    }
+  }
+
+  async listAgentRuntimeHeartbeats(tenantId: string): Promise<AgentRuntimeHeartbeatRecord[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listAgentRuntimeHeartbeatsFromMemory(normalizedTenantId);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT tenant_id,
+                agent_id,
+                session_id,
+                hostname,
+                version,
+                daemon,
+                occurred_at,
+                config_version,
+                config_fetched_at,
+                heartbeat_interval_sec,
+                ingest_protocol,
+                ingest_endpoint,
+                source_count,
+                source_ids,
+                last_ingest_status_code,
+                last_accepted,
+                last_rejected,
+                last_error,
+                created_at,
+                updated_at
+         FROM agent_runtime_heartbeats
+         WHERE tenant_id = $1
+         ORDER BY occurred_at DESC, updated_at DESC, agent_id ASC`,
+        [normalizedTenantId]
+      );
+      return result.rows.map(mapAgentRuntimeHeartbeatRow);
+    } catch (error) {
+      this.disableDb(error, "查询 agent_runtime_heartbeats 失败");
+      return this.listAgentRuntimeHeartbeatsFromMemory(normalizedTenantId);
     }
   }
 
@@ -13217,6 +16442,397 @@ class ControlPlaneRepository {
     }
   }
 
+  async listQualityAdviceExecutions(
+    tenantId: string,
+    input: ListQualityAdviceExecutionsInput = {}
+  ): Promise<QualityAdviceExecution[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalized = normalizeQualityAdviceExecutionListInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listQualityAdviceExecutionsFromMemory(normalizedTenantId, normalized);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+      if (normalized.adviceId) {
+        params.push(normalized.adviceId);
+        whereClauses.push(`advice_id = $${params.length}`);
+      }
+      if (normalized.actionType) {
+        params.push(normalized.actionType);
+        whereClauses.push(`action_type = $${params.length}`);
+      }
+      if (normalized.status) {
+        params.push(normalized.status);
+        whereClauses.push(`status = $${params.length}`);
+      }
+      params.push(normalized.limit);
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                advice_id,
+                project,
+                severity,
+                action_type,
+                trigger_source,
+                status,
+                metric,
+                dataset_id,
+                experiment_id,
+                candidate_labels,
+                scorecard_key,
+                result_summary,
+                error,
+                requested_at,
+                started_at,
+                finished_at,
+                updated_at
+         FROM quality_advice_executions
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY requested_at DESC, id DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      return result.rows.map(mapQualityAdviceExecutionRow);
+    } catch (error) {
+      this.disableDb(error, "查询 quality_advice_executions 失败");
+      return this.listQualityAdviceExecutionsFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
+  async getQualityAdviceExecutionById(
+    tenantId: string,
+    executionId: string
+  ): Promise<QualityAdviceExecution | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedExecutionId = firstNonEmptyString(executionId);
+    if (!normalizedExecutionId) {
+      return null;
+    }
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getQualityAdviceExecutionByIdFromMemory(
+        normalizedTenantId,
+        normalizedExecutionId
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                advice_id,
+                project,
+                severity,
+                action_type,
+                trigger_source,
+                status,
+                metric,
+                dataset_id,
+                experiment_id,
+                candidate_labels,
+                scorecard_key,
+                result_summary,
+                error,
+                requested_at,
+                started_at,
+                finished_at,
+                updated_at
+         FROM quality_advice_executions
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedExecutionId]
+      );
+      const row = result.rows[0];
+      return row ? mapQualityAdviceExecutionRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询 quality_advice_executions 单条记录失败");
+      return this.getQualityAdviceExecutionByIdFromMemory(
+        normalizedTenantId,
+        normalizedExecutionId
+      );
+    }
+  }
+
+  async getLatestQualityAdviceExecution(
+    tenantId: string,
+    adviceId: string
+  ): Promise<QualityAdviceExecution | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedAdviceId = firstNonEmptyString(adviceId);
+    if (!normalizedAdviceId) {
+      return null;
+    }
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getLatestQualityAdviceExecutionFromMemory(
+        normalizedTenantId,
+        normalizedAdviceId
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                advice_id,
+                project,
+                severity,
+                action_type,
+                trigger_source,
+                status,
+                metric,
+                dataset_id,
+                experiment_id,
+                candidate_labels,
+                scorecard_key,
+                result_summary,
+                error,
+                requested_at,
+                started_at,
+                finished_at,
+                updated_at
+         FROM quality_advice_executions
+         WHERE tenant_id = $1
+           AND advice_id = $2
+         ORDER BY requested_at DESC, id DESC
+         LIMIT 1`,
+        [normalizedTenantId, normalizedAdviceId]
+      );
+      const row = result.rows[0];
+      return row ? mapQualityAdviceExecutionRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "查询 quality_advice_executions 最新记录失败");
+      return this.getLatestQualityAdviceExecutionFromMemory(
+        normalizedTenantId,
+        normalizedAdviceId
+      );
+    }
+  }
+
+  async getQualityAdviceExecutionByApprovalRequestId(
+    tenantId: string,
+    approvalRequestId: string
+  ): Promise<QualityAdviceExecution | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedApprovalRequestId = firstNonEmptyString(approvalRequestId);
+    if (!normalizedApprovalRequestId) {
+      return null;
+    }
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getQualityAdviceExecutionByApprovalRequestIdFromMemory(
+        normalizedTenantId,
+        normalizedApprovalRequestId
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                advice_id,
+                project,
+                severity,
+                action_type,
+                trigger_source,
+                status,
+                metric,
+                dataset_id,
+                experiment_id,
+                candidate_labels,
+                scorecard_key,
+                result_summary,
+                error,
+                requested_at,
+                started_at,
+                finished_at,
+                updated_at
+         FROM quality_advice_executions
+         WHERE tenant_id = $1
+           AND result_summary->>'approvalRequestId' = $2
+         ORDER BY requested_at DESC, id DESC
+         LIMIT 1`,
+        [normalizedTenantId, normalizedApprovalRequestId]
+      );
+      const row = result.rows[0];
+      return row ? mapQualityAdviceExecutionRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "按 approvalRequestId 查询 quality_advice_executions 失败");
+      return this.getQualityAdviceExecutionByApprovalRequestIdFromMemory(
+        normalizedTenantId,
+        normalizedApprovalRequestId
+      );
+    }
+  }
+
+  async upsertQualityAdviceExecution(
+    tenantId: string,
+    input: QualityAdviceExecutionUpsertInput
+  ): Promise<QualityAdviceExecution> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const id = firstNonEmptyString(input.id);
+    const adviceId = firstNonEmptyString(input.adviceId);
+    const project = firstNonEmptyString(input.project);
+    const requestedAt = toIsoString(input.requestedAt) ?? new Date().toISOString();
+    if (!id) {
+      throw new Error("quality_advice_execution_id_required");
+    }
+    if (!adviceId) {
+      throw new Error("quality_advice_execution_advice_id_required");
+    }
+    if (!project) {
+      throw new Error("quality_advice_execution_project_required");
+    }
+
+    const execution: QualityAdviceExecution = {
+      id,
+      tenantId: normalizedTenantId,
+      adviceId,
+      project,
+      severity: toQualityAdviceSeverity(input.severity),
+      actionType: toQualityAdviceActionType(input.actionType),
+      triggerSource: input.triggerSource === "automatic" ? "automatic" : "manual",
+      status: toQualityAdviceExecutionStatus(input.status),
+      metric: firstNonEmptyString(input.metric) ?? undefined,
+      datasetId: firstNonEmptyString(input.datasetId) ?? undefined,
+      experimentId: firstNonEmptyString(input.experimentId) ?? undefined,
+      candidateLabels: normalizeDistinctStringArray(input.candidateLabels),
+      scorecardKey: firstNonEmptyString(input.scorecardKey) ?? undefined,
+      resultSummary: toDbRow(input.resultSummary) ?? undefined,
+      error: firstNonEmptyString(input.error) ?? undefined,
+      requestedAt,
+      startedAt:
+        Object.prototype.hasOwnProperty.call(input, "startedAt")
+          ? toIsoString(input.startedAt) ?? undefined
+          : undefined,
+      finishedAt:
+        Object.prototype.hasOwnProperty.call(input, "finishedAt")
+          ? toIsoString(input.finishedAt) ?? undefined
+          : undefined,
+      updatedAt: toIsoString(input.updatedAt) ?? new Date().toISOString(),
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.upsertQualityAdviceExecutionToMemory(execution);
+    }
+
+    try {
+      const result = await pool.query(
+        `INSERT INTO quality_advice_executions (
+           id,
+           tenant_id,
+           advice_id,
+           project,
+           severity,
+           action_type,
+           trigger_source,
+           status,
+           metric,
+           dataset_id,
+           experiment_id,
+           candidate_labels,
+           scorecard_key,
+           result_summary,
+           error,
+           requested_at,
+           started_at,
+           finished_at,
+           updated_at
+         )
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           $5,
+           $6,
+           $7,
+           $8,
+           $9,
+           $10,
+           $11,
+           $12::jsonb,
+           $13,
+           $14::jsonb,
+           $15,
+           $16::timestamptz,
+           $17::timestamptz,
+           $18::timestamptz,
+           $19::timestamptz
+         )
+         ON CONFLICT (tenant_id, id)
+         DO UPDATE
+           SET advice_id = EXCLUDED.advice_id,
+               project = EXCLUDED.project,
+               severity = EXCLUDED.severity,
+               action_type = EXCLUDED.action_type,
+               trigger_source = EXCLUDED.trigger_source,
+               status = EXCLUDED.status,
+               metric = EXCLUDED.metric,
+               dataset_id = EXCLUDED.dataset_id,
+               experiment_id = EXCLUDED.experiment_id,
+               candidate_labels = EXCLUDED.candidate_labels,
+               scorecard_key = EXCLUDED.scorecard_key,
+               result_summary = EXCLUDED.result_summary,
+               error = EXCLUDED.error,
+               requested_at = EXCLUDED.requested_at,
+               started_at = EXCLUDED.started_at,
+               finished_at = EXCLUDED.finished_at,
+               updated_at = EXCLUDED.updated_at
+         RETURNING id,
+                   tenant_id,
+                   advice_id,
+                   project,
+                   severity,
+                   action_type,
+                   trigger_source,
+                   status,
+                   metric,
+                   dataset_id,
+                   experiment_id,
+                   candidate_labels,
+                   scorecard_key,
+                   result_summary,
+                   error,
+                   requested_at,
+                   started_at,
+                   finished_at,
+                   updated_at`,
+        [
+          execution.id,
+          execution.tenantId,
+          execution.adviceId,
+          execution.project,
+          execution.severity,
+          execution.actionType,
+          execution.triggerSource,
+          execution.status,
+          execution.metric ?? null,
+          execution.datasetId ?? null,
+          execution.experimentId ?? null,
+          safeStringifyJson(execution.candidateLabels ?? []),
+          execution.scorecardKey ?? null,
+          safeStringifyJson(execution.resultSummary ?? {}),
+          execution.error ?? null,
+          execution.requestedAt,
+          execution.startedAt ?? null,
+          execution.finishedAt ?? null,
+          execution.updatedAt,
+        ]
+      );
+      const row = result.rows[0];
+      return row ? mapQualityAdviceExecutionRow(row) : this.upsertQualityAdviceExecutionToMemory(execution);
+    } catch (error) {
+      this.disableDb(error, "写入 quality_advice_executions 失败");
+      return this.upsertQualityAdviceExecutionToMemory(execution);
+    }
+  }
+
   async createReplayDataset(
     tenantId: string,
     input: CreateReplayDatasetInput
@@ -13231,8 +16847,11 @@ class ControlPlaneRepository {
       throw new Error("replay_dataset_model_required");
     }
     const now = toIsoString(input.createdAt) ?? new Date().toISOString();
+    const datasetId = crypto.randomUUID();
+    const versionId = crypto.randomUUID();
+    const baseMetadata = toDbRow(input.metadata) ?? {};
     const dataset: ReplayDataset = {
-      id: crypto.randomUUID(),
+      id: datasetId,
       tenantId: normalizedTenantId,
       name,
       description: firstNonEmptyString(input.description) ?? undefined,
@@ -13240,7 +16859,28 @@ class ControlPlaneRepository {
       promptVersion: firstNonEmptyString(input.promptVersion) ?? undefined,
       externalDatasetId: firstNonEmptyString(input.externalDatasetId) ?? undefined,
       caseCount: Math.max(0, Math.trunc(toNumber(input.caseCount, 0))),
-      metadata: toDbRow(input.metadata) ?? {},
+      metadata: applyReplayBaselineVersionsToMetadata(
+        {
+          ...baseMetadata,
+        },
+        [
+          {
+            id: versionId,
+            tenantId: normalizedTenantId,
+            baselineId: datasetId,
+            version: 1,
+            datasetRef: firstNonEmptyString(input.externalDatasetId) ?? undefined,
+            model,
+            promptVersion: firstNonEmptyString(input.promptVersion) ?? undefined,
+            scenarioCount: Math.max(0, Math.trunc(toNumber(input.caseCount, 0))),
+            metadata: baseMetadata,
+            note: "initial",
+            createdAt: now,
+            promotedAt: now,
+          },
+        ],
+        versionId,
+      ),
       createdAt: now,
       updatedAt: now,
     };
@@ -13409,6 +17049,92 @@ class ControlPlaneRepository {
     }
   }
 
+  private async updateReplayDatasetSnapshot(
+    tenantId: string,
+    datasetId: string,
+    input: {
+      externalDatasetId?: string;
+      model?: string;
+      promptVersion?: string;
+      caseCount?: number;
+      metadata: Record<string, unknown>;
+      updatedAt?: string;
+    }
+  ): Promise<ReplayDataset | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedDatasetId = firstNonEmptyString(datasetId);
+    if (!normalizedDatasetId) {
+      return null;
+    }
+    const current = await this.getReplayDatasetById(normalizedTenantId, normalizedDatasetId);
+    if (!current) {
+      return null;
+    }
+    const next: ReplayDataset = {
+      ...current,
+      externalDatasetId:
+        input.externalDatasetId !== undefined
+          ? firstNonEmptyString(input.externalDatasetId) ?? undefined
+          : current.externalDatasetId,
+      model: firstNonEmptyString(input.model) ?? current.model,
+      promptVersion:
+        input.promptVersion !== undefined
+          ? firstNonEmptyString(input.promptVersion) ?? undefined
+          : current.promptVersion,
+      caseCount:
+        input.caseCount !== undefined
+          ? Math.max(0, Math.trunc(toNumber(input.caseCount, current.caseCount)))
+          : current.caseCount,
+      metadata: toDbRow(input.metadata) ?? {},
+      updatedAt: toIsoString(input.updatedAt) ?? new Date().toISOString(),
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.upsertReplayDatasetSnapshotToMemory(next);
+    }
+
+    try {
+      const result = await pool.query(
+        `UPDATE replay_datasets
+         SET external_dataset_id = $3,
+             model = $4,
+             prompt_version = $5,
+             case_count = $6,
+             metadata = $7::jsonb,
+             updated_at = $8::timestamptz
+         WHERE tenant_id = $1
+           AND id = $2
+         RETURNING id,
+                   tenant_id,
+                   name,
+                   description,
+                   model,
+                   prompt_version,
+                   external_dataset_id,
+                   case_count,
+                   metadata,
+                   created_at,
+                   updated_at`,
+        [
+          next.tenantId,
+          next.id,
+          next.externalDatasetId ?? null,
+          next.model,
+          next.promptVersion ?? null,
+          next.caseCount,
+          safeStringifyJson(next.metadata),
+          next.updatedAt,
+        ]
+      );
+      const row = result.rows[0];
+      return row ? mapReplayDatasetRow(row) : null;
+    } catch (error) {
+      this.disableDb(error, "更新 replay_datasets 失败");
+      return this.upsertReplayDatasetSnapshotToMemory(next);
+    }
+  }
+
   async replaceReplayDatasetCases(
     tenantId: string,
     datasetId: string,
@@ -13565,6 +17291,228 @@ class ControlPlaneRepository {
         normalizedTenantId,
         normalizedDatasetId,
         normalizedCases
+      );
+    }
+  }
+
+  async replaceReplayDatasetVersionCases(
+    tenantId: string,
+    datasetId: string,
+    versionId: string,
+    cases: ReplayDatasetCase[]
+  ): Promise<ReplayDatasetCase[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedDatasetId = firstNonEmptyString(datasetId);
+    const normalizedVersionId = firstNonEmptyString(versionId);
+    if (!normalizedDatasetId) {
+      throw new Error("replay_dataset_case_dataset_id_required");
+    }
+    if (!normalizedVersionId) {
+      throw new Error("replay_dataset_version_id_required");
+    }
+
+    const normalizedCases = cases
+      .map((item, index) => {
+        const inputText = firstNonEmptyString(item.input);
+        if (!inputText) {
+          throw new Error(`replay_dataset_case_input_required:${index}`);
+        }
+        const now = new Date().toISOString();
+        return {
+          id: crypto.randomUUID(),
+          tenantId: normalizedTenantId,
+          versionId: normalizedVersionId,
+          datasetId: normalizedDatasetId,
+          caseId: firstNonEmptyString(item.caseId) ?? `case-${index + 1}`,
+          sortOrder: Math.max(0, Math.trunc(toNumber(item.sortOrder, index))),
+          input: inputText,
+          expectedOutput: firstNonEmptyString(item.expectedOutput) ?? undefined,
+          baselineOutput: firstNonEmptyString(item.baselineOutput) ?? undefined,
+          candidateInput: firstNonEmptyString(item.candidateInput) ?? undefined,
+          metadata: toDbRow(item.metadata) ?? {},
+          checksum: firstNonEmptyString(item.checksum) ?? undefined,
+          createdAt: toIsoString(item.createdAt) ?? now,
+          updatedAt: toIsoString(item.updatedAt) ?? now,
+        } satisfies ReplayDatasetVersionCaseRecord;
+      })
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.caseId.localeCompare(b.caseId));
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.replaceReplayDatasetVersionCasesInMemory(
+        normalizedTenantId,
+        normalizedDatasetId,
+        normalizedVersionId,
+        normalizedCases,
+      );
+    }
+
+    try {
+      return await this.withTransaction(pool, async (client) => {
+        const datasetResult = await client.query(
+          `SELECT 1
+           FROM replay_datasets
+           WHERE tenant_id = $1
+             AND id = $2
+           LIMIT 1`,
+          [normalizedTenantId, normalizedDatasetId],
+        );
+        if (!datasetResult.rows[0]) {
+          throw new Error(`replay_dataset_not_found:${normalizedTenantId}:${normalizedDatasetId}`);
+        }
+
+        await client.query(
+          `DELETE FROM replay_dataset_version_cases
+           WHERE tenant_id = $1
+             AND dataset_id = $2
+             AND version_id = $3`,
+          [normalizedTenantId, normalizedDatasetId, normalizedVersionId],
+        );
+
+        for (const item of normalizedCases) {
+          await client.query(
+            `INSERT INTO replay_dataset_version_cases (
+               id,
+               tenant_id,
+               dataset_id,
+               version_id,
+               case_id,
+               sort_order,
+               input_text,
+               expected_output,
+               baseline_output,
+               candidate_input,
+               metadata,
+               checksum,
+               created_at,
+               updated_at
+             )
+             VALUES (
+               $1,
+               $2,
+               $3,
+               $4,
+               $5,
+               $6,
+               $7,
+               $8,
+               $9,
+               $10,
+               $11::jsonb,
+               $12,
+               $13::timestamptz,
+               $14::timestamptz
+             )`,
+            [
+              item.id,
+              item.tenantId,
+              item.datasetId,
+              item.versionId,
+              item.caseId,
+              item.sortOrder,
+              item.input,
+              item.expectedOutput ?? null,
+              item.baselineOutput ?? null,
+              item.candidateInput ?? null,
+              safeStringifyJson(item.metadata),
+              item.checksum ?? null,
+              item.createdAt,
+              item.updatedAt,
+            ],
+          );
+        }
+
+        const refreshed = await client.query(
+          `SELECT id,
+                  tenant_id,
+                  dataset_id,
+                  case_id,
+                  sort_order,
+                  input_text,
+                  expected_output,
+                  baseline_output,
+                  candidate_input,
+                  metadata,
+                  checksum,
+                  created_at,
+                  updated_at
+           FROM replay_dataset_version_cases
+           WHERE tenant_id = $1
+             AND dataset_id = $2
+             AND version_id = $3
+           ORDER BY sort_order ASC, case_id ASC, id ASC`,
+          [normalizedTenantId, normalizedDatasetId, normalizedVersionId],
+        );
+        return refreshed.rows.map(mapReplayDatasetCaseRow);
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("replay_dataset_not_found:")) {
+        throw error;
+      }
+      this.disableDb(error, "写入 replay_dataset_version_cases 失败");
+      return this.replaceReplayDatasetVersionCasesInMemory(
+        normalizedTenantId,
+        normalizedDatasetId,
+        normalizedVersionId,
+        normalizedCases,
+      );
+    }
+  }
+
+  async listReplayDatasetVersionCases(
+    tenantId: string,
+    datasetId: string,
+    versionId: string,
+    input: ListReplayDatasetCasesInput = {}
+  ): Promise<ReplayDatasetCase[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedDatasetId = firstNonEmptyString(datasetId);
+    const normalizedVersionId = firstNonEmptyString(versionId);
+    if (!normalizedDatasetId || !normalizedVersionId) {
+      return [];
+    }
+    const normalized = normalizeReplayDatasetCaseListInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listReplayDatasetVersionCasesFromMemory(
+        normalizedTenantId,
+        normalizedDatasetId,
+        normalizedVersionId,
+        normalized,
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                dataset_id,
+                case_id,
+                sort_order,
+                input_text,
+                expected_output,
+                baseline_output,
+                candidate_input,
+                metadata,
+                checksum,
+                created_at,
+                updated_at
+         FROM replay_dataset_version_cases
+         WHERE tenant_id = $1
+           AND dataset_id = $2
+           AND version_id = $3
+         ORDER BY sort_order ASC, case_id ASC, id ASC
+         LIMIT $4`,
+        [normalizedTenantId, normalizedDatasetId, normalizedVersionId, normalized.limit],
+      );
+      return result.rows.map(mapReplayDatasetCaseRow);
+    } catch (error) {
+      this.disableDb(error, "查询 replay_dataset_version_cases 失败");
+      return this.listReplayDatasetVersionCasesFromMemory(
+        normalizedTenantId,
+        normalizedDatasetId,
+        normalizedVersionId,
+        normalized,
       );
     }
   }
@@ -13955,6 +17903,337 @@ class ControlPlaneRepository {
     }
   }
 
+  async listReplayExperiments(
+    tenantId: string,
+    input: ListReplayExperimentsInput = {}
+  ): Promise<ReplayExperiment[]> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalized = normalizeReplayExperimentListInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listReplayExperimentsFromMemory(normalizedTenantId, normalized);
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+      if (normalized.datasetId) {
+        params.push(normalized.datasetId);
+        whereClauses.push(`dataset_id = $${params.length}`);
+      }
+      if (normalized.sourceAdviceId) {
+        params.push(normalized.sourceAdviceId);
+        whereClauses.push(`source_advice_id = $${params.length}`);
+      }
+      if (normalized.status) {
+        params.push(normalized.status);
+        whereClauses.push(`status = $${params.length}`);
+      }
+      params.push(normalized.limit);
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                name,
+                dataset_id,
+                baseline_id,
+                baseline_version_id,
+                trigger_source,
+                execution_mode,
+                status,
+                candidate_labels,
+                source_advice_id,
+                last_error,
+                started_at,
+                finished_at,
+                created_at,
+                updated_at
+         FROM replay_experiments
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY created_at DESC, id DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      const runIdsByExperimentId = await this.loadReplayExperimentRunIdsMap(
+        pool,
+        normalizedTenantId,
+        result.rows.map((row) => firstNonEmptyString(row.id) ?? "").filter(Boolean)
+      );
+      return result.rows.map((row) =>
+        mapReplayExperimentRow(
+          row,
+          runIdsByExperimentId.get(firstNonEmptyString(row.id) ?? "") ?? []
+        )
+      );
+    } catch (error) {
+      this.disableDb(error, "查询 replay_experiments 失败");
+      return this.listReplayExperimentsFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
+  async getReplayExperimentById(
+    tenantId: string,
+    experimentId: string
+  ): Promise<ReplayExperiment | null> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalizedExperimentId = firstNonEmptyString(experimentId);
+    if (!normalizedExperimentId) {
+      return null;
+    }
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.getReplayExperimentByIdFromMemory(
+        normalizedTenantId,
+        normalizedExperimentId
+      );
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id,
+                tenant_id,
+                name,
+                dataset_id,
+                baseline_id,
+                baseline_version_id,
+                trigger_source,
+                execution_mode,
+                status,
+                candidate_labels,
+                source_advice_id,
+                last_error,
+                started_at,
+                finished_at,
+                created_at,
+                updated_at
+         FROM replay_experiments
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [normalizedTenantId, normalizedExperimentId]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        return null;
+      }
+      const runIdsByExperimentId = await this.loadReplayExperimentRunIdsMap(
+        pool,
+        normalizedTenantId,
+        [normalizedExperimentId]
+      );
+      return mapReplayExperimentRow(
+        row,
+        runIdsByExperimentId.get(normalizedExperimentId) ?? []
+      );
+    } catch (error) {
+      this.disableDb(error, "查询 replay_experiments 单条记录失败");
+      return this.getReplayExperimentByIdFromMemory(
+        normalizedTenantId,
+        normalizedExperimentId
+      );
+    }
+  }
+
+  async upsertReplayExperiment(
+    tenantId: string,
+    input: ReplayExperimentUpsertInput
+  ): Promise<ReplayExperiment> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const id = firstNonEmptyString(input.id);
+    const name = firstNonEmptyString(input.name);
+    const datasetId = firstNonEmptyString(input.datasetId);
+    const createdAt = toIsoString(input.createdAt) ?? new Date().toISOString();
+    if (!id) {
+      throw new Error("replay_experiment_id_required");
+    }
+    if (!name) {
+      throw new Error("replay_experiment_name_required");
+    }
+    if (!datasetId) {
+      throw new Error("replay_experiment_dataset_id_required");
+    }
+
+    const dataset = await this.getReplayDatasetById(normalizedTenantId, datasetId);
+    if (!dataset) {
+      throw new Error(`replay_dataset_not_found:${normalizedTenantId}:${datasetId}`);
+    }
+
+    const experiment: ReplayExperiment = {
+      id,
+      tenantId: normalizedTenantId,
+      name,
+      datasetId,
+      baselineId: firstNonEmptyString(input.baselineId) ?? undefined,
+      baselineVersionId: firstNonEmptyString(input.baselineVersionId) ?? undefined,
+      triggerSource: toReplayExperimentTriggerSource(input.triggerSource),
+      executionMode: toReplayExperimentExecutionMode(input.executionMode),
+      status: toReplayExperimentStatus(input.status),
+      candidateLabels: normalizeDistinctStringArray(input.candidateLabels),
+      sourceAdviceId: firstNonEmptyString(input.sourceAdviceId) ?? undefined,
+      runIds: normalizeDistinctStringArray(input.runIds),
+      lastError: firstNonEmptyString(input.lastError) ?? undefined,
+      startedAt:
+        Object.prototype.hasOwnProperty.call(input, "startedAt")
+          ? toIsoString(input.startedAt) ?? undefined
+          : undefined,
+      finishedAt:
+        Object.prototype.hasOwnProperty.call(input, "finishedAt")
+          ? toIsoString(input.finishedAt) ?? undefined
+          : undefined,
+      createdAt,
+      updatedAt: toIsoString(input.updatedAt) ?? new Date().toISOString(),
+    };
+
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.upsertReplayExperimentToMemory(experiment);
+    }
+
+    try {
+      return await this.withTransaction(pool, async (client) => {
+        await client.query(
+          `INSERT INTO replay_experiments (
+             id,
+             tenant_id,
+             name,
+             dataset_id,
+             baseline_id,
+             baseline_version_id,
+             trigger_source,
+             execution_mode,
+             status,
+             candidate_labels,
+             source_advice_id,
+             last_error,
+             started_at,
+             finished_at,
+             created_at,
+             updated_at
+           )
+           VALUES (
+             $1,
+             $2,
+             $3,
+             $4,
+             $5,
+             $6,
+             $7,
+             $8,
+             $9,
+             $10::jsonb,
+             $11,
+             $12,
+             $13::timestamptz,
+             $14::timestamptz,
+             $15::timestamptz,
+             $16::timestamptz
+           )
+           ON CONFLICT (tenant_id, id)
+           DO UPDATE
+             SET name = EXCLUDED.name,
+                 dataset_id = EXCLUDED.dataset_id,
+                 baseline_id = EXCLUDED.baseline_id,
+                 baseline_version_id = EXCLUDED.baseline_version_id,
+                 trigger_source = EXCLUDED.trigger_source,
+                 execution_mode = EXCLUDED.execution_mode,
+                 status = EXCLUDED.status,
+                 candidate_labels = EXCLUDED.candidate_labels,
+                 source_advice_id = EXCLUDED.source_advice_id,
+                 last_error = EXCLUDED.last_error,
+                 started_at = EXCLUDED.started_at,
+                 finished_at = EXCLUDED.finished_at,
+                 created_at = EXCLUDED.created_at,
+                 updated_at = EXCLUDED.updated_at`,
+          [
+            experiment.id,
+            experiment.tenantId,
+            experiment.name,
+            experiment.datasetId,
+            experiment.baselineId ?? null,
+            experiment.baselineVersionId ?? null,
+            experiment.triggerSource,
+            experiment.executionMode,
+            experiment.status,
+            safeStringifyJson(experiment.candidateLabels),
+            experiment.sourceAdviceId ?? null,
+            experiment.lastError ?? null,
+            experiment.startedAt ?? null,
+            experiment.finishedAt ?? null,
+            experiment.createdAt,
+            experiment.updatedAt,
+          ]
+        );
+
+        await client.query(
+          `DELETE FROM replay_experiment_runs
+           WHERE tenant_id = $1
+             AND experiment_id = $2`,
+          [experiment.tenantId, experiment.id]
+        );
+
+        for (const [index, runId] of experiment.runIds.entries()) {
+          await client.query(
+            `INSERT INTO replay_experiment_runs (
+               tenant_id,
+               experiment_id,
+               run_id,
+               created_at
+             )
+             VALUES ($1, $2, $3, $4::timestamptz)`,
+            [
+              experiment.tenantId,
+              experiment.id,
+              runId,
+              new Date(Date.parse(experiment.updatedAt) + index).toISOString(),
+            ]
+          );
+        }
+
+        const refreshed = await client.query(
+          `SELECT id,
+                  tenant_id,
+                  name,
+                  dataset_id,
+                  baseline_id,
+                  baseline_version_id,
+                  trigger_source,
+                  execution_mode,
+                  status,
+                  candidate_labels,
+                  source_advice_id,
+                  last_error,
+                  started_at,
+                  finished_at,
+                  created_at,
+                  updated_at
+           FROM replay_experiments
+           WHERE tenant_id = $1
+             AND id = $2
+           LIMIT 1`,
+          [experiment.tenantId, experiment.id]
+        );
+        const row = refreshed.rows[0];
+        if (!row) {
+          return this.upsertReplayExperimentToMemory(experiment);
+        }
+        const runIdsByExperimentId = await this.loadReplayExperimentRunIdsMap(
+          client,
+          experiment.tenantId,
+          [experiment.id]
+        );
+        return mapReplayExperimentRow(
+          row,
+          runIdsByExperimentId.get(experiment.id) ?? []
+        );
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("replay_dataset_not_found:")) {
+        throw error;
+      }
+      this.disableDb(error, "写入 replay_experiments 失败");
+      return this.upsertReplayExperimentToMemory(experiment);
+    }
+  }
+
   async upsertReplayArtifacts(
     tenantId: string,
     runId: string,
@@ -14244,6 +18523,130 @@ class ControlPlaneRepository {
   ): Promise<ReplayBaseline | null> {
     const dataset = await this.getReplayDatasetById(tenantId, baselineId);
     return dataset ? mapReplayDatasetToBaseline(dataset) : null;
+  }
+
+  async listReplayBaselineVersions(
+    tenantId: string,
+    baselineId: string
+  ): Promise<ReplayBaselineVersion[]> {
+    const dataset = await this.getReplayDatasetById(tenantId, baselineId);
+    return dataset ? listReplayBaselineVersionsFromDataset(dataset) : [];
+  }
+
+  async createReplayBaselineVersion(
+    tenantId: string,
+    baselineId: string,
+    input: CreateReplayBaselineVersionInput
+  ): Promise<ReplayBaselineVersion> {
+    const dataset = await this.getReplayDatasetById(tenantId, baselineId);
+    if (!dataset) {
+      throw new Error(`replay_baseline_not_found:${tenantId}:${baselineId}`);
+    }
+    const versions = listReplayBaselineVersionsFromDataset(dataset);
+    const nextVersion = Math.max(1, ...versions.map((item) => item.version)) + 1;
+    const version: ReplayBaselineVersion = {
+      id: crypto.randomUUID(),
+      tenantId: dataset.tenantId,
+      baselineId: dataset.id,
+      version: nextVersion,
+      datasetRef: firstNonEmptyString(input.datasetRef) ?? dataset.externalDatasetId,
+      model: firstNonEmptyString(input.model) ?? dataset.model,
+      promptVersion: firstNonEmptyString(input.promptVersion) ?? dataset.promptVersion,
+      scenarioCount:
+        input.scenarioCount !== undefined
+          ? Math.max(0, Math.trunc(toNumber(input.scenarioCount, dataset.caseCount)))
+          : dataset.caseCount,
+      metadata: toDbRow(input.metadata) ?? {},
+      note: firstNonEmptyString(input.note) ?? undefined,
+      createdAt: toIsoString(input.createdAt) ?? new Date().toISOString(),
+      promotedAt: undefined,
+    };
+    const currentCases = await this.listReplayDatasetCases(dataset.tenantId, dataset.id, {
+      limit: Number.MAX_SAFE_INTEGER,
+    });
+    const mergedMetadata = applyReplayBaselineVersionsToMetadata(
+      toDbRow(dataset.metadata) ?? {},
+      [...versions, version],
+      firstNonEmptyString((toDbRow(dataset.metadata) ?? {}).currentVersionId) ?? versions[versions.length - 1]?.id ?? version.id,
+    );
+    const updatedDataset = await this.updateReplayDatasetSnapshot(dataset.tenantId, dataset.id, {
+      metadata: mergedMetadata,
+      updatedAt: version.createdAt,
+    });
+    if (!updatedDataset) {
+      throw new Error(`replay_baseline_not_found:${dataset.tenantId}:${dataset.id}`);
+    }
+    await this.replaceReplayDatasetVersionCases(dataset.tenantId, dataset.id, version.id, currentCases);
+    return version;
+  }
+
+  async promoteReplayBaselineVersion(
+    tenantId: string,
+    baselineId: string,
+    versionId: string
+  ): Promise<ReplayBaselineVersion | null> {
+    const dataset = await this.getReplayDatasetById(tenantId, baselineId);
+    if (!dataset) {
+      return null;
+    }
+    const versions = listReplayBaselineVersionsFromDataset(dataset);
+    const target = versions.find((item) => item.id === versionId);
+    if (!target) {
+      return null;
+    }
+    const promotedAt = new Date().toISOString();
+    let versionCases = await this.listReplayDatasetVersionCases(dataset.tenantId, dataset.id, target.id, {
+      limit: Number.MAX_SAFE_INTEGER,
+    });
+    const currentVersionId = firstNonEmptyString((toDbRow(dataset.metadata) ?? {}).currentVersionId);
+    if (versionCases.length === 0 && currentVersionId === target.id) {
+      const currentCases = await this.listReplayDatasetCases(dataset.tenantId, dataset.id, {
+        limit: Number.MAX_SAFE_INTEGER,
+      });
+      await this.replaceReplayDatasetVersionCases(dataset.tenantId, dataset.id, target.id, currentCases);
+      versionCases = currentCases;
+    }
+    if (versionCases.length > 0) {
+      await this.replaceReplayDatasetCases(
+        dataset.tenantId,
+        dataset.id,
+        versionCases.map((item) => ({
+          caseId: item.caseId,
+          sortOrder: item.sortOrder,
+          input: item.input,
+          expectedOutput: item.expectedOutput,
+          baselineOutput: item.baselineOutput,
+          candidateInput: item.candidateInput,
+          metadata: item.metadata,
+        })),
+      );
+    }
+    const nextVersions = versions.map((item) =>
+      item.id === target.id ? { ...item, promotedAt } : item,
+    );
+    const nextMetadata = applyReplayBaselineVersionsToMetadata(
+      {
+        ...(toDbRow(dataset.metadata) ?? {}),
+        ...target.metadata,
+      },
+      nextVersions,
+      target.id,
+    );
+    const updatedDataset = await this.updateReplayDatasetSnapshot(dataset.tenantId, dataset.id, {
+      externalDatasetId: target.datasetRef,
+      model: target.model,
+      promptVersion: target.promptVersion,
+      caseCount: target.scenarioCount,
+      metadata: nextMetadata,
+      updatedAt: promotedAt,
+    });
+    if (!updatedDataset) {
+      throw new Error(`replay_baseline_not_found:${dataset.tenantId}:${dataset.id}`);
+    }
+    return {
+      ...target,
+      promotedAt,
+    };
   }
 
   async createReplayJob(tenantId: string, input: CreateReplayJobInput): Promise<ReplayJob> {
@@ -15437,6 +19840,32 @@ class ControlPlaneRepository {
     );
 
     await pool.query(
+      `CREATE TABLE IF NOT EXISTS alert_external_links (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         alert_id TEXT NOT NULL,
+         external_type TEXT NOT NULL DEFAULT 'ticket',
+         external_system TEXT NOT NULL DEFAULT 'ticket',
+         external_id TEXT NOT NULL,
+         external_status TEXT,
+         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         last_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_alert_external_links_tenant_alert_type_external_id
+       ON alert_external_links (tenant_id, alert_id, external_type, external_id)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_alert_external_links_tenant_alert_updated_at
+       ON alert_external_links (tenant_id, alert_id, updated_at DESC)`
+    );
+
+    await pool.query(
       `CREATE TABLE IF NOT EXISTS alert_orchestration_rules (
          tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
          id TEXT NOT NULL,
@@ -15875,6 +20304,40 @@ class ControlPlaneRepository {
     );
 
     await pool.query(
+      `CREATE TABLE IF NOT EXISTS tenant_residency_kms_key_mappings (
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         region_id TEXT NOT NULL,
+         key_provider TEXT NOT NULL,
+         key_ref TEXT NOT NULL,
+         enabled BOOLEAN NOT NULL DEFAULT TRUE,
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         PRIMARY KEY (tenant_id, region_id)
+       )`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS tenant_residency_archive_region_policies (
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         source_region TEXT NOT NULL,
+         archive_region TEXT NOT NULL,
+         archive_class TEXT NOT NULL,
+         enabled BOOLEAN NOT NULL DEFAULT TRUE,
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         PRIMARY KEY (tenant_id, source_region)
+       )`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_residency_kms_key_mappings_tenant_updated_at
+       ON tenant_residency_kms_key_mappings (tenant_id, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_residency_archive_region_policies_tenant_updated_at
+       ON tenant_residency_archive_region_policies (tenant_id, updated_at DESC)`
+    );
+
+    await pool.query(
       `CREATE TABLE IF NOT EXISTS rule_assets (
          id TEXT PRIMARY KEY,
          tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
@@ -16076,6 +20539,15 @@ class ControlPlaneRepository {
          tool_id TEXT NOT NULL,
          risk_level TEXT NOT NULL DEFAULT 'medium',
          decision TEXT NOT NULL DEFAULT 'require_approval',
+         approval_mode TEXT,
+         approval_workflow JSONB,
+         approval_stages JSONB NOT NULL DEFAULT '[]'::jsonb,
+         stage1_required_approvals INTEGER,
+         stage2_required_approvals INTEGER,
+         stage1_roles JSONB NOT NULL DEFAULT '[]'::jsonb,
+         stage2_roles JSONB NOT NULL DEFAULT '[]'::jsonb,
+         approval_condition JSONB NOT NULL DEFAULT '{}'::jsonb,
+         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
          reason TEXT,
          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
          PRIMARY KEY (tenant_id, tool_id)
@@ -16088,6 +20560,15 @@ class ControlPlaneRepository {
          ADD COLUMN IF NOT EXISTS tool_id TEXT,
          ADD COLUMN IF NOT EXISTS risk_level TEXT,
          ADD COLUMN IF NOT EXISTS decision TEXT,
+         ADD COLUMN IF NOT EXISTS approval_mode TEXT,
+         ADD COLUMN IF NOT EXISTS approval_workflow JSONB,
+         ADD COLUMN IF NOT EXISTS approval_stages JSONB,
+         ADD COLUMN IF NOT EXISTS stage1_required_approvals INTEGER,
+         ADD COLUMN IF NOT EXISTS stage2_required_approvals INTEGER,
+         ADD COLUMN IF NOT EXISTS stage1_roles JSONB,
+         ADD COLUMN IF NOT EXISTS stage2_roles JSONB,
+         ADD COLUMN IF NOT EXISTS approval_condition JSONB,
+         ADD COLUMN IF NOT EXISTS metadata JSONB,
          ADD COLUMN IF NOT EXISTS reason TEXT,
          ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ`
     );
@@ -16104,6 +20585,50 @@ class ControlPlaneRepository {
              WHEN decision IN ('allow', 'deny', 'require_approval') THEN decision
              ELSE 'require_approval'
            END,
+           approval_mode = CASE
+             WHEN approval_mode IN ('single_stage', 'two_stage', 'multi_stage') THEN approval_mode
+             ELSE NULL
+           END,
+           approval_stages = COALESCE(
+             approval_stages,
+             CASE
+               WHEN stage2_required_approvals IS NOT NULL OR jsonb_array_length(COALESCE(stage2_roles, '[]'::jsonb)) > 0
+                 THEN jsonb_build_array(
+                   jsonb_build_object(
+                     'stage', 'stage1',
+                     'requiredApprovals', GREATEST(COALESCE(stage1_required_approvals, 1), 1),
+                     'roles', COALESCE(stage1_roles, '[]'::jsonb)
+                   ),
+                   jsonb_build_object(
+                     'stage', 'stage2',
+                     'requiredApprovals', GREATEST(COALESCE(stage2_required_approvals, 1), 1),
+                     'roles', COALESCE(stage2_roles, '[]'::jsonb)
+                   )
+                 )
+               ELSE jsonb_build_array(
+                 jsonb_build_object(
+                   'stage', 'stage1',
+                   'requiredApprovals', GREATEST(COALESCE(stage1_required_approvals, 1), 1),
+                   'roles', COALESCE(stage1_roles, '[]'::jsonb)
+                 )
+               )
+             END
+           ),
+           stage1_required_approvals = CASE
+             WHEN stage1_required_approvals IS NULL OR stage1_required_approvals < 1 THEN NULL
+             ELSE stage1_required_approvals
+           END,
+           stage2_required_approvals = CASE
+             WHEN stage2_required_approvals IS NULL OR stage2_required_approvals < 1 THEN NULL
+             ELSE stage2_required_approvals
+           END,
+           stage1_roles = COALESCE(stage1_roles, '[]'::jsonb),
+           stage2_roles = COALESCE(stage2_roles, '[]'::jsonb),
+           approval_condition = COALESCE(approval_condition, '{}'::jsonb),
+           metadata = CASE
+             WHEN jsonb_typeof(metadata) = 'object' THEN metadata
+             ELSE '{}'::jsonb
+           END,
            reason = NULLIF(reason, ''),
            updated_at = COALESCE(updated_at, NOW())
        WHERE tenant_id IS NULL
@@ -16114,6 +20639,15 @@ class ControlPlaneRepository {
           OR risk_level NOT IN ('low', 'medium', 'high')
           OR decision IS NULL
           OR decision NOT IN ('allow', 'deny', 'require_approval')
+          OR (approval_mode IS NOT NULL AND approval_mode NOT IN ('single_stage', 'two_stage', 'multi_stage'))
+          OR approval_stages IS NULL
+          OR (stage1_required_approvals IS NOT NULL AND stage1_required_approvals < 1)
+          OR (stage2_required_approvals IS NOT NULL AND stage2_required_approvals < 1)
+          OR stage1_roles IS NULL
+          OR stage2_roles IS NULL
+          OR approval_condition IS NULL
+          OR metadata IS NULL
+          OR jsonb_typeof(metadata) <> 'object'
           OR updated_at IS NULL`
     );
 
@@ -16185,6 +20719,129 @@ class ControlPlaneRepository {
     await pool.query(
       `CREATE INDEX IF NOT EXISTS idx_mcp_approval_requests_tenant_status_updated_at
        ON mcp_approval_requests (tenant_id, status, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS mcp_approval_workflows (
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         approval_request_id TEXT NOT NULL,
+         approval_mode TEXT NOT NULL DEFAULT 'single_stage',
+         approval_condition_matched BOOLEAN NOT NULL DEFAULT FALSE,
+         approval_workflow JSONB,
+         approval_stages JSONB NOT NULL DEFAULT '[]'::jsonb,
+         current_node_id TEXT,
+         path_history JSONB NOT NULL DEFAULT '[]'::jsonb,
+         evaluation_context JSONB NOT NULL DEFAULT '{}'::jsonb,
+         stage1_required_approvals INTEGER NOT NULL DEFAULT 1,
+         stage1_roles JSONB NOT NULL DEFAULT '[]'::jsonb,
+         stage1_approvals JSONB NOT NULL DEFAULT '[]'::jsonb,
+         stage1_rejected_by JSONB,
+         stage2_required_approvals INTEGER,
+         stage2_roles JSONB NOT NULL DEFAULT '[]'::jsonb,
+         stage2_approvals JSONB NOT NULL DEFAULT '[]'::jsonb,
+         stage2_rejected_by JSONB,
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         PRIMARY KEY (tenant_id, approval_request_id)
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE mcp_approval_workflows
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS approval_request_id TEXT,
+         ADD COLUMN IF NOT EXISTS approval_mode TEXT,
+         ADD COLUMN IF NOT EXISTS approval_condition_matched BOOLEAN,
+         ADD COLUMN IF NOT EXISTS approval_workflow JSONB,
+         ADD COLUMN IF NOT EXISTS approval_stages JSONB,
+         ADD COLUMN IF NOT EXISTS current_node_id TEXT,
+         ADD COLUMN IF NOT EXISTS path_history JSONB,
+         ADD COLUMN IF NOT EXISTS evaluation_context JSONB,
+         ADD COLUMN IF NOT EXISTS stage1_required_approvals INTEGER,
+         ADD COLUMN IF NOT EXISTS stage1_roles JSONB,
+         ADD COLUMN IF NOT EXISTS stage1_approvals JSONB,
+         ADD COLUMN IF NOT EXISTS stage1_rejected_by JSONB,
+         ADD COLUMN IF NOT EXISTS stage2_required_approvals INTEGER,
+         ADD COLUMN IF NOT EXISTS stage2_roles JSONB,
+         ADD COLUMN IF NOT EXISTS stage2_approvals JSONB,
+         ADD COLUMN IF NOT EXISTS stage2_rejected_by JSONB,
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ`
+    );
+
+    await pool.query(
+      `UPDATE mcp_approval_workflows
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           approval_request_id = COALESCE(NULLIF(approval_request_id, ''), 'unknown'),
+           approval_mode = CASE
+             WHEN approval_mode IN ('single_stage', 'two_stage', 'multi_stage') THEN approval_mode
+             ELSE 'single_stage'
+           END,
+           approval_condition_matched = COALESCE(approval_condition_matched, FALSE),
+           current_node_id = COALESCE(NULLIF(current_node_id, ''), 'stage1'),
+           approval_stages = COALESCE(
+             approval_stages,
+             CASE
+               WHEN stage2_required_approvals IS NOT NULL
+                 OR jsonb_array_length(COALESCE(stage2_roles, '[]'::jsonb)) > 0
+                 OR jsonb_array_length(COALESCE(stage2_approvals, '[]'::jsonb)) > 0
+                 OR stage2_rejected_by IS NOT NULL
+                 THEN jsonb_build_array(
+                   jsonb_build_object(
+                     'stage', 'stage1',
+                     'requiredApprovals', GREATEST(COALESCE(stage1_required_approvals, 1), 1),
+                     'roles', COALESCE(stage1_roles, '[]'::jsonb),
+                     'approvals', COALESCE(stage1_approvals, '[]'::jsonb),
+                     'rejectedBy', COALESCE(stage1_rejected_by, 'null'::jsonb)
+                   ),
+                   jsonb_build_object(
+                     'stage', 'stage2',
+                     'requiredApprovals', GREATEST(COALESCE(stage2_required_approvals, 1), 1),
+                     'roles', COALESCE(stage2_roles, '[]'::jsonb),
+                     'approvals', COALESCE(stage2_approvals, '[]'::jsonb),
+                     'rejectedBy', COALESCE(stage2_rejected_by, 'null'::jsonb)
+                   )
+                 )
+               ELSE jsonb_build_array(
+                 jsonb_build_object(
+                   'stage', 'stage1',
+                   'requiredApprovals', GREATEST(COALESCE(stage1_required_approvals, 1), 1),
+                   'roles', COALESCE(stage1_roles, '[]'::jsonb),
+                   'approvals', COALESCE(stage1_approvals, '[]'::jsonb),
+                   'rejectedBy', COALESCE(stage1_rejected_by, 'null'::jsonb)
+                 )
+               )
+             END
+           ),
+           stage1_required_approvals = GREATEST(COALESCE(stage1_required_approvals, 1), 1),
+           stage1_roles = COALESCE(stage1_roles, '[]'::jsonb),
+           stage1_approvals = COALESCE(stage1_approvals, '[]'::jsonb),
+           path_history = COALESCE(path_history, '[]'::jsonb),
+           evaluation_context = COALESCE(evaluation_context, '{}'::jsonb),
+           stage2_roles = COALESCE(stage2_roles, '[]'::jsonb),
+           stage2_approvals = COALESCE(stage2_approvals, '[]'::jsonb),
+           updated_at = COALESCE(updated_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR approval_request_id IS NULL
+          OR approval_request_id = ''
+          OR approval_mode IS NULL
+          OR approval_mode NOT IN ('single_stage', 'two_stage', 'multi_stage')
+          OR approval_condition_matched IS NULL
+          OR current_node_id IS NULL
+          OR approval_stages IS NULL
+          OR stage1_required_approvals IS NULL
+          OR stage1_required_approvals < 1
+          OR stage1_roles IS NULL
+          OR stage1_approvals IS NULL
+          OR path_history IS NULL
+          OR evaluation_context IS NULL
+          OR stage2_roles IS NULL
+          OR stage2_approvals IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_mcp_approval_workflows_tenant_updated_at
+       ON mcp_approval_workflows (tenant_id, updated_at DESC)`
     );
 
     await pool.query(
@@ -16781,6 +21438,102 @@ class ControlPlaneRepository {
     );
 
     await pool.query(
+      `CREATE TABLE IF NOT EXISTS legal_holds (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         resource_type TEXT NOT NULL,
+         resource_id TEXT NOT NULL,
+         reason TEXT NOT NULL,
+         created_by_user_id TEXT,
+         created_by_email TEXT,
+         released_at TIMESTAMPTZ,
+         released_by_user_id TEXT,
+         released_by_email TEXT,
+         release_reason TEXT,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE legal_holds
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS resource_type TEXT,
+         ADD COLUMN IF NOT EXISTS resource_id TEXT,
+         ADD COLUMN IF NOT EXISTS reason TEXT,
+         ADD COLUMN IF NOT EXISTS created_by_user_id TEXT,
+         ADD COLUMN IF NOT EXISTS created_by_email TEXT,
+         ADD COLUMN IF NOT EXISTS released_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS released_by_user_id TEXT,
+         ADD COLUMN IF NOT EXISTS released_by_email TEXT,
+         ADD COLUMN IF NOT EXISTS release_reason TEXT,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE legal_holds
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           resource_type = CASE
+             WHEN resource_type IN ('audit', 'audit_export', 'evidence_bundle') THEN resource_type
+             ELSE 'audit'
+           END,
+           resource_id = COALESCE(NULLIF(resource_id, ''), id),
+           reason = COALESCE(NULLIF(reason, ''), 'legal hold'),
+           created_by_user_id = NULLIF(created_by_user_id, ''),
+           created_by_email = NULLIF(created_by_email, ''),
+           released_by_user_id = NULLIF(released_by_user_id, ''),
+           released_by_email = NULLIF(released_by_email, ''),
+           release_reason = NULLIF(release_reason, ''),
+           created_at = COALESCE(created_at, NOW()),
+           updated_at = COALESCE(updated_at, created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR resource_type IS NULL
+          OR resource_type NOT IN ('audit', 'audit_export', 'evidence_bundle')
+          OR resource_id IS NULL
+          OR resource_id = ''
+          OR reason IS NULL
+          OR reason = ''
+          OR created_by_user_id = ''
+          OR created_by_email = ''
+          OR released_by_user_id = ''
+          OR released_by_email = ''
+          OR release_reason = ''
+          OR created_at IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `ALTER TABLE legal_holds
+         ALTER COLUMN tenant_id SET DEFAULT '${DEFAULT_TENANT_ID}',
+         ALTER COLUMN tenant_id SET NOT NULL,
+         ALTER COLUMN resource_type SET NOT NULL,
+         ALTER COLUMN resource_id SET NOT NULL,
+         ALTER COLUMN reason SET NOT NULL,
+         ALTER COLUMN created_at SET DEFAULT NOW(),
+         ALTER COLUMN created_at SET NOT NULL,
+         ALTER COLUMN updated_at SET DEFAULT NOW(),
+         ALTER COLUMN updated_at SET NOT NULL`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_legal_holds_tenant_created_at
+       ON legal_holds (tenant_id, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_legal_holds_tenant_resource
+       ON legal_holds (tenant_id, resource_type, resource_id, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_legal_holds_active_resource
+       ON legal_holds (tenant_id, resource_type, resource_id)
+       WHERE released_at IS NULL`
+    );
+
+    await pool.query(
       `CREATE TABLE IF NOT EXISTS tenants (
          id TEXT PRIMARY KEY,
          name TEXT NOT NULL,
@@ -16852,6 +21605,17 @@ class ControlPlaneRepository {
     );
 
     await pool.query(
+      `INSERT INTO tenants (id, name, created_at, updated_at)
+       SELECT DISTINCT hold.tenant_id, hold.tenant_id, NOW(), NOW()
+       FROM legal_holds AS hold
+       LEFT JOIN tenants AS t ON t.id = hold.tenant_id
+       WHERE hold.tenant_id IS NOT NULL
+         AND hold.tenant_id <> ''
+         AND t.id IS NULL
+       ON CONFLICT (id) DO NOTHING`
+    );
+
+    await pool.query(
       `UPDATE sources
        SET metadata = jsonb_set(
              jsonb_set(COALESCE(metadata, '{}'::jsonb), '{tenant_id}', to_jsonb(tenant_id), true),
@@ -16884,6 +21648,11 @@ class ControlPlaneRepository {
     );
 
     await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_legal_holds_tenant_updated_at
+       ON legal_holds (tenant_id, updated_at DESC)`
+    );
+
+    await pool.query(
       `DO $$
        BEGIN
          IF NOT EXISTS (
@@ -16911,6 +21680,23 @@ class ControlPlaneRepository {
          ) THEN
            ALTER TABLE audit_logs
              ADD CONSTRAINT fk_audit_logs_tenant
+             FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT;
+         END IF;
+       END
+       $$`
+    );
+
+    await pool.query(
+      `DO $$
+       BEGIN
+         IF NOT EXISTS (
+           SELECT 1
+           FROM pg_constraint
+           WHERE conname = 'fk_legal_holds_tenant'
+             AND conrelid = 'legal_holds'::regclass
+         ) THEN
+           ALTER TABLE legal_holds
+             ADD CONSTRAINT fk_legal_holds_tenant
              FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT;
          END IF;
        END
@@ -17258,6 +22044,128 @@ class ControlPlaneRepository {
     await pool.query(
       `CREATE INDEX IF NOT EXISTS idx_identity_agent_bindings_tenant_device_updated_at
        ON identity_agent_bindings (tenant_id, device_id, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS agent_runtime_heartbeats (
+         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+         agent_id TEXT NOT NULL,
+         session_id TEXT,
+         hostname TEXT,
+         version TEXT,
+         daemon BOOLEAN NOT NULL DEFAULT FALSE,
+         occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         config_version TEXT,
+         config_fetched_at TIMESTAMPTZ,
+         heartbeat_interval_sec INTEGER,
+         ingest_protocol TEXT,
+         ingest_endpoint TEXT,
+         source_count INTEGER NOT NULL DEFAULT 0,
+         source_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+         last_ingest_status_code INTEGER,
+         last_accepted INTEGER NOT NULL DEFAULT 0,
+         last_rejected INTEGER NOT NULL DEFAULT 0,
+         last_error TEXT,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         PRIMARY KEY (tenant_id, agent_id)
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE agent_runtime_heartbeats
+         ADD COLUMN IF NOT EXISTS session_id TEXT,
+         ADD COLUMN IF NOT EXISTS hostname TEXT,
+         ADD COLUMN IF NOT EXISTS version TEXT,
+         ADD COLUMN IF NOT EXISTS daemon BOOLEAN NOT NULL DEFAULT FALSE,
+         ADD COLUMN IF NOT EXISTS occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS config_version TEXT,
+         ADD COLUMN IF NOT EXISTS config_fetched_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS heartbeat_interval_sec INTEGER,
+         ADD COLUMN IF NOT EXISTS ingest_protocol TEXT,
+         ADD COLUMN IF NOT EXISTS ingest_endpoint TEXT,
+         ADD COLUMN IF NOT EXISTS source_count INTEGER NOT NULL DEFAULT 0,
+         ADD COLUMN IF NOT EXISTS source_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+         ADD COLUMN IF NOT EXISTS last_ingest_status_code INTEGER,
+         ADD COLUMN IF NOT EXISTS last_accepted INTEGER NOT NULL DEFAULT 0,
+         ADD COLUMN IF NOT EXISTS last_rejected INTEGER NOT NULL DEFAULT 0,
+         ADD COLUMN IF NOT EXISTS last_error TEXT,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE agent_runtime_heartbeats
+       SET session_id = NULLIF(session_id, ''),
+           hostname = NULLIF(hostname, ''),
+           version = NULLIF(version, ''),
+           daemon = COALESCE(daemon, FALSE),
+           occurred_at = COALESCE(occurred_at, updated_at, created_at, NOW()),
+           config_version = NULLIF(config_version, ''),
+           config_fetched_at = config_fetched_at,
+           heartbeat_interval_sec = CASE
+             WHEN heartbeat_interval_sec IS NULL OR heartbeat_interval_sec <= 0
+               THEN NULL
+             ELSE heartbeat_interval_sec
+           END,
+           ingest_protocol = NULLIF(ingest_protocol, ''),
+           ingest_endpoint = NULLIF(ingest_endpoint, ''),
+           source_count = GREATEST(COALESCE(source_count, 0), 0),
+           source_ids = COALESCE(source_ids, '[]'::jsonb),
+           last_ingest_status_code = CASE
+             WHEN last_ingest_status_code IS NULL OR last_ingest_status_code < 0
+               THEN NULL
+             ELSE last_ingest_status_code
+           END,
+           last_accepted = GREATEST(COALESCE(last_accepted, 0), 0),
+           last_rejected = GREATEST(COALESCE(last_rejected, 0), 0),
+           last_error = NULLIF(last_error, ''),
+           created_at = COALESCE(created_at, NOW()),
+           updated_at = COALESCE(updated_at, occurred_at, created_at, NOW())
+       WHERE session_id = ''
+          OR hostname = ''
+          OR version = ''
+          OR daemon IS NULL
+          OR occurred_at IS NULL
+          OR config_version = ''
+          OR heartbeat_interval_sec <= 0
+          OR ingest_protocol = ''
+          OR ingest_endpoint = ''
+          OR source_count IS NULL
+          OR source_ids IS NULL
+          OR last_ingest_status_code < 0
+          OR last_accepted IS NULL
+          OR last_accepted < 0
+          OR last_rejected IS NULL
+          OR last_rejected < 0
+          OR last_error = ''
+          OR created_at IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `ALTER TABLE agent_runtime_heartbeats
+         ALTER COLUMN daemon SET DEFAULT FALSE,
+         ALTER COLUMN daemon SET NOT NULL,
+         ALTER COLUMN occurred_at SET DEFAULT NOW(),
+         ALTER COLUMN occurred_at SET NOT NULL,
+         ALTER COLUMN source_count SET DEFAULT 0,
+         ALTER COLUMN source_count SET NOT NULL,
+         ALTER COLUMN source_ids SET DEFAULT '[]'::jsonb,
+         ALTER COLUMN source_ids SET NOT NULL,
+         ALTER COLUMN last_accepted SET DEFAULT 0,
+         ALTER COLUMN last_accepted SET NOT NULL,
+         ALTER COLUMN last_rejected SET DEFAULT 0,
+         ALTER COLUMN last_rejected SET NOT NULL,
+         ALTER COLUMN created_at SET DEFAULT NOW(),
+         ALTER COLUMN created_at SET NOT NULL,
+         ALTER COLUMN updated_at SET DEFAULT NOW(),
+         ALTER COLUMN updated_at SET NOT NULL`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_agent_runtime_heartbeats_tenant_occurred_at
+       ON agent_runtime_heartbeats (tenant_id, occurred_at DESC, updated_at DESC)`
     );
 
     await pool.query(
@@ -17815,6 +22723,130 @@ class ControlPlaneRepository {
     );
 
     await pool.query(
+      `CREATE TABLE IF NOT EXISTS quality_advice_executions (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         advice_id TEXT NOT NULL DEFAULT '',
+         project TEXT NOT NULL DEFAULT '',
+         severity TEXT NOT NULL DEFAULT 'warn',
+         action_type TEXT NOT NULL DEFAULT 'scorecard_adjustment',
+         trigger_source TEXT NOT NULL DEFAULT 'manual',
+         status TEXT NOT NULL DEFAULT 'pending',
+         metric TEXT,
+         dataset_id TEXT,
+         experiment_id TEXT,
+         candidate_labels JSONB NOT NULL DEFAULT '[]'::jsonb,
+         scorecard_key TEXT,
+         result_summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+         error TEXT,
+         requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         started_at TIMESTAMPTZ,
+         finished_at TIMESTAMPTZ,
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE quality_advice_executions
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS advice_id TEXT,
+         ADD COLUMN IF NOT EXISTS project TEXT,
+         ADD COLUMN IF NOT EXISTS severity TEXT,
+         ADD COLUMN IF NOT EXISTS action_type TEXT,
+         ADD COLUMN IF NOT EXISTS trigger_source TEXT,
+         ADD COLUMN IF NOT EXISTS status TEXT,
+         ADD COLUMN IF NOT EXISTS metric TEXT,
+         ADD COLUMN IF NOT EXISTS dataset_id TEXT,
+         ADD COLUMN IF NOT EXISTS experiment_id TEXT,
+         ADD COLUMN IF NOT EXISTS candidate_labels JSONB NOT NULL DEFAULT '[]'::jsonb,
+         ADD COLUMN IF NOT EXISTS scorecard_key TEXT,
+         ADD COLUMN IF NOT EXISTS result_summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS error TEXT,
+         ADD COLUMN IF NOT EXISTS requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE quality_advice_executions
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           advice_id = COALESCE(NULLIF(advice_id, ''), id),
+           project = COALESCE(NULLIF(project, ''), advice_id),
+           severity = CASE
+             WHEN severity IN ('info', 'warn', 'critical') THEN severity
+             ELSE 'warn'
+           END,
+           action_type = CASE
+             WHEN action_type IN ('scorecard_adjustment', 'replay_experiment') THEN action_type
+             ELSE 'scorecard_adjustment'
+           END,
+           trigger_source = CASE
+             WHEN trigger_source IN ('manual', 'automatic') THEN trigger_source
+             ELSE 'manual'
+           END,
+           status = CASE
+             WHEN status IN ('pending', 'running', 'completed', 'failed', 'cancelled') THEN status
+             ELSE 'pending'
+           END,
+           metric = NULLIF(metric, ''),
+           dataset_id = NULLIF(dataset_id, ''),
+           experiment_id = NULLIF(experiment_id, ''),
+           candidate_labels = CASE
+             WHEN jsonb_typeof(candidate_labels) = 'array' THEN candidate_labels
+             ELSE '[]'::jsonb
+           END,
+           scorecard_key = NULLIF(scorecard_key, ''),
+           result_summary = CASE
+             WHEN jsonb_typeof(result_summary) = 'object' THEN result_summary
+             ELSE '{}'::jsonb
+           END,
+           error = NULLIF(error, ''),
+           requested_at = COALESCE(requested_at, NOW()),
+           updated_at = COALESCE(updated_at, requested_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR advice_id IS NULL
+          OR advice_id = ''
+          OR project IS NULL
+          OR project = ''
+          OR severity IS NULL
+          OR severity NOT IN ('info', 'warn', 'critical')
+          OR action_type IS NULL
+          OR action_type NOT IN ('scorecard_adjustment', 'replay_experiment')
+          OR trigger_source IS NULL
+          OR trigger_source NOT IN ('manual', 'automatic')
+          OR status IS NULL
+          OR status NOT IN ('pending', 'running', 'completed', 'failed', 'cancelled')
+          OR metric = ''
+          OR dataset_id = ''
+          OR experiment_id = ''
+          OR candidate_labels IS NULL
+          OR jsonb_typeof(candidate_labels) <> 'array'
+          OR scorecard_key = ''
+          OR result_summary IS NULL
+          OR jsonb_typeof(result_summary) <> 'object'
+          OR error = ''
+          OR requested_at IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_quality_advice_executions_tenant_id_unique
+       ON quality_advice_executions (tenant_id, id)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_quality_advice_executions_tenant_advice_requested_at
+       ON quality_advice_executions (tenant_id, advice_id, requested_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_quality_advice_executions_tenant_status_updated_at
+       ON quality_advice_executions (tenant_id, status, updated_at DESC)`
+    );
+
+    await pool.query(
       `CREATE TABLE IF NOT EXISTS replay_baselines (
          id TEXT PRIMARY KEY,
          tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
@@ -18121,6 +23153,52 @@ class ControlPlaneRepository {
     );
 
     await pool.query(
+      `CREATE TABLE IF NOT EXISTS replay_dataset_version_cases (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         dataset_id TEXT NOT NULL,
+         version_id TEXT NOT NULL,
+         case_id TEXT NOT NULL,
+         sort_order INTEGER NOT NULL DEFAULT 0,
+         input_text TEXT NOT NULL DEFAULT '',
+         expected_output TEXT,
+         baseline_output TEXT,
+         candidate_input TEXT,
+         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         checksum TEXT,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE replay_dataset_version_cases
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS dataset_id TEXT,
+         ADD COLUMN IF NOT EXISTS version_id TEXT,
+         ADD COLUMN IF NOT EXISTS case_id TEXT,
+         ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0,
+         ADD COLUMN IF NOT EXISTS input_text TEXT NOT NULL DEFAULT '',
+         ADD COLUMN IF NOT EXISTS expected_output TEXT,
+         ADD COLUMN IF NOT EXISTS baseline_output TEXT,
+         ADD COLUMN IF NOT EXISTS candidate_input TEXT,
+         ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ADD COLUMN IF NOT EXISTS checksum TEXT,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_replay_dataset_version_cases_tenant_case_unique
+       ON replay_dataset_version_cases (tenant_id, dataset_id, version_id, case_id)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_replay_dataset_version_cases_tenant_sort
+       ON replay_dataset_version_cases (tenant_id, dataset_id, version_id, sort_order ASC, case_id ASC)`
+    );
+
+    await pool.query(
       `CREATE TABLE IF NOT EXISTS replay_runs (
          id TEXT PRIMARY KEY,
          tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
@@ -18237,6 +23315,153 @@ class ControlPlaneRepository {
     await pool.query(
       `CREATE INDEX IF NOT EXISTS idx_replay_runs_tenant_status_updated_at
        ON replay_runs (tenant_id, status, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS replay_experiments (
+         id TEXT PRIMARY KEY,
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         name TEXT NOT NULL DEFAULT '',
+         dataset_id TEXT NOT NULL,
+         baseline_id TEXT,
+         baseline_version_id TEXT,
+         trigger_source TEXT NOT NULL DEFAULT 'manual',
+         execution_mode TEXT NOT NULL DEFAULT 'manual',
+         status TEXT NOT NULL DEFAULT 'draft',
+         candidate_labels JSONB NOT NULL DEFAULT '[]'::jsonb,
+         source_advice_id TEXT,
+         last_error TEXT,
+         started_at TIMESTAMPTZ,
+         finished_at TIMESTAMPTZ,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE replay_experiments
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS name TEXT,
+         ADD COLUMN IF NOT EXISTS dataset_id TEXT,
+         ADD COLUMN IF NOT EXISTS baseline_id TEXT,
+         ADD COLUMN IF NOT EXISTS baseline_version_id TEXT,
+         ADD COLUMN IF NOT EXISTS trigger_source TEXT,
+         ADD COLUMN IF NOT EXISTS execution_mode TEXT,
+         ADD COLUMN IF NOT EXISTS status TEXT,
+         ADD COLUMN IF NOT EXISTS candidate_labels JSONB NOT NULL DEFAULT '[]'::jsonb,
+         ADD COLUMN IF NOT EXISTS source_advice_id TEXT,
+         ADD COLUMN IF NOT EXISTS last_error TEXT,
+         ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE replay_experiments
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           name = COALESCE(NULLIF(name, ''), id),
+           dataset_id = COALESCE(NULLIF(dataset_id, ''), id),
+           baseline_id = NULLIF(baseline_id, ''),
+           baseline_version_id = NULLIF(baseline_version_id, ''),
+           trigger_source = CASE
+             WHEN trigger_source IN ('manual', 'quality_advice', 'automatic') THEN trigger_source
+             ELSE 'manual'
+           END,
+           execution_mode = CASE
+             WHEN execution_mode IN ('manual', 'automatic') THEN execution_mode
+             ELSE 'manual'
+           END,
+           status = CASE
+             WHEN status IN ('draft', 'queued', 'running', 'completed', 'failed', 'cancelled') THEN status
+             ELSE 'draft'
+           END,
+           candidate_labels = CASE
+             WHEN jsonb_typeof(candidate_labels) = 'array' THEN candidate_labels
+             ELSE '[]'::jsonb
+           END,
+           source_advice_id = NULLIF(source_advice_id, ''),
+           last_error = NULLIF(last_error, ''),
+           created_at = COALESCE(created_at, NOW()),
+           updated_at = COALESCE(updated_at, created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR name IS NULL
+          OR name = ''
+          OR dataset_id IS NULL
+          OR dataset_id = ''
+          OR baseline_id = ''
+          OR baseline_version_id = ''
+          OR trigger_source IS NULL
+          OR trigger_source NOT IN ('manual', 'quality_advice', 'automatic')
+          OR execution_mode IS NULL
+          OR execution_mode NOT IN ('manual', 'automatic')
+          OR status IS NULL
+          OR status NOT IN ('draft', 'queued', 'running', 'completed', 'failed', 'cancelled')
+          OR candidate_labels IS NULL
+          OR jsonb_typeof(candidate_labels) <> 'array'
+          OR source_advice_id = ''
+          OR last_error = ''
+          OR created_at IS NULL
+          OR updated_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_replay_experiments_tenant_id_unique
+       ON replay_experiments (tenant_id, id)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_replay_experiments_tenant_dataset_created_at
+       ON replay_experiments (tenant_id, dataset_id, created_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_replay_experiments_tenant_status_updated_at
+       ON replay_experiments (tenant_id, status, updated_at DESC)`
+    );
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS replay_experiment_runs (
+         tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}',
+         experiment_id TEXT NOT NULL,
+         run_id TEXT NOT NULL,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         PRIMARY KEY (tenant_id, experiment_id, run_id)
+       )`
+    );
+
+    await pool.query(
+      `ALTER TABLE replay_experiment_runs
+         ADD COLUMN IF NOT EXISTS tenant_id TEXT,
+         ADD COLUMN IF NOT EXISTS experiment_id TEXT,
+         ADD COLUMN IF NOT EXISTS run_id TEXT,
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+      `UPDATE replay_experiment_runs
+       SET tenant_id = COALESCE(NULLIF(tenant_id, ''), '${DEFAULT_TENANT_ID}'),
+           experiment_id = COALESCE(NULLIF(experiment_id, ''), run_id),
+           run_id = COALESCE(NULLIF(run_id, ''), experiment_id),
+           created_at = COALESCE(created_at, NOW())
+       WHERE tenant_id IS NULL
+          OR tenant_id = ''
+          OR experiment_id IS NULL
+          OR experiment_id = ''
+          OR run_id IS NULL
+          OR run_id = ''
+          OR created_at IS NULL`
+    );
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_replay_experiment_runs_tenant_unique
+       ON replay_experiment_runs (tenant_id, experiment_id, run_id)`
+    );
+
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_replay_experiment_runs_tenant_experiment_created_at
+       ON replay_experiment_runs (tenant_id, experiment_id, created_at ASC, run_id ASC)`
     );
 
     await pool.query(
@@ -19699,6 +24924,20 @@ class ControlPlaneRepository {
     };
   }
 
+  private cloneQualityAdviceExecution(
+    qualityAdviceExecution: QualityAdviceExecution
+  ): QualityAdviceExecution {
+    return {
+      ...qualityAdviceExecution,
+      candidateLabels: qualityAdviceExecution.candidateLabels
+        ? [...qualityAdviceExecution.candidateLabels]
+        : undefined,
+      resultSummary: qualityAdviceExecution.resultSummary
+        ? { ...qualityAdviceExecution.resultSummary }
+        : undefined,
+    };
+  }
+
   private listQualityScorecardsFromMemory(
     tenantId: string,
     input: NormalizedQualityScorecardListInput
@@ -19733,6 +24972,84 @@ class ControlPlaneRepository {
     }
     this.memoryQualityScorecards.unshift(this.cloneQualityScorecard(qualityScorecard));
     return this.cloneQualityScorecard(qualityScorecard);
+  }
+
+  private listQualityAdviceExecutionsFromMemory(
+    tenantId: string,
+    input: NormalizedQualityAdviceExecutionListInput
+  ): QualityAdviceExecution[] {
+    return this.memoryQualityAdviceExecutions
+      .filter((item) => {
+        if (item.tenantId !== tenantId) {
+          return false;
+        }
+        if (input.adviceId && item.adviceId !== input.adviceId) {
+          return false;
+        }
+        if (input.actionType && item.actionType !== input.actionType) {
+          return false;
+        }
+        if (input.status && item.status !== input.status) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt) || b.id.localeCompare(a.id))
+      .slice(0, input.limit)
+      .map((item) => this.cloneQualityAdviceExecution(item));
+  }
+
+  private getQualityAdviceExecutionByIdFromMemory(
+    tenantId: string,
+    executionId: string
+  ): QualityAdviceExecution | null {
+    const matched = this.memoryQualityAdviceExecutions.find(
+      (item) => item.tenantId === tenantId && item.id === executionId
+    );
+    return matched ? this.cloneQualityAdviceExecution(matched) : null;
+  }
+
+  private getLatestQualityAdviceExecutionFromMemory(
+    tenantId: string,
+    adviceId: string
+  ): QualityAdviceExecution | null {
+    const matched = this.memoryQualityAdviceExecutions
+      .filter((item) => item.tenantId === tenantId && item.adviceId === adviceId)
+      .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt) || b.id.localeCompare(a.id))[0];
+    return matched ? this.cloneQualityAdviceExecution(matched) : null;
+  }
+
+  private getQualityAdviceExecutionByApprovalRequestIdFromMemory(
+    tenantId: string,
+    approvalRequestId: string
+  ): QualityAdviceExecution | null {
+    const matched = this.memoryQualityAdviceExecutions
+      .filter((item) => {
+        if (item.tenantId !== tenantId) {
+          return false;
+        }
+        const resultSummary = toDbRow(item.resultSummary);
+        return firstNonEmptyString(resultSummary?.approvalRequestId) === approvalRequestId;
+      })
+      .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt) || b.id.localeCompare(a.id))[0];
+    return matched ? this.cloneQualityAdviceExecution(matched) : null;
+  }
+
+  private upsertQualityAdviceExecutionToMemory(
+    qualityAdviceExecution: QualityAdviceExecution
+  ): QualityAdviceExecution {
+    const index = this.memoryQualityAdviceExecutions.findIndex(
+      (item) =>
+        item.tenantId === qualityAdviceExecution.tenantId &&
+        item.id === qualityAdviceExecution.id
+    );
+    if (index >= 0) {
+      this.memoryQualityAdviceExecutions.splice(index, 1);
+    }
+    this.memoryQualityAdviceExecutions.unshift(
+      this.cloneQualityAdviceExecution(qualityAdviceExecution)
+    );
+    return this.cloneQualityAdviceExecution(qualityAdviceExecution);
   }
 
   private cloneReplayDataset(replayDataset: ReplayDataset): ReplayDataset {
@@ -19785,6 +25102,29 @@ class ControlPlaneRepository {
     return matched ? this.cloneReplayDataset(matched) : null;
   }
 
+  private updateReplayDatasetInMemory(replayDataset: ReplayDataset): ReplayDataset {
+    const datasetIndex = this.memoryReplayDatasets.findIndex(
+      (item) => item.tenantId === replayDataset.tenantId && item.id === replayDataset.id
+    );
+    if (datasetIndex < 0) {
+      throw new Error(`replay_dataset_not_found:${replayDataset.tenantId}:${replayDataset.id}`);
+    }
+    this.memoryReplayDatasets[datasetIndex] = this.cloneReplayDataset(replayDataset);
+    return this.cloneReplayDataset(replayDataset);
+  }
+
+  private upsertReplayDatasetSnapshotToMemory(replayDataset: ReplayDataset): ReplayDataset {
+    const datasetIndex = this.memoryReplayDatasets.findIndex(
+      (item) => item.tenantId === replayDataset.tenantId && item.id === replayDataset.id
+    );
+    if (datasetIndex < 0) {
+      this.memoryReplayDatasets.unshift(this.cloneReplayDataset(replayDataset));
+      return this.cloneReplayDataset(replayDataset);
+    }
+    this.memoryReplayDatasets[datasetIndex] = this.cloneReplayDataset(replayDataset);
+    return this.cloneReplayDataset(replayDataset);
+  }
+
   private cloneReplayDatasetCase(replayDatasetCase: ReplayDatasetCase): ReplayDatasetCase {
     return {
       ...replayDatasetCase,
@@ -19820,6 +25160,59 @@ class ControlPlaneRepository {
       };
     }
     return cases.map((item) => this.cloneReplayDatasetCase(item));
+  }
+
+  private cloneReplayDatasetVersionCaseRecord(
+    replayDatasetVersionCase: ReplayDatasetVersionCaseRecord,
+  ): ReplayDatasetVersionCaseRecord {
+    return {
+      ...this.cloneReplayDatasetCase(replayDatasetVersionCase),
+      versionId: replayDatasetVersionCase.versionId,
+    };
+  }
+
+  private replaceReplayDatasetVersionCasesInMemory(
+    tenantId: string,
+    datasetId: string,
+    versionId: string,
+    cases: ReplayDatasetVersionCaseRecord[],
+  ): ReplayDatasetCase[] {
+    const datasetExists = this.memoryReplayDatasets.some(
+      (item) => item.tenantId === tenantId && item.id === datasetId,
+    );
+    if (!datasetExists) {
+      throw new Error(`replay_dataset_not_found:${tenantId}:${datasetId}`);
+    }
+    this.memoryReplayDatasetVersionCases.splice(
+      0,
+      this.memoryReplayDatasetVersionCases.length,
+      ...this.memoryReplayDatasetVersionCases.filter(
+        (item) =>
+          item.tenantId !== tenantId ||
+          item.datasetId !== datasetId ||
+          item.versionId !== versionId,
+      ),
+      ...cases.map((item) => this.cloneReplayDatasetVersionCaseRecord(item)),
+    );
+    return cases.map((item) => this.cloneReplayDatasetCase(item));
+  }
+
+  private listReplayDatasetVersionCasesFromMemory(
+    tenantId: string,
+    datasetId: string,
+    versionId: string,
+    input: NormalizedReplayDatasetCaseListInput,
+  ): ReplayDatasetCase[] {
+    return this.memoryReplayDatasetVersionCases
+      .filter(
+        (item) =>
+          item.tenantId === tenantId &&
+          item.datasetId === datasetId &&
+          item.versionId === versionId,
+      )
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.caseId.localeCompare(b.caseId))
+      .slice(0, input.limit)
+      .map((item) => this.cloneReplayDatasetCase(item));
   }
 
   private listReplayDatasetCasesFromMemory(
@@ -19939,6 +25332,109 @@ class ControlPlaneRepository {
 
     this.memoryReplayRuns[index] = updated;
     return this.cloneReplayRun(updated);
+  }
+
+  private cloneReplayExperiment(replayExperiment: ReplayExperiment): ReplayExperiment {
+    return {
+      ...replayExperiment,
+      candidateLabels: [...replayExperiment.candidateLabels],
+      runIds: [...replayExperiment.runIds],
+    };
+  }
+
+  private listReplayExperimentsFromMemory(
+    tenantId: string,
+    input: NormalizedReplayExperimentListInput
+  ): ReplayExperiment[] {
+    return this.memoryReplayExperiments
+      .filter((item) => {
+        if (item.tenantId !== tenantId) {
+          return false;
+        }
+        if (input.datasetId && item.datasetId !== input.datasetId) {
+          return false;
+        }
+        if (input.sourceAdviceId && item.sourceAdviceId !== input.sourceAdviceId) {
+          return false;
+        }
+        if (input.status && item.status !== input.status) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(0, input.limit)
+      .map((item) => this.cloneReplayExperiment(item));
+  }
+
+  private getReplayExperimentByIdFromMemory(
+    tenantId: string,
+    experimentId: string
+  ): ReplayExperiment | null {
+    const matched = this.memoryReplayExperiments.find(
+      (item) => item.tenantId === tenantId && item.id === experimentId
+    );
+    return matched ? this.cloneReplayExperiment(matched) : null;
+  }
+
+  private upsertReplayExperimentToMemory(
+    replayExperiment: ReplayExperiment
+  ): ReplayExperiment {
+    const datasetExists = this.memoryReplayDatasets.some(
+      (item) =>
+        item.tenantId === replayExperiment.tenantId && item.id === replayExperiment.datasetId
+    );
+    if (!datasetExists) {
+      throw new Error(
+        `replay_dataset_not_found:${replayExperiment.tenantId}:${replayExperiment.datasetId}`
+      );
+    }
+    const index = this.memoryReplayExperiments.findIndex(
+      (item) =>
+        item.tenantId === replayExperiment.tenantId &&
+        item.id === replayExperiment.id
+    );
+    if (index >= 0) {
+      this.memoryReplayExperiments.splice(index, 1);
+    }
+    this.memoryReplayExperiments.unshift(this.cloneReplayExperiment(replayExperiment));
+    return this.cloneReplayExperiment(replayExperiment);
+  }
+
+  private async loadReplayExperimentRunIdsMap(
+    pool: PgQueryable,
+    tenantId: string,
+    experimentIds: string[]
+  ): Promise<Map<string, string[]>> {
+    const ids = normalizeDistinctStringArray(experimentIds);
+    const resultMap = new Map<string, string[]>();
+    if (ids.length === 0) {
+      return resultMap;
+    }
+
+    const result = await pool.query(
+      `SELECT experiment_id,
+              run_id
+       FROM replay_experiment_runs
+       WHERE tenant_id = $1
+         AND experiment_id = ANY($2::text[])
+       ORDER BY created_at ASC, run_id ASC`,
+      [tenantId, ids]
+    );
+
+    for (const row of result.rows) {
+      const experimentId = firstNonEmptyString(row.experiment_id);
+      const runId = firstNonEmptyString(row.run_id);
+      if (!experimentId || !runId) {
+        continue;
+      }
+      const runIds = resultMap.get(experimentId) ?? [];
+      if (!runIds.includes(runId)) {
+        runIds.push(runId);
+      }
+      resultMap.set(experimentId, runIds);
+    }
+    return resultMap;
   }
 
   private cloneReplayArtifact(replayArtifact: ReplayArtifact): ReplayArtifact {
@@ -21695,6 +27191,15 @@ class ControlPlaneRepository {
         if (input.simulated !== undefined && execution.simulated !== input.simulated) {
           return false;
         }
+        if (input.escalated !== undefined && execution.escalated !== input.escalated) {
+          return false;
+        }
+        if (
+          input.escalationReason &&
+          execution.escalationReason !== input.escalationReason
+        ) {
+          return false;
+        }
         if (Number.isFinite(fromTimestamp) || Number.isFinite(toTimestamp)) {
           const createdAtTs = Date.parse(execution.createdAt);
           if (!Number.isFinite(createdAtTs)) {
@@ -21758,6 +27263,76 @@ class ControlPlaneRepository {
     }
     this.memoryResidencyPolicies.unshift(this.cloneTenantResidencyPolicy(policy));
     return this.cloneTenantResidencyPolicy(policy);
+  }
+
+  private cloneResidencyKmsKeyMapping(
+    item: ResidencyKmsKeyMapping
+  ): ResidencyKmsKeyMapping {
+    return { ...item };
+  }
+
+  private listResidencyKmsKeyMappingsFromMemory(
+    tenantId: string
+  ): ResidencyKmsKeyMappingListResult {
+    const items = this.memoryResidencyKmsKeyMappings
+      .filter((item) => item.tenantId === tenantId)
+      .sort((a, b) => a.regionId.localeCompare(b.regionId))
+      .map((item) => this.cloneResidencyKmsKeyMapping(item));
+    return {
+      items,
+      total: items.length,
+    };
+  }
+
+  private replaceResidencyKmsKeyMappingsInMemory(
+    tenantId: string,
+    items: ResidencyKmsKeyMapping[]
+  ): ResidencyKmsKeyMappingListResult {
+    for (let index = this.memoryResidencyKmsKeyMappings.length - 1; index >= 0; index -= 1) {
+      if (this.memoryResidencyKmsKeyMappings[index]?.tenantId === tenantId) {
+        this.memoryResidencyKmsKeyMappings.splice(index, 1);
+      }
+    }
+    for (const item of items) {
+      this.memoryResidencyKmsKeyMappings.push(this.cloneResidencyKmsKeyMapping(item));
+    }
+    return this.listResidencyKmsKeyMappingsFromMemory(tenantId);
+  }
+
+  private cloneResidencyArchiveRegionPolicy(
+    item: ResidencyArchiveRegionPolicy
+  ): ResidencyArchiveRegionPolicy {
+    return { ...item };
+  }
+
+  private listResidencyArchiveRegionPoliciesFromMemory(
+    tenantId: string
+  ): ResidencyArchiveRegionPolicyListResult {
+    const items = this.memoryResidencyArchiveRegionPolicies
+      .filter((item) => item.tenantId === tenantId)
+      .sort((a, b) => a.sourceRegion.localeCompare(b.sourceRegion))
+      .map((item) => this.cloneResidencyArchiveRegionPolicy(item));
+    return {
+      items,
+      total: items.length,
+    };
+  }
+
+  private replaceResidencyArchiveRegionPoliciesInMemory(
+    tenantId: string,
+    items: ResidencyArchiveRegionPolicy[]
+  ): ResidencyArchiveRegionPolicyListResult {
+    for (let index = this.memoryResidencyArchiveRegionPolicies.length - 1; index >= 0; index -= 1) {
+      if (this.memoryResidencyArchiveRegionPolicies[index]?.tenantId === tenantId) {
+        this.memoryResidencyArchiveRegionPolicies.splice(index, 1);
+      }
+    }
+    for (const item of items) {
+      this.memoryResidencyArchiveRegionPolicies.push(
+        this.cloneResidencyArchiveRegionPolicy(item)
+      );
+    }
+    return this.listResidencyArchiveRegionPoliciesFromMemory(tenantId);
   }
 
   private cloneReplicationJob(job: ReplicationJob): ReplicationJob {
@@ -22138,7 +27713,27 @@ class ControlPlaneRepository {
   }
 
   private cloneMcpToolPolicy(policy: McpToolPolicy): McpToolPolicy {
-    return { ...policy };
+    return {
+      ...policy,
+      approvalWorkflow: policy.approvalWorkflow
+        ? JSON.parse(JSON.stringify(policy.approvalWorkflow))
+        : undefined,
+      approvalStages: policy.approvalStages
+        ? policy.approvalStages.map((stage) => ({
+            nodeId: stage.nodeId,
+            stage: stage.stage,
+            label: stage.label,
+            requiredApprovals: stage.requiredApprovals,
+            roles: [...stage.roles],
+          }))
+        : undefined,
+      stage1Roles: policy.stage1Roles ? [...policy.stage1Roles] : undefined,
+      stage2Roles: policy.stage2Roles ? [...policy.stage2Roles] : undefined,
+      approvalCondition: policy.approvalCondition
+        ? { ...policy.approvalCondition }
+        : undefined,
+      metadata: policy.metadata ? { ...policy.metadata } : undefined,
+    };
   }
 
   private listMcpToolPoliciesFromMemory(
@@ -22197,7 +27792,615 @@ class ControlPlaneRepository {
   }
 
   private cloneMcpApprovalRequest(request: McpApprovalRequest): McpApprovalRequest {
-    return { ...request };
+    return {
+      ...request,
+      approvalWorkflow: request.approvalWorkflow
+        ? JSON.parse(JSON.stringify(request.approvalWorkflow))
+        : undefined,
+      approvalNodes: request.approvalNodes
+        ? JSON.parse(JSON.stringify(request.approvalNodes))
+        : undefined,
+      pathHistory: request.pathHistory ? [...request.pathHistory] : undefined,
+      nextTransitionPreview: request.nextTransitionPreview
+        ? JSON.parse(JSON.stringify(request.nextTransitionPreview))
+        : undefined,
+      approvalStages: request.approvalStages
+        ? request.approvalStages.map((stage) => ({
+            nodeId: stage.nodeId,
+            stage: stage.stage,
+            label: stage.label,
+            requiredApprovals: stage.requiredApprovals,
+            roles: [...stage.roles],
+            approvedApprovals: stage.approvedApprovals,
+            approvedByUserIds: [...stage.approvedByUserIds],
+            rejectedByUserId: stage.rejectedByUserId,
+          }))
+        : undefined,
+      stage1Roles: request.stage1Roles ? [...request.stage1Roles] : undefined,
+      stage2Roles: request.stage2Roles ? [...request.stage2Roles] : undefined,
+    };
+  }
+
+  private getMcpApprovalWorkflowKey(
+    tenantId: string,
+    approvalRequestId: string
+  ): string {
+    return `${tenantId}:${approvalRequestId}`;
+  }
+
+  private getDefaultMcpApprovalStageRoles(
+    stage: LocalMcpApprovalStage
+  ): TenantRole[] {
+    return stage === "stage1" ? ["owner", "maintainer"] : ["owner"];
+  }
+
+  private normalizeMcpApprovalStageRoles(
+    roles: TenantRole[] | undefined,
+    stage: LocalMcpApprovalStage
+  ): TenantRole[] {
+    const deduped = Array.isArray(roles)
+      ? Array.from(
+          new Set(
+            roles.filter((role): role is TenantRole =>
+              TENANT_ROLE_SET.includes(role)
+            )
+          )
+        )
+      : [];
+    return deduped.length > 0
+      ? deduped
+      : this.getDefaultMcpApprovalStageRoles(stage);
+  }
+
+  private normalizeMcpApprovalStageConfig(
+    stage: LocalMcpApprovalStage,
+    config?: LocalMcpApprovalStageConfig
+  ): LocalMcpApprovalStageState {
+    const requiredApprovals = Math.max(
+      1,
+      toOptionalNonNegativeInteger(config?.requiredApprovals) ?? 1
+    );
+    return {
+      nodeId: firstNonEmptyString(config?.nodeId) ?? stage,
+      stage,
+      label: firstNonEmptyString(config?.label) ?? undefined,
+      requiredApprovals,
+      roles: this.normalizeMcpApprovalStageRoles(config?.roles, stage),
+      approvals: [],
+    };
+  }
+
+  private normalizeMcpApprovalConfig(
+    config?: LocalMcpApprovalConfig
+  ): LocalMcpApprovalConfig {
+    const inputStages =
+      Array.isArray(config?.approvalStages) && config.approvalStages.length > 0
+        ? config.approvalStages
+        : [
+            {
+              nodeId: "stage1",
+              stage: "stage1" as LocalMcpApprovalStage,
+              requiredApprovals: 1,
+              roles: this.getDefaultMcpApprovalStageRoles("stage1"),
+            },
+          ];
+    const normalizedStages = inputStages.map((stage, index) =>
+      this.normalizeMcpApprovalStageConfig(
+        isLocalMcpApprovalStage(stage.stage) ? stage.stage : (`stage${index + 1}` as LocalMcpApprovalStage),
+        stage,
+      )
+    );
+    const mode = normalizeLocalMcpApprovalWorkflowMode(
+      config?.mode,
+      normalizedStages.length,
+    );
+    return {
+      mode,
+      approvalStages: normalizedStages.map((stage) => ({
+        nodeId: stage.nodeId,
+        stage: stage.stage,
+        label: stage.label,
+        requiredApprovals: stage.requiredApprovals,
+        roles: [...stage.roles],
+      })),
+      approvalWorkflow:
+        config?.approvalWorkflow ??
+        buildLinearMcpApprovalWorkflowDefinition(
+          normalizedStages.map((stage) => ({
+            nodeId: stage.nodeId,
+            stage: stage.stage,
+            label: stage.label,
+            requiredApprovals: stage.requiredApprovals,
+            roles: [...stage.roles],
+          })),
+        ),
+    };
+  }
+
+  private cloneLocalMcpApprovalReviewActor(
+    review: LocalMcpApprovalReviewActor
+  ): LocalMcpApprovalReviewActor {
+    return { ...review };
+  }
+
+  private cloneLocalMcpApprovalStageState(
+    stage: LocalMcpApprovalStageState
+  ): LocalMcpApprovalStageState {
+    const nodeId = firstNonEmptyString(stage.nodeId) ?? stage.stage;
+    return {
+      nodeId,
+      stage: stage.stage,
+      label: stage.label,
+      requiredApprovals: stage.requiredApprovals,
+      roles: [...stage.roles],
+      approvals: stage.approvals.map((review) =>
+        this.cloneLocalMcpApprovalReviewActor(review)
+      ),
+      rejectedBy: stage.rejectedBy
+        ? this.cloneLocalMcpApprovalReviewActor(stage.rejectedBy)
+        : undefined,
+    };
+  }
+
+  private cloneLocalMcpApprovalWorkflowRecord(
+    workflow: LocalMcpApprovalWorkflowRecord
+  ): LocalMcpApprovalWorkflowRecord {
+    const fallbackWorkflow = buildLinearMcpApprovalWorkflowDefinition(
+      workflow.approvalStages.map((stage) => ({
+        nodeId: stage.nodeId,
+        stage: stage.stage,
+        label: stage.label,
+        requiredApprovals: stage.requiredApprovals,
+        roles: [...stage.roles],
+      })),
+    );
+    const resolvedCurrentNodeId =
+      workflow.currentNodeId ??
+      workflow.approvalStages.find((stage) => stage.approvals.length < stage.requiredApprovals)
+        ?.nodeId ??
+      workflow.approvalStages[0]?.nodeId ??
+      fallbackWorkflow.entryNodeId;
+    return {
+      approvalRequestId: workflow.approvalRequestId,
+      tenantId: workflow.tenantId,
+      approvalMode: workflow.approvalMode,
+      approvalConditionMatched: workflow.approvalConditionMatched,
+      approvalWorkflow: JSON.parse(
+        JSON.stringify(workflow.approvalWorkflow ?? fallbackWorkflow),
+      ),
+      approvalStages: workflow.approvalStages.map((stage) =>
+        this.cloneLocalMcpApprovalStageState(stage)
+      ),
+      currentNodeId: resolvedCurrentNodeId,
+      pathHistory:
+        workflow.pathHistory && workflow.pathHistory.length > 0
+          ? [...workflow.pathHistory]
+          : [resolvedCurrentNodeId],
+      evaluationContext: {
+        toolId: workflow.evaluationContext?.toolId ?? "unknown",
+        riskLevel: workflow.evaluationContext?.riskLevel ?? "medium",
+        evaluationTimestamp:
+          workflow.evaluationContext?.evaluationTimestamp ?? new Date().toISOString(),
+        ...(workflow.evaluationContext?.tenantRole
+          ? { tenantRole: workflow.evaluationContext.tenantRole }
+          : {}),
+      },
+    };
+  }
+
+  private createDefaultMcpApprovalWorkflowRecord(
+    request: McpApprovalRequest
+  ): LocalMcpApprovalWorkflowRecord {
+    const stage1 = this.normalizeMcpApprovalStageConfig("stage1");
+    const approvalWorkflow = buildLinearMcpApprovalWorkflowDefinition([
+      {
+        nodeId: stage1.nodeId,
+        stage: stage1.stage,
+        label: stage1.label,
+        requiredApprovals: stage1.requiredApprovals,
+        roles: [...stage1.roles],
+      },
+    ]);
+    if (request.status === "approved" && request.reviewedByUserId) {
+      stage1.approvals.push({
+        userId: request.reviewedByUserId,
+        email: request.reviewedByEmail,
+        reason: request.reviewReason,
+        reviewedAt: request.updatedAt,
+      });
+    }
+    if (request.status === "rejected" && request.reviewedByUserId) {
+      stage1.rejectedBy = {
+        userId: request.reviewedByUserId,
+        email: request.reviewedByEmail,
+        reason: request.reviewReason,
+        reviewedAt: request.updatedAt,
+      };
+    }
+    return {
+      approvalRequestId: request.id,
+      tenantId: request.tenantId,
+      approvalMode: "single_stage",
+      approvalConditionMatched: false,
+      approvalWorkflow,
+      approvalStages: [stage1],
+      currentNodeId:
+        request.status === "approved"
+          ? "approved"
+          : request.status === "rejected"
+            ? "rejected"
+            : approvalWorkflow.entryNodeId,
+      pathHistory:
+        request.status === "approved"
+          ? [approvalWorkflow.entryNodeId, "approved"]
+          : request.status === "rejected"
+            ? [approvalWorkflow.entryNodeId, "rejected"]
+            : [approvalWorkflow.entryNodeId],
+      evaluationContext: {
+        toolId: request.toolId,
+        riskLevel: "medium",
+        evaluationTimestamp: request.createdAt,
+      },
+    };
+  }
+
+  private createMcpApprovalWorkflowRecord(
+    request: McpApprovalRequest,
+    options?: {
+      approvalConfig?: LocalMcpApprovalConfig;
+      approvalConditionMatched?: boolean;
+      riskLevel?: McpRiskLevel;
+      requestedByTenantRole?: TenantRole;
+      evaluationTimestamp?: string;
+    }
+  ): LocalMcpApprovalWorkflowRecord {
+    const config = this.normalizeMcpApprovalConfig(options?.approvalConfig);
+    return {
+      approvalRequestId: request.id,
+      tenantId: request.tenantId,
+      approvalMode: config.mode,
+      approvalConditionMatched: options?.approvalConditionMatched === true,
+      approvalWorkflow: normalizeMcpApprovalWorkflowDefinition(
+        config.approvalWorkflow,
+        config.approvalStages,
+      ),
+      approvalStages: config.approvalStages.map((stage) =>
+        this.normalizeMcpApprovalStageConfig(stage.stage, stage)
+      ),
+      currentNodeId:
+        config.approvalWorkflow?.entryNodeId ??
+        config.approvalStages[0]?.nodeId ??
+        "stage1",
+      pathHistory: [
+        config.approvalWorkflow?.entryNodeId ??
+          config.approvalStages[0]?.nodeId ??
+          "stage1",
+      ],
+      evaluationContext: {
+        toolId: request.toolId,
+        riskLevel: options?.riskLevel ?? "medium",
+        evaluationTimestamp: options?.evaluationTimestamp ?? request.createdAt,
+        tenantRole: options?.requestedByTenantRole,
+      },
+    };
+  }
+
+  private findMcpWorkflowNode(
+    workflow: LocalMcpApprovalWorkflowRecord,
+    nodeId: string | null | undefined,
+  ): McpApprovalWorkflowNode | null {
+    if (!nodeId) {
+      return null;
+    }
+    return workflow.approvalWorkflow.nodes.find((node) => node.nodeId === nodeId) ?? null;
+  }
+
+  private findMcpApprovalStageStateByNodeId(
+    workflow: LocalMcpApprovalWorkflowRecord,
+    nodeId: string | null | undefined,
+  ): LocalMcpApprovalStageState | null {
+    if (!nodeId) {
+      return null;
+    }
+    return workflow.approvalStages.find((stage) => stage.nodeId === nodeId) ?? null;
+  }
+
+  private isMcpWorkflowTransitionConditionMatched(
+    condition: McpApprovalWorkflowCondition | undefined,
+    context: LocalMcpApprovalEvaluationContext,
+  ): boolean {
+    if (!condition || condition.default === true) {
+      return true;
+    }
+    if (
+      condition.riskLevelAtLeast &&
+      MCP_RISK_LEVEL_SET.indexOf(context.riskLevel) <
+        MCP_RISK_LEVEL_SET.indexOf(condition.riskLevelAtLeast)
+    ) {
+      return false;
+    }
+    if (
+      condition.toolIds &&
+      condition.toolIds.length > 0 &&
+      !condition.toolIds.includes(context.toolId)
+    ) {
+      return false;
+    }
+    if (
+      condition.tenantRoles &&
+      condition.tenantRoles.length > 0 &&
+      (!context.tenantRole || !condition.tenantRoles.includes(context.tenantRole))
+    ) {
+      return false;
+    }
+    if (condition.timeWindow) {
+      const evaluationDate = new Date(context.evaluationTimestamp);
+      if (
+        Number.isNaN(evaluationDate.getTime()) ||
+        !isSupportedTimeZoneValue(condition.timeWindow.timezone)
+      ) {
+        return false;
+      }
+      const localParts = getLocalWorkflowDateTimeParts(
+        evaluationDate,
+        condition.timeWindow.timezone,
+      );
+      if (!localParts) {
+        return false;
+      }
+      const startMinutes = parseWorkflowTimeMinutes(condition.timeWindow.startTime);
+      const endMinutes = parseWorkflowTimeMinutes(condition.timeWindow.endTime);
+      if (startMinutes === null || endMinutes === null) {
+        return false;
+      }
+      const currentMinutes = localParts.hour * 60 + localParts.minute;
+      const localWeekday = (() => {
+        const weekday = new Date(
+          Date.UTC(localParts.year, localParts.month - 1, localParts.day),
+        ).getUTCDay();
+        return weekday === 0 ? 7 : weekday;
+      })();
+      const previousWeekday = localWeekday === 1 ? 7 : localWeekday - 1;
+      const allowedWeekdays = condition.timeWindow.weekdays;
+      const matchesWeekday = (weekday: number) =>
+        !allowedWeekdays || allowedWeekdays.length === 0 || allowedWeekdays.includes(weekday);
+      if (startMinutes === endMinutes) {
+        if (!matchesWeekday(localWeekday)) {
+          return false;
+        }
+      } else if (startMinutes < endMinutes) {
+        if (currentMinutes < startMinutes || currentMinutes >= endMinutes) {
+          return false;
+        }
+        if (!matchesWeekday(localWeekday)) {
+          return false;
+        }
+      } else {
+        const inCurrentDayWindow = currentMinutes >= startMinutes;
+        const inNextDayWindow = currentMinutes < endMinutes;
+        if (!inCurrentDayWindow && !inNextDayWindow) {
+          return false;
+        }
+        if (!matchesWeekday(inCurrentDayWindow ? localWeekday : previousWeekday)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  private resolveNextMcpWorkflowTransition(
+    workflow: LocalMcpApprovalWorkflowRecord,
+    fromNodeId: string | null | undefined,
+  ): McpApprovalWorkflowTransitionPreview | undefined {
+    if (!fromNodeId) {
+      return undefined;
+    }
+    const transitions = workflow.approvalWorkflow.transitions.filter(
+      (item) => item.fromNodeId === fromNodeId,
+    );
+    if (transitions.length === 0) {
+      return undefined;
+    }
+    const conditional = transitions.find(
+      (item) =>
+        item.condition?.default !== true &&
+        this.isMcpWorkflowTransitionConditionMatched(item.condition, workflow.evaluationContext),
+    );
+    if (conditional) {
+      return {
+        fromNodeId,
+        toNodeId: conditional.toNodeId,
+        matched: true,
+        matchedBy: "condition",
+        condition: conditional.condition,
+      };
+    }
+    const fallback = transitions.find((item) => item.condition?.default === true);
+    if (fallback) {
+      return {
+        fromNodeId,
+        toNodeId: fallback.toNodeId,
+        matched: true,
+        matchedBy: "default",
+        condition: fallback.condition,
+      };
+    }
+    return {
+      fromNodeId,
+      matched: false,
+    };
+  }
+
+  private saveMcpApprovalWorkflowRecordToMemory(
+    workflow: LocalMcpApprovalWorkflowRecord
+  ): LocalMcpApprovalWorkflowRecord {
+    const cloned = this.cloneLocalMcpApprovalWorkflowRecord(workflow);
+    this.memoryMcpApprovalWorkflows.set(
+      this.getMcpApprovalWorkflowKey(cloned.tenantId, cloned.approvalRequestId),
+      cloned
+    );
+    return cloned;
+  }
+
+  private async saveMcpApprovalWorkflowRecord(
+    workflow: LocalMcpApprovalWorkflowRecord
+  ): Promise<LocalMcpApprovalWorkflowRecord> {
+    const cloned = this.cloneLocalMcpApprovalWorkflowRecord(workflow);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.saveMcpApprovalWorkflowRecordToMemory(cloned);
+    }
+
+    try {
+      await this.upsertMcpApprovalWorkflowRecordWithQuerier(pool, cloned);
+      return this.saveMcpApprovalWorkflowRecordToMemory(cloned);
+    } catch (error) {
+      this.disableDb(error, "写入 MCP 审批工作流失败");
+      return this.saveMcpApprovalWorkflowRecordToMemory(cloned);
+    }
+  }
+
+  private async loadMcpApprovalWorkflowRecord(
+    tenantId: string,
+    approvalRequestId: string
+  ): Promise<LocalMcpApprovalWorkflowRecord | null> {
+    const key = this.getMcpApprovalWorkflowKey(tenantId, approvalRequestId);
+    const cached = this.memoryMcpApprovalWorkflows.get(key);
+    if (cached) {
+      return this.cloneLocalMcpApprovalWorkflowRecord(cached);
+    }
+    const pool = await this.getPool();
+    if (!pool) {
+      return null;
+    }
+    try {
+      const result = await pool.query(
+        `SELECT tenant_id,
+                approval_request_id,
+                approval_mode,
+                approval_condition_matched,
+                approval_workflow,
+                approval_stages,
+                current_node_id,
+                path_history,
+                evaluation_context,
+                stage1_required_approvals,
+                stage1_roles,
+                stage1_approvals,
+                stage1_rejected_by,
+                stage2_required_approvals,
+                stage2_roles,
+                stage2_approvals,
+                stage2_rejected_by
+         FROM mcp_approval_workflows
+         WHERE tenant_id = $1
+           AND approval_request_id = $2
+         LIMIT 1`,
+        [tenantId, approvalRequestId]
+      );
+      const row = result.rows[0];
+      const workflow = row ? mapMcpApprovalWorkflowRow(row) : null;
+      if (!workflow) {
+        return null;
+      }
+      return this.saveMcpApprovalWorkflowRecordToMemory(workflow);
+    } catch (error) {
+      this.disableDb(error, "查询 MCP 审批工作流失败");
+      return null;
+    }
+  }
+
+  private async ensureMcpApprovalWorkflowRecord(
+    request: McpApprovalRequest
+  ): Promise<LocalMcpApprovalWorkflowRecord> {
+    const existing = await this.loadMcpApprovalWorkflowRecord(
+      request.tenantId,
+      request.id
+    );
+    if (existing) {
+      return existing;
+    }
+    const created = this.createDefaultMcpApprovalWorkflowRecord(request);
+    return this.saveMcpApprovalWorkflowRecord(created);
+  }
+
+  private resolveCurrentMcpApprovalStage(
+    request: McpApprovalRequest,
+    workflow: LocalMcpApprovalWorkflowRecord
+  ): LocalMcpApprovalStage | null {
+    if (request.status !== "pending") {
+      return null;
+    }
+    return this.findMcpApprovalStageStateByNodeId(
+      workflow,
+      workflow.currentNodeId,
+    )?.stage ?? null;
+  }
+
+  private buildMcpApprovalStageSnapshot(
+    stage: LocalMcpApprovalStageState
+  ): LocalMcpApprovalStageSnapshot {
+    return {
+      nodeId: stage.nodeId,
+      stage: stage.stage,
+      label: stage.label,
+      requiredApprovals: stage.requiredApprovals,
+      roles: [...stage.roles],
+      approvedApprovals: stage.approvals.length,
+      approvedByUserIds: stage.approvals.map((review) => review.userId),
+      rejectedByUserId: stage.rejectedBy?.userId,
+    };
+  }
+
+  private buildMcpApprovalWorkflowNodeSnapshot(
+    workflow: LocalMcpApprovalWorkflowRecord,
+    node: McpApprovalWorkflowNode,
+  ): McpApprovalWorkflowNodeSnapshot {
+    const stageState = this.findMcpApprovalStageStateByNodeId(workflow, node.nodeId);
+    return {
+      ...node,
+      approvedApprovals: stageState?.approvals.length ?? 0,
+      approvedByUserIds: stageState?.approvals.map((review) => review.userId) ?? [],
+      rejectedByUserId: stageState?.rejectedBy?.userId,
+    };
+  }
+
+  private buildMcpApprovalWorkflowSnapshot(
+    request: McpApprovalRequest,
+    workflow: LocalMcpApprovalWorkflowRecord
+  ): LocalMcpApprovalWorkflowSnapshot {
+    const currentStage = this.resolveCurrentMcpApprovalStage(request, workflow);
+    const currentStageState = this.findMcpApprovalStageStateByNodeId(
+      workflow,
+      workflow.currentNodeId,
+    );
+    return {
+      approvalRequestId: request.id,
+      approvalMode: workflow.approvalMode,
+      approvalConditionMatched: workflow.approvalConditionMatched,
+      currentNodeId: workflow.currentNodeId,
+      currentStage,
+      remainingApprovals: currentStageState
+        ? Math.max(
+            0,
+            currentStageState.requiredApprovals - currentStageState.approvals.length
+          )
+        : 0,
+      terminated: request.status !== "pending",
+      approvalStages: workflow.approvalStages.map((stage) =>
+        this.buildMcpApprovalStageSnapshot(stage)
+      ),
+      approvalWorkflow: JSON.parse(JSON.stringify(workflow.approvalWorkflow)),
+      approvalNodes: workflow.approvalWorkflow.nodes.map((node) =>
+        this.buildMcpApprovalWorkflowNodeSnapshot(workflow, node)
+      ),
+      pathHistory: [...workflow.pathHistory],
+      nextTransitionPreview:
+        request.status === "pending"
+          ? this.resolveNextMcpWorkflowTransition(workflow, workflow.currentNodeId)
+          : undefined,
+    };
   }
 
   private saveMcpApprovalRequestToMemory(request: McpApprovalRequest): McpApprovalRequest {
@@ -22248,7 +28451,7 @@ class ControlPlaneRepository {
   private reviewMcpApprovalRequestInMemory(
     tenantId: string,
     requestId: string,
-    nextStatus: "approved" | "rejected",
+    nextStatus: McpApprovalStatus,
     reviewedByUserId: string,
     reviewedByEmail: string | undefined,
     reviewReason: string | undefined,
@@ -22394,7 +28597,13 @@ class ControlPlaneRepository {
     }
 
     const hasMore = items.length > input.limit;
-    const pagedItems = (hasMore ? items.slice(0, input.limit) : items).map((alert) => ({ ...alert }));
+    const pagedItems = (hasMore ? items.slice(0, input.limit) : items).map((alert) => ({
+      ...alert,
+      externalLinks:
+        this.listAlertExternalLinksByAlertIdsFromMemory(tenantId, [
+          alert.id,
+        ]).get(alert.id) ?? [],
+    }));
     const lastItem = pagedItems[pagedItems.length - 1];
     const nextCursor =
       hasMore && lastItem
@@ -22415,7 +28624,13 @@ class ControlPlaneRepository {
     const target = this.memoryAlerts.find(
       (alert) => alert.tenantId === tenantId && alert.id === alertId
     );
-    return target ? { ...target } : null;
+    if (!target) {
+      return null;
+    }
+    const links = this.memoryAlertExternalLinks
+      .filter((item) => item.tenantId === tenantId && item.alertId === alertId)
+      .map((item) => this.cloneAlertExternalLink(item));
+    return { ...target, externalLinks: links };
   }
 
   private updateAlertStatusInMemory(
@@ -22437,7 +28652,138 @@ class ControlPlaneRepository {
 
     target.status = status;
     target.updatedAt = updatedAt;
-    return { ...target };
+    return this.getAlertByIdFromMemory(tenantId, alertId);
+  }
+
+  private cloneAlertExternalLink(link: AlertExternalLink): AlertExternalLink {
+    return {
+      ...link,
+      metadata: { ...link.metadata },
+    };
+  }
+
+  private buildAlertExternalLinkMap(
+    items: AlertExternalLink[]
+  ): Map<string, AlertExternalLink[]> {
+    const map = new Map<string, AlertExternalLink[]>();
+    for (const item of items) {
+      const bucket = map.get(item.alertId) ?? [];
+      bucket.push(this.cloneAlertExternalLink(item));
+      map.set(item.alertId, bucket);
+    }
+    return map;
+  }
+
+  private listAlertExternalLinksByAlertIdsFromMemory(
+    tenantId: string,
+    alertIds: string[]
+  ): Map<string, AlertExternalLink[]> {
+    const alertIdSet = new Set(alertIds);
+    const items = this.memoryAlertExternalLinks.filter(
+      (item) => item.tenantId === tenantId && alertIdSet.has(item.alertId)
+    );
+    return this.buildAlertExternalLinkMap(items);
+  }
+
+  private upsertAlertExternalLinkToMemory(
+    link: AlertExternalLink
+  ): AlertExternalLink {
+    const index = this.memoryAlertExternalLinks.findIndex(
+      (item) =>
+        item.tenantId === link.tenantId &&
+        item.alertId === link.alertId &&
+        item.externalType === link.externalType &&
+        item.externalId === link.externalId
+    );
+    if (index >= 0) {
+      const existing = this.memoryAlertExternalLinks[index];
+      if (existing) {
+        this.memoryAlertExternalLinks[index] = {
+          ...existing,
+          externalSystem: link.externalSystem,
+          externalStatus: link.externalStatus,
+          pendingExternalStatus: link.pendingExternalStatus,
+          metadata: { ...link.metadata },
+          lastSyncedAt: link.lastSyncedAt,
+          publishStatus: link.publishStatus,
+          publishError: link.publishError,
+          lastSyncResult: link.lastSyncResult,
+          lastSyncError: link.lastSyncError,
+          lastSyncFailureStage: link.lastSyncFailureStage,
+          lastSyncFailureCode: link.lastSyncFailureCode,
+          updatedAt: link.updatedAt,
+        };
+        return this.cloneAlertExternalLink(this.memoryAlertExternalLinks[index]!);
+      }
+    }
+    this.memoryAlertExternalLinks.unshift(this.cloneAlertExternalLink(link));
+    return this.cloneAlertExternalLink(link);
+  }
+
+  private syncAlertExternalLinksStatusInMemory(
+    tenantId: string,
+    alertId: string,
+    externalStatus: string,
+    metadata: Record<string, unknown>,
+    syncedAt: string
+  ): AlertExternalLink[] {
+    const items: AlertExternalLink[] = [];
+    for (let index = 0; index < this.memoryAlertExternalLinks.length; index += 1) {
+      const current = this.memoryAlertExternalLinks[index];
+      if (!current || current.tenantId !== tenantId || current.alertId !== alertId) {
+        continue;
+      }
+      const next: AlertExternalLink = {
+        ...current,
+        externalStatus,
+        metadata:
+          Object.keys(metadata).length > 0
+            ? { ...current.metadata, ...metadata }
+            : { ...current.metadata },
+        pendingExternalStatus:
+          firstNonEmptyString(
+            metadata.pendingExternalStatus,
+            metadata.pending_external_status,
+          ) ?? current.pendingExternalStatus,
+        lastSyncedAt: syncedAt,
+        publishStatus:
+          toAlertExternalLinkPublishStatus(
+            firstNonEmptyString(metadata.publishStatus, metadata.publish_status),
+          ) ?? current.publishStatus,
+        publishError:
+          firstNonEmptyString(metadata.publishError, metadata.publish_error) ??
+          current.publishError,
+        lastSyncResult:
+          firstNonEmptyString(metadata.lastSyncResult, metadata.last_sync_result) ===
+          "failed"
+            ? "failed"
+            : firstNonEmptyString(metadata.lastSyncResult, metadata.last_sync_result) ===
+                "success"
+              ? "success"
+              : current.lastSyncResult,
+        lastSyncError:
+          firstNonEmptyString(metadata.lastSyncError, metadata.last_sync_error) ??
+          current.lastSyncError,
+        lastSyncFailureStage:
+          firstNonEmptyString(
+            metadata.lastSyncFailureStage,
+            metadata.last_sync_failure_stage,
+            metadata.failureStage,
+            metadata.failure_stage,
+          ) ?? current.lastSyncFailureStage,
+        lastSyncFailureCode:
+          firstNonEmptyString(
+            metadata.lastSyncFailureCode,
+            metadata.last_sync_failure_code,
+            metadata.failureCode,
+            metadata.failure_code,
+          ) ?? current.lastSyncFailureCode,
+        updatedAt: syncedAt,
+      };
+      this.memoryAlertExternalLinks[index] = next;
+      items.push(this.cloneAlertExternalLink(next));
+    }
+    return items;
   }
 
   private saveAuditToMemory(audit: AuditItem): AuditItem {
@@ -22450,6 +28796,124 @@ class ControlPlaneRepository {
       ...stored,
       metadata: { ...stored.metadata },
     };
+  }
+
+  private resolveAuditTenantId(audit: AuditItem): string {
+    return (
+      firstNonEmptyString(audit.metadata.tenant_id, audit.metadata.tenantId) ??
+      DEFAULT_TENANT_ID
+    );
+  }
+
+  private getAuditByIdFromMemory(tenantId: string, auditId: string): AuditItem | null {
+    const matched = this.memoryAudits.find(
+      (audit) => audit.id === auditId && this.resolveAuditTenantId(audit) === tenantId
+    );
+    return matched
+      ? {
+          ...matched,
+          metadata: { ...matched.metadata },
+        }
+      : null;
+  }
+
+  private deleteAuditFromMemory(tenantId: string, auditId: string): boolean {
+    const index = this.memoryAudits.findIndex(
+      (audit) => audit.id === auditId && this.resolveAuditTenantId(audit) === tenantId
+    );
+    if (index < 0) {
+      return false;
+    }
+    this.memoryAudits.splice(index, 1);
+    return true;
+  }
+
+  private cloneLegalHold(item: LegalHoldItem): LegalHoldItem {
+    return {
+      ...item,
+    };
+  }
+
+  private createLegalHoldToMemory(item: LegalHoldItem): LegalHoldItem {
+    const stored = this.cloneLegalHold(item);
+    this.memoryLegalHolds.unshift(stored);
+    return this.cloneLegalHold(stored);
+  }
+
+  private getLegalHoldByIdFromMemory(tenantId: string, holdId: string): LegalHoldItem | null {
+    const matched = this.memoryLegalHolds.find(
+      (item) => item.tenantId === tenantId && item.id === holdId
+    );
+    return matched ? this.cloneLegalHold(matched) : null;
+  }
+
+  private getActiveLegalHoldByResourceFromMemory(
+    tenantId: string,
+    resourceType: LegalHoldResourceType,
+    resourceId: string
+  ): LegalHoldItem | null {
+    const matched = this.memoryLegalHolds.find(
+      (item) =>
+        item.tenantId === tenantId &&
+        item.resourceType === resourceType &&
+        item.resourceId === resourceId &&
+        !item.releasedAt
+    );
+    return matched ? this.cloneLegalHold(matched) : null;
+  }
+
+  private listLegalHoldsFromMemory(input: NormalizedLegalHoldListInput): LegalHoldListResult {
+    const items = this.memoryLegalHolds
+      .filter((item) => {
+        if (item.tenantId !== input.tenantId) {
+          return false;
+        }
+        if (input.resourceType && item.resourceType !== input.resourceType) {
+          return false;
+        }
+        if (input.resourceId && item.resourceId !== input.resourceId) {
+          return false;
+        }
+        if (input.active === true && item.releasedAt) {
+          return false;
+        }
+        if (input.active === false && !item.releasedAt) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+
+    return {
+      items: items.slice(0, input.limit).map((item) => this.cloneLegalHold(item)),
+      total: items.length,
+    };
+  }
+
+  private releaseLegalHoldToMemory(
+    tenantId: string,
+    holdId: string,
+    input: LegalHoldReleaseInput,
+    options: ReleaseLegalHoldOptions
+  ): LegalHoldItem | null {
+    const index = this.memoryLegalHolds.findIndex(
+      (item) => item.tenantId === tenantId && item.id === holdId && !item.releasedAt
+    );
+    if (index < 0) {
+      return null;
+    }
+
+    const current = this.memoryLegalHolds[index] as LegalHoldItem;
+    const updated: LegalHoldItem = {
+      ...current,
+      releasedAt: options.releasedAt ?? new Date().toISOString(),
+      releasedByUserId: firstNonEmptyString(options.releasedByUserId) ?? undefined,
+      releasedByEmail: firstNonEmptyString(options.releasedByEmail) ?? undefined,
+      releaseReason: firstNonEmptyString(input.reason) ?? undefined,
+      updatedAt: options.releasedAt ?? new Date().toISOString(),
+    };
+    this.memoryLegalHolds[index] = updated;
+    return this.cloneLegalHold(updated);
   }
 
   private cloneTokenPulseRuntimeEvent(
@@ -22946,6 +29410,61 @@ class ControlPlaneRepository {
     }
     this.memoryAgentBindings.splice(index, 1);
     return true;
+  }
+
+  private listAgentRuntimeHeartbeatsFromMemory(
+    tenantId: string
+  ): AgentRuntimeHeartbeatRecord[] {
+    return this.memoryAgentRuntimeHeartbeats
+      .filter((record) => record.tenantId === tenantId)
+      .sort(
+        (a, b) =>
+          b.occurredAt.localeCompare(a.occurredAt) ||
+          b.updatedAt.localeCompare(a.updatedAt) ||
+          a.agentId.localeCompare(b.agentId)
+      )
+      .map(cloneAgentRuntimeHeartbeatRecord);
+  }
+
+  private getAgentRuntimeHeartbeatFromMemory(
+    tenantId: string,
+    agentId: string
+  ): AgentRuntimeHeartbeatRecord | null {
+    const matched = this.memoryAgentRuntimeHeartbeats.find(
+      (record) => record.tenantId === tenantId && record.agentId === agentId
+    );
+    return matched ? cloneAgentRuntimeHeartbeatRecord(matched) : null;
+  }
+
+  private upsertAgentRuntimeHeartbeatInMemory(
+    record: AgentRuntimeHeartbeatRecord
+  ): AgentRuntimeHeartbeatRecord {
+    const existing = this.memoryAgentRuntimeHeartbeats.find(
+      (item) => item.tenantId === record.tenantId && item.agentId === record.agentId
+    );
+    if (!existing) {
+      this.memoryAgentRuntimeHeartbeats.push(cloneAgentRuntimeHeartbeatRecord(record));
+      return cloneAgentRuntimeHeartbeatRecord(record);
+    }
+
+    existing.sessionId = record.sessionId;
+    existing.hostname = record.hostname;
+    existing.version = record.version;
+    existing.daemon = record.daemon;
+    existing.occurredAt = record.occurredAt;
+    existing.configVersion = record.configVersion;
+    existing.configFetchedAt = record.configFetchedAt;
+    existing.heartbeatIntervalSec = record.heartbeatIntervalSec;
+    existing.ingestProtocol = record.ingestProtocol;
+    existing.ingestEndpoint = record.ingestEndpoint;
+    existing.sourceCount = record.sourceCount;
+    existing.sourceIds = [...record.sourceIds];
+    existing.lastIngestStatusCode = record.lastIngestStatusCode;
+    existing.lastAccepted = record.lastAccepted;
+    existing.lastRejected = record.lastRejected;
+    existing.lastError = record.lastError;
+    existing.updatedAt = record.updatedAt;
+    return cloneAgentRuntimeHeartbeatRecord(existing);
   }
 
   private hasSourceInTenantFromMemory(tenantId: string, sourceId: string): boolean {

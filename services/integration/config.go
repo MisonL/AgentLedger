@@ -13,30 +13,34 @@ import (
 )
 
 const (
-	defaultIntegrationHTTPAddr    = ":8085"
-	defaultAlertsStream           = "GOVERNANCE_ALERTS"
-	defaultWeeklyStream           = "GOVERNANCE_REPORTS_WEEKLY"
-	defaultAlertsSubject          = "governance.alerts"
-	defaultAlertsDurable          = "INTEGRATION_ALERTS_DISPATCHER"
-	defaultCallbackStream         = "INTEGRATION_CALLBACK_EVENTS"
-	defaultCallbackSubject        = "integration.callback.events"
-	defaultCallbackDurable        = "INTEGRATION_CALLBACK_EVENT_SINK"
-	defaultCallbackPath           = "/api/v1/integrations/callbacks/alerts"
-	defaultWeeklySubject          = "governance.reports.weekly"
-	defaultWeeklyDurable          = "INTEGRATION_WEEKLY_REPORT_DISPATCHER"
-	defaultDLQSubject             = "integration.dispatch"
-	defaultWebhookTimeout         = 10 * time.Second
-	defaultCallbackSignatureTTL   = 5 * time.Minute
-	defaultRetryMax               = 5
-	defaultRetryBaseDelay         = 2 * time.Second
-	defaultRetryMaxDelay          = 60 * time.Second
-	defaultAlertDedupeWindow      = 0 * time.Second
-	defaultAlertDedupeMaxEntries  = 20000
-	defaultConsumerAckWait        = 90 * time.Second
-	defaultDLQPublishTimeout      = 5 * time.Second
-	defaultIntegrationServiceName = "integration"
-	defaultIntegrationChannels    = "webhook"
-	defaultEmailSMTPPort          = 587
+	defaultIntegrationHTTPAddr            = ":8085"
+	defaultAlertsStream                   = "GOVERNANCE_ALERTS"
+	defaultWeeklyStream                   = "GOVERNANCE_REPORTS_WEEKLY"
+	defaultAlertsSubject                  = "governance.alerts"
+	defaultAlertsDurable                  = "INTEGRATION_ALERTS_DISPATCHER"
+	defaultCallbackStream                 = "INTEGRATION_CALLBACK_EVENTS"
+	defaultCallbackSubject                = "integration.callback.events"
+	defaultCallbackDurable                = "INTEGRATION_CALLBACK_EVENT_SINK"
+	defaultDLQStream                      = "INTEGRATION_DISPATCH_DLQ"
+	defaultAlertExternalStatusSyncStream  = "INTEGRATION_ALERT_EXTERNAL_STATUS_SYNC_EVENTS"
+	defaultAlertExternalStatusSyncSubject = "integration.alert.external_status_sync"
+	defaultAlertExternalStatusSyncDurable = "INTEGRATION_ALERT_EXTERNAL_STATUS_SYNC_EVENT_SINK"
+	defaultCallbackPath                   = "/api/v1/integrations/callbacks/alerts"
+	defaultWeeklySubject                  = "governance.reports.weekly"
+	defaultWeeklyDurable                  = "INTEGRATION_WEEKLY_REPORT_DISPATCHER"
+	defaultDLQSubject                     = "integration.dispatch"
+	defaultWebhookTimeout                 = 10 * time.Second
+	defaultCallbackSignatureTTL           = 5 * time.Minute
+	defaultRetryMax                       = 5
+	defaultRetryBaseDelay                 = 2 * time.Second
+	defaultRetryMaxDelay                  = 60 * time.Second
+	defaultAlertDedupeWindow              = 0 * time.Second
+	defaultAlertDedupeMaxEntries          = 20000
+	defaultConsumerAckWait                = 90 * time.Second
+	defaultDLQPublishTimeout              = 5 * time.Second
+	defaultIntegrationServiceName         = "integration"
+	defaultIntegrationChannels            = "webhook"
+	defaultEmailSMTPPort                  = 587
 )
 
 type integrationChannel string
@@ -48,6 +52,7 @@ const (
 	channelFeishu       integrationChannel = "feishu"
 	channelEmail        integrationChannel = "email"
 	channelEmailWebhook integrationChannel = "email_webhook"
+	channelIncident     integrationChannel = "incident"
 	channelTicket       integrationChannel = "ticket"
 )
 
@@ -76,6 +81,10 @@ type integrationConfig struct {
 	CallbackStream  string
 	CallbackSubject string
 	CallbackDurable string
+
+	AlertExternalStatusSyncStream  string
+	AlertExternalStatusSyncSubject string
+	AlertExternalStatusSyncDurable string
 
 	WeeklyStream  string
 	WeeklySubject string
@@ -134,6 +143,19 @@ func loadIntegrationConfig() (integrationConfig, error) {
 		CallbackSubject: callbackSubject,
 		CallbackDurable: getEnv("INTEGRATION_CALLBACK_DURABLE", defaultCallbackDurable),
 
+		AlertExternalStatusSyncStream: getEnv(
+			"INTEGRATION_ALERT_EXTERNAL_STATUS_SYNC_STREAM",
+			defaultAlertExternalStatusSyncStream,
+		),
+		AlertExternalStatusSyncSubject: getEnv(
+			"INTEGRATION_ALERT_EXTERNAL_STATUS_SYNC_SUBJECT",
+			defaultAlertExternalStatusSyncSubject,
+		),
+		AlertExternalStatusSyncDurable: getEnv(
+			"INTEGRATION_ALERT_EXTERNAL_STATUS_SYNC_DURABLE",
+			defaultAlertExternalStatusSyncDurable,
+		),
+
 		WeeklyStream:  getEnv("INTEGRATION_WEEKLY_STREAM", defaultWeeklyStream),
 		WeeklySubject: getEnv("INTEGRATION_WEEKLY_SUBJECT", defaultWeeklySubject),
 		WeeklyDurable: getEnv("INTEGRATION_WEEKLY_DURABLE", defaultWeeklyDurable),
@@ -151,6 +173,7 @@ func loadIntegrationConfig() (integrationConfig, error) {
 			channelDingTalk:     getEnv("INTEGRATION_DINGTALK_WEBHOOK_URL", ""),
 			channelFeishu:       getEnv("INTEGRATION_FEISHU_WEBHOOK_URL", ""),
 			channelEmailWebhook: getEnv("INTEGRATION_EMAIL_WEBHOOK_URL", ""),
+			channelIncident:     getEnv("INTEGRATION_INCIDENT_WEBHOOK_URL", ""),
 			channelTicket:       getEnv("INTEGRATION_TICKET_WEBHOOK_URL", ""),
 		},
 
@@ -252,6 +275,15 @@ func loadIntegrationConfig() (integrationConfig, error) {
 	}
 	if cfg.CallbackDurable == "" {
 		return integrationConfig{}, fmt.Errorf("INTEGRATION_CALLBACK_DURABLE is required")
+	}
+	if cfg.AlertExternalStatusSyncStream == "" {
+		return integrationConfig{}, fmt.Errorf("INTEGRATION_ALERT_EXTERNAL_STATUS_SYNC_STREAM is required")
+	}
+	if cfg.AlertExternalStatusSyncSubject == "" {
+		return integrationConfig{}, fmt.Errorf("INTEGRATION_ALERT_EXTERNAL_STATUS_SYNC_SUBJECT is required")
+	}
+	if cfg.AlertExternalStatusSyncDurable == "" {
+		return integrationConfig{}, fmt.Errorf("INTEGRATION_ALERT_EXTERNAL_STATUS_SYNC_DURABLE is required")
 	}
 	if cfg.WeeklyStream == "" {
 		return integrationConfig{}, fmt.Errorf("INTEGRATION_WEEKLY_STREAM is required")
@@ -515,6 +547,8 @@ func channelFromString(raw string) (integrationChannel, bool) {
 		return channelEmail, true
 	case string(channelEmailWebhook):
 		return channelEmailWebhook, true
+	case string(channelIncident):
+		return channelIncident, true
 	case string(channelTicket):
 		return channelTicket, true
 	default:
@@ -570,6 +604,8 @@ func channelEnvKey(channel integrationChannel) string {
 		return "INTEGRATION_EMAIL_SMTP_HOST"
 	case channelEmailWebhook:
 		return "INTEGRATION_EMAIL_WEBHOOK_URL"
+	case channelIncident:
+		return "INTEGRATION_INCIDENT_WEBHOOK_URL"
 	case channelTicket:
 		return "INTEGRATION_TICKET_WEBHOOK_URL"
 	default:

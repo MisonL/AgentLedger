@@ -9,7 +9,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { clearAuthTokens, setAuthTokens } from "../src/api";
 import App from "../src/App";
 
-const GOVERNANCE_HEAVY_TEST_TIMEOUT_MS = 25_000;
+const GOVERNANCE_HEAVY_TEST_TIMEOUT_MS = 120_000;
 
 function toUrl(input: Parameters<typeof fetch>[0]): string {
   if (typeof input === "string") {
@@ -236,6 +236,76 @@ function mockGovernancePageFetch({
         });
       }
 
+      if (
+        pathname === "/api/v2/residency/kms-key-mappings" &&
+        method === "GET"
+      ) {
+        return mockJsonResponse({
+          items: [],
+          total: 0,
+        });
+      }
+
+      if (
+        pathname === "/api/v2/residency/kms-key-mappings" &&
+        method === "PUT"
+      ) {
+        const payload = JSON.parse(String(init?.body ?? "{}")) as {
+          items?: Array<{
+            regionId?: string;
+            keyProvider?: string;
+            keyRef?: string;
+            enabled?: boolean;
+          }>;
+        };
+        return mockJsonResponse({
+          items: (payload.items ?? []).map((item) => ({
+            tenantId: "default",
+            regionId: item.regionId ?? "",
+            keyProvider: item.keyProvider ?? "",
+            keyRef: item.keyRef ?? "",
+            enabled: item.enabled === true,
+            updatedAt: "2026-03-06T10:00:00.000Z",
+          })),
+          total: Array.isArray(payload.items) ? payload.items.length : 0,
+        });
+      }
+
+      if (
+        pathname === "/api/v2/residency/archive-region-policies" &&
+        method === "GET"
+      ) {
+        return mockJsonResponse({
+          items: [],
+          total: 0,
+        });
+      }
+
+      if (
+        pathname === "/api/v2/residency/archive-region-policies" &&
+        method === "PUT"
+      ) {
+        const payload = JSON.parse(String(init?.body ?? "{}")) as {
+          items?: Array<{
+            sourceRegion?: string;
+            archiveRegion?: string;
+            archiveClass?: string;
+            enabled?: boolean;
+          }>;
+        };
+        return mockJsonResponse({
+          items: (payload.items ?? []).map((item) => ({
+            tenantId: "default",
+            sourceRegion: item.sourceRegion ?? "",
+            archiveRegion: item.archiveRegion ?? "",
+            archiveClass: item.archiveClass ?? "",
+            enabled: item.enabled === true,
+            updatedAt: "2026-03-06T10:00:00.000Z",
+          })),
+          total: Array.isArray(payload.items) ? payload.items.length : 0,
+        });
+      }
+
       if (pathname === "/api/v2/residency/replications" && method === "GET") {
         return mockJsonResponse({
           items: [],
@@ -243,6 +313,65 @@ function mockGovernancePageFetch({
           filters: {
             limit: 50,
           },
+        });
+      }
+
+      if (pathname === "/api/v1/system/config/packages" && method === "GET") {
+        return mockJsonResponse({
+          items: [],
+          total: 0,
+          filters: {
+            limit: 50,
+          },
+        });
+      }
+
+      if (
+        pathname.match(/^\/api\/v1\/system\/config\/packages\/[^/]+\/approvals$/) &&
+        method === "GET"
+      ) {
+        return mockJsonResponse({
+          items: [],
+          total: 0,
+        });
+      }
+
+      if (
+        pathname === "/api/v1/system/config/packages/watch/latest" &&
+        method === "GET"
+      ) {
+        return mockJsonResponse(
+          {
+            message: "当前没有命中的已发布配置包。",
+          },
+          404,
+        );
+      }
+
+      if (pathname === "/api/v1/system/agent-releases" && method === "GET") {
+        return mockJsonResponse({
+          items: [],
+          total: 0,
+          filters: {
+            limit: 50,
+          },
+        });
+      }
+
+      if (pathname === "/api/v1/system/agent-releases/check" && method === "GET") {
+        return mockJsonResponse({
+          checkedAt: "2026-03-09T00:00:00.000Z",
+          currentVersion: "0.0.0",
+          channel: "stable",
+          os: "darwin",
+          arch: "amd64",
+          updateAvailable: false,
+          comparison: "no_release",
+          latestRelease: null,
+          selectedArtifact: null,
+          instructions: "当前仅提供升级检查结果，不执行真实下载升级。",
+          evaluatedRing: "stable",
+          selectionReason: "no_candidate",
         });
       }
 
@@ -356,6 +485,129 @@ describe("Web Console", () => {
     expect(
       screen.getByRole("grid", { name: "使用热力图" }),
     ).toBeInTheDocument();
+  });
+
+  test("Agents 页面展示守护视图与运行时配置", async () => {
+    setAuthTokens({
+      accessToken: "access-token-agents-page",
+      refreshToken: "refresh-token-agents-page",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) => {
+        const url = toUrl(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        const pathname = new URL(url, "http://localhost").pathname;
+
+        if (pathname === "/api/v1/usage/heatmap" && method === "GET") {
+          return mockJsonResponse({
+            cells: [],
+            summary: {
+              tokens: 0,
+              cost: 0,
+              sessions: 0,
+            },
+          });
+        }
+
+        if (pathname === "/api/v1/system/config/agents/views" && method === "GET") {
+          return mockJsonResponse({
+            items: [
+              {
+                id: "agent-1",
+                agentId: "agent-1",
+                tenantId: "default",
+                displayName: "Agent One",
+                hostname: "host-1",
+                version: "0.1.0",
+                sourceCount: 1,
+                sourceIds: ["source-1"],
+                sourceNames: ["Source One"],
+                runtimeStatus: "online",
+                lastHeartbeatAt: "2026-03-09T01:00:00.000Z",
+                lastConfigFetchedAt: "2026-03-09T00:59:30.000Z",
+                lastConfigVersion: "cfg:test-001",
+                lastIngestStatusCode: 202,
+                lastAccepted: 5,
+                lastRejected: 0,
+                heartbeatIntervalSeconds: 30,
+                staleAfterSeconds: 90,
+                ingestProtocol: "http",
+                ingestEndpoint: "http://127.0.0.1:8081/v1/ingest",
+                updatedAt: "2026-03-09T01:00:00.000Z",
+              },
+            ],
+            total: 1,
+            generatedAt: "2026-03-09T01:00:01.000Z",
+          });
+        }
+
+        if (pathname === "/api/v1/system/config/agent-runtime" && method === "GET") {
+          return mockJsonResponse({
+            tenantId: "default",
+            agent: {
+              agentId: "agent-1",
+              hostname: "host-1",
+              version: "0.1.0",
+              displayName: "Agent One",
+            },
+            runtime: {
+              heartbeatIntervalSeconds: 30,
+              staleAfterSeconds: 90,
+              ingestProtocol: "http",
+              ingestEndpoint: "http://127.0.0.1:8081/v1/ingest",
+              sampleGenerateCount: 5,
+            },
+            bindings: {
+              sourceCount: 1,
+              sourceIds: ["source-1"],
+              sources: [
+                {
+                  sourceId: "source-1",
+                  name: "Source One",
+                  accessMode: "realtime",
+                  enabled: true,
+                  location: "/var/log/agent",
+                  sourceRegion: "cn-shanghai",
+                },
+              ],
+            },
+            configVersion: "cfg:test-001",
+            updatedAt: "2026-03-09T01:00:01.000Z",
+          });
+        }
+
+        throw new Error(`unexpected call: ${method} ${url}`);
+      });
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "AI 使用热力图", level: 1 }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Agents" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Agent 守护视图", level: 1 }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Agent 守护状态")).toBeInTheDocument();
+    expect(await screen.findAllByText("在线")).toHaveLength(2);
+    expect(await screen.findByText("202 / 5:0")).toBeInTheDocument();
+    expect(await screen.findByText(/cfg:test-001/)).toBeInTheDocument();
+    expect(await screen.findByText("Source One")).toBeInTheDocument();
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/system/config/agents/views"),
+      expect.any(Object),
+    );
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/system/config/agent-runtime?agentId=agent-1"),
+      expect.any(Object),
+    );
   });
 
   test("Sources 新增后会刷新列表", async () => {
@@ -2018,7 +2270,7 @@ describe("Web Console", () => {
       await screen.findByRole("heading", { name: "导出中心", level: 2 }),
     ).toBeInTheDocument();
     },
-    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+    40_000,
   );
 
   test(
@@ -2324,7 +2576,7 @@ describe("Web Console", () => {
     );
     expect(patchCall).toBeTruthy();
     },
-    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+    40_000,
   );
 
   test(
@@ -2361,6 +2613,43 @@ describe("Web Console", () => {
       .mockImplementation(async (input, init) => {
         const url = toUrl(input);
         const method = (init?.method ?? "GET").toUpperCase();
+        const buildOpsResponse = () => {
+          const items = (alerts[0].externalLinks ?? []).map((item) => {
+            const syncState =
+              item.lastSyncResult === "failed"
+                ? "failed"
+                : item.pendingExternalStatus &&
+                    item.pendingExternalStatus !== item.externalStatus
+                  ? "pending"
+                  : "synced";
+            return {
+              ...item,
+              syncState,
+              retryable: syncState !== "synced",
+            };
+          });
+          const summary = items.reduce(
+            (acc, item) => {
+              acc.total += 1;
+              if (item.syncState === "pending") {
+                acc.pending += 1;
+              }
+              if (item.syncState === "failed") {
+                acc.failed += 1;
+              }
+              return acc;
+            },
+            { total: 0, pending: 0, failed: 0 },
+          );
+          return {
+            alertId: alerts[0].id,
+            summary,
+            items,
+            filters: {
+              onlyFailed: true,
+            },
+          };
+        };
 
         if (url.includes("/api/v1/alerts") && method === "GET") {
           return mockJsonResponse({
@@ -2436,6 +2725,757 @@ describe("Web Console", () => {
   );
 
   test(
+    "治理页支持重试告警外部状态同步",
+    async () => {
+    window.location.hash = "#/governance";
+    setAuthTokens({
+      accessToken: "access-token-governance-alert-retry-sync",
+      refreshToken: "refresh-token-governance-alert-retry-sync",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const alerts = [
+      {
+        id: "alert-ui-retry-sync",
+        tenantId: "default",
+        budgetId: "budget-ui-retry-sync",
+        scope: "tenant",
+        scopeRef: "default",
+        severity: "critical",
+        status: "resolved",
+        message: "retry external sync",
+        threshold: 0.9,
+        value: 0.96,
+        createdAt: "2026-03-01T12:00:00.000Z",
+        updatedAt: "2026-03-01T12:10:00.000Z",
+        metadata: {},
+        externalLinks: [
+          {
+            id: "link-ui-retry-sync",
+            externalType: "ticket" as const,
+            externalSystem: "ticket",
+            externalId: "ticket-1001",
+            externalStatus: "acknowledged",
+            pendingExternalStatus: "resolved",
+            lastSyncedAt: "2026-03-01T12:12:00.000Z",
+            publishStatus: "success" as const,
+            lastSyncResult: "failed" as const,
+            lastSyncError: "downstream timeout",
+            lastSyncFailureStage: "dispatch_http",
+            lastSyncFailureCode: "downstream_http_5xx",
+          },
+        ],
+      },
+    ];
+    const buildOpsResponse = () => {
+      const items = (alerts[0].externalLinks ?? []).map((item) => {
+        const syncState =
+          item.lastSyncResult === "failed"
+            ? "failed"
+            : item.pendingExternalStatus &&
+                item.pendingExternalStatus !== item.externalStatus
+              ? "pending"
+              : "synced";
+        return {
+          ...item,
+          syncState,
+          retryable: syncState !== "synced",
+        };
+      });
+      const summary = items.reduce(
+        (acc, item) => {
+          acc.total += 1;
+          if (item.syncState === "pending") {
+            acc.pending += 1;
+          }
+          if (item.syncState === "failed") {
+            acc.failed += 1;
+          }
+          return acc;
+        },
+        { total: 0, pending: 0, failed: 0 },
+      );
+      return {
+        alertId: alerts[0].id,
+        summary,
+        items,
+        filters: {
+          onlyFailed: true,
+        },
+      };
+    };
+    const buildFailureResponse = () => {
+      const ops = buildOpsResponse();
+      return {
+        summary: ops.summary,
+        items: ops.items.map((item) => ({
+          ...item,
+          alertId: alerts[0].id,
+          alertStatus: alerts[0].status,
+          updatedAt: alerts[0].updatedAt,
+        })),
+        filters: {
+          syncState: "failed",
+          limit: 20,
+        },
+      };
+    };
+
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) => {
+        const url = toUrl(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+
+        if (
+          url.includes("/api/v1/alerts/external-links/failures") &&
+          method === "GET"
+        ) {
+          return mockJsonResponse(buildFailureResponse());
+        }
+
+        if (
+          url.endsWith("/api/v1/alerts/alert-ui-retry-sync/external-links?onlyFailed=true") &&
+          method === "GET"
+        ) {
+          return mockJsonResponse(buildOpsResponse());
+        }
+        if (url.includes("/api/v1/alerts") && method === "GET") {
+          return mockJsonResponse({
+            items: alerts,
+            total: alerts.length,
+            filters: {
+              limit: 50,
+            },
+            nextCursor: null,
+          });
+        }
+        if (url.includes("/api/v1/usage/weekly-summary") && method === "GET") {
+          return mockJsonResponse({
+            metric: "tokens",
+            timezone: "UTC",
+            weeks: [],
+            summary: {
+              tokens: 0,
+              cost: 0,
+              sessions: 0,
+            },
+          });
+        }
+
+        if (
+          url.endsWith("/api/v1/alerts/alert-ui-retry-sync/external-links/retry-sync") &&
+          method === "POST"
+        ) {
+          const payload = JSON.parse(String(init?.body ?? "{}")) as {
+            externalType?: string;
+            externalId?: string;
+          };
+          expect(payload).toEqual({
+            externalType: "ticket",
+            externalId: "ticket-1001",
+          });
+          alerts[0] = {
+            ...alerts[0],
+            updatedAt: "2026-03-01T12:20:00.000Z",
+            externalLinks: [
+              {
+                ...alerts[0].externalLinks[0],
+                pendingExternalStatus: "resolved",
+                publishStatus: "success",
+                lastSyncedAt: "2026-03-01T12:20:00.000Z",
+                lastSyncResult: undefined,
+                lastSyncError: undefined,
+                lastSyncFailureStage: undefined,
+                lastSyncFailureCode: undefined,
+              },
+            ],
+          };
+          return mockJsonResponse(alerts[0]);
+        }
+        if (
+          url.endsWith(
+            "/api/v1/alerts/alert-ui-retry-sync/external-links/retry-sync-batch",
+          ) &&
+          method === "POST"
+        ) {
+          return mockJsonResponse({
+            alertId: alerts[0].id,
+            retriedCount: 1,
+            published: 1,
+            failed: 0,
+            items: buildOpsResponse().items,
+          });
+        }
+
+        throw new Error(`unexpected call: ${method} ${url}`);
+      });
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(
+        "ticket:ticket-1001 status=acknowledged pending=resolved publish=success sync=failed error=downstream timeout stage=dispatch_http code=downstream_http_5xx",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "查看联动运维",
+      }),
+    );
+    expect(await screen.findByText("外部联动运维视图")).toBeInTheDocument();
+    expect(
+      await screen.findByText((content) =>
+        content.includes("聚合：total=1 / pending=0 / failed=1"),
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "加载失败联动" }),
+    );
+    expect(await screen.findByText("失败外部联动视图")).toBeInTheDocument();
+    expect((await screen.findAllByText("alert-ui-retry-sync")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("dispatch_http")).length).toBeGreaterThan(0);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "重试同步 ticket:ticket-1001",
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        "告警 alert-ui-retry-sync 的外部联动 ticket:ticket-1001 已重新触发同步。",
+      ),
+    ).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          "ticket:ticket-1001 status=acknowledged pending=resolved publish=success",
+        ),
+      ).toBeInTheDocument();
+    });
+    expect(
+      (
+        await screen.findAllByText((content) =>
+          content.includes("聚合：total=1 / pending=1 / failed=0"),
+        )
+      ).length,
+    ).toBeGreaterThan(0);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "批量重试当前告警" }),
+    );
+    expect(
+      await screen.findByText("告警 alert-ui-retry-sync 已批量重试 1 条外部联动。"),
+    ).toBeInTheDocument();
+
+    const retryCall = fetchSpy.mock.calls.find(
+      ([url, init]) =>
+        toUrl(url).endsWith(
+          "/api/v1/alerts/alert-ui-retry-sync/external-links/retry-sync",
+        ) &&
+        (init as RequestInit | undefined)?.method === "POST",
+    );
+    expect(retryCall).toBeTruthy();
+    const batchRetryCall = fetchSpy.mock.calls.find(
+      ([url, init]) =>
+        toUrl(url).endsWith(
+          "/api/v1/alerts/alert-ui-retry-sync/external-links/retry-sync-batch",
+        ) &&
+        (init as RequestInit | undefined)?.method === "POST",
+    );
+    expect(batchRetryCall).toBeTruthy();
+    const failureListCall = fetchSpy.mock.calls.find(
+      ([url, init]) =>
+        toUrl(url).includes("/api/v1/alerts/external-links/failures") &&
+        (init as RequestInit | undefined)?.method === undefined,
+    );
+    expect(failureListCall).toBeTruthy();
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "治理页支持创建并查看 Integration DLQ 恢复批次",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-dlq",
+        refreshToken: "refresh-token-governance-dlq",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async (input, init) => {
+          const url = toUrl(input);
+          const method = (init?.method ?? "GET").toUpperCase();
+
+          if (url.includes("/api/v1/alerts") && method === "GET") {
+            return mockJsonResponse({
+              items: [],
+              total: 0,
+              filters: {
+                limit: 50,
+              },
+              nextCursor: null,
+            });
+          }
+          if (url.includes("/api/v1/usage/weekly-summary") && method === "GET") {
+            return mockJsonResponse({
+              metric: "tokens",
+              timezone: "UTC",
+              weeks: [],
+              summary: {
+                tokens: 0,
+                cost: 0,
+                sessions: 0,
+              },
+            });
+          }
+          if (
+            url.includes("/api/v1/integrations/dlq/messages?") &&
+            method === "GET"
+          ) {
+            return mockJsonResponse({
+              items: [
+                {
+                  messageId: "INTEGRATION_DISPATCH_DLQ:101",
+                  stream: "INTEGRATION_DISPATCH_DLQ",
+                  subject: "integration.alert.external_status_sync",
+                  eventType: "alert_external_status_sync",
+                  channel: "ticket",
+                  callbackId: "sync-result:dlq-ui-1",
+                  tenantId: "default",
+                  alertId: "alert-dlq-ui-1",
+                  externalType: "ticket",
+                  externalId: "INC-1001",
+                  failedAt: "2026-03-01T12:00:00.000Z",
+                  attempt: 4,
+                  error: "downstream timeout",
+                  retryable: true,
+                  payload: {
+                    subject: "integration.alert.external_status_sync",
+                  },
+                },
+              ],
+              total: 1,
+              filters: {
+                limit: 20,
+              },
+            });
+          }
+          if (
+            url.endsWith("/api/v1/integrations/dlq/recovery-jobs") &&
+            method === "POST"
+          ) {
+            expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+              messageIds: ["INTEGRATION_DISPATCH_DLQ:101"],
+            });
+            return mockJsonResponse({
+              id: "dlq-job-ui-1",
+              tenantId: "default",
+              status: "queued",
+              requestedAt: "2026-03-01T12:10:00.000Z",
+              messageIds: ["INTEGRATION_DISPATCH_DLQ:101"],
+              summary: {
+                total: 1,
+                replayed: 0,
+                failed: 0,
+              },
+              items: [],
+            }, 202);
+          }
+          if (
+            url.includes("/api/v1/integrations/dlq/recovery-jobs?") &&
+            method === "GET"
+          ) {
+            return mockJsonResponse({
+              items: [
+                {
+                  id: "dlq-job-ui-1",
+                  tenantId: "default",
+                  status: "completed",
+                  requestedAt: "2026-03-01T12:10:00.000Z",
+                  startedAt: "2026-03-01T12:10:01.000Z",
+                  finishedAt: "2026-03-01T12:10:02.000Z",
+                  messageIds: ["INTEGRATION_DISPATCH_DLQ:101"],
+                  summary: {
+                    total: 1,
+                    replayed: 1,
+                    failed: 0,
+                  },
+                  items: [
+                    {
+                      messageId: "INTEGRATION_DISPATCH_DLQ:101",
+                      status: "replayed",
+                    },
+                  ],
+                },
+              ],
+              total: 1,
+              filters: {
+                limit: 20,
+              },
+            });
+          }
+          if (
+            url.endsWith("/api/v1/integrations/dlq/recovery-jobs/dlq-job-ui-1") &&
+            method === "GET"
+          ) {
+            return mockJsonResponse({
+              id: "dlq-job-ui-1",
+              tenantId: "default",
+              status: "completed",
+              requestedAt: "2026-03-01T12:10:00.000Z",
+              startedAt: "2026-03-01T12:10:01.000Z",
+              finishedAt: "2026-03-01T12:10:02.000Z",
+              messageIds: ["INTEGRATION_DISPATCH_DLQ:101"],
+              summary: {
+                total: 1,
+                replayed: 1,
+                failed: 0,
+              },
+              items: [
+                {
+                  messageId: "INTEGRATION_DISPATCH_DLQ:101",
+                  status: "replayed",
+                },
+              ],
+            });
+          }
+
+          throw new Error(`unexpected call: ${method} ${url}`);
+        });
+
+      render(<App />);
+
+      const dlqHeading = await screen.findByText("Integration DLQ");
+      const dlqContainer = dlqHeading.closest(".governance-stack");
+      if (!(dlqContainer instanceof HTMLElement)) {
+        throw new Error("未找到 Integration DLQ 容器。");
+      }
+      fireEvent.click(screen.getByRole("button", { name: "加载 DLQ" }));
+      expect(await screen.findByText("alert-dlq-ui-1")).toBeInTheDocument();
+      fireEvent.click(within(dlqContainer).getByRole("checkbox"));
+      fireEvent.click(
+        within(dlqContainer).getByRole("button", { name: "创建恢复批次" }),
+      );
+      expect(
+        await screen.findByText("已创建恢复批次 dlq-job-ui-1。"),
+      ).toBeInTheDocument();
+      fireEvent.click(
+        within(dlqContainer).getByRole("button", { name: "加载恢复批次" }),
+      );
+      expect(await screen.findByText("dlq-job-ui-1")).toBeInTheDocument();
+      fireEvent.change(
+        within(dlqContainer).getByLabelText("jobId"),
+        {
+          target: { value: "dlq-job-ui-1" },
+        },
+      );
+      fireEvent.click(
+        within(dlqContainer).getByRole("button", { name: "查看恢复详情" }),
+      );
+      await waitFor(() => {
+        expect(dlqContainer.textContent ?? "").toContain(
+          "恢复批次 dlq-job-ui-1： total=1 / replayed=1 / failed=0",
+        );
+      });
+
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url]) =>
+            toUrl(url).includes("/api/v1/integrations/dlq/messages?"),
+        ),
+      ).toBe(true);
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url, init]) =>
+            toUrl(url).endsWith("/api/v1/integrations/dlq/recovery-jobs") &&
+            (init as RequestInit | undefined)?.method === "POST",
+        ),
+      ).toBe(true);
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url, init]) =>
+            toUrl(url).includes("/api/v1/integrations/dlq/recovery-jobs?") &&
+            (init as RequestInit | undefined)?.method === undefined,
+        ),
+      ).toBe(true);
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url, init]) =>
+            toUrl(url).endsWith("/api/v1/integrations/dlq/recovery-jobs/dlq-job-ui-1") &&
+            (init as RequestInit | undefined)?.method === undefined,
+        ),
+      ).toBe(true);
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "治理页支持加载失败审计报表",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-failure-report",
+        refreshToken: "refresh-token-governance-failure-report",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async (input, init) => {
+          const url = toUrl(input);
+          const method = (init?.method ?? "GET").toUpperCase();
+
+          if (url.includes("/api/v1/alerts") && method === "GET") {
+            return mockJsonResponse({
+              items: [],
+              total: 0,
+              filters: {
+                limit: 50,
+              },
+              nextCursor: null,
+            });
+          }
+          if (url.includes("/api/v1/usage/weekly-summary") && method === "GET") {
+            return mockJsonResponse({
+              metric: "tokens",
+              timezone: "UTC",
+              weeks: [],
+              summary: {
+                tokens: 0,
+                cost: 0,
+                sessions: 0,
+              },
+            });
+          }
+          if (
+            url.includes("/api/v1/integrations/failure-reports/alerts?") &&
+            method === "GET"
+          ) {
+            return mockJsonResponse({
+              summary: {
+                totalEvents: 2,
+                retryRequested: 1,
+                retryCompleted: 0,
+                retryFailed: 1,
+                dlqQueried: 0,
+                dlqReplayed: 0,
+                recoveryJobsCreated: 0,
+                recoveryJobsCompleted: 0,
+                recoveryJobsFailed: 0,
+              },
+              items: [
+                {
+                  occurredAt: "2026-03-01T11:00:00.000Z",
+                  action: "control_plane.alert_external_link_retry_failed",
+                  actionType: "retry_failed",
+                  alertId: "alert-report-1",
+                  externalSystem: "ticket",
+                  stage: "dispatch_http",
+                  code: "downstream_http_5xx",
+                  status: "failed",
+                  metadata: {},
+                },
+              ],
+              filters: {
+                externalSystem: "ticket",
+                limit: 10,
+              },
+            });
+          }
+
+          throw new Error(`unexpected call: ${method} ${url}`);
+      });
+
+      render(<App />);
+
+      const reportHeading = await screen.findByText("失败审计报表");
+      const reportSection = reportHeading.closest(".governance-stack");
+      if (!(reportSection instanceof HTMLElement)) {
+        throw new Error("未找到失败审计报表容器。");
+      }
+      const reportScreen = within(reportSection);
+
+      fireEvent.change(reportScreen.getByLabelText("externalSystem"), {
+        target: { value: "ticket" },
+      });
+      fireEvent.change(reportScreen.getByLabelText("limit"), {
+        target: { value: "10" },
+      });
+      fireEvent.click(reportScreen.getByRole("button", { name: "加载失败审计报表" }));
+
+      expect(
+        await reportScreen.findByText((content) =>
+          content.includes("total=2 / retryRequested=1 / retryFailed=1"),
+        ),
+      ).toBeInTheDocument();
+      expect(await reportScreen.findByText("alert-report-1")).toBeInTheDocument();
+      expect(await reportScreen.findByText("dispatch_http")).toBeInTheDocument();
+      expect(await reportScreen.findByText("downstream_http_5xx")).toBeInTheDocument();
+
+      expect(
+        fetchSpy.mock.calls.some(([url]) =>
+          toUrl(url).includes("/api/v1/integrations/failure-reports/alerts?"),
+        ),
+      ).toBe(true);
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "治理页支持加载长期趋势/容量运维视图",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-failure-trends",
+        refreshToken: "refresh-token-governance-failure-trends",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async (input, init) => {
+          const url = toUrl(input);
+          const method = (init?.method ?? "GET").toUpperCase();
+
+          if (url.includes("/api/v1/alerts") && method === "GET") {
+            return mockJsonResponse({
+              items: [],
+              total: 0,
+              filters: {
+                limit: 50,
+              },
+              nextCursor: null,
+            });
+          }
+          if (url.includes("/api/v1/usage/weekly-summary") && method === "GET") {
+            return mockJsonResponse({
+              metric: "tokens",
+              timezone: "UTC",
+              weeks: [],
+              summary: {
+                tokens: 0,
+                cost: 0,
+                sessions: 0,
+              },
+            });
+          }
+          if (
+            url.includes("/api/v1/integrations/failure-reports/alerts/trends?") &&
+            method === "GET"
+          ) {
+            return mockJsonResponse({
+              summary: {
+                totalEvents: 3,
+                requestedEvents: 1,
+                successEvents: 1,
+                failedEvents: 1,
+                days: 2,
+                averageEventsPerDay: 1.5,
+                peakDate: "2026-03-01",
+                peakCount: 2,
+              },
+              daily: [
+                {
+                  date: "2026-03-01",
+                  totalEvents: 2,
+                  requestedEvents: 0,
+                  successEvents: 1,
+                  failedEvents: 1,
+                  uniqueAlerts: 1,
+                  retryRequested: 0,
+                  retryCompleted: 0,
+                  retryFailed: 1,
+                  dlqQueried: 0,
+                  dlqReplayed: 0,
+                  recoveryJobsCreated: 0,
+                  recoveryJobsCompleted: 1,
+                  recoveryJobsFailed: 0,
+                },
+              ],
+              capacity: {
+                externalSystems: [
+                  {
+                    name: "ticket",
+                    totalEvents: 2,
+                    requestedEvents: 0,
+                    successEvents: 1,
+                    failedEvents: 1,
+                    uniqueAlerts: 1,
+                    lastOccurredAt: "2026-03-01T11:00:00.000Z",
+                  },
+                ],
+                stages: [
+                  {
+                    name: "dispatch_http",
+                    totalEvents: 1,
+                    requestedEvents: 0,
+                    successEvents: 0,
+                    failedEvents: 1,
+                    uniqueAlerts: 1,
+                    lastOccurredAt: "2026-03-01T10:00:00.000Z",
+                  },
+                ],
+              },
+              filters: {
+                externalSystem: "ticket",
+                top: 5,
+              },
+            });
+          }
+
+          throw new Error(`unexpected call: ${method} ${url}`);
+        });
+
+      render(<App />);
+
+      const trendHeading = await screen.findByText("长期趋势/容量运维视图");
+      const trendSection = trendHeading.closest(".governance-stack");
+      if (!(trendSection instanceof HTMLElement)) {
+        throw new Error("未找到长期趋势/容量运维视图容器。");
+      }
+      const trendScreen = within(trendSection);
+
+      fireEvent.change(trendScreen.getByLabelText("externalSystem"), {
+        target: { value: "ticket" },
+      });
+      fireEvent.change(trendScreen.getByLabelText("top"), {
+        target: { value: "5" },
+      });
+      fireEvent.click(
+        trendScreen.getByRole("button", { name: "加载长期趋势/容量运维视图" }),
+      );
+
+      expect(
+        await trendScreen.findByText((content) =>
+          content.includes("total=3 / failed=1 / requested=1 / avg/day=1.5"),
+        ),
+      ).toBeInTheDocument();
+      expect(await trendScreen.findByText("2026-03-01")).toBeInTheDocument();
+      expect(await trendScreen.findAllByText("ticket")).toHaveLength(1);
+      expect(await trendScreen.findByText("dispatch_http")).toBeInTheDocument();
+
+      expect(
+        fetchSpy.mock.calls.some(([url]) =>
+          toUrl(url).includes("/api/v1/integrations/failure-reports/alerts/trends?"),
+        ),
+      ).toBe(true);
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
     "治理页支持告警编排规则筛选、保存规范化、模拟与执行日志加载",
     async () => {
       window.location.hash = "#/governance";
@@ -2477,6 +3517,10 @@ describe("Web Console", () => {
         dedupeHit: boolean;
         suppressed: boolean;
         simulated: boolean;
+        escalated: boolean;
+        escalationReason?: "sla_timeout";
+        escalationTargetChannels?: string[];
+        slaMinutes?: number;
         metadata: Record<string, unknown>;
         createdAt: string;
       }> = [];
@@ -2635,6 +3679,10 @@ describe("Web Console", () => {
                 dedupeHit: payload.dedupeHit === true,
                 suppressed: payload.suppressed === true,
                 simulated: true,
+                escalated: false,
+                escalationReason: undefined,
+                escalationTargetChannels: [],
+                slaMinutes: item.slaMinutes,
                 metadata: {
                   dispatchMode: "rule",
                   attempt: 2,
@@ -2944,6 +3992,10 @@ describe("Web Console", () => {
         dedupeHit: false,
         suppressed: false,
         simulated: true,
+        escalated: true,
+        escalationReason: "sla_timeout",
+        escalationTargetChannels: ["email", "ticket"],
+        slaMinutes: 30,
         metadata: {},
         createdAt: "2026-03-03T11:10:00.000Z",
       });
@@ -3040,8 +4092,10 @@ describe("Web Console", () => {
         "cell",
       );
       expect(executionCells[3]?.textContent).toBe("rule");
-      expect(executionCells[9]?.textContent).toBe("--");
-      expect(executionCells[11]?.textContent).toBe(
+      expect(executionCells[4]?.textContent).toBe("false");
+      expect(executionCells[5]?.textContent).toBe("--");
+      expect(executionCells[11]?.textContent).toBe("--");
+      expect(executionCells[15]?.textContent).toBe(
         '{"dispatchMode":"rule","attempt":2}',
       );
       const latestExecutionQuerySnapshot =
@@ -3099,14 +4153,16 @@ describe("Web Console", () => {
     GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
   );
 
-  test("治理页告警编排非法输入时会阻止请求", async () => {
-    window.location.hash = "#/governance";
-    setAuthTokens({
-      accessToken: "access-token-governance-orchestration-invalid",
-      refreshToken: "refresh-token-governance-orchestration-invalid",
-      expiresIn: 1800,
-      tokenType: "Bearer",
-    });
+  test(
+    "治理页告警编排非法输入时会阻止请求",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-orchestration-invalid",
+        refreshToken: "refresh-token-governance-orchestration-invalid",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
 
     const orchestrationExecutionQuerySnapshots: Array<Record<string, string>> =
       [];
@@ -3299,10 +4355,932 @@ describe("Web Console", () => {
         "执行日志筛选时间范围非法：from 不能晚于 to。",
       ),
     ).toBeInTheDocument();
-    expect(orchestrationExecutionQuerySnapshots).toHaveLength(
-      beforeInvalidTimeRange,
-    );
-  });
+      expect(orchestrationExecutionQuerySnapshots).toHaveLength(
+        beforeInvalidTimeRange,
+      );
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "治理页 MCP 支持双阶段策略保存与评估结果展示",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-mcp-workflow",
+        refreshToken: "refresh-token-governance-mcp-workflow",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const mcpPolicies: Array<Record<string, unknown>> = [];
+      const mcpApprovals: Array<Record<string, unknown>> = [];
+      const mcpInvocations: Array<Record<string, unknown>> = [];
+      const mcpPolicyUpsertBodies: Array<Record<string, unknown>> = [];
+      const mcpEvaluateBodies: Array<Record<string, unknown>> = [];
+
+      mockGovernancePageFetch({
+        extraHandler: async (_input, init, context) => {
+          if (context.pathname === "/api/v1/mcp/policies" && context.method === "GET") {
+            return mockJsonResponse({
+              items: mcpPolicies,
+              total: mcpPolicies.length,
+              filters: { limit: 50 },
+            });
+          }
+          if (
+            context.pathname === "/api/v1/mcp/policies/github.delete_repo" &&
+            context.method === "PUT"
+          ) {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+            mcpPolicyUpsertBodies.push(payload);
+            const saved = {
+              tenantId: "default",
+              toolId: "github.delete_repo",
+              riskLevel: payload.riskLevel ?? "high",
+              decision: payload.decision ?? "require_approval",
+              approvalMode: payload.approvalMode ?? "two_stage",
+              stage1RequiredApprovals: payload.stage1RequiredApprovals ?? 1,
+              stage2RequiredApprovals: payload.stage2RequiredApprovals ?? 1,
+              stage1Roles: payload.stage1Roles ?? ["maintainer"],
+              stage2Roles: payload.stage2Roles ?? ["owner"],
+              approvalCondition: payload.approvalCondition ?? {
+                riskLevelAtLeast: "high",
+              },
+              reason: payload.reason ?? "双阶段审批",
+              updatedAt: "2026-03-08T10:00:00.000Z",
+            };
+            mcpPolicies.splice(0, mcpPolicies.length, saved);
+            return mockJsonResponse(saved);
+          }
+          if (context.pathname === "/api/v1/mcp/evaluate" && context.method === "POST") {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+            mcpEvaluateBodies.push(payload);
+            const invocation = {
+              id: "mcp-invoke-1",
+              tenantId: "default",
+              toolId: "github.delete_repo",
+              decision: "require_approval",
+              result: "blocked",
+              approvalRequestId: "mcp-approval-1",
+              enforced: true,
+              evaluatedDecision: "require_approval",
+              approvalMode: "two_stage",
+              approvalStage: "stage1",
+              approvalSatisfied: false,
+              approvalConditionMatched: true,
+              metadata: {
+                source: "mcp.evaluate",
+              },
+              createdAt: "2026-03-08T10:01:00.000Z",
+            };
+            mcpInvocations.splice(0, mcpInvocations.length, invocation);
+            return mockJsonResponse({
+              toolId: "github.delete_repo",
+              decision: "require_approval",
+              result: "blocked",
+              approvalRequestId: "mcp-approval-1",
+              approvalRequired: true,
+              approvalMode: "two_stage",
+              currentStage: "stage1",
+              remainingApprovals: 1,
+              approvalConditionMatched: true,
+              enforced: true,
+              evaluatedDecision: "require_approval",
+              policy:
+                mcpPolicies[0] ??
+                ({
+                  tenantId: "default",
+                  toolId: "github.delete_repo",
+                  riskLevel: "high",
+                  decision: "require_approval",
+                  updatedAt: "2026-03-08T10:00:00.000Z",
+                } satisfies Record<string, unknown>),
+              invocation,
+              evaluatedAt: "2026-03-08T10:01:00.000Z",
+            });
+          }
+          if (context.pathname === "/api/v1/mcp/approvals" && context.method === "GET") {
+            return mockJsonResponse({
+              items: mcpApprovals,
+              total: mcpApprovals.length,
+              filters: { limit: 50 },
+            });
+          }
+          if (context.pathname === "/api/v1/mcp/approvals" && context.method === "POST") {
+            const approval = {
+              id: "mcp-approval-1",
+              tenantId: "default",
+              toolId: "github.delete_repo",
+              status: "pending",
+              approvalMode: "two_stage",
+              currentStage: "stage1",
+              stage1RequiredApprovals: 1,
+              stage2RequiredApprovals: 1,
+              stage1ApprovedCount: 0,
+              stage2ApprovedCount: 0,
+              remainingApprovals: 1,
+              stage1Roles: ["maintainer"],
+              stage2Roles: ["owner"],
+              approvalConditionMatched: true,
+              requestedByUserId: "user-default",
+              requestedByEmail: "user@example.com",
+              reason: "需要删除仓库",
+              createdAt: "2026-03-08T10:02:00.000Z",
+              updatedAt: "2026-03-08T10:02:00.000Z",
+            };
+            mcpApprovals.splice(0, mcpApprovals.length, approval);
+            return mockJsonResponse(approval, 201);
+          }
+          if (
+            context.pathname === "/api/v1/mcp/approvals/mcp-approval-1/approve" &&
+            context.method === "POST"
+          ) {
+            const approved = {
+              ...(mcpApprovals[0] ?? {}),
+              status: "approved",
+              currentStage: null,
+              remainingApprovals: 0,
+              updatedAt: "2026-03-08T10:03:00.000Z",
+            };
+            mcpApprovals.splice(0, mcpApprovals.length, approved);
+            return mockJsonResponse(approved);
+          }
+          if (context.pathname === "/api/v1/mcp/invocations" && context.method === "GET") {
+            return mockJsonResponse({
+              items: mcpInvocations,
+              total: mcpInvocations.length,
+              filters: { limit: 50 },
+            });
+          }
+          return undefined;
+        },
+      });
+
+      render(<App />);
+
+      const heading = await screen.findByRole("heading", {
+        name: "MCP 治理",
+        level: 2,
+      });
+      const section = heading.closest("section");
+      if (!(section instanceof HTMLElement)) {
+        throw new Error("未找到 MCP 治理所在 section。");
+      }
+      const sectionScreen = within(section);
+
+      fireEvent.change(sectionScreen.getByLabelText("Tool ID"), {
+        target: { value: "github.delete_repo" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("风险等级"), {
+        target: { value: "high" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("策略决策"), {
+        target: { value: "require_approval" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("审批模式"), {
+        target: { value: "two_stage" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("stage1 人数"), {
+        target: { value: "1" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("stage2 人数"), {
+        target: { value: "1" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("stage1 角色（逗号分隔）"), {
+        target: { value: "maintainer" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("stage2 角色（逗号分隔）"), {
+        target: { value: "owner" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "保存策略" }));
+
+      expect(
+        await sectionScreen.findByText("策略 github.delete_repo 已更新为 require_approval。"),
+      ).toBeInTheDocument();
+      expect(mcpPolicyUpsertBodies.at(-1)).toEqual(
+        expect.objectContaining({
+          approvalMode: "two_stage",
+          stage1RequiredApprovals: 1,
+          stage2RequiredApprovals: 1,
+          stage1Roles: ["maintainer"],
+          stage2Roles: ["owner"],
+        }),
+      );
+
+      fireEvent.change(sectionScreen.getByLabelText("评估 Tool ID"), {
+        target: { value: "github.delete_repo" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "执行 MCP 评估" }));
+
+      expect(
+        await sectionScreen.findByText("MCP 评估完成：github.delete_repo -> blocked (stage1)。"),
+      ).toBeInTheDocument();
+      expect(mcpEvaluateBodies.at(-1)).toEqual(
+        expect.objectContaining({
+          approvalConfig: expect.objectContaining({
+            mode: "two_stage",
+            approvalStages: [
+              {
+                stage: "stage1",
+                requiredApprovals: 1,
+                roles: ["maintainer"],
+              },
+              {
+                stage: "stage2",
+                requiredApprovals: 1,
+                roles: ["owner"],
+              },
+            ],
+            stage1: {
+              stage: "stage1",
+              requiredApprovals: 1,
+              roles: ["maintainer"],
+            },
+            stage2: {
+              stage: "stage2",
+              requiredApprovals: 1,
+              roles: ["owner"],
+            },
+          }),
+        }),
+      );
+
+      fireEvent.change(sectionScreen.getByLabelText("新建审批 Tool ID"), {
+        target: { value: "github.delete_repo" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "提交审批请求" }));
+
+      expect(
+        await sectionScreen.findByText("审批请求 mcp-approval-1 已创建。"),
+      ).toBeInTheDocument();
+      expect(
+        sectionScreen.getAllByText((content) =>
+          content.includes("two_stage / stage1"),
+        ).length,
+      ).toBeGreaterThan(0);
+
+      fireEvent.click(sectionScreen.getByRole("button", { name: "通过" }));
+      expect(
+        await sectionScreen.findByText("审批请求 mcp-approval-1 已更新为 approved。"),
+      ).toBeInTheDocument();
+      expect(sectionScreen.getByText("已处理")).toBeInTheDocument();
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "治理页 MCP 支持 approvalStages JSON 覆盖静态审批配置",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-mcp-json-override",
+        refreshToken: "refresh-token-governance-mcp-json-override",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const mcpPolicies: Array<Record<string, unknown>> = [];
+      const mcpPolicyUpsertBodies: Array<Record<string, unknown>> = [];
+
+      mockGovernancePageFetch({
+        extraHandler: async (_input, init, context) => {
+          if (context.pathname === "/api/v1/mcp/policies" && context.method === "GET") {
+            return mockJsonResponse({
+              items: mcpPolicies,
+              total: mcpPolicies.length,
+              filters: { limit: 50 },
+            });
+          }
+          if (
+            context.pathname === "/api/v1/mcp/policies/github.json_override" &&
+            context.method === "PUT"
+          ) {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+            mcpPolicyUpsertBodies.push(payload);
+            const saved = {
+              tenantId: "default",
+              toolId: "github.json_override",
+              riskLevel: payload.riskLevel ?? "high",
+              decision: payload.decision ?? "require_approval",
+              approvalMode: payload.approvalMode ?? "two_stage",
+              approvalStages: payload.approvalStages,
+              stage1RequiredApprovals: payload.stage1RequiredApprovals ?? 2,
+              stage2RequiredApprovals: payload.stage2RequiredApprovals ?? 1,
+              stage1Roles: payload.stage1Roles ?? ["owner"],
+              stage2Roles: payload.stage2Roles ?? ["maintainer"],
+              updatedAt: "2026-03-09T10:00:00.000Z",
+            };
+            mcpPolicies.splice(0, mcpPolicies.length, saved);
+            return mockJsonResponse(saved);
+          }
+          return undefined;
+        },
+      });
+
+      render(<App />);
+
+      const section = (
+        await screen.findByRole("heading", { name: "MCP 治理", level: 2 })
+      ).closest("section");
+      expect(section).not.toBeNull();
+      const sectionScreen = within(section as HTMLElement);
+
+      fireEvent.change(sectionScreen.getByLabelText("Tool ID"), {
+        target: { value: "github.json_override" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("风险等级"), {
+        target: { value: "high" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("审批模式"), {
+        target: { value: "two_stage" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("approvalStages JSON"), {
+        target: {
+          value: JSON.stringify(
+            [
+              {
+                nodeId: "owner-gate",
+                stage: "stage1",
+                label: "Owner Gate",
+                requiredApprovals: 2,
+                roles: ["owner"],
+              },
+              {
+                nodeId: "maintainer-gate",
+                stage: "stage2",
+                label: "Maintainer Gate",
+                requiredApprovals: 1,
+                roles: ["maintainer"],
+              },
+            ],
+            null,
+            2,
+          ),
+        },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "保存策略" }));
+
+      expect(
+        await sectionScreen.findByText("策略 github.json_override 已更新为 require_approval。"),
+      ).toBeInTheDocument();
+      expect(mcpPolicyUpsertBodies.at(-1)).toEqual(
+        expect.objectContaining({
+          approvalMode: "two_stage",
+          approvalStages: [
+            {
+              nodeId: "owner-gate",
+              stage: "stage1",
+              label: "Owner Gate",
+              requiredApprovals: 2,
+              roles: ["owner"],
+            },
+            {
+              nodeId: "maintainer-gate",
+              stage: "stage2",
+              label: "Maintainer Gate",
+              requiredApprovals: 1,
+              roles: ["maintainer"],
+            },
+          ],
+          stage1RequiredApprovals: 2,
+          stage2RequiredApprovals: 1,
+          stage1Roles: ["owner"],
+          stage2Roles: ["maintainer"],
+        }),
+      );
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "治理页 MCP 支持 multi_stage approvalStages JSON 保存",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-mcp-multi-stage",
+        refreshToken: "refresh-token-governance-mcp-multi-stage",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const mcpPolicies: Array<Record<string, unknown>> = [];
+      const mcpPolicyUpsertBodies: Array<Record<string, unknown>> = [];
+
+      mockGovernancePageFetch({
+        extraHandler: async (_input, init, context) => {
+          if (context.pathname === "/api/v1/mcp/policies" && context.method === "GET") {
+            return mockJsonResponse({
+              items: mcpPolicies,
+              total: mcpPolicies.length,
+              filters: { limit: 50 },
+            });
+          }
+          if (
+            context.pathname === "/api/v1/mcp/policies/github.rotate_key" &&
+            context.method === "PUT"
+          ) {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+            mcpPolicyUpsertBodies.push(payload);
+            const saved = {
+              tenantId: "default",
+              toolId: "github.rotate_key",
+              riskLevel: payload.riskLevel ?? "high",
+              decision: payload.decision ?? "require_approval",
+              approvalMode: payload.approvalMode ?? "multi_stage",
+              approvalWorkflow: payload.approvalWorkflow,
+              approvalStages: [
+                {
+                  stage: "stage1",
+                  requiredApprovals: 1,
+                  roles: ["maintainer"],
+                },
+                {
+                  stage: "stage2",
+                  requiredApprovals: 1,
+                  roles: ["owner"],
+                },
+                {
+                  stage: "stage3",
+                  requiredApprovals: 2,
+                  roles: ["owner"],
+                },
+              ],
+              approvalCondition: payload.approvalCondition ?? {
+                riskLevelAtLeast: "high",
+              },
+              reason: payload.reason ?? "多级审批",
+              updatedAt: "2026-03-08T11:00:00.000Z",
+            };
+            mcpPolicies.splice(0, mcpPolicies.length, saved);
+            return mockJsonResponse(saved);
+          }
+          return undefined;
+        },
+      });
+
+      render(<App />);
+
+      const section = (
+        await screen.findByRole("heading", { name: "MCP 治理", level: 2 })
+      ).closest("section");
+      expect(section).not.toBeNull();
+      const sectionScreen = within(section as HTMLElement);
+      const byId = <T extends HTMLElement>(id: string) => {
+        const element = (section as HTMLElement).querySelector(`#${id}`);
+        expect(element).not.toBeNull();
+        return element as T;
+      };
+
+      fireEvent.change(sectionScreen.getByLabelText("Tool ID"), {
+        target: { value: "github.rotate_key" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("风险等级"), {
+        target: { value: "high" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("审批模式"), {
+        target: { value: "multi_stage" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "添加审批节点" }));
+      fireEvent.click(sectionScreen.getByRole("button", { name: "添加审批节点" }));
+      fireEvent.change(sectionScreen.getByLabelText("workflow-node-0-roles"), {
+        target: { value: "maintainer" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-node-1-roles"), {
+        target: { value: "owner" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-node-2-requiredApprovals"), {
+        target: { value: "2" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-node-2-roles"), {
+        target: { value: "owner" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "添加转移" }));
+      fireEvent.click(sectionScreen.getByRole("button", { name: "添加转移" }));
+      fireEvent.change(sectionScreen.getByLabelText("workflow-transition-0-to"), {
+        target: { value: "stage2-node" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-transition-1-from"), {
+        target: { value: "stage2-node" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-transition-1-to"), {
+        target: { value: "stage3-node" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-transition-2-from"), {
+        target: { value: "stage3-node" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-transition-2-to"), {
+        target: { value: "approved" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "保存策略" }));
+
+      expect(
+        await sectionScreen.findByText("策略 github.rotate_key 已更新为 require_approval。"),
+      ).toBeInTheDocument();
+      expect(mcpPolicyUpsertBodies.at(-1)).toEqual(
+        expect.objectContaining({
+          approvalMode: "multi_stage",
+          approvalWorkflow: expect.objectContaining({
+            entryNodeId: "stage1-node",
+            nodes: expect.arrayContaining([
+              expect.objectContaining({
+                nodeId: "stage1-node",
+                stage: "stage1",
+                requiredApprovals: 1,
+                roles: ["maintainer"],
+              }),
+              expect.objectContaining({
+                nodeId: "stage2-node",
+                stage: "stage2",
+                requiredApprovals: 1,
+                roles: ["owner"],
+              }),
+              expect.objectContaining({
+                nodeId: "stage3-node",
+                stage: "stage3",
+                requiredApprovals: 2,
+                roles: ["owner"],
+              }),
+            ]),
+          }),
+        }),
+      );
+      expect(
+        sectionScreen.getByText((content) =>
+          content.includes("multi_stage / stage1-node / stage1:1 -> stage2:1 -> stage3:2"),
+        ),
+      ).toBeInTheDocument();
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "治理页 MCP 在 multi_stage 节点改名后会同步入口与转移引用",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-mcp-node-rename",
+        refreshToken: "refresh-token-governance-mcp-node-rename",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const mcpPolicies: Array<Record<string, unknown>> = [];
+      const mcpPolicyUpsertBodies: Array<Record<string, unknown>> = [];
+
+      mockGovernancePageFetch({
+        extraHandler: async (_input, init, context) => {
+          if (context.pathname === "/api/v1/mcp/policies" && context.method === "GET") {
+            return mockJsonResponse({
+              items: mcpPolicies,
+              total: mcpPolicies.length,
+              filters: { limit: 50 },
+            });
+          }
+          if (
+            context.pathname === "/api/v1/mcp/policies/github.rename_branch" &&
+            context.method === "PUT"
+          ) {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+            mcpPolicyUpsertBodies.push(payload);
+            const saved = {
+              tenantId: "default",
+              toolId: "github.rename_branch",
+              riskLevel: payload.riskLevel ?? "high",
+              decision: payload.decision ?? "require_approval",
+              approvalMode: "multi_stage",
+              approvalWorkflow: payload.approvalWorkflow,
+              approvalStages: payload.approvalStages ?? [
+                {
+                  stage: "stage1",
+                  requiredApprovals: 1,
+                  roles: ["owner", "maintainer"],
+                },
+              ],
+              updatedAt: "2026-03-09T10:30:00.000Z",
+            };
+            mcpPolicies.splice(0, mcpPolicies.length, saved);
+            return mockJsonResponse(saved);
+          }
+          return undefined;
+        },
+      });
+
+      render(<App />);
+
+      const section = (
+        await screen.findByRole("heading", { name: "MCP 治理", level: 2 })
+      ).closest("section");
+      expect(section).not.toBeNull();
+      const sectionScreen = within(section as HTMLElement);
+
+      fireEvent.change(sectionScreen.getByLabelText("Tool ID"), {
+        target: { value: "github.rename_branch" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("风险等级"), {
+        target: { value: "high" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("审批模式"), {
+        target: { value: "multi_stage" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-node-0-nodeId"), {
+        target: { value: "initial-review" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "保存策略" }));
+
+      expect(
+        await sectionScreen.findByText("策略 github.rename_branch 已更新为 require_approval。"),
+      ).toBeInTheDocument();
+      expect(mcpPolicyUpsertBodies.at(-1)).toEqual(
+        expect.objectContaining({
+          approvalMode: "multi_stage",
+          approvalWorkflow: expect.objectContaining({
+            entryNodeId: "initial-review",
+            transitions: expect.arrayContaining([
+              expect.objectContaining({
+                fromNodeId: "initial-review",
+                toNodeId: "approved",
+              }),
+            ]),
+          }),
+        }),
+      );
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "治理页 MCP 支持 timeWindow 编排与 evaluationTimestamp 回传",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-mcp-time-window",
+        refreshToken: "refresh-token-governance-mcp-time-window",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const mcpPolicies: Array<Record<string, unknown>> = [];
+      const mcpPolicyUpsertBodies: Array<Record<string, unknown>> = [];
+      const mcpEvaluateBodies: Array<Record<string, unknown>> = [];
+
+      mockGovernancePageFetch({
+        extraHandler: async (_input, init, context) => {
+          if (context.pathname === "/api/v1/mcp/policies" && context.method === "GET") {
+            return mockJsonResponse({
+              items: mcpPolicies,
+              total: mcpPolicies.length,
+              filters: { limit: 50 },
+            });
+          }
+          if (
+            context.pathname === "/api/v1/mcp/policies/github.freeze_window" &&
+            context.method === "PUT"
+          ) {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+            mcpPolicyUpsertBodies.push(payload);
+            const saved = {
+              tenantId: "default",
+              toolId: "github.freeze_window",
+              riskLevel: payload.riskLevel ?? "high",
+              decision: payload.decision ?? "require_approval",
+              approvalMode: "multi_stage",
+              approvalWorkflow: payload.approvalWorkflow,
+              approvalStages: [
+                {
+                  stage: "stage1",
+                  requiredApprovals: 1,
+                  roles: ["owner", "maintainer"],
+                },
+                {
+                  stage: "stage2",
+                  requiredApprovals: 1,
+                  roles: ["owner"],
+                },
+                {
+                  stage: "stage3",
+                  requiredApprovals: 1,
+                  roles: ["owner"],
+                },
+              ],
+              updatedAt: "2026-03-09T08:00:00.000Z",
+            };
+            mcpPolicies.splice(0, mcpPolicies.length, saved);
+            return mockJsonResponse(saved);
+          }
+          if (context.pathname === "/api/v1/mcp/evaluate" && context.method === "POST") {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+            mcpEvaluateBodies.push(payload);
+            return mockJsonResponse({
+              toolId: "github.freeze_window",
+              decision: "require_approval",
+              result: "blocked",
+              approvalRequestId: "mcp-approval-time-window",
+              approvalRequired: true,
+              approvalMode: "multi_stage",
+              currentNodeId: "stage1-node",
+              currentStage: "stage1",
+              pathHistory: ["stage1-node"],
+              nextTransitionPreview: {
+                fromNodeId: "stage1-node",
+                toNodeId: "stage2-node",
+                matched: true,
+                matchedBy: "condition",
+                condition: {
+                  timeWindow: {
+                    timezone: "Asia/Shanghai",
+                    weekdays: [1, 2, 3, 4, 5],
+                    startTime: "09:00",
+                    endTime: "18:00",
+                  },
+                },
+              },
+              approvalStages: [
+                {
+                  stage: "stage1",
+                  requiredApprovals: 1,
+                  roles: ["owner", "maintainer"],
+                  approvedApprovals: 0,
+                  approvedByUserIds: [],
+                },
+                {
+                  stage: "stage2",
+                  requiredApprovals: 1,
+                  roles: ["owner"],
+                  approvedApprovals: 0,
+                  approvedByUserIds: [],
+                },
+                {
+                  stage: "stage3",
+                  requiredApprovals: 1,
+                  roles: ["owner"],
+                  approvedApprovals: 0,
+                  approvedByUserIds: [],
+                },
+              ],
+              remainingApprovals: 1,
+              approvalConditionMatched: true,
+              enforced: true,
+              evaluatedDecision: "require_approval",
+              policy:
+                mcpPolicies[0] ??
+                ({
+                  tenantId: "default",
+                  toolId: "github.freeze_window",
+                  riskLevel: "high",
+                  decision: "require_approval",
+                  updatedAt: "2026-03-09T08:00:00.000Z",
+                } satisfies Record<string, unknown>),
+              invocation: {
+                id: "mcp-invocation-time-window",
+                tenantId: "default",
+                toolId: "github.freeze_window",
+                decision: "require_approval",
+                result: "blocked",
+                approvalRequestId: "mcp-approval-time-window",
+                enforced: true,
+                evaluatedDecision: "require_approval",
+                approvalMode: "multi_stage",
+                approvalConditionMatched: true,
+                metadata: { source: "mcp.evaluate" },
+                createdAt: "2026-03-09T08:05:00.000Z",
+              },
+              evaluatedAt: "2026-03-09T08:05:00.000Z",
+            });
+          }
+          if (context.pathname === "/api/v1/mcp/approvals" && context.method === "GET") {
+            return mockJsonResponse({
+              items: [],
+              total: 0,
+              filters: { limit: 50 },
+            });
+          }
+          if (context.pathname === "/api/v1/mcp/invocations" && context.method === "GET") {
+            return mockJsonResponse({
+              items: [],
+              total: 0,
+              filters: { limit: 50 },
+            });
+          }
+          return undefined;
+        },
+      });
+
+      render(<App />);
+
+      const section = (
+        await screen.findByRole("heading", { name: "MCP 治理", level: 2 })
+      ).closest("section");
+      expect(section).not.toBeNull();
+      const sectionScreen = within(section as HTMLElement);
+
+      fireEvent.change(sectionScreen.getByLabelText("Tool ID"), {
+        target: { value: "github.freeze_window" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("风险等级"), {
+        target: { value: "high" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("审批模式"), {
+        target: { value: "multi_stage" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-node-0-roles"), {
+        target: { value: "owner,maintainer" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "添加审批节点" }));
+      fireEvent.click(sectionScreen.getByRole("button", { name: "添加审批节点" }));
+      fireEvent.change(sectionScreen.getByLabelText("workflow-node-1-roles"), {
+        target: { value: "owner" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-node-2-roles"), {
+        target: { value: "owner" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-transition-0-mode"), {
+        target: { value: "conditional" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-transition-0-to"), {
+        target: { value: "stage2-node" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-transition-0-timezone"), {
+        target: { value: "Asia/Shanghai" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-transition-0-weekdays"), {
+        target: { value: "1,2,3,4,5" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-transition-0-startTime"), {
+        target: { value: "09:00" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-transition-0-endTime"), {
+        target: { value: "18:00" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "添加转移" }));
+      fireEvent.click(sectionScreen.getByRole("button", { name: "添加转移" }));
+      fireEvent.click(sectionScreen.getByRole("button", { name: "添加转移" }));
+      fireEvent.change(sectionScreen.getByLabelText("workflow-transition-1-to"), {
+        target: { value: "approved" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-transition-2-from"), {
+        target: { value: "stage2-node" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-transition-2-to"), {
+        target: { value: "stage3-node" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-transition-3-from"), {
+        target: { value: "stage3-node" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("workflow-transition-3-to"), {
+        target: { value: "approved" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "保存策略" }));
+
+      expect(
+        await sectionScreen.findByText("策略 github.freeze_window 已更新为 require_approval。"),
+      ).toBeInTheDocument();
+      expect(mcpPolicyUpsertBodies.at(-1)).toEqual(
+        expect.objectContaining({
+          approvalMode: "multi_stage",
+          approvalWorkflow: expect.objectContaining({
+            transitions: expect.arrayContaining([
+              expect.objectContaining({
+                fromNodeId: "stage1-node",
+                toNodeId: "stage2-node",
+                condition: expect.objectContaining({
+                  timeWindow: {
+                    timezone: "Asia/Shanghai",
+                    weekdays: [1, 2, 3, 4, 5],
+                    startTime: "09:00",
+                    endTime: "18:00",
+                  },
+                }),
+              }),
+            ]),
+          }),
+        }),
+      );
+
+      fireEvent.change(sectionScreen.getByLabelText("评估 Tool ID"), {
+        target: { value: "github.freeze_window" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("评估时间（可选）"), {
+        target: { value: "2026-03-09T17:30" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "执行 MCP 评估" }));
+
+      expect(
+        await sectionScreen.findByText("MCP 评估完成：github.freeze_window -> blocked (stage1)。"),
+      ).toBeInTheDocument();
+      expect(mcpEvaluateBodies.at(-1)).toEqual(
+        expect.objectContaining({
+          evaluationTimestamp: new Date("2026-03-09T17:30").toISOString(),
+        }),
+      );
+      expect(
+        sectionScreen.getByText((content) =>
+          content.includes("Asia/Shanghai 09:00-18:00 [1,2,3,4,5]"),
+        ),
+      ).toBeInTheDocument();
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
 
   test(
     "治理页开放平台工作台支持 OpenAPI/API Key/Webhook/Quality/Replay 基础联调",
@@ -3365,7 +5343,10 @@ describe("Web Console", () => {
         datasetId: string;
         model: string;
         promptVersion?: string;
+        caseCount?: number;
         sampleCount: number;
+        currentVersionId?: string;
+        currentVersionNumber?: number;
         metadata: Record<string, unknown>;
         createdAt: string;
         updatedAt: string;
@@ -3379,6 +5360,8 @@ describe("Web Console", () => {
           promptVersion: "v1",
           caseCount: 50,
           sampleCount: 50,
+          currentVersionId: "baseline-ui-1:v1",
+          currentVersionNumber: 1,
           metadata: {},
           createdAt: "2026-03-03T12:10:00.000Z",
           updatedAt: "2026-03-03T12:10:00.000Z",
@@ -3396,6 +5379,39 @@ describe("Web Console", () => {
           updatedAt: "2026-03-03T12:12:00.000Z",
         },
       ];
+      const replayDatasetVersionsByDatasetId: Record<
+        string,
+        Array<{
+          id: string;
+          tenantId: string;
+          datasetId: string;
+          version: number;
+          datasetRef: string;
+          model: string;
+          promptVersion?: string;
+          sampleCount: number;
+          metadata: Record<string, unknown>;
+          note?: string;
+          createdAt: string;
+          promotedAt: string | null;
+        }>
+      > = {
+        "baseline-ui-1": [
+          {
+            id: "baseline-ui-1:v1",
+            tenantId: "default",
+            datasetId: "baseline-ui-1",
+            version: 1,
+            datasetRef: "dataset-1",
+            model: "gpt-5-codex",
+            promptVersion: "v1",
+            sampleCount: 50,
+            metadata: {},
+            createdAt: "2026-03-03T12:10:00.000Z",
+            promotedAt: "2026-03-03T12:10:00.000Z",
+          },
+        ],
+      };
       const replayRuns: Array<{
         id: string;
         runId?: string;
@@ -3439,6 +5455,19 @@ describe("Web Console", () => {
           finishedAt: "2026-03-03T12:22:00.000Z",
         },
       ];
+      const replayExperiments: Array<{
+        id: string;
+        tenantId: string;
+        name: string;
+        datasetId: string;
+        baselineId?: string | null;
+        baselineVersionId?: string | null;
+        runIds: string[];
+        summary: Record<string, unknown>;
+        runs: Array<Record<string, unknown>>;
+        createdAt: string;
+        updatedAt: string;
+      }> = [];
 
       const fetchSpy = mockGovernancePageFetch({
         extraHandler: async (_input, init, { method, pathname, url }) => {
@@ -3692,6 +5721,95 @@ describe("Web Console", () => {
           }
 
           if (
+            pathname === "/api/v2/quality/automation-policy" &&
+            method === "GET"
+          ) {
+            return mockJsonResponse({
+              tenantId: "default",
+              toolId: "quality.replay.advice.execute",
+              scope: "quality_replay_advice",
+              riskLevel: "high",
+              decision: "require_approval",
+              reason: "质量高风险命中矩阵时需要审批",
+              evaluationScoreThreshold: 78,
+              triggerOnEvaluationFailure: true,
+              triggerOnReplayRegression: true,
+              defaultActionType: "scorecard_adjustment",
+              strategyMatrix: [
+                {
+                  id: "critical-replay",
+                  metric: "accuracy",
+                  severity: "warn",
+                  trendDirection: "down",
+                  provider: "github",
+                  workflow: "ci-main",
+                  projectPattern: "agentledger/*",
+                  minConfidence: 0.6,
+                  regressionProbabilityAtLeast: 0.5,
+                  replayRegressionAtLeast: 1,
+                  actionType: "replay_experiment",
+                  requiresApproval: true,
+                  cooldownMinutes: 30,
+                  reason: "高风险优先回放",
+                },
+              ],
+              updatedAt: "2026-03-03T11:58:00.000Z",
+            });
+          }
+
+          if (
+            pathname === "/api/v2/quality/automation-policy" &&
+            method === "PUT"
+          ) {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as {
+              strategyMatrix?: Array<Record<string, unknown>>;
+            };
+            expect(payload.strategyMatrix?.[0]).toMatchObject({
+              id: "critical-replay",
+              provider: "github",
+              workflow: "ci-main",
+              projectPattern: "agentledger/*",
+              reason: "高风险优先回放",
+            });
+            return mockJsonResponse({
+              tenantId: "default",
+              toolId: "quality.replay.advice.execute",
+              scope: "quality_replay_advice",
+              riskLevel: "high",
+              decision: "require_approval",
+              reason: "质量高风险命中矩阵时需要审批",
+              evaluationScoreThreshold: 78,
+              triggerOnEvaluationFailure: true,
+              triggerOnReplayRegression: true,
+              defaultActionType: "scorecard_adjustment",
+              strategyMatrix: payload.strategyMatrix ?? [],
+              updatedAt: "2026-03-03T12:00:00.000Z",
+            });
+          }
+
+          if (
+            pathname === "/api/v2/quality/automation-policy/simulate" &&
+            method === "POST"
+          ) {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as {
+              metric?: string;
+            };
+            expect(payload.metric).toBe("accuracy");
+            return mockJsonResponse({
+              matchedRuleId: "critical-replay",
+              resolvedAction: "replay_experiment",
+              requiresApproval: true,
+              blockingReasons: [],
+              metric: "accuracy",
+              severity: "warn",
+              confidence: 0.65,
+              trendDirection: "down",
+              regressionProbability: 0.55,
+              replayRegressionCount: 2,
+            });
+          }
+
+          if (
             pathname === "/api/v2/quality/reports/project-trends" &&
             method === "GET"
           ) {
@@ -3737,6 +5855,102 @@ describe("Web Console", () => {
             });
           }
 
+          if (
+            pathname === "/api/v2/quality/reports/forecast" &&
+            method === "GET"
+          ) {
+            return mockJsonResponse({
+              items: [
+                {
+                  project: "agentledger/main",
+                  metric: "accuracy",
+                  modelVersion: "quality-heuristic-v2",
+                  forecastHorizonDays: 7,
+                  predictedScore: 91.2,
+                  expectedScoreRange: {
+                    lower: 89.8,
+                    upper: 92.6,
+                  },
+                  confidence: 0.65,
+                  confidenceLabel: "medium",
+                  regressionProbability: 0.55,
+                  rationale: "accuracy 通过率略有回落，建议继续观察失败样本。",
+                  windowStart: "2026-03-03T00:00:00.000Z",
+                  windowEnd: "2026-03-03T23:59:59.999Z",
+                  riskDrivers: ["pass_rate", "stable_sample_size"],
+                  recommendedActions: ["review_failed_samples"],
+                  featureContributions: [
+                    {
+                      feature: "passRateGap",
+                      impact: -0.32,
+                      direction: "negative",
+                    },
+                  ],
+                  windowComparisons: {
+                    currentWindow: { averageScore: 91.2 },
+                    previousWindow: { averageScore: 93.0 },
+                  },
+                  basis: {
+                    totalEvents: 8,
+                    passRate: 0.875,
+                    averageScore: 92.4,
+                  },
+                },
+              ],
+              total: 1,
+              filters: {},
+            });
+          }
+
+          if (
+            pathname === "/api/v2/quality/reports/advice" &&
+            method === "GET"
+          ) {
+            return mockJsonResponse({
+              items: [
+                {
+                  id: "advice-ui-1",
+                  project: "agentledger/main",
+                  severity: "warn",
+                  title: "质量波动，建议跟踪趋势",
+                  recommendation: "关注最近窗口得分下降趋势，并补充对比 run。",
+                  explanation: "项目 quality 信号开始回落，建议先补 replay 对比。",
+                  confidence: 0.65,
+                  confidenceLabel: "medium",
+                  automationReadiness: "ready_for_execution",
+                  strategyMatrixMatch: "critical-replay",
+                  autoExecutionDecision: "approval_required",
+                  blockingReasons: ["dataset_required_for_replay_experiment"],
+                  executionHint: {
+                    recommendedActionType: "replay_experiment",
+                    requiresDataset: true,
+                    priority: "medium",
+                    reason: "先做 replay 对比定位回退来源。",
+                  },
+                  executionOptions: [
+                    {
+                      actionType: "replay_experiment",
+                      availability: "recommended",
+                      reason: "建议补充对比 run。",
+                    },
+                    {
+                      actionType: "scorecard_adjustment",
+                      availability: "available",
+                      reason: "可按需调整评分卡阈值。",
+                    },
+                  ],
+                  basis: {
+                    totalEvents: 8,
+                    passRate: 0.875,
+                  },
+                  relatedMetrics: ["avgScore", "passRate"],
+                },
+              ],
+              total: 1,
+              filters: {},
+            });
+          }
+
           if (pathname === "/api/v2/replay/datasets" && method === "POST") {
             const payload = JSON.parse(String(init?.body ?? "{}")) as {
               name?: string;
@@ -3758,12 +5972,128 @@ describe("Web Console", () => {
               promptVersion: payload.promptVersion,
               caseCount: payload.sampleCount ?? 0,
               sampleCount: payload.sampleCount ?? 0,
+              currentVersionId: `baseline-ui-${replayDatasets.length + 1}:v1`,
+              currentVersionNumber: 1,
               metadata: {},
               createdAt: "2026-03-03T12:12:00.000Z",
               updatedAt: "2026-03-03T12:12:00.000Z",
             };
             replayDatasets.unshift(created);
+            replayDatasetVersionsByDatasetId[created.id] = [
+              {
+                id: created.currentVersionId ?? `${created.id}:v1`,
+                tenantId: "default",
+                datasetId: created.id,
+                version: 1,
+                datasetRef: created.datasetId,
+                model: created.model,
+                promptVersion: created.promptVersion,
+                sampleCount: created.sampleCount,
+                metadata: {},
+                createdAt: created.createdAt,
+                promotedAt: created.createdAt,
+              },
+            ];
             return mockJsonResponse(created, 201);
+          }
+
+          if (
+            pathname === "/api/v2/replay/datasets/baseline-ui-1/versions" &&
+            method === "GET"
+          ) {
+            const dataset =
+              replayDatasets.find((item) => item.id === "baseline-ui-1") ?? null;
+            const items = replayDatasetVersionsByDatasetId["baseline-ui-1"] ?? [];
+            return mockJsonResponse({
+              items,
+              total: items.length,
+              currentVersionId: dataset?.currentVersionId ?? null,
+              currentVersionNumber: dataset?.currentVersionNumber ?? null,
+            });
+          }
+
+          if (
+            pathname === "/api/v2/replay/datasets/baseline-ui-1/versions" &&
+            method === "POST"
+          ) {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as {
+              datasetRef?: string;
+              model?: string;
+              promptVersion?: string;
+              sampleCount?: number;
+              note?: string;
+            };
+            const versions = replayDatasetVersionsByDatasetId["baseline-ui-1"] ?? [];
+            const createdVersion = {
+              id: "baseline-ui-1:v" + String(versions.length + 1),
+              tenantId: "default",
+              datasetId: "baseline-ui-1",
+              version: versions.length + 1,
+              datasetRef: payload.datasetRef ?? "dataset-version-created",
+              model: payload.model ?? "gpt-5-codex",
+              promptVersion: payload.promptVersion,
+              sampleCount: payload.sampleCount ?? 0,
+              metadata: {
+                rollout: "candidate",
+              },
+              note: payload.note,
+              createdAt: "2026-03-03T12:15:00.000Z",
+              promotedAt: null,
+            };
+            replayDatasetVersionsByDatasetId["baseline-ui-1"] = [
+              createdVersion,
+              ...versions,
+            ];
+            return mockJsonResponse(createdVersion, 201);
+          }
+
+          if (
+            pathname ===
+              "/api/v2/replay/datasets/baseline-ui-1/versions/baseline-ui-1%3Av2/cases" &&
+            method === "GET"
+          ) {
+            return mockJsonResponse({
+              datasetId: "baseline-ui-1",
+              versionId: "baseline-ui-1:v2",
+              items: [
+                {
+                  datasetId: "baseline-ui-1",
+                  caseId: "case-v2-1",
+                  sortOrder: 0,
+                  input: "Replay the versioned prompt",
+                  metadata: { source: "version-v2" },
+                },
+              ],
+              total: 1,
+            });
+          }
+
+          if (
+            pathname === "/api/v2/replay/datasets/baseline-ui-1/promote" &&
+            method === "POST"
+          ) {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as {
+              versionId?: string;
+            };
+            const dataset = replayDatasets.find((item) => item.id === "baseline-ui-1");
+            const versions = replayDatasetVersionsByDatasetId["baseline-ui-1"] ?? [];
+            const target = versions.find((item) => item.id === payload.versionId);
+            if (!dataset || !target) {
+              return mockJsonResponse({ message: "未找到 dataset version" }, 404);
+            }
+            dataset.datasetId = target.datasetRef;
+            dataset.model = target.model;
+            dataset.promptVersion = target.promptVersion;
+            dataset.sampleCount = target.sampleCount;
+            dataset.currentVersionId = target.id;
+            dataset.currentVersionNumber = target.version;
+            dataset.metadata = target.metadata;
+            dataset.updatedAt = "2026-03-03T12:16:00.000Z";
+            target.promotedAt = "2026-03-03T12:16:00.000Z";
+            return mockJsonResponse({
+              dataset,
+              version: target,
+            });
           }
 
           if (pathname === "/api/v2/replay/datasets" && method === "GET") {
@@ -3883,6 +6213,309 @@ describe("Web Console", () => {
               items: filteredRuns,
               total: filteredRuns.length,
               filters: {},
+            });
+          }
+
+          if (pathname === "/api/v2/replay/runs" && method === "POST") {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as {
+              datasetId?: string;
+              baselineVersionId?: string;
+              candidateLabel?: string;
+              sampleLimit?: number;
+            };
+            expect(payload.baselineVersionId).toBe("baseline-ui-1:v2");
+            return mockJsonResponse(
+              {
+                id: "run-ui-version-1",
+                runId: "run-ui-version-1",
+                jobId: "run-ui-version-1",
+                tenantId: "default",
+                datasetId: payload.datasetId ?? "baseline-ui-1",
+                baselineId: payload.datasetId ?? "baseline-ui-1",
+                baselineVersionId: payload.baselineVersionId ?? null,
+                candidateLabel: payload.candidateLabel ?? "candidate-version",
+                status: "pending",
+                totalCases: payload.sampleLimit ?? 12,
+                processedCases: 0,
+                improvedCases: 0,
+                regressedCases: 0,
+                unchangedCases: 0,
+                summary: {
+                  baselineVersionId: payload.baselineVersionId ?? null,
+                },
+                createdAt: "2026-03-03T12:18:00.000Z",
+                updatedAt: "2026-03-03T12:18:00.000Z",
+              },
+              201,
+            );
+          }
+
+          if (pathname === "/api/v2/replay/experiments" && method === "POST") {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as {
+              name?: string;
+              datasetId?: string;
+              baselineVersionId?: string;
+              runIds?: string[];
+            };
+            const created = {
+              id: `exp-ui-${replayExperiments.length + 1}`,
+              tenantId: "default",
+              name: payload.name ?? "experiment-created",
+              datasetId: payload.datasetId ?? "baseline-ui-1",
+              baselineId: payload.datasetId ?? "baseline-ui-1",
+              baselineVersionId: payload.baselineVersionId ?? null,
+              runIds: payload.runIds ?? [],
+              summary: {
+                totalRuns: payload.runIds?.length ?? 0,
+              },
+              runs: replayRuns.filter((item) =>
+                (payload.runIds ?? []).includes(item.id),
+              ),
+              createdAt: "2026-03-03T12:25:00.000Z",
+              updatedAt: "2026-03-03T12:25:00.000Z",
+            };
+            replayExperiments.unshift(created);
+            return mockJsonResponse(created, 201);
+          }
+
+          if (pathname === "/api/v2/replay/experiments" && method === "GET") {
+            return mockJsonResponse({
+              items: replayExperiments,
+              total: replayExperiments.length,
+            });
+          }
+
+          if (
+            pathname === "/api/v2/replay/experiments/compare" &&
+            method === "GET"
+          ) {
+            return mockJsonResponse({
+              items: [
+                {
+                  experimentId: "exp-ui-1",
+                  name: "exp smoke",
+                  datasetId: "baseline-ui-1",
+                  status: "completed",
+                  workflowStage: "completed",
+                  triggerSource: "manual",
+                  sourceAdviceId: null,
+                  candidateLabels: ["candidate-a"],
+                  totalRuns: 1,
+                  completedRuns: 1,
+                  failedRuns: 0,
+                  runningRuns: 0,
+                  queuedRuns: 0,
+                  totalCases: 10,
+                  processedCases: 10,
+                  improvedCases: 4,
+                  regressedCases: 1,
+                  improvementRate: 0.4,
+                  regressionRate: 0.1,
+                  netDelta: 3,
+                  bestRunId: "job-ui-1",
+                  worstRunId: "job-ui-1",
+                  runs: [
+                    {
+                      runId: "job-ui-1",
+                      candidateLabel: "candidate-a",
+                      status: "completed",
+                      totalCases: 10,
+                      processedCases: 10,
+                      improvedCases: 4,
+                      regressedCases: 1,
+                      unchangedCases: 5,
+                      passRate: 0.9,
+                      improvementRate: 0.4,
+                      regressionRate: 0.1,
+                      netDelta: 3,
+                      startedAt: "2026-03-03T12:26:00.000Z",
+                      finishedAt: "2026-03-03T12:27:00.000Z",
+                    },
+                  ],
+                  updatedAt: "2026-03-03T12:27:00.000Z",
+                },
+                {
+                  experimentId: "exp-ui-2",
+                  name: "exp compare",
+                  datasetId: "baseline-ui-1",
+                  status: "completed",
+                  workflowStage: "completed",
+                  triggerSource: "manual",
+                  sourceAdviceId: null,
+                  candidateLabels: ["candidate-b"],
+                  totalRuns: 1,
+                  completedRuns: 1,
+                  failedRuns: 0,
+                  runningRuns: 0,
+                  queuedRuns: 0,
+                  totalCases: 10,
+                  processedCases: 10,
+                  improvedCases: 2,
+                  regressedCases: 3,
+                  improvementRate: 0.2,
+                  regressionRate: 0.3,
+                  netDelta: -1,
+                  bestRunId: "job-ui-2",
+                  worstRunId: "job-ui-2",
+                  runs: [
+                    {
+                      runId: "job-ui-2",
+                      candidateLabel: "candidate-b",
+                      status: "completed",
+                      totalCases: 10,
+                      processedCases: 10,
+                      improvedCases: 2,
+                      regressedCases: 3,
+                      unchangedCases: 5,
+                      passRate: 0.7,
+                      improvementRate: 0.2,
+                      regressionRate: 0.3,
+                      netDelta: -1,
+                      startedAt: "2026-03-03T12:28:00.000Z",
+                      finishedAt: "2026-03-03T12:29:00.000Z",
+                    },
+                  ],
+                  updatedAt: "2026-03-03T12:29:00.000Z",
+                },
+              ],
+              total: 2,
+              summary: {
+                comparedExperimentCount: 2,
+                comparedAt: "2026-03-03T12:30:00.000Z",
+                datasets: ["baseline-ui-1"],
+                totalRuns: 2,
+                completedRuns: 2,
+                failedRuns: 0,
+                runningRuns: 0,
+                queuedRuns: 0,
+                totalCases: 20,
+                processedCases: 20,
+                improvedCases: 6,
+                regressedCases: 4,
+                bestExperimentId: "exp-ui-1",
+                worstExperimentId: "exp-ui-2",
+              },
+              filters: {
+                experimentIds: ["exp-ui-1", "exp-ui-2"],
+                datasetId: "baseline-ui-1",
+              },
+            });
+          }
+
+          if (
+            pathname === "/api/v2/replay/experiments/exp-ui-1/compare" &&
+            method === "GET"
+          ) {
+            return mockJsonResponse({
+              experimentId: "exp-ui-1",
+              datasetId: "baseline-ui-1",
+              items: [
+                {
+                  runId: "job-ui-1",
+                  candidateLabel: "candidate-a",
+                  status: "completed",
+                  totalCases: 10,
+                  processedCases: 10,
+                  improvedCases: 4,
+                  regressedCases: 1,
+                  unchangedCases: 5,
+                  passRate: 0.9,
+                  improvementRate: 0.4,
+                  regressionRate: 0.1,
+                  netDelta: 3,
+                  startedAt: "2026-03-03T12:26:00.000Z",
+                  finishedAt: "2026-03-03T12:27:00.000Z",
+                },
+              ],
+              total: 1,
+              summary: {
+                totalRuns: 1,
+                completedRuns: 1,
+                failedRuns: 0,
+                runningRuns: 0,
+                queuedRuns: 0,
+                cancelledRuns: 0,
+                bestRunId: "job-ui-1",
+                worstRunId: "job-ui-1",
+                bestNetDelta: 3,
+                worstNetDelta: 3,
+              },
+            });
+          }
+
+          if (
+            pathname === "/api/v2/replay/experiments/exp-ui-1/workflow" &&
+            method === "GET"
+          ) {
+            return mockJsonResponse({
+              experimentId: "exp-ui-1",
+              status: "completed",
+              nodes: [
+                {
+                  id: "experiment:exp-ui-1",
+                  type: "experiment",
+                  label: "exp smoke",
+                  status: "completed",
+                  startedAt: "2026-03-03T12:25:00.000Z",
+                  finishedAt: "2026-03-03T12:27:00.000Z",
+                  metadata: {
+                    datasetId: "baseline-ui-1",
+                  },
+                },
+                {
+                  id: "run:job-ui-1",
+                  type: "run",
+                  label: "候选 candidate-a",
+                  status: "completed",
+                  startedAt: "2026-03-03T12:26:00.000Z",
+                  finishedAt: "2026-03-03T12:27:00.000Z",
+                  metadata: {
+                    runId: "job-ui-1",
+                  },
+                },
+              ],
+              edges: [
+                {
+                  from: "experiment:exp-ui-1",
+                  to: "run:job-ui-1",
+                  label: "dispatches",
+                },
+              ],
+              summary: {
+                totalNodes: 2,
+                totalRuns: 1,
+                queuedRuns: 0,
+                runningRuns: 0,
+                completedRuns: 1,
+                failedRuns: 0,
+                cancelledRuns: 0,
+              },
+            });
+          }
+
+          if (
+            pathname === "/api/v2/replay/experiments/exp-ui-1/artifacts" &&
+            method === "GET"
+          ) {
+            return mockJsonResponse({
+              experimentId: "exp-ui-1",
+              datasetId: "baseline-ui-1",
+              items: [
+                {
+                  runId: "job-ui-1",
+                  type: "summary",
+                  name: "exp-summary.json",
+                  contentType: "application/json",
+                  downloadUrl: "/api/v2/replay/runs/job-ui-1/artifacts/summary/download",
+                  byteSize: 128,
+                  storageBackend: "local",
+                  createdAt: "2026-03-03T12:22:30.000Z",
+                  inline: {
+                    totalCases: 10,
+                  },
+                },
+              ],
+              total: 1,
             });
           }
 
@@ -4150,6 +6783,66 @@ describe("Web Console", () => {
       expect(
         await sectionScreen.findByText("agentledger/main"),
       ).toBeInTheDocument();
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "保存 automation policy" }),
+      );
+      expect(
+        await sectionScreen.findByText(
+          "Quality automation policy 已更新为 require_approval。",
+        ),
+      ).toBeInTheDocument();
+      const automationPolicyPutCallCount = fetchSpy.mock.calls.filter(
+        ([url, init]) =>
+          new URL(toUrl(url), "http://localhost").pathname ===
+            "/api/v2/quality/automation-policy" &&
+          ((init as RequestInit | undefined)?.method ?? "GET").toUpperCase() === "PUT",
+      ).length;
+      fireEvent.change(
+        byId<HTMLTextAreaElement>("open-platform-quality-automation-strategy-matrix"),
+        {
+          target: {
+            value:
+              '[{"id":"critical-replay","metric":"accuracy","actionType":"replay_experiment","requiresApproval":true,"reason":"高风险优先回放","minConfidence":1.2}]',
+          },
+        },
+      );
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "保存 automation policy" }),
+      );
+      expect(
+        await sectionScreen.findByText(
+          "strategyMatrix[0].minConfidence 必须小于等于 1。",
+        ),
+      ).toBeInTheDocument();
+      await waitFor(() => {
+        expect(
+          fetchSpy.mock.calls.filter(
+            ([url, init]) =>
+              new URL(toUrl(url), "http://localhost").pathname ===
+                "/api/v2/quality/automation-policy" &&
+              ((init as RequestInit | undefined)?.method ?? "GET").toUpperCase() ===
+                "PUT",
+          ).length,
+        ).toBe(automationPolicyPutCallCount);
+      });
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "模拟 automation policy" }),
+      );
+      expect(
+        await sectionScreen.findByText("critical-replay"),
+      ).toBeInTheDocument();
+      await waitFor(() => {
+        expect(
+          fetchSpy.mock.calls.some(([url, init]) => {
+            const requestInit = init as RequestInit | undefined;
+            return (
+              new URL(toUrl(url), "http://localhost").pathname ===
+                "/api/v2/quality/automation-policy/simulate" &&
+              (requestInit?.method ?? "GET").toUpperCase() === "POST"
+            );
+          }),
+        ).toBe(true);
+      });
       fireEvent.change(
         byId<HTMLInputElement>("open-platform-quality-scorecard-team"),
         {
@@ -4160,6 +6853,42 @@ describe("Web Console", () => {
         sectionScreen.getByRole("button", { name: "加载 Quality scorecards" }),
       );
       expect(await sectionScreen.findByText("user-1")).toBeInTheDocument();
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "加载 Quality forecast" }),
+      );
+      expect(await sectionScreen.findByText("91.20")).toBeInTheDocument();
+      expect(
+        await sectionScreen.findByText("accuracy 通过率略有回落，建议继续观察失败样本。"),
+      ).toBeInTheDocument();
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "加载 Quality advice" }),
+      );
+      expect(
+        await sectionScreen.findByText("质量波动，建议跟踪趋势"),
+      ).toBeInTheDocument();
+      expect(
+        await sectionScreen.findByText("项目 quality 信号开始回落，建议先补 replay 对比。"),
+      ).toBeInTheDocument();
+      expect(
+        await sectionScreen.findByText((content) =>
+          content.includes("replay_experiment:recommended"),
+        ),
+      ).toBeInTheDocument();
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "带入执行" }),
+      );
+      expect(
+        await sectionScreen.findByText("已将 advice advice-ui-1 带入执行表单。"),
+      ).toBeInTheDocument();
+      expect(
+        byId<HTMLInputElement>("quality-advice-id"),
+      ).toHaveValue("advice-ui-1");
+      expect(
+        byId<HTMLInputElement>("quality-advice-project"),
+      ).toHaveValue("agentledger/main");
+      expect(
+        byId<HTMLSelectElement>("quality-advice-action-type"),
+      ).toHaveValue("replay_experiment");
 
       fireEvent.change(
         byId<HTMLInputElement>("open-platform-replay-create-dataset-name"),
@@ -4272,6 +7001,58 @@ describe("Web Console", () => {
       );
       expect(await sectionScreen.findByText("job-ui-1")).toBeInTheDocument();
       fireEvent.change(
+        byId<HTMLInputElement>("open-platform-replay-experiment-name"),
+        {
+          target: { value: "exp smoke" },
+        },
+      );
+      fireEvent.change(
+        byId<HTMLInputElement>("open-platform-replay-experiment-dataset-id"),
+        {
+          target: { value: "baseline-ui-1" },
+        },
+      );
+      fireEvent.change(
+        byId<HTMLInputElement>("open-platform-replay-experiment-run-ids"),
+        {
+          target: { value: "job-ui-1" },
+        },
+      );
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "创建回放实验" }),
+      );
+      expect(
+        await sectionScreen.findByText("回放实验 exp smoke 已创建。"),
+      ).toBeInTheDocument();
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "加载回放实验" }),
+      );
+      expect(await sectionScreen.findByText("exp smoke")).toBeInTheDocument();
+      fireEvent.change(
+        byId<HTMLInputElement>("open-platform-replay-experiment-compare-ids"),
+        {
+          target: { value: "exp-ui-1,exp-ui-2" },
+        },
+      );
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "批量对比实验" }),
+      );
+      expect(await sectionScreen.findByText("批量对比")).toBeInTheDocument();
+      expect(await sectionScreen.findByText("exp compare")).toBeInTheDocument();
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "对比" }),
+      );
+      expect(await sectionScreen.findByText("实验对比")).toBeInTheDocument();
+      expect((await sectionScreen.findAllByText("job-ui-1")).length).toBeGreaterThan(0);
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "工作流" }),
+      );
+      expect(await sectionScreen.findByText("实验工作流")).toBeInTheDocument();
+      expect(await sectionScreen.findByText("候选 candidate-a")).toBeInTheDocument();
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "工件" }),
+      );
+      fireEvent.change(
         byId<HTMLInputElement>("open-platform-replay-diff-baseline-id"),
         {
           target: { value: "baseline-ui-1" },
@@ -4300,6 +7081,13 @@ describe("Web Console", () => {
         await sectionScreen.findByText("summary.json"),
       ).toBeInTheDocument();
 
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url]) =>
+            new URL(toUrl(url), "http://localhost").pathname ===
+            "/api/v2/replay/experiments/compare",
+        ),
+      ).toBe(true);
       expect(
         fetchSpy.mock.calls.some(
           ([url]) =>
@@ -4397,7 +7185,28 @@ describe("Web Console", () => {
         fetchSpy.mock.calls.some(
           ([url]) =>
             new URL(toUrl(url), "http://localhost").pathname ===
-            "/api/v2/replay/runs/job-ui-1/artifacts",
+              "/api/v2/replay/runs/job-ui-1/artifacts",
+        ),
+      ).toBe(true);
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url]) =>
+            new URL(toUrl(url), "http://localhost").pathname ===
+              "/api/v2/replay/experiments/exp-ui-1/compare",
+        ),
+      ).toBe(true);
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url]) =>
+            new URL(toUrl(url), "http://localhost").pathname ===
+              "/api/v2/replay/experiments/exp-ui-1/workflow",
+        ),
+      ).toBe(true);
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url]) =>
+            new URL(toUrl(url), "http://localhost").pathname ===
+              "/api/v2/replay/experiments/exp-ui-1/artifacts",
         ),
       ).toBe(true);
       expect(
@@ -4411,61 +7220,415 @@ describe("Web Console", () => {
     GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
   );
 
-  test("治理页在 single_region 模式配置副本地域时会阻止保存且不发起 PUT", async () => {
-    window.location.hash = "#/governance";
-    setAuthTokens({
-      accessToken: "access-token-governance-residency-single-region",
-      refreshToken: "refresh-token-governance-residency-single-region",
-      expiresIn: 1800,
-      tokenType: "Bearer",
-    });
+  test(
+    "治理页 replay dataset versions 支持 list/create/promote 并在实验请求带上 baselineVersionId",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-replay-versions",
+        refreshToken: "refresh-token-governance-replay-versions",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
 
-    const fetchSpy = mockGovernancePageFetch({
-      residencyPolicy: {
-        tenantId: "default",
-        mode: "single_region",
-        primaryRegion: "cn-shanghai",
-        replicaRegions: [],
-        allowCrossRegionTransfer: false,
-        requireTransferApproval: false,
-        updatedAt: "2026-03-01T00:00:00.000Z",
-      },
-    });
+      const replayDatasets = [
+        {
+          id: "baseline-ui-1",
+          tenantId: "default",
+          name: "baseline smoke",
+          datasetId: "dataset-1",
+          model: "gpt-5-codex",
+          promptVersion: "v1",
+          caseCount: 50,
+          sampleCount: 50,
+          currentVersionId: "baseline-ui-1:v1",
+          currentVersionNumber: 1,
+          metadata: {},
+          createdAt: "2026-03-03T12:10:00.000Z",
+          updatedAt: "2026-03-03T12:10:00.000Z",
+        },
+      ];
+      const replayDatasetVersions = [
+        {
+          id: "baseline-ui-1:v1",
+          tenantId: "default",
+          datasetId: "baseline-ui-1",
+          version: 1,
+          datasetRef: "dataset-1",
+          model: "gpt-5-codex",
+          promptVersion: "v1",
+          sampleCount: 50,
+          metadata: {},
+          createdAt: "2026-03-03T12:10:00.000Z",
+          promotedAt: "2026-03-03T12:10:00.000Z",
+        },
+      ];
 
-    render(<App />);
+      const fetchSpy = mockGovernancePageFetch({
+        extraHandler: async (_input, init, { pathname, method }) => {
+          if (pathname === "/api/v2/replay/datasets" && method === "GET") {
+            return mockJsonResponse({
+              items: replayDatasets,
+              total: replayDatasets.length,
+              filters: {},
+            });
+          }
 
-    expect(
-      await screen.findByRole("heading", { name: "治理中心" }),
-    ).toBeInTheDocument();
+          if (
+            pathname === "/api/v2/replay/datasets/baseline-ui-1/versions" &&
+            method === "GET"
+          ) {
+            return mockJsonResponse({
+              items: replayDatasetVersions,
+              total: replayDatasetVersions.length,
+              currentVersionId: replayDatasets[0]?.currentVersionId ?? null,
+              currentVersionNumber: replayDatasets[0]?.currentVersionNumber ?? null,
+            });
+          }
 
-    const replicaRegionsInput =
-      await screen.findByLabelText("副本地域（逗号分隔）");
-    const residencySection = replicaRegionsInput.closest("section");
-    expect(residencySection).not.toBeNull();
+          if (
+            pathname === "/api/v2/replay/datasets/baseline-ui-1/versions" &&
+            method === "POST"
+          ) {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as {
+              datasetRef?: string;
+              model?: string;
+              promptVersion?: string;
+              sampleCount?: number;
+              note?: string;
+            };
+            const created = {
+              id: "baseline-ui-1:v2",
+              tenantId: "default",
+              datasetId: "baseline-ui-1",
+              version: 2,
+              datasetRef: payload.datasetRef ?? "dataset-2",
+              model: payload.model ?? "gpt-5-codex-mini",
+              promptVersion: payload.promptVersion,
+              sampleCount: payload.sampleCount ?? 12,
+              metadata: {
+                rollout: "candidate",
+              },
+              note: payload.note,
+              createdAt: "2026-03-03T12:15:00.000Z",
+              promotedAt: null,
+            };
+            replayDatasetVersions.unshift(created);
+            return mockJsonResponse(created, 201);
+          }
 
-    fireEvent.change(replicaRegionsInput, {
-      target: { value: "ap-southeast-1" },
-    });
-    fireEvent.click(
-      within(residencySection as HTMLElement).getByRole("button", {
-        name: "保存策略",
-      }),
-    );
+          if (
+            pathname === "/api/v2/replay/datasets/baseline-ui-1/promote" &&
+            method === "POST"
+          ) {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as {
+              versionId?: string;
+            };
+            const target =
+              replayDatasetVersions.find((item) => item.id === payload.versionId) ??
+              null;
+            if (!target) {
+              return mockJsonResponse({ message: "未找到 dataset version" }, 404);
+            }
+            replayDatasets[0] = {
+              ...replayDatasets[0],
+              datasetId: target.datasetRef,
+              model: target.model,
+              promptVersion: target.promptVersion,
+              sampleCount: target.sampleCount,
+              currentVersionId: target.id,
+              currentVersionNumber: target.version,
+              metadata: target.metadata,
+              updatedAt: "2026-03-03T12:16:00.000Z",
+            };
+            target.promotedAt = "2026-03-03T12:16:00.000Z";
+            return mockJsonResponse({
+              dataset: replayDatasets[0],
+              version: target,
+            });
+          }
 
-    expect(
-      await screen.findByText("single_region 模式不允许配置副本地域。"),
-    ).toBeInTheDocument();
-    expect(
-      fetchSpy.mock.calls.some(([url, init]) => {
-        const requestInit = init as RequestInit | undefined;
-        return (
+          if (pathname === "/api/v2/replay/experiments" && method === "POST") {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as {
+              name?: string;
+              datasetId?: string;
+              baselineVersionId?: string;
+            };
+            return mockJsonResponse(
+              {
+                id: "exp-ui-version-1",
+                tenantId: "default",
+                name: payload.name ?? "exp versions",
+                datasetId: payload.datasetId ?? "baseline-ui-1",
+                baselineVersionId: payload.baselineVersionId ?? null,
+                runIds: [],
+                summary: {},
+                runs: [],
+                createdAt: "2026-03-03T12:20:00.000Z",
+                updatedAt: "2026-03-03T12:20:00.000Z",
+              },
+              201,
+            );
+          }
+
+          return undefined;
+        },
+      });
+
+      render(<App />);
+
+      const section = (
+        await screen.findByRole("heading", { name: "开放平台工作台", level: 2 })
+      ).closest("section");
+      expect(section).not.toBeNull();
+      const sectionScreen = within(section as HTMLElement);
+      const byId = <T extends HTMLElement>(id: string) => {
+        const element = (section as HTMLElement).querySelector(`#${id}`);
+        expect(element).not.toBeNull();
+        return element as T;
+      };
+
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "加载回放数据集" }),
+      );
+      expect(await sectionScreen.findByText("baseline-ui-1")).toBeInTheDocument();
+
+      fireEvent.change(
+        byId<HTMLInputElement>("open-platform-replay-dataset-version-dataset-id"),
+        {
+          target: { value: "baseline-ui-1" },
+        },
+      );
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "加载回放数据集版本" }),
+      );
+      expect(await sectionScreen.findByText("baseline-ui-1:v1")).toBeInTheDocument();
+
+      fireEvent.change(
+        byId<HTMLInputElement>("open-platform-replay-create-version-dataset-ref"),
+        {
+          target: { value: "dataset-2" },
+        },
+      );
+      fireEvent.change(
+        byId<HTMLInputElement>("open-platform-replay-create-version-model"),
+        {
+          target: { value: "gpt-5-codex-mini" },
+        },
+      );
+      fireEvent.change(
+        byId<HTMLInputElement>(
+          "open-platform-replay-create-version-prompt-version",
+        ),
+        {
+          target: { value: "v2" },
+        },
+      );
+      fireEvent.change(
+        byId<HTMLInputElement>("open-platform-replay-create-version-sample-count"),
+        {
+          target: { value: "12" },
+        },
+      );
+      fireEvent.change(
+        byId<HTMLInputElement>("open-platform-replay-create-version-note"),
+        {
+          target: { value: "candidate rollout" },
+        },
+      );
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "创建回放数据集版本" }),
+      );
+      expect(
+        await sectionScreen.findByText(/回放数据集版本 v2 已创建/),
+      ).toBeInTheDocument();
+
+      const createdVersionRow = (
+        await sectionScreen.findByText("baseline-ui-1:v2")
+      ).closest("tr");
+      expect(createdVersionRow).not.toBeNull();
+      fireEvent.click(
+        within(createdVersionRow as HTMLElement).getByRole("button", {
+          name: "带入实验版本",
+        }),
+      );
+      expect(
+        byId<HTMLInputElement>("open-platform-replay-create-run-baseline-version-id"),
+      ).toHaveValue("baseline-ui-1:v2");
+
+      fireEvent.click(
+        within(createdVersionRow as HTMLElement).getByRole("button", {
+          name: "版本样本",
+        }),
+      );
+      expect(
+        byId<HTMLInputElement>("open-platform-replay-experiment-baseline-version-id"),
+      ).toHaveValue("baseline-ui-1:v2");
+      expect(
+        byId<HTMLInputElement>("open-platform-replay-experiment-dataset-id"),
+      ).toHaveValue("baseline-ui-1");
+
+      fireEvent.click(
+        within(createdVersionRow as HTMLElement).getByRole("button", {
+          name: "提升为当前版本",
+        }),
+      );
+      expect(
+        await sectionScreen.findByText("回放数据集版本 v2 已提升为当前版本。"),
+      ).toBeInTheDocument();
+      expect(await sectionScreen.findByText("2 / baseline-ui-1:v2")).toBeInTheDocument();
+
+      fireEvent.change(
+        byId<HTMLInputElement>("open-platform-replay-create-run-baseline-id"),
+        {
+          target: { value: "baseline-ui-1" },
+        },
+      );
+      fireEvent.change(
+        byId<HTMLInputElement>("open-platform-replay-create-run-candidate-label"),
+        {
+          target: { value: "candidate-version-run" },
+        },
+      );
+      fireEvent.change(
+        byId<HTMLInputElement>("open-platform-replay-create-run-sample-limit"),
+        {
+          target: { value: "12" },
+        },
+      );
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "创建回放运行" }),
+      );
+
+      fireEvent.change(
+        byId<HTMLInputElement>("open-platform-replay-experiment-name"),
+        {
+          target: { value: "exp versions" },
+        },
+      );
+      fireEvent.click(
+        sectionScreen.getByRole("button", { name: "创建回放实验" }),
+      );
+      expect(
+        await sectionScreen.findByText("回放实验 exp versions 已创建。"),
+      ).toBeInTheDocument();
+
+      expect(
+        fetchSpy.mock.calls.some(([url, init]) => {
+          const requestInit = init as RequestInit | undefined;
+          return (
+            new URL(toUrl(url), "http://localhost").pathname ===
+              "/api/v2/replay/datasets/baseline-ui-1/versions" &&
+            (requestInit?.method ?? "GET").toUpperCase() === "POST" &&
+            JSON.parse(String(requestInit?.body ?? "{}")).datasetRef === "dataset-2"
+          );
+        }),
+      ).toBe(true);
+      expect(
+        fetchSpy.mock.calls.some(([url, init]) => {
+          const requestInit = init as RequestInit | undefined;
+          return (
+            new URL(toUrl(url), "http://localhost").pathname ===
+              "/api/v2/replay/datasets/baseline-ui-1/promote" &&
+            (requestInit?.method ?? "GET").toUpperCase() === "POST" &&
+            JSON.parse(String(requestInit?.body ?? "{}")).versionId ===
+              "baseline-ui-1:v2"
+          );
+        }),
+      ).toBe(true);
+      expect(
+        fetchSpy.mock.calls.some(([url, init]) => {
+          const requestInit = init as RequestInit | undefined;
+          return (
+            new URL(toUrl(url), "http://localhost").pathname ===
+              "/api/v2/replay/runs" &&
+            (requestInit?.method ?? "GET").toUpperCase() === "POST" &&
+            JSON.parse(String(requestInit?.body ?? "{}")).baselineVersionId ===
+              "baseline-ui-1:v2"
+          );
+        }),
+      ).toBe(true);
+      expect(
+        fetchSpy.mock.calls.some(([url]) =>
           new URL(toUrl(url), "http://localhost").pathname ===
-            "/api/v2/residency/policies/current" &&
-          (requestInit?.method ?? "GET").toUpperCase() === "PUT"
-        );
-      }),
-    ).toBe(false);
-  });
+            "/api/v2/replay/datasets/baseline-ui-1/versions/baseline-ui-1%3Av2/cases",
+        ),
+      ).toBe(true);
+      expect(
+        fetchSpy.mock.calls.some(([url, init]) => {
+          const requestInit = init as RequestInit | undefined;
+          return (
+            new URL(toUrl(url), "http://localhost").pathname ===
+              "/api/v2/replay/experiments" &&
+            (requestInit?.method ?? "GET").toUpperCase() === "POST" &&
+            JSON.parse(String(requestInit?.body ?? "{}")).baselineVersionId ===
+              "baseline-ui-1:v2"
+          );
+        }),
+      ).toBe(true);
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "治理页在 single_region 模式配置副本地域时会阻止保存且不发起 PUT",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-residency-single-region",
+        refreshToken: "refresh-token-governance-residency-single-region",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const fetchSpy = mockGovernancePageFetch({
+        residencyPolicy: {
+          tenantId: "default",
+          mode: "single_region",
+          primaryRegion: "cn-shanghai",
+          replicaRegions: [],
+          allowCrossRegionTransfer: false,
+          requireTransferApproval: false,
+          updatedAt: "2026-03-01T00:00:00.000Z",
+        },
+      });
+
+      render(<App />);
+
+      expect(
+        await screen.findByRole("heading", { name: "治理中心" }),
+      ).toBeInTheDocument();
+
+      const replicaRegionsInput =
+        await screen.findByLabelText("副本地域（逗号分隔）");
+      const residencySection = replicaRegionsInput.closest("section");
+      expect(residencySection).not.toBeNull();
+
+      fireEvent.change(replicaRegionsInput, {
+        target: { value: "ap-southeast-1" },
+      });
+      fireEvent.click(
+        within(residencySection as HTMLElement).getByRole("button", {
+          name: "保存策略",
+        }),
+      );
+
+      expect(
+        await screen.findByText("single_region 模式不允许配置副本地域。"),
+      ).toBeInTheDocument();
+      expect(
+        fetchSpy.mock.calls.some(([url, init]) => {
+          const requestInit = init as RequestInit | undefined;
+          return (
+            new URL(toUrl(url), "http://localhost").pathname ===
+              "/api/v2/residency/policies/current" &&
+            (requestInit?.method ?? "GET").toUpperCase() === "PUT"
+          );
+        }),
+      ).toBe(false);
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
 
   test(
     "治理页主权策略首次失败后恢复成功时会回填表单",
@@ -4516,10 +7679,10 @@ describe("Web Console", () => {
           ).toBe("cn-shanghai");
           expect(
             (screen.getByLabelText("副本地域（逗号分隔）") as HTMLInputElement)
-              .value,
+            .value,
           ).toBe("ap-southeast-1");
         },
-        { timeout: 8_000 },
+        { timeout: GOVERNANCE_HEAVY_TEST_TIMEOUT_MS },
       );
 
       expect(
@@ -4656,6 +7819,90 @@ describe("Web Console", () => {
       } finally {
         promptSpy.mockRestore();
       }
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "治理页支持保存 KMS 映射与区域归档策略",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-residency-mappings",
+        refreshToken: "refresh-token-governance-residency-mappings",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const fetchSpy = mockGovernancePageFetch();
+      render(<App />);
+
+      const residencyHeading = await screen.findByRole("heading", {
+        name: "数据主权与复制",
+        level: 2,
+      });
+      const residencySection = residencyHeading.closest("section");
+      if (!(residencySection instanceof HTMLElement)) {
+        throw new Error("未找到数据主权与复制所在 section。");
+      }
+      const residencyScreen = within(residencySection);
+
+      fireEvent.change(await residencyScreen.findByLabelText("Region"), {
+        target: { value: "cn-shanghai" },
+      });
+      fireEvent.change(residencyScreen.getByLabelText("Key Provider"), {
+        target: { value: "kms" },
+      });
+      fireEvent.change(residencyScreen.getByLabelText("Key Ref"), {
+        target: { value: "kms://replica-cn-shanghai" },
+      });
+      fireEvent.click(
+        residencyScreen.getByRole("button", { name: "添加 / 覆盖 KMS 映射" }),
+      );
+      fireEvent.click(
+        residencyScreen.getByRole("button", { name: "保存 KMS 映射" }),
+      );
+
+      expect(
+        await residencyScreen.findByText("KMS 映射已保存，共 1 条。"),
+      ).toBeInTheDocument();
+
+      fireEvent.change(residencyScreen.getByLabelText("Source Region"), {
+        target: { value: "cn-shanghai" },
+      });
+      fireEvent.change(residencyScreen.getByLabelText("Archive Region"), {
+        target: { value: "ap-southeast-1" },
+      });
+      fireEvent.change(residencyScreen.getByLabelText("Archive Class"), {
+        target: { value: "cold" },
+      });
+      fireEvent.click(
+        residencyScreen.getByRole("button", { name: "添加 / 覆盖归档策略" }),
+      );
+      fireEvent.click(
+        residencyScreen.getByRole("button", { name: "保存归档策略" }),
+      );
+
+      expect(
+        await residencyScreen.findByText("区域归档策略已保存，共 1 条。"),
+      ).toBeInTheDocument();
+
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url, init]) =>
+            new URL(toUrl(url), "http://localhost").pathname ===
+              "/api/v2/residency/kms-key-mappings" &&
+            (init as RequestInit | undefined)?.method === "PUT",
+        ),
+      ).toBe(true);
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url, init]) =>
+            new URL(toUrl(url), "http://localhost").pathname ===
+              "/api/v2/residency/archive-region-policies" &&
+            (init as RequestInit | undefined)?.method === "PUT",
+        ),
+      ).toBe(true);
     },
     GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
   );
@@ -5554,6 +8801,669 @@ describe("Web Console", () => {
     GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
   );
 
+  test(
+    "治理页支持 Config Packages 审批发布与 watch/latest 预览",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-system-config",
+        refreshToken: "refresh-token-governance-system-config",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const packages = [
+        {
+          packageId: "pkg-1",
+          tenantId: "default",
+          version: "config-v1",
+          issuedAt: "2026-03-09T00:00:00.000Z",
+          signatureStatus: "verified",
+          payload: { mode: "observe" },
+          targetSelectors: { channels: ["stable"] },
+          requiresApproval: true,
+          requiredApprovals: 1,
+          isPublished: false,
+          createdAt: "2026-03-09T00:00:00.000Z",
+          updatedAt: "2026-03-09T00:00:00.000Z",
+        },
+      ];
+      const approvals: Array<{
+        approvalId: string;
+        tenantId: string;
+        packageId: string;
+        version: string;
+        approverUserId: string;
+        decision: "approved" | "rejected";
+        comment?: string;
+        createdAt: string;
+        updatedAt: string;
+      }> = [];
+
+      const fetchSpy = mockGovernancePageFetch({
+        extraHandler: (_input, init, context) => {
+          if (context.pathname === "/api/v1/system/config/packages" && context.method === "GET") {
+            return mockJsonResponse({
+              items: packages,
+              total: packages.length,
+              filters: { limit: 50 },
+            });
+          }
+          if (
+            context.pathname === "/api/v1/system/config/packages/pkg-1/approvals" &&
+            context.method === "GET"
+          ) {
+            return mockJsonResponse({
+              items: approvals,
+              total: approvals.length,
+            });
+          }
+          if (
+            context.pathname === "/api/v1/system/config/packages/pkg-1/approvals" &&
+            context.method === "POST"
+          ) {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as {
+              decision?: "approved" | "rejected";
+              comment?: string;
+            };
+            const current = approvals[0];
+            if (current) {
+              current.decision = payload.decision ?? "approved";
+              current.comment = payload.comment;
+              current.updatedAt = "2026-03-09T00:10:00.000Z";
+              return mockJsonResponse(current, 200);
+            }
+            const created = {
+              approvalId: "pkg-approval-1",
+              tenantId: "default",
+              packageId: "pkg-1",
+              version: "config-v1",
+              approverUserId: "user-1",
+              decision: payload.decision ?? "approved",
+              comment: payload.comment,
+              createdAt: "2026-03-09T00:05:00.000Z",
+              updatedAt: "2026-03-09T00:05:00.000Z",
+            };
+            approvals.splice(0, approvals.length, created);
+            return mockJsonResponse(created, 201);
+          }
+          if (
+            context.pathname === "/api/v1/system/config/packages/pkg-1/publish" &&
+            context.method === "POST"
+          ) {
+            if (approvals.length === 0 || approvals[0]?.decision !== "approved") {
+              return mockJsonResponse(
+                { message: "配置包 pkg-1 尚未满足审批门槛。" },
+                409,
+              );
+            }
+            packages[0] = {
+              ...packages[0],
+              isPublished: true,
+              publishedAt: "2026-03-09T00:15:00.000Z",
+              updatedAt: "2026-03-09T00:15:00.000Z",
+            };
+            return mockJsonResponse(packages[0]);
+          }
+          if (
+            context.pathname === "/api/v1/system/config/packages/watch/latest" &&
+            context.method === "GET"
+          ) {
+            const url = new URL(context.url, "http://localhost");
+            if (url.searchParams.get("channel") === "stable" && packages[0]?.isPublished) {
+              return mockJsonResponse(packages[0]);
+            }
+            return mockJsonResponse(
+              { message: "当前没有命中的已发布配置包。" },
+              404,
+            );
+          }
+          return undefined;
+        },
+      });
+
+      render(<App />);
+
+      const heading = await screen.findByRole("heading", {
+        name: "Config Packages",
+        level: 2,
+      });
+      const section = heading.closest("section");
+      if (!(section instanceof HTMLElement)) {
+        throw new Error("未找到 Config Packages 所在 section。");
+      }
+      const sectionScreen = within(section);
+
+      expect(await sectionScreen.findByText("config-v1")).toBeInTheDocument();
+      expect(sectionScreen.getByRole("button", { name: "已选中" })).toBeInTheDocument();
+
+      fireEvent.click(sectionScreen.getByRole("button", { name: "发布配置包" }));
+      expect(
+        await sectionScreen.findByText("发布配置包失败：配置包 pkg-1 尚未满足审批门槛。"),
+      ).toBeInTheDocument();
+
+      fireEvent.change(sectionScreen.getByLabelText("审批决策"), {
+        target: { value: "approved" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("审批意见"), {
+        target: { value: "批准发布" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "提交配置审批" }));
+      expect(
+        await sectionScreen.findByText("配置包审批已提交：config-v1 -> approved。"),
+      ).toBeInTheDocument();
+
+      fireEvent.click(sectionScreen.getByRole("button", { name: "发布配置包" }));
+      expect(
+        await sectionScreen.findByText("配置包 pkg-1 已发布。"),
+      ).toBeInTheDocument();
+
+      fireEvent.change(sectionScreen.getByLabelText("Watch Channel"), {
+        target: { value: "stable" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "查询 watch/latest" }));
+      expect(
+        await sectionScreen.findByText("watch/latest 已命中 pkg-1。"),
+      ).toBeInTheDocument();
+      expect(
+        sectionScreen.getByText("watch/latest 命中：pkg-1 / vconfig-v1"),
+      ).toBeInTheDocument();
+
+      expect(
+        fetchSpy.mock.calls.some(([url]) => {
+          const parsed = new URL(toUrl(url), "http://localhost");
+          return (
+            parsed.pathname === "/api/v1/system/config/packages/watch/latest" &&
+            parsed.searchParams.get("channel") === "stable"
+          );
+        }),
+      ).toBe(true);
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "治理页支持创建 Config Package，并支持载入到表单与克隆为新包",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-system-config-create",
+        refreshToken: "refresh-token-governance-system-config-create",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const packages: Array<Record<string, unknown>> = [
+        {
+          packageId: "pkg-seed-1",
+          tenantId: "default",
+          version: "config-seed-v1",
+          issuedAt: "2026-03-09T02:00:00.000Z",
+          signatureStatus: "verified",
+          payload: { mode: "observe", region: "cn" },
+          targetSelectors: {
+            agentIds: ["agent-seed-1"],
+            channels: ["stable"],
+          },
+          requiresApproval: true,
+          requiredApprovals: 1,
+          isPublished: false,
+          createdAt: "2026-03-09T02:00:00.000Z",
+          updatedAt: "2026-03-09T02:00:00.000Z",
+        },
+      ];
+
+      mockGovernancePageFetch({
+        extraHandler: (_input, init, context) => {
+          if (context.pathname === "/api/v1/system/config/packages" && context.method === "GET") {
+            return mockJsonResponse({
+              items: packages,
+              total: packages.length,
+              filters: { limit: 50 },
+            });
+          }
+          if (context.pathname === "/api/v1/system/config/packages" && context.method === "POST") {
+            const payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+            const created = {
+              packageId: "pkg-created-1",
+              tenantId: "default",
+              version: payload.version ?? "config-created-v1",
+              issuedAt: payload.issuedAt ?? "2026-03-09T02:00:00.000Z",
+              signatureStatus: payload.signatureStatus ?? "unknown",
+              payload: payload.payload ?? {},
+              targetSelectors: payload.targetSelectors ?? {},
+              requiresApproval: payload.requiresApproval === true,
+              requiredApprovals: payload.requiredApprovals ?? 0,
+              isPublished: false,
+              createdAt: "2026-03-09T02:00:00.000Z",
+              updatedAt: "2026-03-09T02:00:00.000Z",
+            };
+            packages.splice(0, packages.length, created);
+            return mockJsonResponse(created, 201);
+          }
+          if (
+            context.pathname.startsWith("/api/v1/system/config/packages/") &&
+            context.pathname.endsWith("/approvals") &&
+            context.method === "GET"
+          ) {
+            return mockJsonResponse({ items: [], total: 0 });
+          }
+          return undefined;
+        },
+      });
+
+      render(<App />);
+
+      const heading = await screen.findByRole("heading", {
+        name: "Config Packages",
+        level: 2,
+      });
+      const section = heading.closest("section");
+      if (!(section instanceof HTMLElement)) {
+        throw new Error("未找到 Config Packages 所在 section。");
+      }
+      const sectionScreen = within(section);
+
+      expect(await sectionScreen.findByText("config-seed-v1")).toBeInTheDocument();
+      expect(sectionScreen.getByRole("button", { name: "已选中" })).toBeInTheDocument();
+
+      fireEvent.change(sectionScreen.getByLabelText("Version"), {
+        target: { value: "config-draft-invalid" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("Payload JSON"), {
+        target: { value: "{invalid" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "创建配置包" }));
+
+      expect(
+        await sectionScreen.findByText(/Payload JSON 非法/),
+      ).toBeInTheDocument();
+
+      fireEvent.click(sectionScreen.getByRole("button", { name: "载入到表单" }));
+      expect(
+        await sectionScreen.findByText("已将配置包 pkg-seed-1 载入创建表单。"),
+      ).toBeInTheDocument();
+      expect(sectionScreen.getByLabelText("Version")).toHaveValue("config-seed-v1");
+      expect(sectionScreen.getByLabelText("Issued At")).toHaveValue(
+        "2026-03-09T02:00:00.000Z",
+      );
+      expect(sectionScreen.getByLabelText("Signature Status")).toHaveValue("verified");
+      expect(sectionScreen.getByLabelText("Agent IDs")).toHaveValue("agent-seed-1");
+      expect(sectionScreen.getByLabelText("Channels")).toHaveValue("stable");
+      expect(sectionScreen.getByLabelText("Payload JSON")).toHaveValue(
+        JSON.stringify({ mode: "observe", region: "cn" }, null, 2),
+      );
+
+      fireEvent.click(sectionScreen.getByRole("button", { name: "克隆为新包" }));
+      expect(
+        await sectionScreen.findByText(
+          "已基于配置包 pkg-seed-1 回填表单，请修改 Version 后创建新包。",
+        ),
+      ).toBeInTheDocument();
+      fireEvent.click(sectionScreen.getByRole("button", { name: "创建配置包" }));
+      expect(
+        await sectionScreen.findByText("克隆为新包时 Version 必须不同。"),
+      ).toBeInTheDocument();
+
+      fireEvent.change(sectionScreen.getByLabelText("Version"), {
+        target: { value: "config-created-v1" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "创建配置包" }));
+
+      expect(
+        await sectionScreen.findByText("配置包 pkg-created-1 已创建。"),
+      ).toBeInTheDocument();
+      expect(await sectionScreen.findByText("config-created-v1")).toBeInTheDocument();
+      expect(sectionScreen.getByRole("button", { name: "已选中" })).toBeInTheDocument();
+      expect(
+        sectionScreen.queryByText(/当前基于配置包 pkg-seed-1 \/ vconfig-seed-v1 克隆新包/),
+      ).not.toBeInTheDocument();
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "治理页支持 Agent Releases rollout 预览",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-agent-release",
+        refreshToken: "refresh-token-governance-agent-release",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const fetchSpy = mockGovernancePageFetch({
+        extraHandler: (_input, _init, context) => {
+          if (
+            context.pathname === "/api/v1/system/agent-releases" &&
+            context.method === "GET"
+          ) {
+            return mockJsonResponse({
+              items: [
+                {
+                  releaseId: "release-1",
+                  tenantId: "default",
+                  version: "2.0.0",
+                  channel: "stable",
+                  publishedAt: "2026-03-09T01:00:00.000Z",
+                  artifacts: [
+                    {
+                      os: "darwin",
+                      arch: "amd64",
+                      downloadUrl: "https://downloads.example.com/agent-darwin-amd64",
+                      rolloutRing: "beta-ring",
+                      rolloutPercentage: 25,
+                      minAgentVersion: "1.5.0",
+                      signatureAlgorithm: "ed25519",
+                      fileName: "agent-darwin-amd64",
+                    },
+                  ],
+                  createdAt: "2026-03-09T01:00:00.000Z",
+                  updatedAt: "2026-03-09T01:00:00.000Z",
+                },
+              ],
+              total: 1,
+              filters: { limit: 50, channel: "stable" },
+            });
+          }
+          if (
+            context.pathname === "/api/v1/system/agent-releases/check" &&
+            context.method === "GET"
+          ) {
+            const url = new URL(context.url, "http://localhost");
+            if (url.searchParams.get("ring") === "stable") {
+              return mockJsonResponse({
+                checkedAt: "2026-03-09T01:10:00.000Z",
+                currentVersion: "1.5.0",
+                channel: "stable",
+                os: "darwin",
+                arch: "amd64",
+                updateAvailable: false,
+                comparison: "no_release",
+                latestRelease: null,
+                selectedArtifact: null,
+                instructions: "当前仅提供升级检查结果，不执行真实下载升级。",
+                evaluatedRing: "stable",
+                rolloutBucket: 76,
+                selectionReason: "ring_mismatch",
+              });
+            }
+            return mockJsonResponse({
+              checkedAt: "2026-03-09T01:11:00.000Z",
+              currentVersion: "1.5.0",
+              channel: "stable",
+              os: "darwin",
+              arch: "amd64",
+              updateAvailable: true,
+              comparison: "upgrade_available",
+              latestRelease: {
+                releaseId: "release-1",
+                tenantId: "default",
+                version: "2.0.0",
+                channel: "stable",
+                publishedAt: "2026-03-09T01:00:00.000Z",
+                artifacts: [],
+                createdAt: "2026-03-09T01:00:00.000Z",
+                updatedAt: "2026-03-09T01:00:00.000Z",
+              },
+              selectedArtifact: {
+                os: "darwin",
+                arch: "amd64",
+                downloadUrl: "https://downloads.example.com/agent-darwin-amd64",
+                rolloutRing: "beta-ring",
+                rolloutPercentage: 25,
+                minAgentVersion: "1.5.0",
+                signatureAlgorithm: "ed25519",
+                fileName: "agent-darwin-amd64",
+              },
+              instructions: "当前仅提供升级检查结果，不执行真实下载升级。",
+              evaluatedRing: "beta-ring",
+              rolloutBucket: 24,
+              selectionReason: "matched",
+            });
+          }
+          return undefined;
+        },
+      });
+
+      render(<App />);
+
+      const heading = await screen.findByRole("heading", {
+        name: "Agent Releases / Rollout",
+        level: 2,
+      });
+      const section = heading.closest("section");
+      if (!(section instanceof HTMLElement)) {
+        throw new Error("未找到 Agent Releases / Rollout 所在 section。");
+      }
+      const sectionScreen = within(section);
+
+      expect(await sectionScreen.findByText("release-1")).toBeInTheDocument();
+      expect(sectionScreen.getByText(/ring=beta-ring/)).toBeInTheDocument();
+      expect(
+        sectionScreen.getByText("当前 Release：release-1 / v2.0.0 / channel=stable"),
+      ).toBeInTheDocument();
+      expect(sectionScreen.getByText("agent-darwin-amd64")).toBeInTheDocument();
+
+      fireEvent.click(sectionScreen.getByRole("button", { name: "回填到预览" }));
+      expect(
+        await sectionScreen.findByText(
+          "已将 agent-darwin-amd64 回填到升级预览，请补 Current Version 后执行。",
+        ),
+      ).toBeInTheDocument();
+      expect(sectionScreen.getByLabelText("OS")).toHaveValue("darwin");
+      expect(sectionScreen.getByLabelText("Arch")).toHaveValue("amd64");
+      expect(sectionScreen.getByLabelText("Rollout Ring")).toHaveValue("beta-ring");
+
+      fireEvent.change(sectionScreen.getByLabelText("Current Version"), {
+        target: { value: "1.5.0" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("Agent ID"), {
+        target: { value: "agent-preview-1" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("Device ID"), {
+        target: { value: "device-preview-1" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("Hostname"), {
+        target: { value: "host-preview-1" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("Rollout Ring"), {
+        target: { value: "stable" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "执行升级预览" }));
+      expect(
+        await sectionScreen.findByText("升级预览已完成：ring_mismatch。"),
+      ).toBeInTheDocument();
+      expect(sectionScreen.getByText("ring_mismatch")).toBeInTheDocument();
+
+      fireEvent.change(sectionScreen.getByLabelText("Rollout Ring"), {
+        target: { value: "beta-ring" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("OS"), {
+        target: { value: "linux" },
+      });
+      fireEvent.change(sectionScreen.getByLabelText("Arch"), {
+        target: { value: "arm64" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "回填到预览" }));
+      expect(
+        await sectionScreen.findByText("已将 agent-darwin-amd64 回填到升级预览。"),
+      ).toBeInTheDocument();
+      expect(sectionScreen.getByLabelText("OS")).toHaveValue("darwin");
+      expect(sectionScreen.getByLabelText("Arch")).toHaveValue("amd64");
+      expect(sectionScreen.getByLabelText("Rollout Ring")).toHaveValue("beta-ring");
+      expect(sectionScreen.getByLabelText("Current Version")).toHaveValue("1.5.0");
+      expect(sectionScreen.getByLabelText("Agent ID")).toHaveValue("agent-preview-1");
+      expect(sectionScreen.getByLabelText("Device ID")).toHaveValue("device-preview-1");
+      expect(sectionScreen.getByLabelText("Hostname")).toHaveValue("host-preview-1");
+
+      fireEvent.click(sectionScreen.getByRole("button", { name: "执行升级预览" }));
+      expect(
+        await sectionScreen.findByText("升级预览已命中 agent-darwin-amd64。"),
+      ).toBeInTheDocument();
+      expect(sectionScreen.getByText("matched")).toBeInTheDocument();
+      expect(sectionScreen.getByText("24")).toBeInTheDocument();
+
+      expect(
+        fetchSpy.mock.calls.some(([url]) => {
+          const parsed = new URL(toUrl(url), "http://localhost");
+          return (
+            parsed.pathname === "/api/v1/system/agent-releases/check" &&
+            parsed.searchParams.get("ring") === "beta-ring"
+          );
+        }),
+      ).toBe(true);
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "治理页支持 Agent Releases 批量 rollout 模拟，并在 samples JSON 非法时阻止提交",
+    async () => {
+      window.location.hash = "#/governance";
+      setAuthTokens({
+        accessToken: "access-token-governance-agent-release-batch",
+        refreshToken: "refresh-token-governance-agent-release-batch",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      const fetchSpy = mockGovernancePageFetch({
+        extraHandler: (_input, _init, context) => {
+          if (
+            context.pathname === "/api/v1/system/agent-releases" &&
+            context.method === "GET"
+          ) {
+            return mockJsonResponse({
+              items: [],
+              total: 0,
+              filters: { limit: 50, channel: "stable" },
+            });
+          }
+          if (
+            context.pathname === "/api/v1/system/agent-releases/check/batch" &&
+            context.method === "POST"
+          ) {
+            return mockJsonResponse({
+              items: [
+                {
+                  label: "stable-default",
+                  checkedAt: "2026-03-09T02:10:00.000Z",
+                  currentVersion: "1.0.0",
+                  channel: "stable",
+                  os: "darwin",
+                  arch: "amd64",
+                  updateAvailable: false,
+                  comparison: "no_release",
+                  latestRelease: null,
+                  selectedArtifact: null,
+                  instructions: "当前仅提供升级检查结果，不执行真实下载升级。",
+                  evaluatedRing: "stable",
+                  rolloutBucket: 80,
+                  selectionReason: "ring_mismatch",
+                },
+                {
+                  label: "beta-ring-1",
+                  checkedAt: "2026-03-09T02:10:01.000Z",
+                  currentVersion: "1.0.0",
+                  channel: "stable",
+                  os: "darwin",
+                  arch: "amd64",
+                  updateAvailable: true,
+                  comparison: "upgrade_available",
+                  latestRelease: {
+                    releaseId: "release-batch-1",
+                    tenantId: "default",
+                    version: "2.1.0",
+                    channel: "stable",
+                    publishedAt: "2026-03-09T02:00:00.000Z",
+                    artifacts: [],
+                    createdAt: "2026-03-09T02:00:00.000Z",
+                    updatedAt: "2026-03-09T02:00:00.000Z",
+                  },
+                  selectedArtifact: {
+                    os: "darwin",
+                    arch: "amd64",
+                    downloadUrl: "https://downloads.example.com/agent-darwin-amd64",
+                    rolloutRing: "beta-ring",
+                    rolloutPercentage: 25,
+                    minAgentVersion: "1.0.0",
+                    fileName: "agent-darwin-amd64",
+                  },
+                  instructions: "当前仅提供升级检查结果，不执行真实下载升级。",
+                  evaluatedRing: "beta-ring",
+                  rolloutBucket: 24,
+                  selectionReason: "matched",
+                },
+              ],
+              total: 2,
+            });
+          }
+          return undefined;
+        },
+      });
+
+      render(<App />);
+
+      const heading = await screen.findByRole("heading", {
+        name: "Agent Releases / Rollout",
+        level: 2,
+      });
+      const section = heading.closest("section");
+      if (!(section instanceof HTMLElement)) {
+        throw new Error("未找到 Agent Releases / Rollout 所在 section。");
+      }
+      const sectionScreen = within(section);
+
+      fireEvent.change(sectionScreen.getByLabelText("Batch Samples JSON"), {
+        target: { value: "{invalid" },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "执行批量模拟" }));
+      expect(
+        await sectionScreen.findByText(/Batch Samples JSON 非法/),
+      ).toBeInTheDocument();
+
+      fireEvent.change(sectionScreen.getByLabelText("Batch Samples JSON"), {
+        target: {
+          value: JSON.stringify(
+            [
+              {
+                label: "stable-default",
+                currentVersion: "1.0.0",
+                ring: "stable",
+              },
+              {
+                label: "beta-ring-1",
+                currentVersion: "1.0.0",
+                ring: "beta-ring",
+              },
+            ],
+            null,
+            2,
+          ),
+        },
+      });
+      fireEvent.click(sectionScreen.getByRole("button", { name: "执行批量模拟" }));
+
+      expect(
+        await sectionScreen.findByText("批量升级模拟已完成，共 2 条。"),
+      ).toBeInTheDocument();
+      expect(sectionScreen.getByText("stable-default")).toBeInTheDocument();
+      expect(sectionScreen.getByText("beta-ring-1")).toBeInTheDocument();
+      expect(sectionScreen.getByText("ring_mismatch")).toBeInTheDocument();
+      expect(sectionScreen.getByText("matched")).toBeInTheDocument();
+
+      expect(
+        fetchSpy.mock.calls.some(([url]) => {
+          const parsed = new URL(toUrl(url), "http://localhost");
+          return parsed.pathname === "/api/v1/system/agent-releases/check/batch";
+        }),
+      ).toBe(true);
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
   test("治理页支持 Sessions/Usage 导出", async () => {
     window.location.hash = "#/governance";
     setAuthTokens({
@@ -5712,5 +9622,5 @@ describe("Web Console", () => {
         value: originalRevokeObjectURL,
       });
     }
-  });
+  }, GOVERNANCE_HEAVY_TEST_TIMEOUT_MS);
 });

@@ -49,6 +49,7 @@ const (
 	defaultWeeklyTopModelLimit        = 5
 	alertCreatedAuditAction           = "governance.alert_created"
 	alertDispatchedAuditAction        = "governance.alert_dispatched"
+	alertEscalatedAuditAction         = "governance.alert_escalated"
 	budgetFrozenAuditAction           = "governance.budget_frozen"
 	weeklyReportAuditAction           = "governance.weekly_report_published"
 	alertCostRoundDecimals            = 1e8
@@ -59,6 +60,7 @@ const (
 	weeklyReportDedupeCacheMax        = 50000
 	orchestrationDispatchModeRule     = "rule"
 	orchestrationDispatchModeFallback = "fallback"
+	orchestrationEscalationReasonSLA  = "sla_timeout"
 )
 
 type governanceService struct {
@@ -167,11 +169,13 @@ type weeklyReportEvent struct {
 }
 
 type eventOrchestration struct {
-	MatchedRuleIDs []string `json:"matchedRuleIds,omitempty"`
-	Channels       []string `json:"channels,omitempty"`
-	DedupeHit      bool     `json:"dedupeHit,omitempty"`
-	Suppressed     bool     `json:"suppressed,omitempty"`
-	Fallback       bool     `json:"fallback,omitempty"`
+	MatchedRuleIDs   []string `json:"matchedRuleIds,omitempty"`
+	Channels         []string `json:"channels,omitempty"`
+	DedupeHit        bool     `json:"dedupeHit,omitempty"`
+	Suppressed       bool     `json:"suppressed,omitempty"`
+	Fallback         bool     `json:"fallback,omitempty"`
+	Escalated        bool     `json:"escalated,omitempty"`
+	EscalationReason string   `json:"escalationReason,omitempty"`
 }
 
 type alertOrchestrationRule struct {
@@ -183,6 +187,7 @@ type alertOrchestrationRule struct {
 	DedupeWindowSeconds      int
 	SuppressionWindowSeconds int
 	MergeWindowSeconds       int
+	SLAMinutes               int
 	Channels                 []string
 }
 
@@ -247,6 +252,17 @@ type auditLogEntry struct {
 	CreatedAt time.Time
 }
 
+type slaEscalationPlan struct {
+	DueRules          []alertOrchestrationRule
+	MatchedRuleIDs    []string
+	TargetChannels    []string
+	ConflictRuleIDs   map[string][]string
+	EscalationDue     bool
+	NormalizedAlertID string
+	NormalizedSource  string
+	NormalizedMatchKey string
+}
+
 type weeklyReportDedupeCache struct {
 	mu         sync.Mutex
 	items      map[string]time.Time
@@ -277,6 +293,22 @@ func normalizeOrchestrationChannels(raw []string) []string {
 			continue
 		}
 		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	return normalized
+}
+
+func normalizeNonEmptyStrings(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	normalized := make([]string, 0, len(raw))
+	for _, item := range raw {
+		value := strings.TrimSpace(item)
+		if value == "" {
+			continue
+		}
 		normalized = append(normalized, value)
 	}
 	return normalized
@@ -359,6 +391,58 @@ func detectOrchestrationConflicts(rules []alertOrchestrationRule) map[string][]s
 		conflicts[ruleID] = items
 	}
 	return conflicts
+}
+
+func buildSLAEscalationPlan(
+	alert alertEvent,
+	evaluatedAt time.Time,
+	rules []alertOrchestrationRule,
+) slaEscalationPlan {
+	severity := strings.ToLower(strings.TrimSpace(alert.Severity))
+	sourceID := normalizeOptionalString(alert.SourceID)
+	dueRules := make([]alertOrchestrationRule, 0, len(rules))
+	for _, rule := range rules {
+		if rule.SLAMinutes <= 0 {
+			continue
+		}
+		if !matchesSeverityWithWildcard(rule.Severity, severity) {
+			continue
+		}
+		if !matchesSourceWithWildcard(rule.SourceID, sourceID) {
+			continue
+		}
+		if alert.CreatedAt.Add(time.Duration(rule.SLAMinutes) * time.Minute).After(evaluatedAt) {
+			continue
+		}
+		dueRules = append(dueRules, rule)
+	}
+
+	plan := slaEscalationPlan{
+		DueRules:           dueRules,
+		MatchedRuleIDs:     make([]string, 0, len(dueRules)),
+		TargetChannels:     make([]string, 0),
+		ConflictRuleIDs:    detectOrchestrationConflicts(dueRules),
+		EscalationDue:      len(dueRules) > 0,
+		NormalizedAlertID:  strconv.FormatInt(alert.AlertID, 10),
+		NormalizedSource:   sourceID,
+		NormalizedMatchKey: fmt.Sprintf("%s:sla", buildAlertOrchestrationMatchKey(alert)),
+	}
+	if len(dueRules) == 0 {
+		return plan
+	}
+
+	targetChannelSet := make(map[string]struct{})
+	for _, rule := range dueRules {
+		plan.MatchedRuleIDs = append(plan.MatchedRuleIDs, rule.ID)
+		for _, channel := range normalizeOrchestrationChannels(rule.Channels) {
+			if _, exists := targetChannelSet[channel]; exists {
+				continue
+			}
+			targetChannelSet[channel] = struct{}{}
+			plan.TargetChannels = append(plan.TargetChannels, channel)
+		}
+	}
+	return plan
 }
 
 func fallbackExecutionRuleID(eventType string) string {
@@ -561,6 +645,10 @@ func (s *governanceService) runOnce(ctx context.Context) error {
 
 	if err := s.publishWeeklyReportsIfDue(evalCtx, evaluatedAt); err != nil {
 		return fmt.Errorf("publish weekly reports failed: %w", err)
+	}
+
+	if err := s.processSLAEscalations(evalCtx, evaluatedAt); err != nil {
+		return fmt.Errorf("process sla escalations failed: %w", err)
 	}
 
 	return nil
@@ -1042,6 +1130,7 @@ SELECT
   dedupe_window_seconds,
   suppression_window_seconds,
   merge_window_seconds,
+  sla_minutes,
   channels
 FROM alert_orchestration_rules
 WHERE tenant_id = $1
@@ -1064,6 +1153,7 @@ ORDER BY updated_at DESC, id ASC
 			dedupeWindow      int32
 			suppressionWindow int32
 			mergeWindow       int32
+			slaMinutes        *int32
 		)
 		if err := rows.Scan(
 			&rule.ID,
@@ -1074,6 +1164,7 @@ ORDER BY updated_at DESC, id ASC
 			&dedupeWindow,
 			&suppressionWindow,
 			&mergeWindow,
+			&slaMinutes,
 			&channelsRaw,
 		); err != nil {
 			return nil, fmt.Errorf("scan alert orchestration rule failed: %w", err)
@@ -1084,6 +1175,9 @@ ORDER BY updated_at DESC, id ASC
 		rule.DedupeWindowSeconds = int(dedupeWindow)
 		rule.SuppressionWindowSeconds = int(suppressionWindow)
 		rule.MergeWindowSeconds = int(mergeWindow)
+		if slaMinutes != nil && *slaMinutes > 0 {
+			rule.SLAMinutes = int(*slaMinutes)
+		}
 		if len(channelsRaw) > 0 {
 			if err := json.Unmarshal(channelsRaw, &rule.Channels); err != nil {
 				return nil, fmt.Errorf("unmarshal alert orchestration rule channels failed: %w", err)
@@ -1126,6 +1220,36 @@ SELECT EXISTS (
   LIMIT 1
 )
 `, normalizeTenantID(tenantID), strings.TrimSpace(ruleID), strings.TrimSpace(eventType), strings.TrimSpace(matchKey), since).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+func (s *governanceService) hasOrchestrationExecutionWithMatchKey(
+	ctx context.Context,
+	tenantID string,
+	ruleID string,
+	eventType string,
+	matchKey string,
+) (bool, error) {
+	if strings.TrimSpace(matchKey) == "" {
+		return false, nil
+	}
+
+	var exists bool
+	err := s.pool.QueryRow(ctx, `
+SELECT EXISTS (
+  SELECT 1
+  FROM alert_orchestration_executions
+  WHERE tenant_id = $1
+    AND rule_id = $2
+    AND event_type = $3
+    AND simulated = FALSE
+    AND COALESCE(metadata ->> 'matchKey', '') = $4
+  LIMIT 1
+)
+`, normalizeTenantID(tenantID), strings.TrimSpace(ruleID), strings.TrimSpace(eventType), strings.TrimSpace(matchKey)).Scan(&exists)
 	if err != nil {
 		return false, err
 	}
@@ -1346,6 +1470,296 @@ func (s *governanceService) applyAlertOrchestration(
 		Fallback:       false,
 	}
 	return alert, nil
+}
+
+func (s *governanceService) loadOpenAlertsForSLA(
+	ctx context.Context,
+) ([]alertEvent, error) {
+	rows, err := s.pool.Query(ctx, `
+SELECT
+  id,
+  tenant_id,
+  budget_id,
+  source_id,
+  period,
+  window_start,
+  window_end,
+  tokens_used,
+  cost_used::double precision,
+  token_limit,
+  cost_limit::double precision,
+  threshold::double precision,
+  severity,
+  status,
+  dedupe_key,
+  created_at,
+  updated_at
+FROM governance_alerts
+WHERE status = 'open'
+ORDER BY tenant_id ASC, created_at ASC, id ASC
+`)
+	if err != nil {
+		return nil, fmt.Errorf("query open alerts for sla failed: %w", err)
+	}
+	defer rows.Close()
+
+	alerts := make([]alertEvent, 0)
+	for rows.Next() {
+		var alert alertEvent
+		var sourceID *string
+		var costUsed float64
+		var costLimit *float64
+		var threshold float64
+		var severity string
+		var status string
+		var createdAt time.Time
+		var updatedAt time.Time
+		if err := rows.Scan(
+			&alert.AlertID,
+			&alert.TenantID,
+			&alert.BudgetID,
+			&sourceID,
+			&alert.Period,
+			&alert.WindowStart,
+			&alert.WindowEnd,
+			&alert.TokensUsed,
+			&costUsed,
+			&alert.TokenLimit,
+			&costLimit,
+			&threshold,
+			&severity,
+			&status,
+			&alert.DedupeKey,
+			&createdAt,
+			&updatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan open alert for sla failed: %w", err)
+		}
+		alert.SourceID = trimOptionalString(sourceID)
+		alert.CostUsed = costUsed
+		alert.CostLimit = costLimit
+		alert.Threshold = threshold
+		alert.Severity = strings.ToLower(strings.TrimSpace(severity))
+		alert.Status = strings.ToLower(strings.TrimSpace(status))
+		alert.Stage = stageFromStoredAlert(alert.Severity, threshold)
+		alert.CreatedAt = createdAt.UTC()
+		alert.EvaluatedAt = createdAt.UTC()
+		alert.GovernanceStateBefore, alert.GovernanceStateAfter = defaultGovernanceStates(alert.Stage)
+		alert.ThresholdSnapshot = thresholdSnapshot{}
+		alert.TokenUsageRatio = nil
+		alert.CostUsageRatio = nil
+		if costLimit != nil {
+			costLimitValue := *costLimit
+			alert.CostLimit = &costLimitValue
+		}
+		if updatedAt.After(createdAt) {
+			alert.EvaluatedAt = updatedAt.UTC()
+		}
+		alerts = append(alerts, alert)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate open alerts for sla failed: %w", err)
+	}
+	return alerts, nil
+}
+
+func (s *governanceService) hasRecordedAlertEscalation(
+	ctx context.Context,
+	tenantID string,
+	alertID int64,
+) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx, `
+SELECT EXISTS (
+  SELECT 1
+  FROM audit_logs
+  WHERE action = $1
+    AND event_id = $2
+    AND tenant_id = $3
+  LIMIT 1
+)
+`, alertEscalatedAuditAction, alertEscalationMessageID(alertID), normalizeTenantID(tenantID)).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check alert escalation audit exists failed: %w", err)
+	}
+	return exists, nil
+}
+
+func (s *governanceService) processSLAEscalations(ctx context.Context, evaluatedAt time.Time) error {
+	alerts, err := s.loadOpenAlertsForSLA(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, alert := range alerts {
+		escalated, escalateErr := s.processSLAEscalationForAlert(ctx, alert, evaluatedAt)
+		if escalateErr != nil {
+			s.log.Error("process sla escalation failed",
+				"error", escalateErr,
+				"alert_id", alert.AlertID,
+				"tenant_id", normalizeTenantID(alert.TenantID),
+			)
+			continue
+		}
+		if escalated {
+			s.log.Info("sla escalation processed",
+				"alert_id", alert.AlertID,
+				"tenant_id", normalizeTenantID(alert.TenantID),
+			)
+		}
+	}
+	return nil
+}
+
+func (s *governanceService) processSLAEscalationForAlert(
+	ctx context.Context,
+	alert alertEvent,
+	evaluatedAt time.Time,
+) (bool, error) {
+	if strings.ToLower(strings.TrimSpace(alert.Status)) != "open" {
+		return false, nil
+	}
+	alreadyEscalated, err := s.hasRecordedAlertEscalation(ctx, alert.TenantID, alert.AlertID)
+	if err != nil {
+		return false, err
+	}
+	if alreadyEscalated {
+		return false, nil
+	}
+
+	rules, err := s.loadAlertOrchestrationRules(ctx, alert.TenantID, "alert")
+	if err != nil {
+		return false, err
+	}
+	plan := buildSLAEscalationPlan(alert, evaluatedAt, rules)
+	if !plan.EscalationDue {
+		return false, nil
+	}
+
+	createdAt := evaluatedAt.UTC()
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	severity := strings.ToLower(strings.TrimSpace(alert.Severity))
+	anyDedupeHit := false
+	anySuppressed := false
+
+	for _, rule := range plan.DueRules {
+		dedupeHit, err := s.hasRecentOrchestrationExecutionWithMatchKey(
+			ctx,
+			alert.TenantID,
+			rule.ID,
+			"alert",
+			plan.NormalizedMatchKey,
+			time.Duration(rule.DedupeWindowSeconds)*time.Second,
+			createdAt,
+		)
+		if err != nil {
+			return false, err
+		}
+		suppressed, err := s.hasRecentOrchestrationExecutionWithMatchKey(
+			ctx,
+			alert.TenantID,
+			rule.ID,
+			"alert",
+			plan.NormalizedMatchKey,
+			time.Duration(rule.SuppressionWindowSeconds)*time.Second,
+			createdAt,
+		)
+		if err != nil {
+			return false, err
+		}
+		executionExists, err := s.hasOrchestrationExecutionWithMatchKey(
+			ctx,
+			alert.TenantID,
+			rule.ID,
+			"alert",
+			plan.NormalizedMatchKey,
+		)
+		if err != nil {
+			return false, err
+		}
+		anyDedupeHit = anyDedupeHit || dedupeHit
+		anySuppressed = anySuppressed || suppressed
+		deliveryChannels := normalizeOrchestrationChannels(rule.Channels)
+
+		metadata := map[string]any{
+			"dispatchMode":             orchestrationDispatchModeRule,
+			"fallback":                 false,
+			"matchKey":                 plan.NormalizedMatchKey,
+			"natsSubject":              alertsSubject,
+			"alertId":                  plan.NormalizedAlertID,
+			"severity":                 severity,
+			"sourceId":                 plan.NormalizedSource,
+			"ruleName":                 rule.Name,
+			"matchedRuleIds":           plan.MatchedRuleIDs,
+			"deliveryChannels":         deliveryChannels,
+			"dedupeHit":                dedupeHit,
+			"suppressed":               suppressed,
+			"escalated":                true,
+			"escalationReason":         orchestrationEscalationReasonSLA,
+			"escalatedFromAlertStatus": "open",
+			"escalationTargetChannels": plan.TargetChannels,
+			"slaMinutes":               rule.SLAMinutes,
+		}
+		if len(plan.ConflictRuleIDs[rule.ID]) > 0 {
+			metadata["conflictRuleIds"] = plan.ConflictRuleIDs[rule.ID]
+		}
+		if executionExists {
+			continue
+		}
+		if err := s.createAlertOrchestrationExecutionLog(ctx, alert.TenantID, alertOrchestrationExecution{
+			RuleID:          rule.ID,
+			EventType:       "alert",
+			AlertID:         &plan.NormalizedAlertID,
+			Severity:        &severity,
+			SourceID:        alert.SourceID,
+			Channels:        rule.Channels,
+			ConflictRuleIDs: plan.ConflictRuleIDs[rule.ID],
+			DedupeHit:       dedupeHit,
+			Suppressed:      suppressed,
+			Metadata:        metadata,
+			CreatedAt:       createdAt,
+		}); err != nil {
+			return false, err
+		}
+	}
+
+	if len(plan.TargetChannels) == 0 {
+		return false, nil
+	}
+
+	escalatedAlert := alert
+	escalatedAlert.Orchestration = &eventOrchestration{
+		MatchedRuleIDs:   plan.MatchedRuleIDs,
+		Channels:         plan.TargetChannels,
+		DedupeHit:        anyDedupeHit,
+		Suppressed:       anySuppressed,
+		Fallback:         false,
+		Escalated:        true,
+		EscalationReason: orchestrationEscalationReasonSLA,
+	}
+	return true, s.publishEscalatedAlert(ctx, escalatedAlert)
+}
+
+func (s *governanceService) publishEscalatedAlert(ctx context.Context, alert alertEvent) error {
+	payload, err := json.Marshal(alert)
+	if err != nil {
+		return fmt.Errorf("marshal escalated alert payload failed: %w", err)
+	}
+
+	publishCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	messageID := alertEscalationMessageID(alert.AlertID)
+	ack, err := s.js.Publish(publishCtx, alertsSubject, payload, jetstream.WithMsgID(messageID))
+	if err != nil {
+		return fmt.Errorf("publish escalated alert failed: %w", err)
+	}
+	if err := s.recordAlertEscalated(ctx, alert, ack.Duplicate); err != nil {
+		return fmt.Errorf("record alert escalated audit failed: %w", err)
+	}
+	return nil
 }
 
 func (s *governanceService) applyWeeklyReportOrchestration(
@@ -1591,6 +2005,10 @@ func alertMessageID(alertID int64) string {
 	return fmt.Sprintf("governance_alert:%d", alertID)
 }
 
+func alertEscalationMessageID(alertID int64) string {
+	return fmt.Sprintf("governance_alert_sla:%d", alertID)
+}
+
 func budgetFrozenMessageID(budgetID string) string {
 	return fmt.Sprintf("governance_budget_frozen:%s", strings.TrimSpace(budgetID))
 }
@@ -1787,6 +2205,57 @@ func (s *governanceService) recordAlertPublished(ctx context.Context, alert aler
 	return s.recordAlertDispatched(ctx, alert, duplicate)
 }
 
+func (s *governanceService) recordAlertEscalated(ctx context.Context, alert alertEvent, duplicate bool) error {
+	eventID := alertEscalationMessageID(alert.AlertID)
+	tenantID := normalizeTenantID(alert.TenantID)
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin alert escalated audit tx failed: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `
+SELECT pg_advisory_xact_lock(hashtext($1 || ':' || $2), hashtext($3))
+`, alertEscalatedAuditAction, eventID, tenantID)
+	if err != nil {
+		return fmt.Errorf("acquire alert escalated audit lock failed: %w", err)
+	}
+
+	var exists bool
+	err = tx.QueryRow(ctx, `
+SELECT EXISTS (
+  SELECT 1
+  FROM audit_logs
+  WHERE action = $1
+    AND event_id = $2
+    AND tenant_id = $3
+  LIMIT 1
+)
+`, alertEscalatedAuditAction, eventID, tenantID).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("check alert escalated audit exists failed: %w", err)
+	}
+	if exists {
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("commit alert escalated audit tx failed: %w", err)
+		}
+		return nil
+	}
+
+	auditEntry, err := buildAlertEscalatedAuditLog(alert, duplicate, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if err := insertAuditLog(ctx, tx, auditEntry); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit alert escalated audit tx failed: %w", err)
+	}
+	return nil
+}
+
 func buildAlertCreatedAuditLog(alert alertEvent) (auditLogEntry, error) {
 	tenantID := normalizeTenantID(alert.TenantID)
 	normalizedSeverity := strings.ToLower(strings.TrimSpace(alert.Severity))
@@ -1915,6 +2384,60 @@ func buildAlertDispatchedAuditLog(alert alertEvent, duplicate bool, createdAt ti
 		TenantID:  tenantID,
 		EventID:   alertMessageID(alert.AlertID),
 		Action:    alertDispatchedAuditAction,
+		Level:     auditLevelFromSeverity(normalizedSeverity),
+		Detail:    detail,
+		Metadata:  metadata,
+		CreatedAt: createdAt,
+	}, nil
+}
+
+func buildAlertEscalatedAuditLog(alert alertEvent, duplicate bool, createdAt time.Time) (auditLogEntry, error) {
+	tenantID := normalizeTenantID(alert.TenantID)
+	normalizedSeverity := strings.ToLower(strings.TrimSpace(alert.Severity))
+	normalizedStage := normalizeBudgetStage(alert.Stage)
+	var orchestrationChannels []string
+	var matchedRuleIDs []string
+	if alert.Orchestration != nil {
+		orchestrationChannels = normalizeOrchestrationChannels(alert.Orchestration.Channels)
+		matchedRuleIDs = normalizeNonEmptyStrings(alert.Orchestration.MatchedRuleIDs)
+	}
+	metadata, err := json.Marshal(map[string]any{
+		"alert_id":                 alert.AlertID,
+		"budget_id":                strings.TrimSpace(alert.BudgetID),
+		"tenant_id":                tenantID,
+		"stage":                    normalizedStage,
+		"threshold_snapshot":       alert.ThresholdSnapshot,
+		"governance_state_before":  normalizeGovernanceState(alert.GovernanceStateBefore),
+		"governance_state_after":   normalizeGovernanceState(alert.GovernanceStateAfter),
+		"severity":                 normalizedSeverity,
+		"status":                   strings.ToLower(strings.TrimSpace(alert.Status)),
+		"subject":                  alertsSubject,
+		"duplicate":                duplicate,
+		"dedupe_key":               strings.TrimSpace(alert.DedupeKey),
+		"window_start":             alert.WindowStart.UTC(),
+		"window_end":               alert.WindowEnd.UTC(),
+		"created_at":               alert.CreatedAt.UTC(),
+		"escalated":                true,
+		"escalationReason":         orchestrationEscalationReasonSLA,
+		"escalationTargetChannels": orchestrationChannels,
+		"matchedRuleIds":           matchedRuleIDs,
+		"orchestration":            alert.Orchestration,
+	})
+	if err != nil {
+		return auditLogEntry{}, fmt.Errorf("marshal alert escalated audit metadata failed: %w", err)
+	}
+	createdAt = createdAt.UTC()
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	detail := fmt.Sprintf("governance alert %d escalated by SLA on %s", alert.AlertID, alertsSubject)
+	if duplicate {
+		detail = fmt.Sprintf("governance alert %d duplicate SLA escalation acknowledged on %s", alert.AlertID, alertsSubject)
+	}
+	return auditLogEntry{
+		TenantID:  tenantID,
+		EventID:   alertEscalationMessageID(alert.AlertID),
+		Action:    alertEscalatedAuditAction,
 		Level:     auditLevelFromSeverity(normalizedSeverity),
 		Detail:    detail,
 		Metadata:  metadata,

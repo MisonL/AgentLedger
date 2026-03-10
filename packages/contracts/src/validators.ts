@@ -1,4 +1,11 @@
 import type {
+  AgentLifecycleAction,
+  AgentLifecycleEventCreateInput,
+  AgentLifecycleEventListInput,
+  AgentLifecycleResult,
+  AgentReleaseChannel,
+  AgentReleaseCreateInput,
+  AgentReleaseListInput,
   AgentItem,
   AgentListInput,
   AgentListResponse,
@@ -13,6 +20,10 @@ import type {
   AlertOrchestrationSimulateInput,
   AlertMutableStatus,
   AlertListInput,
+  AlertExternalLinkPublishStatus,
+  AlertExternalLinkBatchRetryInput,
+  AlertExternalLinkFailureQueryInput,
+  AlertExternalLinkRetryInput,
   AlertStatusUpdateInput,
   ApiKeyCreateInput,
   ApiKeyListInput,
@@ -32,10 +43,19 @@ import type {
   AuditItem,
   AuditLevel,
   AuditListInput,
+  LegalHoldCreateInput,
+  LegalHoldListInput,
+  LegalHoldReleaseInput,
+  LegalHoldResourceType,
+  AlertExternalLinkType,
+  AlertExternalLinkSyncResult,
+  AlertOrchestrationEscalationReason,
   TokenPulseRoutePolicy,
   TokenPulseRuntimeEventIngestInput,
   TokenPulseRuntimeEventListInput,
   TokenPulseRuntimeEventStatus,
+  ResidencyArchiveRegionPolicyUpsertInput,
+  ResidencyKmsKeyMappingUpsertInput,
   DataResidencyMode,
   AlertSeverity,
   AlertStatus,
@@ -62,9 +82,25 @@ import type {
   HeatmapCell,
   IntegrationAlertCallbackAction,
   IntegrationAlertCallbackInput,
+  IntegrationDlqMessageQueryInput,
+  IntegrationDlqReplayInput,
+  IntegrationDlqRecoveryJobCreateInput,
+  IntegrationAlertFailureReportActionType,
+  IntegrationAlertFailureReportQueryInput,
+  IntegrationAlertFailureTrendQueryInput,
+  IntegrationDlqRecoveryJobStatus,
   McpApprovalCreateInput,
+  McpApprovalMode,
+  McpApprovalConfig,
   McpEvaluateInput,
+  McpApprovalStage,
   McpApprovalReviewInput,
+  McpApprovalWorkflow,
+  McpApprovalWorkflowCondition,
+  McpApprovalWorkflowTimeWindow,
+  McpApprovalWorkflowNode,
+  McpApprovalWorkflowNodeKind,
+  McpApprovalWorkflowTransition,
   McpInvocationCreateInput,
   McpInvocationResult,
   McpRiskLevel,
@@ -113,6 +149,9 @@ import type {
   SourceRegionBackfillResultItem,
   TenantResidencyPolicyUpsertInput,
   SystemConfigBackupPayload,
+  SystemConfigPackageCreateInput,
+  SystemConfigPackageListInput,
+  SystemConfigPackageSignatureStatus,
   SystemConfigBackupSource,
   SystemConfigRestoreInput,
   Source,
@@ -135,6 +174,11 @@ import type {
   ReplayDatasetCreateInput,
   ReplayDatasetMaterializeInput,
   ReplayBaselineCreateInput,
+  ReplayBaselineVersionCreateInput,
+  ReplayBaselineVersionPromoteInput,
+  ReplayDatasetVersionCreateInput,
+  ReplayDatasetVersionPromoteInput,
+  ReplayExperimentCreateInput,
   ReplayJobCreateInput,
   ReplayJobStatus,
   ReplayRunCreateInput,
@@ -166,6 +210,18 @@ const SOURCE_TYPE_SET = new Set<SourceType>(["local", "ssh", "sync-cache"]);
 const SOURCE_ACCESS_MODE_SET = new Set<SourceAccessMode>(["realtime", "sync", "hybrid"]);
 const SSH_AUTH_TYPE_SET = new Set<SSHAuthType>(["key", "agent"]);
 const SOURCE_BINDING_METHOD_SET = new Set<SourceBindingMethod>(["ssh-pull", "agent-push"]);
+const AGENT_LIFECYCLE_ACTION_SET = new Set<AgentLifecycleAction>([
+  "install",
+  "upgrade",
+  "uninstall",
+  "doctor",
+  "status",
+]);
+const AGENT_LIFECYCLE_RESULT_SET = new Set<AgentLifecycleResult>([
+  "success",
+  "warn",
+  "failed",
+]);
 const BUDGET_SCOPE_SET = new Set(["global", "source", "org", "user", "model"]);
 const BUDGET_GOVERNANCE_STATE_SET = new Set<BudgetGovernanceState>([
   "active",
@@ -184,6 +240,21 @@ const INTEGRATION_ALERT_CALLBACK_ACTION_SET = new Set<IntegrationAlertCallbackAc
   "request_release",
   "approve_release",
   "reject_release",
+  "upsert_external_link",
+  "sync_external_link_result",
+]);
+const ALERT_EXTERNAL_LINK_TYPE_SET = new Set<AlertExternalLinkType>([
+  "ticket",
+  "case",
+  "incident",
+]);
+const ALERT_EXTERNAL_LINK_SYNC_RESULT_SET = new Set<AlertExternalLinkSyncResult>([
+  "success",
+  "failed",
+]);
+const ALERT_EXTERNAL_LINK_PUBLISH_STATUS_SET = new Set<AlertExternalLinkPublishStatus>([
+  "success",
+  "failed",
 ]);
 const ALERT_STATUS_SET = new Set<AlertStatus>(["open", "acknowledged", "resolved"]);
 const ALERT_MUTABLE_STATUS_SET = new Set<AlertMutableStatus>([
@@ -202,12 +273,33 @@ const ALERT_ORCHESTRATION_CHANNEL_SET = new Set<AlertOrchestrationChannel>([
   "feishu",
   "email",
   "email_webhook",
+  "incident",
   "ticket",
 ]);
 const ALERT_ORCHESTRATION_DISPATCH_MODE_SET = new Set<AlertOrchestrationDispatchMode>([
   "rule",
   "fallback",
 ]);
+const ALERT_ORCHESTRATION_ESCALATION_REASON_SET =
+  new Set<AlertOrchestrationEscalationReason>(["sla_timeout"]);
+const INTEGRATION_DLQ_RECOVERY_JOB_STATUS_SET =
+  new Set<IntegrationDlqRecoveryJobStatus>([
+    "queued",
+    "running",
+    "completed",
+    "failed",
+  ]);
+const INTEGRATION_ALERT_FAILURE_REPORT_ACTION_TYPE_SET =
+  new Set<IntegrationAlertFailureReportActionType>([
+    "retry_requested",
+    "retry_completed",
+    "retry_failed",
+    "dlq_queried",
+    "dlq_replayed",
+    "recovery_job_created",
+    "recovery_job_completed",
+    "recovery_job_failed",
+  ]);
 const DATA_RESIDENCY_MODE_SET = new Set<DataResidencyMode>(["single_region", "active_active"]);
 const REPLICATION_JOB_STATUS_SET = new Set<ReplicationJobStatus>([
   "pending",
@@ -227,6 +319,11 @@ const MCP_TOOL_DECISION_SET = new Set<McpToolDecision>([
   "allow",
   "deny",
   "require_approval",
+]);
+const MCP_APPROVAL_MODE_SET = new Set<McpApprovalMode>([
+  "single_stage",
+  "two_stage",
+  "multi_stage",
 ]);
 const MCP_INVOCATION_RESULT_SET = new Set<McpInvocationResult>([
   "allowed",
@@ -257,6 +354,21 @@ const AUTH_PROVIDER_TYPE_SET = new Set<AuthProviderType>([
   "oauth2",
   "oidc",
   "sso",
+  "saml",
+]);
+const SYSTEM_CONFIG_PACKAGE_SIGNATURE_STATUS_SET =
+  new Set<SystemConfigPackageSignatureStatus>([
+    "verified",
+    "unverified",
+    "invalid",
+    "unsigned",
+    "skipped",
+    "unknown",
+  ]);
+const AGENT_RELEASE_CHANNEL_SET = new Set<AgentReleaseChannel>([
+  "stable",
+  "beta",
+  "canary",
 ]);
 const SYNC_JOB_STATUS_SET = new Set<SyncJobStatus>([
   "pending",
@@ -293,6 +405,11 @@ const WEBHOOK_REPLAY_TASK_STATUS_SET = new Set<WebhookReplayTaskStatus>([
   "running",
   "completed",
   "failed",
+]);
+const LEGAL_HOLD_RESOURCE_TYPE_SET = new Set<LegalHoldResourceType>([
+  "audit",
+  "audit_export",
+  "evidence_bundle",
 ]);
 const QUALITY_METRIC_SET = new Set<QualityMetric>([
   "accuracy",
@@ -483,6 +600,417 @@ function normalizeStringArray(value: unknown): string[] | undefined | "invalid" 
   return items;
 }
 
+function normalizeMcpApprovalStageName(
+  value: unknown,
+  index: number
+): McpApprovalStage | undefined {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return `stage${index + 1}` as McpApprovalStage;
+  }
+  if (!/^stage[1-9]\d*$/.test(normalized)) {
+    return undefined;
+  }
+  return normalized as McpApprovalStage;
+}
+
+function normalizeMcpApprovalStageConfigs(
+  value: unknown
+):
+  | Array<{
+      nodeId?: string;
+      stage: McpApprovalStage;
+      label?: string;
+      requiredApprovals: number;
+      roles: string[];
+    }>
+  | undefined
+  | "invalid" {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!Array.isArray(value) || value.length === 0) {
+    return "invalid";
+  }
+
+  const items: Array<{
+    nodeId?: string;
+    stage: McpApprovalStage;
+    label?: string;
+    requiredApprovals: number;
+    roles: string[];
+  }> = [];
+  const seen = new Set<string>();
+
+  for (const [index, item] of value.entries()) {
+    if (!isRecord(item)) {
+      return "invalid";
+    }
+    const stage = normalizeMcpApprovalStageName(item.stage, index);
+    const nodeId = normalizeString(item.nodeId);
+    const label = normalizeString(item.label);
+    const requiredApprovals = toOptionalInteger(item.requiredApprovals);
+    const roles = normalizeStringArray(item.roles);
+    if (
+      !stage ||
+      seen.has(stage) ||
+      requiredApprovals === undefined ||
+      !Number.isInteger(requiredApprovals) ||
+      requiredApprovals < 1 ||
+      roles === undefined ||
+      roles === "invalid" ||
+      roles.length === 0
+    ) {
+      return "invalid";
+    }
+    seen.add(stage);
+    items.push({
+      nodeId: nodeId || undefined,
+      stage,
+      label: label || undefined,
+      requiredApprovals,
+      roles,
+    });
+  }
+
+  return items;
+}
+
+function isMcpApprovalWorkflowNodeKind(
+  value: unknown
+): value is McpApprovalWorkflowNodeKind {
+  return (
+    value === "approval" ||
+    value === "terminal_approved" ||
+    value === "terminal_rejected"
+  );
+}
+
+function isSupportedTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeMcpApprovalWorkflowTimeWindow(
+  value: unknown
+): McpApprovalWorkflowTimeWindow | undefined | "invalid" {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    return "invalid";
+  }
+  const timezone = normalizeString(value.timezone);
+  const startTime = normalizeString(value.startTime);
+  const endTime = normalizeString(value.endTime);
+  const weekdays = Array.isArray(value.weekdays)
+    ? Array.from(
+        new Set(
+          value.weekdays
+            .map((item) =>
+              typeof item === "number" ? item : Number(normalizeString(item) ?? Number.NaN)
+            )
+            .filter((item) => Number.isInteger(item) && item >= 1 && item <= 7)
+        )
+      )
+    : undefined;
+  if (
+    !timezone ||
+    !isSupportedTimeZone(timezone) ||
+    !startTime ||
+    !/^\d{2}:\d{2}$/.test(startTime) ||
+    !endTime ||
+    !/^\d{2}:\d{2}$/.test(endTime)
+  ) {
+    return "invalid";
+  }
+  if (value.weekdays !== undefined && (!Array.isArray(value.weekdays) || weekdays?.length !== value.weekdays.length)) {
+    return "invalid";
+  }
+  const [startHour, startMinute] = startTime.split(":").map(Number);
+  const [endHour, endMinute] = endTime.split(":").map(Number);
+  if (
+    !Number.isInteger(startHour) ||
+    !Number.isInteger(startMinute) ||
+    startHour < 0 ||
+    startHour > 23 ||
+    startMinute < 0 ||
+    startMinute > 59 ||
+    !Number.isInteger(endHour) ||
+    !Number.isInteger(endMinute) ||
+    endHour < 0 ||
+    endHour > 23 ||
+    endMinute < 0 ||
+    endMinute > 59
+  ) {
+    return "invalid";
+  }
+  if (value.weekdays !== undefined && weekdays === undefined) {
+    return "invalid";
+  }
+  return {
+    timezone,
+    ...(weekdays && weekdays.length > 0 ? { weekdays } : {}),
+    startTime,
+    endTime,
+  };
+}
+
+function normalizeMcpApprovalWorkflowCondition(
+  value: unknown
+): McpApprovalWorkflowCondition | undefined | "invalid" {
+  if (value === undefined || value === null) {
+    return { default: true };
+  }
+  if (!isRecord(value)) {
+    return "invalid";
+  }
+  const riskLevelAtLeast = normalizeString(value.riskLevelAtLeast);
+  const toolIds = normalizeStringArray(value.toolIds);
+  const tenantRoles = normalizeStringArray(value.tenantRoles);
+  const timeWindow = normalizeMcpApprovalWorkflowTimeWindow(value.timeWindow);
+  const defaultFlag =
+    value.default === undefined
+      ? false
+      : typeof value.default === "boolean"
+        ? value.default
+        : null;
+  if (
+    value.riskLevelAtLeast !== undefined &&
+    (!riskLevelAtLeast || !isMcpRiskLevel(riskLevelAtLeast))
+  ) {
+    return "invalid";
+  }
+  if (
+    toolIds === "invalid" ||
+    tenantRoles === "invalid" ||
+    timeWindow === "invalid" ||
+    defaultFlag === null
+  ) {
+    return "invalid";
+  }
+  if (
+    defaultFlag === true &&
+    (riskLevelAtLeast !== undefined ||
+      (toolIds !== undefined && toolIds.length > 0) ||
+      (tenantRoles !== undefined && tenantRoles.length > 0) ||
+      timeWindow !== undefined)
+  ) {
+    return "invalid";
+  }
+  if (
+    defaultFlag !== true &&
+    riskLevelAtLeast === undefined &&
+    (toolIds === undefined || toolIds.length === 0) &&
+    (tenantRoles === undefined || tenantRoles.length === 0) &&
+    timeWindow === undefined
+  ) {
+    return { default: true };
+  }
+  return {
+    riskLevelAtLeast: riskLevelAtLeast as McpRiskLevel | undefined,
+    toolIds,
+    tenantRoles,
+    ...(timeWindow ? { timeWindow } : {}),
+    ...(defaultFlag === true ? { default: true } : {}),
+  };
+}
+
+function normalizeMcpApprovalWorkflow(
+  value: unknown
+): McpApprovalWorkflow | undefined | "invalid" {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    return "invalid";
+  }
+  const entryNodeId = normalizeString(value.entryNodeId);
+  if (!entryNodeId || !Array.isArray(value.nodes) || value.nodes.length === 0) {
+    return "invalid";
+  }
+  if (!Array.isArray(value.transitions) || value.transitions.length === 0) {
+    return "invalid";
+  }
+
+  const approvalStageSeen = new Set<string>();
+  const nodeIds = new Set<string>();
+  const nodes: McpApprovalWorkflowNode[] = [];
+  let approvalNodeCount = 0;
+  let terminalApprovedCount = 0;
+  let terminalRejectedCount = 0;
+
+  for (const [index, rawNode] of value.nodes.entries()) {
+    if (!isRecord(rawNode)) {
+      return "invalid";
+    }
+    const nodeId = normalizeString(rawNode.nodeId);
+    const kind = normalizeString(rawNode.kind);
+    const label = normalizeString(rawNode.label);
+    if (!nodeId || !kind || !isMcpApprovalWorkflowNodeKind(kind) || nodeIds.has(nodeId)) {
+      return "invalid";
+    }
+    nodeIds.add(nodeId);
+
+    if (kind === "approval") {
+      approvalNodeCount += 1;
+      const requiredApprovals = toOptionalInteger(rawNode.requiredApprovals);
+      const roles = normalizeStringArray(rawNode.roles);
+      const stage = normalizeMcpApprovalStageName(rawNode.stage, approvalNodeCount - 1);
+      if (
+        !stage ||
+        approvalStageSeen.has(stage) ||
+        requiredApprovals === undefined ||
+        !Number.isInteger(requiredApprovals) ||
+        requiredApprovals < 1 ||
+        roles === undefined ||
+        roles === "invalid" ||
+        roles.length === 0
+      ) {
+        return "invalid";
+      }
+      approvalStageSeen.add(stage);
+      nodes.push({
+        nodeId,
+        kind,
+        label,
+        stage,
+        requiredApprovals,
+        roles,
+      });
+      continue;
+    }
+
+    if (kind === "terminal_approved") {
+      terminalApprovedCount += 1;
+    } else {
+      terminalRejectedCount += 1;
+    }
+    nodes.push({
+      nodeId,
+      kind,
+      label,
+    });
+  }
+
+  if (
+    approvalNodeCount === 0 ||
+    terminalApprovedCount !== 1 ||
+    terminalRejectedCount !== 1 ||
+    !nodeIds.has(entryNodeId)
+  ) {
+    return "invalid";
+  }
+
+  const entryNode = nodes.find((item) => item.nodeId === entryNodeId);
+  if (!entryNode || entryNode.kind !== "approval") {
+    return "invalid";
+  }
+
+  const transitions: McpApprovalWorkflowTransition[] = [];
+  const outgoingByNode = new Map<string, McpApprovalWorkflowTransition[]>();
+  for (const rawTransition of value.transitions) {
+    if (!isRecord(rawTransition)) {
+      return "invalid";
+    }
+    const fromNodeId = normalizeString(rawTransition.fromNodeId);
+    const toNodeId = normalizeString(rawTransition.toNodeId);
+    const condition = normalizeMcpApprovalWorkflowCondition(rawTransition.condition);
+    if (
+      !fromNodeId ||
+      !toNodeId ||
+      !nodeIds.has(fromNodeId) ||
+      !nodeIds.has(toNodeId) ||
+      condition === "invalid"
+    ) {
+      return "invalid";
+    }
+    const fromNode = nodes.find((item) => item.nodeId === fromNodeId);
+    if (!fromNode || fromNode.kind !== "approval") {
+      return "invalid";
+    }
+    const normalizedTransition: McpApprovalWorkflowTransition = {
+      fromNodeId,
+      toNodeId,
+      ...(condition ? { condition } : {}),
+    };
+    transitions.push(normalizedTransition);
+    outgoingByNode.set(fromNodeId, [
+      ...(outgoingByNode.get(fromNodeId) ?? []),
+      normalizedTransition,
+    ]);
+  }
+
+  const approvalNodeIds = nodes
+    .filter((item) => item.kind === "approval")
+    .map((item) => item.nodeId);
+  for (const nodeId of approvalNodeIds) {
+    const outgoing = outgoingByNode.get(nodeId) ?? [];
+    if (outgoing.length === 0) {
+      return "invalid";
+    }
+    const defaultCount = outgoing.filter((item) => item.condition?.default === true).length;
+    if (defaultCount !== 1) {
+      return "invalid";
+    }
+  }
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const dfs = (nodeId: string): boolean => {
+    if (visiting.has(nodeId)) {
+      return true;
+    }
+    if (visited.has(nodeId)) {
+      return false;
+    }
+    visiting.add(nodeId);
+    for (const transition of outgoingByNode.get(nodeId) ?? []) {
+      const targetNode = nodes.find((item) => item.nodeId === transition.toNodeId);
+      if (targetNode?.kind === "approval" && dfs(targetNode.nodeId)) {
+        return true;
+      }
+    }
+    visiting.delete(nodeId);
+    visited.add(nodeId);
+    return false;
+  };
+  if (dfs(entryNodeId)) {
+    return "invalid";
+  }
+
+  return {
+    entryNodeId,
+    nodes,
+    transitions,
+  };
+}
+
+function projectMcpApprovalStagesFromWorkflow(
+  workflow: McpApprovalWorkflow,
+): Array<{
+  stage: McpApprovalStage;
+  requiredApprovals: number;
+  roles: string[];
+}> {
+  return workflow.nodes
+    .filter((node): node is McpApprovalWorkflowNode & { kind: "approval"; stage: McpApprovalStage; requiredApprovals: number; roles: string[] } =>
+      node.kind === "approval" &&
+      typeof node.stage === "string" &&
+      typeof node.requiredApprovals === "number" &&
+      Array.isArray(node.roles),
+    )
+    .map((node) => ({
+      stage: node.stage,
+      requiredApprovals: node.requiredApprovals,
+      roles: node.roles,
+    }));
+}
+
 function isHttpUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
@@ -589,6 +1117,17 @@ export function isAlertOrchestrationDispatchMode(
   );
 }
 
+export function isAlertOrchestrationEscalationReason(
+  value: unknown
+): value is AlertOrchestrationEscalationReason {
+  return (
+    typeof value === "string" &&
+    ALERT_ORCHESTRATION_ESCALATION_REASON_SET.has(
+      value as AlertOrchestrationEscalationReason
+    )
+  );
+}
+
 export function isDataResidencyMode(value: unknown): value is DataResidencyMode {
   return (
     typeof value === "string" &&
@@ -628,6 +1167,17 @@ export function isMcpToolDecision(value: unknown): value is McpToolDecision {
   );
 }
 
+export function isMcpApprovalMode(value: unknown): value is McpApprovalMode {
+  return (
+    typeof value === "string" &&
+    MCP_APPROVAL_MODE_SET.has(value as McpApprovalMode)
+  );
+}
+
+export function isMcpApprovalStage(value: unknown): value is McpApprovalStage {
+  return typeof value === "string" && /^stage[1-9]\d*$/.test(value);
+}
+
 export function isMcpInvocationResult(value: unknown): value is McpInvocationResult {
   return (
     typeof value === "string" &&
@@ -637,6 +1187,15 @@ export function isMcpInvocationResult(value: unknown): value is McpInvocationRes
 
 export function isAuditLevel(value: unknown): value is AuditLevel {
   return typeof value === "string" && AUDIT_LEVEL_SET.has(value as AuditLevel);
+}
+
+export function isLegalHoldResourceType(
+  value: unknown
+): value is LegalHoldResourceType {
+  return (
+    typeof value === "string" &&
+    LEGAL_HOLD_RESOURCE_TYPE_SET.has(value as LegalHoldResourceType)
+  );
 }
 
 export function isTokenPulseRoutePolicy(
@@ -775,6 +1334,33 @@ export function isIntegrationAlertCallbackAction(
   return (
     typeof value === "string" &&
     INTEGRATION_ALERT_CALLBACK_ACTION_SET.has(value as IntegrationAlertCallbackAction)
+  );
+}
+
+export function isAlertExternalLinkType(
+  value: unknown
+): value is AlertExternalLinkType {
+  return (
+    typeof value === "string" &&
+    ALERT_EXTERNAL_LINK_TYPE_SET.has(value as AlertExternalLinkType)
+  );
+}
+
+export function isAlertExternalLinkSyncResult(
+  value: unknown
+): value is AlertExternalLinkSyncResult {
+  return (
+    typeof value === "string" &&
+    ALERT_EXTERNAL_LINK_SYNC_RESULT_SET.has(value as AlertExternalLinkSyncResult)
+  );
+}
+
+export function isAlertExternalLinkPublishStatus(
+  value: unknown
+): value is AlertExternalLinkPublishStatus {
+  return (
+    typeof value === "string" &&
+    ALERT_EXTERNAL_LINK_PUBLISH_STATUS_SET.has(value as AlertExternalLinkPublishStatus)
   );
 }
 
@@ -1532,6 +2118,64 @@ export function isAlert(value: unknown): value is Alert {
 
   const sourceIdOk =
     value.sourceId === undefined || value.sourceId === null || isString(value.sourceId);
+  const externalLinksOk =
+    value.externalLinks === undefined ||
+    (Array.isArray(value.externalLinks) &&
+      value.externalLinks.every((item) => {
+        if (!isRecord(item)) {
+          return false;
+        }
+        const externalStatusOk =
+          item.externalStatus === undefined ||
+          item.externalStatus === null ||
+          isString(item.externalStatus);
+        const pendingExternalStatusOk =
+          item.pendingExternalStatus === undefined ||
+          item.pendingExternalStatus === null ||
+          isString(item.pendingExternalStatus);
+        const publishStatusOk =
+          item.publishStatus === undefined ||
+          item.publishStatus === null ||
+          isAlertExternalLinkPublishStatus(item.publishStatus);
+        const publishErrorOk =
+          item.publishError === undefined ||
+          item.publishError === null ||
+          isString(item.publishError);
+        const lastSyncResultOk =
+          item.lastSyncResult === undefined ||
+          item.lastSyncResult === null ||
+          isAlertExternalLinkSyncResult(item.lastSyncResult);
+        const lastSyncErrorOk =
+          item.lastSyncError === undefined ||
+          item.lastSyncError === null ||
+          isString(item.lastSyncError);
+        const lastSyncFailureStageOk =
+          item.lastSyncFailureStage === undefined ||
+          item.lastSyncFailureStage === null ||
+          isString(item.lastSyncFailureStage);
+        const lastSyncFailureCodeOk =
+          item.lastSyncFailureCode === undefined ||
+          item.lastSyncFailureCode === null ||
+          isString(item.lastSyncFailureCode);
+        return (
+          isString(item.id) &&
+          isAlertExternalLinkType(item.externalType) &&
+          isString(item.externalSystem) &&
+          isString(item.externalId) &&
+          externalStatusOk &&
+          pendingExternalStatusOk &&
+          isRecord(item.metadata) &&
+          isISODate(item.lastSyncedAt) &&
+          publishStatusOk &&
+          publishErrorOk &&
+          lastSyncResultOk &&
+          lastSyncErrorOk &&
+          lastSyncFailureStageOk &&
+          lastSyncFailureCodeOk &&
+          isISODate(item.createdAt) &&
+          isISODate(item.updatedAt)
+        );
+      }));
 
   return (
     isString(value.id) &&
@@ -1549,6 +2193,7 @@ export function isAlert(value: unknown): value is Alert {
     isNumber(value.threshold) &&
     isAlertStatus(value.status) &&
     isAlertSeverity(value.severity) &&
+    externalLinksOk &&
     isISODate(value.triggeredAt) &&
     isISODate(value.updatedAt)
   );
@@ -1725,6 +2370,19 @@ export function isAuthProviderItem(value: unknown): value is AuthProviderItem {
     value.authorizationUrl === undefined ||
     value.authorizationUrl === null ||
     isString(value.authorizationUrl);
+  const metadataUrlOk =
+    value.metadataUrl === undefined || value.metadataUrl === null || isString(value.metadataUrl);
+  const ssoUrlOk = value.ssoUrl === undefined || value.ssoUrl === null || isString(value.ssoUrl);
+  const acsUrlOk = value.acsUrl === undefined || value.acsUrl === null || isString(value.acsUrl);
+  const bindingOk =
+    value.binding === undefined ||
+    value.binding === null ||
+    value.binding === "redirect" ||
+    value.binding === "post";
+  const requireMfaOk =
+    value.requireMfa === undefined ||
+    value.requireMfa === null ||
+    typeof value.requireMfa === "boolean";
 
   return (
     isString(value.id) &&
@@ -1732,7 +2390,12 @@ export function isAuthProviderItem(value: unknown): value is AuthProviderItem {
     isString(value.displayName) &&
     typeof value.enabled === "boolean" &&
     issuerOk &&
-    authorizationUrlOk
+    authorizationUrlOk &&
+    metadataUrlOk &&
+    ssoUrlOk &&
+    acsUrlOk &&
+    bindingOk &&
+    requireMfaOk
   );
 }
 
@@ -1956,6 +2619,7 @@ export function validateAuthRegisterInput(input: unknown): ValidationResult<Auth
   const email = normalizeString(input.email);
   const displayName = normalizeString(input.displayName);
   const password = typeof input.password === "string" ? input.password : undefined;
+  const otpCode = normalizeString(input.otpCode);
 
   if (!email || !isEmail(email)) {
     return { success: false, error: "email 必填且必须为合法邮箱地址。" };
@@ -1976,6 +2640,7 @@ export function validateAuthRegisterInput(input: unknown): ValidationResult<Auth
       email,
       password,
       displayName,
+      otpCode,
     },
   };
 }
@@ -1987,6 +2652,7 @@ export function validateAuthLoginInput(input: unknown): ValidationResult<AuthLog
 
   const email = normalizeString(input.email);
   const password = typeof input.password === "string" ? input.password : undefined;
+  const otpCode = normalizeString(input.otpCode);
 
   if (!email || !isEmail(email)) {
     return { success: false, error: "email 必填且必须为合法邮箱地址。" };
@@ -2000,6 +2666,7 @@ export function validateAuthLoginInput(input: unknown): ValidationResult<AuthLog
     data: {
       email,
       password,
+      otpCode,
     },
   };
 }
@@ -2052,6 +2719,12 @@ export function validateAuthExternalExchangeInput(
   const redirectUri = normalizeString(input.redirectUri);
   const codeVerifier = normalizeString(input.codeVerifier);
   const state = normalizeString(input.state);
+  const mfaVerified =
+    input.mfaVerified === undefined
+      ? undefined
+      : typeof input.mfaVerified === "boolean"
+        ? input.mfaVerified
+        : null;
 
   if (!providerId || !/^[a-z0-9][a-z0-9_-]{1,63}$/.test(providerId)) {
     return {
@@ -2071,6 +2744,9 @@ export function validateAuthExternalExchangeInput(
   if (input.state !== undefined && !state) {
     return { success: false, error: "state 必须为非空字符串。" };
   }
+  if (mfaVerified === null) {
+    return { success: false, error: "mfaVerified 必须是布尔值。" };
+  }
 
   return {
     success: true,
@@ -2080,6 +2756,7 @@ export function validateAuthExternalExchangeInput(
       redirectUri,
       codeVerifier,
       state,
+      mfaVerified,
     },
   };
 }
@@ -2096,6 +2773,12 @@ export function validateAuthExternalLoginInput(
   const email = normalizeString(input.email)?.toLowerCase();
   const displayName = normalizeString(input.displayName);
   const tenantId = normalizeString(input.tenantId);
+  const mfaVerified =
+    input.mfaVerified === undefined
+      ? undefined
+      : typeof input.mfaVerified === "boolean"
+        ? input.mfaVerified
+        : null;
   const timestamp = normalizeString(input.timestamp);
   const nonce = normalizeString(input.nonce);
   const signature = normalizeString(input.signature)?.toLowerCase();
@@ -2118,6 +2801,9 @@ export function validateAuthExternalLoginInput(
   if (input.tenantId !== undefined && !tenantId) {
     return { success: false, error: "tenantId 必须为非空字符串。" };
   }
+  if (mfaVerified === null) {
+    return { success: false, error: "mfaVerified 必须是布尔值。" };
+  }
   if (!timestamp || !isISODate(timestamp)) {
     return { success: false, error: "timestamp 必填且必须为 ISO 日期字符串。" };
   }
@@ -2139,6 +2825,7 @@ export function validateAuthExternalLoginInput(
       email,
       displayName,
       tenantId,
+      mfaVerified,
       timestamp,
       nonce,
       signature,
@@ -2554,6 +3241,121 @@ export function validateCreateAgentInput(input: unknown): ValidationResult<Creat
       deviceId,
       hostname,
       version,
+    },
+  };
+}
+
+export function validateAgentLifecycleEventCreateInput(
+  input: unknown
+): ValidationResult<AgentLifecycleEventCreateInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const tenantId = normalizeString(input.tenantId);
+  const agentId = normalizeString(input.agentId);
+  const deviceId = normalizeString(input.deviceId);
+  const hostname = normalizeString(input.hostname);
+  const version = normalizeString(input.version);
+  const action = normalizeString(input.action);
+  const result = normalizeString(input.result);
+  const occurredAt = normalizeString(input.occurredAt ?? input.occurred_at);
+  const metadata = input.metadata;
+
+  if (input.tenantId !== undefined && !tenantId) {
+    return { success: false, error: "tenantId 必须为非空字符串。" };
+  }
+  if (!agentId) {
+    return { success: false, error: "agentId 必填且必须为非空字符串。" };
+  }
+  if (input.deviceId !== undefined && !deviceId) {
+    return { success: false, error: "deviceId 必须为非空字符串。" };
+  }
+  if (input.hostname !== undefined && !hostname) {
+    return { success: false, error: "hostname 必须为非空字符串。" };
+  }
+  if (input.version !== undefined && !version) {
+    return { success: false, error: "version 必须为非空字符串。" };
+  }
+  if (!action || !AGENT_LIFECYCLE_ACTION_SET.has(action as AgentLifecycleAction)) {
+    return {
+      success: false,
+      error: "action 必填且必须是 install/upgrade/uninstall/doctor/status 之一。",
+    };
+  }
+  if (!result || !AGENT_LIFECYCLE_RESULT_SET.has(result as AgentLifecycleResult)) {
+    return {
+      success: false,
+      error: "result 必填且必须是 success/warn/failed 之一。",
+    };
+  }
+  if (occurredAt !== undefined && !isISODate(occurredAt)) {
+    return { success: false, error: "occurredAt 必须是 ISO 日期字符串。" };
+  }
+  if (metadata !== undefined && !isRecord(metadata)) {
+    return { success: false, error: "metadata 必须是对象。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId,
+      agentId,
+      deviceId,
+      hostname,
+      version,
+      action: action as AgentLifecycleAction,
+      result: result as AgentLifecycleResult,
+      occurredAt,
+      metadata: metadata ? { ...metadata } : undefined,
+    },
+  };
+}
+
+export function validateAgentLifecycleEventListInput(
+  input: unknown
+): ValidationResult<AgentLifecycleEventListInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "查询参数必须是对象。" };
+  }
+
+  const agentId = normalizeString(input.agentId);
+  const action = normalizeString(input.action);
+  const result = normalizeString(input.result);
+  const limit = toOptionalInteger(input.limit);
+
+  if (input.agentId !== undefined && !agentId) {
+    return { success: false, error: "agentId 必须为非空字符串。" };
+  }
+  if (
+    input.action !== undefined &&
+    (!action || !AGENT_LIFECYCLE_ACTION_SET.has(action as AgentLifecycleAction))
+  ) {
+    return {
+      success: false,
+      error: "action 必须是 install/upgrade/uninstall/doctor/status 之一。",
+    };
+  }
+  if (
+    input.result !== undefined &&
+    (!result || !AGENT_LIFECYCLE_RESULT_SET.has(result as AgentLifecycleResult))
+  ) {
+    return {
+      success: false,
+      error: "result 必须是 success/warn/failed 之一。",
+    };
+  }
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 200)) {
+    return { success: false, error: "limit 必须是 1 到 200 的整数。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      agentId,
+      action: action as AgentLifecycleAction | undefined,
+      result: result as AgentLifecycleResult | undefined,
+      limit,
     },
   };
 }
@@ -3357,6 +4159,162 @@ export function validateReplayBaselineCreateInput(
   };
 }
 
+export function validateReplayDatasetVersionCreateInput(
+  input: unknown
+): ValidationResult<ReplayDatasetVersionCreateInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const tenantId = normalizeString(input.tenantId);
+  const replayDatasetId =
+    normalizeString(input.replayDatasetId) ??
+    normalizeString(input.datasetResourceId) ??
+    normalizeString(input.baselineId);
+  const versionDatasetId =
+    normalizeString(input.versionDatasetId) ??
+    normalizeString(input.datasetId) ??
+    normalizeString(input.datasetRef);
+  const model = normalizeString(input.model);
+  const promptVersion = normalizeString(input.promptVersion);
+  const sampleCount = toOptionalInteger(input.sampleCount ?? input.scenarioCount);
+  const metadata = isRecord(input.metadata) ? input.metadata : undefined;
+  const note = normalizeString(input.note);
+
+  if (!tenantId) {
+    return { success: false, error: "tenantId 必填且必须为非空字符串。" };
+  }
+  if (!replayDatasetId) {
+    return { success: false, error: "replayDatasetId 必填且必须为非空字符串。" };
+  }
+  if (
+    (input.versionDatasetId !== undefined ||
+      input.datasetId !== undefined ||
+      input.datasetRef !== undefined) &&
+    !versionDatasetId
+  ) {
+    return {
+      success: false,
+      error: "versionDatasetId/datasetId/datasetRef 必须为非空字符串。",
+    };
+  }
+  if (input.model !== undefined && !model) {
+    return { success: false, error: "model 必须为非空字符串。" };
+  }
+  if (input.promptVersion !== undefined && !promptVersion) {
+    return { success: false, error: "promptVersion 必须为非空字符串。" };
+  }
+  if (
+    (input.sampleCount !== undefined || input.scenarioCount !== undefined) &&
+    (sampleCount === undefined || !Number.isInteger(sampleCount) || sampleCount < 0)
+  ) {
+    return { success: false, error: "sampleCount 必须是大于等于 0 的整数。" };
+  }
+  if (input.metadata !== undefined && !isRecord(input.metadata)) {
+    return { success: false, error: "metadata 必须是对象。" };
+  }
+  if (input.note !== undefined && !note) {
+    return { success: false, error: "note 必须为非空字符串。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId,
+      replayDatasetId,
+      versionDatasetId,
+      model,
+      promptVersion,
+      sampleCount,
+      metadata,
+      note,
+    },
+  };
+}
+
+export function validateReplayBaselineVersionCreateInput(
+  input: unknown
+): ValidationResult<ReplayBaselineVersionCreateInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const validation = validateReplayDatasetVersionCreateInput(input);
+  if (!validation.success) {
+    return validation;
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId: validation.data.tenantId,
+      baselineId: validation.data.replayDatasetId,
+      datasetId: validation.data.versionDatasetId,
+      model: validation.data.model,
+      promptVersion: validation.data.promptVersion,
+      sampleCount: validation.data.sampleCount,
+      metadata: validation.data.metadata,
+      note: validation.data.note,
+    },
+  };
+}
+
+export function validateReplayDatasetVersionPromoteInput(
+  input: unknown
+): ValidationResult<ReplayDatasetVersionPromoteInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const tenantId = normalizeString(input.tenantId);
+  const replayDatasetId =
+    normalizeString(input.replayDatasetId) ??
+    normalizeString(input.datasetResourceId) ??
+    normalizeString(input.baselineId);
+  const versionId = normalizeString(input.versionId) ?? normalizeString(input.version_id);
+
+  if (!tenantId) {
+    return { success: false, error: "tenantId 必填且必须为非空字符串。" };
+  }
+  if (!replayDatasetId) {
+    return { success: false, error: "replayDatasetId 必填且必须为非空字符串。" };
+  }
+  if (!versionId) {
+    return { success: false, error: "versionId 必填且必须为非空字符串。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId,
+      replayDatasetId,
+      versionId,
+    },
+  };
+}
+
+export function validateReplayBaselineVersionPromoteInput(
+  input: unknown
+): ValidationResult<ReplayBaselineVersionPromoteInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const validation = validateReplayDatasetVersionPromoteInput(input);
+  if (!validation.success) {
+    return validation;
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId: validation.data.tenantId,
+      baselineId: validation.data.replayDatasetId,
+      versionId: validation.data.versionId,
+    },
+  };
+}
+
 export function validateReplayRunCreateInput(
   input: unknown
 ): ValidationResult<ReplayRunCreateInput> {
@@ -3366,6 +4324,8 @@ export function validateReplayRunCreateInput(
 
   const tenantId = normalizeString(input.tenantId);
   const datasetId = normalizeString(input.datasetId) ?? normalizeString(input.baselineId);
+  const baselineVersionId =
+    normalizeString(input.baselineVersionId) ?? normalizeString(input.baseline_version_id);
   const candidateLabel = normalizeString(input.candidateLabel);
   const from = normalizeString(input.from);
   const to = normalizeString(input.to);
@@ -3411,11 +4371,96 @@ export function validateReplayRunCreateInput(
       tenantId,
       datasetId,
       baselineId: datasetId,
+      baselineVersionId,
       candidateLabel,
       from,
       to,
       sampleLimit,
       metadata,
+    },
+  };
+}
+
+export function validateReplayExperimentCreateInput(
+  input: unknown
+): ValidationResult<ReplayExperimentCreateInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const tenantId = normalizeString(input.tenantId);
+  const name = normalizeString(input.name);
+  const datasetId = normalizeString(input.datasetId);
+  const baselineId = normalizeString(input.baselineId);
+  const baselineVersionId =
+    normalizeString(input.baselineVersionId) ?? normalizeString(input.baseline_version_id);
+  const triggerSource = normalizeString(input.triggerSource);
+  const autoRun = toOptionalBoolean(input.autoRun);
+  const candidateLabels = normalizeStringArray(input.candidateLabels);
+  const sourceAdviceId = normalizeString(input.sourceAdviceId);
+  const runIds = normalizeStringArray(input.runIds);
+
+  if (!tenantId) {
+    return { success: false, error: "tenantId 必填且必须为非空字符串。" };
+  }
+  if (!name) {
+    return { success: false, error: "name 必填且必须为非空字符串。" };
+  }
+  if (!datasetId) {
+    return { success: false, error: "datasetId 必填且必须为非空字符串。" };
+  }
+  if (input.baselineId !== undefined && !baselineId) {
+    return { success: false, error: "baselineId 必须为非空字符串。" };
+  }
+  if (
+    (input.baselineVersionId !== undefined || input.baseline_version_id !== undefined) &&
+    !baselineVersionId
+  ) {
+    return { success: false, error: "baselineVersionId 必须为非空字符串。" };
+  }
+  if (
+    triggerSource !== undefined &&
+    triggerSource !== "manual" &&
+    triggerSource !== "quality_advice" &&
+    triggerSource !== "automatic"
+  ) {
+    return {
+      success: false,
+      error: "triggerSource 仅支持 manual、quality_advice 或 automatic。",
+    };
+  }
+  if (autoRun === "invalid") {
+    return { success: false, error: "autoRun 必须为布尔值。" };
+  }
+  if (candidateLabels === "invalid") {
+    return { success: false, error: "candidateLabels 必须是字符串数组。" };
+  }
+  if (input.sourceAdviceId !== undefined && !sourceAdviceId) {
+    return { success: false, error: "sourceAdviceId 必须为非空字符串。" };
+  }
+  if (runIds === "invalid") {
+    return { success: false, error: "runIds 必须是字符串数组。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      tenantId,
+      name,
+      datasetId,
+      baselineId,
+      baselineVersionId,
+      triggerSource:
+        triggerSource === "quality_advice" || triggerSource === "automatic"
+          ? triggerSource
+          : "manual",
+      autoRun: autoRun === true,
+      candidateLabels:
+        candidateLabels && candidateLabels.length > 0
+          ? Array.from(new Set(candidateLabels))
+          : undefined,
+      sourceAdviceId,
+      runIds: runIds && runIds.length > 0 ? Array.from(new Set(runIds)) : undefined,
     },
   };
 }
@@ -3971,6 +5016,14 @@ function toNumber(value: unknown): number {
   return Number.NaN;
 }
 
+function toOptionalNumber(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const parsed = toNumber(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 export function validatePricingCatalogUpsertInput(
   input: unknown
 ): ValidationResult<{ note?: string; entries: PricingCatalogEntry[] }> {
@@ -4206,6 +5259,413 @@ export function validateAlertStatusUpdateInput(
   };
 }
 
+export function validateAlertExternalLinkRetryInput(
+  input: unknown
+): ValidationResult<AlertExternalLinkRetryInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const externalType = normalizeString(input.externalType);
+  const externalId = normalizeString(input.externalId);
+
+  if (!externalType || !isAlertExternalLinkType(externalType)) {
+    return {
+      success: false,
+      error: "externalType 必填且必须是 ticket/case/incident 之一。",
+    };
+  }
+  if (!externalId) {
+    return {
+      success: false,
+      error: "externalId 必填且必须为非空字符串。",
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      externalType,
+      externalId,
+    },
+  };
+}
+
+export function validateAlertExternalLinkBatchRetryInput(
+  input: unknown
+): ValidationResult<AlertExternalLinkBatchRetryInput> {
+  if (input === undefined || input === null) {
+    return { success: true, data: {} };
+  }
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const externalType = normalizeString(input.externalType);
+  if (input.externalType !== undefined) {
+    if (!externalType || !isAlertExternalLinkType(externalType)) {
+      return {
+        success: false,
+        error: "externalType 必须是 ticket/case/incident 之一。",
+      };
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      externalType: externalType as AlertExternalLinkType | undefined,
+    },
+  };
+}
+
+export function validateAlertExternalLinkFailureQueryInput(
+  input: unknown
+): ValidationResult<AlertExternalLinkFailureQueryInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "查询参数必须是对象。" };
+  }
+
+  const alertId = normalizeString(input.alertId);
+  const externalType = normalizeString(input.externalType);
+  const externalSystem = normalizeString(input.externalSystem);
+  const syncState = normalizeString(input.syncState);
+  const limit = toOptionalInteger(input.limit);
+
+  if (input.alertId !== undefined && !alertId) {
+    return { success: false, error: "alertId 必须为非空字符串。" };
+  }
+  if (
+    input.externalType !== undefined &&
+    (!externalType || !isAlertExternalLinkType(externalType))
+  ) {
+    return {
+      success: false,
+      error: "externalType 必须是 ticket/case/incident 之一。",
+    };
+  }
+  if (input.externalSystem !== undefined && !externalSystem) {
+    return { success: false, error: "externalSystem 必须为非空字符串。" };
+  }
+  if (
+    input.syncState !== undefined &&
+    syncState !== "synced" &&
+    syncState !== "pending" &&
+    syncState !== "failed"
+  ) {
+    return {
+      success: false,
+      error: "syncState 必须是 synced/pending/failed 之一。",
+    };
+  }
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 200)) {
+    return { success: false, error: "limit 必须是 1 到 200 的整数。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      alertId,
+      externalType: externalType as AlertExternalLinkType | undefined,
+      externalSystem,
+      syncState: syncState as "synced" | "pending" | "failed" | undefined,
+      limit,
+    },
+  };
+}
+
+export function validateIntegrationDlqMessageQueryInput(
+  input: unknown
+): ValidationResult<IntegrationDlqMessageQueryInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "查询参数必须是对象。" };
+  }
+
+  const eventType = normalizeString(input.eventType);
+  const channel = normalizeString(input.channel);
+  const callbackId = normalizeString(input.callbackId);
+  const alertId = normalizeString(input.alertId);
+  const limit = toOptionalInteger(input.limit);
+
+  if (input.eventType !== undefined && !eventType) {
+    return { success: false, error: "eventType 必须为非空字符串。" };
+  }
+  if (input.channel !== undefined && !channel) {
+    return { success: false, error: "channel 必须为非空字符串。" };
+  }
+  if (input.callbackId !== undefined && !callbackId) {
+    return { success: false, error: "callbackId 必须为非空字符串。" };
+  }
+  if (input.alertId !== undefined && !alertId) {
+    return { success: false, error: "alertId 必须为非空字符串。" };
+  }
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 200)) {
+    return { success: false, error: "limit 必须是 1 到 200 的整数。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      eventType,
+      channel,
+      callbackId,
+      alertId,
+      limit,
+    },
+  };
+}
+
+export function validateIntegrationDlqReplayInput(
+  input: unknown
+): ValidationResult<IntegrationDlqReplayInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  if (!Array.isArray(input.messageIds)) {
+    return { success: false, error: "messageIds 必须是数组。" };
+  }
+
+  const messageIds = input.messageIds
+    .map((item) => normalizeString(item))
+    .filter((item): item is string => Boolean(item));
+
+  if (messageIds.length === 0) {
+    return { success: false, error: "messageIds 至少需要 1 条。" };
+  }
+  if (messageIds.length > 20) {
+    return { success: false, error: "messageIds 最多支持 20 条。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      messageIds,
+    },
+  };
+}
+
+export function validateIntegrationDlqRecoveryJobCreateInput(
+  input: unknown
+): ValidationResult<IntegrationDlqRecoveryJobCreateInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const messageIds = Array.isArray(input.messageIds)
+    ? input.messageIds
+        .map((item) => normalizeString(item))
+        .filter((item): item is string => Boolean(item))
+    : undefined;
+  const filters = isRecord(input.filters) ? input.filters : undefined;
+
+  if (input.messageIds !== undefined && !Array.isArray(input.messageIds)) {
+    return { success: false, error: "messageIds 必须是数组。" };
+  }
+  if (input.filters !== undefined && !isRecord(input.filters)) {
+    return { success: false, error: "filters 必须是对象。" };
+  }
+
+  const eventType = normalizeString(filters?.eventType);
+  const channel = normalizeString(filters?.channel);
+  const callbackId = normalizeString(filters?.callbackId);
+  const alertId = normalizeString(filters?.alertId);
+  const limit = toOptionalInteger(filters?.limit);
+
+  if (filters?.eventType !== undefined && !eventType) {
+    return { success: false, error: "filters.eventType 必须为非空字符串。" };
+  }
+  if (filters?.channel !== undefined && !channel) {
+    return { success: false, error: "filters.channel 必须为非空字符串。" };
+  }
+  if (filters?.callbackId !== undefined && !callbackId) {
+    return { success: false, error: "filters.callbackId 必须为非空字符串。" };
+  }
+  if (filters?.alertId !== undefined && !alertId) {
+    return { success: false, error: "filters.alertId 必须为非空字符串。" };
+  }
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 200)) {
+    return { success: false, error: "filters.limit 必须是 1 到 200 的整数。" };
+  }
+  if (messageIds && messageIds.length > 20) {
+    return { success: false, error: "messageIds 最多支持 20 条。" };
+  }
+
+  const hasMessageIds = Array.isArray(messageIds) && messageIds.length > 0;
+  const hasFilters = Boolean(
+    eventType || channel || callbackId || alertId || limit !== undefined,
+  );
+  if (hasMessageIds && hasFilters) {
+    return { success: false, error: "messageIds 与 filters 只能二选一。" };
+  }
+  if (!hasMessageIds && !hasFilters) {
+    return { success: false, error: "messageIds 与 filters 至少提供一种。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      messageIds: hasMessageIds ? messageIds : undefined,
+      filters: hasFilters
+        ? {
+            eventType,
+            channel,
+            callbackId,
+            alertId,
+            limit,
+          }
+        : undefined,
+    },
+  };
+}
+
+export function validateIntegrationDlqRecoveryJobListInput(
+  input: unknown
+): ValidationResult<{ status?: IntegrationDlqRecoveryJobStatus; limit?: number }> {
+  if (!isRecord(input)) {
+    return { success: false, error: "查询参数必须是对象。" };
+  }
+
+  const status = normalizeString(input.status);
+  const limit = toOptionalInteger(input.limit);
+
+  if (
+    input.status !== undefined &&
+    (!status || !INTEGRATION_DLQ_RECOVERY_JOB_STATUS_SET.has(status as IntegrationDlqRecoveryJobStatus))
+  ) {
+    return { success: false, error: "status 必须是 queued/running/completed/failed 之一。" };
+  }
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 200)) {
+    return { success: false, error: "limit 必须是 1 到 200 的整数。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      status: status as IntegrationDlqRecoveryJobStatus | undefined,
+      limit,
+    },
+  };
+}
+
+export function validateIntegrationAlertFailureReportQueryInput(
+  input: unknown
+): ValidationResult<IntegrationAlertFailureReportQueryInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "查询参数必须是对象。" };
+  }
+
+  const from = normalizeString(input.from);
+  const to = normalizeString(input.to);
+  const externalSystem = normalizeString(input.externalSystem);
+  const stage = normalizeString(input.stage);
+  const actionType = normalizeString(input.actionType);
+  const limit = toOptionalInteger(input.limit);
+
+  if (input.from !== undefined && (!from || !isISODate(from))) {
+    return { success: false, error: "from 必须是 ISO 日期字符串。" };
+  }
+  if (input.to !== undefined && (!to || !isISODate(to))) {
+    return { success: false, error: "to 必须是 ISO 日期字符串。" };
+  }
+  if (from && to && Date.parse(from) > Date.parse(to)) {
+    return { success: false, error: "from 必须早于或等于 to。" };
+  }
+  if (input.externalSystem !== undefined && !externalSystem) {
+    return { success: false, error: "externalSystem 必须为非空字符串。" };
+  }
+  if (input.stage !== undefined && !stage) {
+    return { success: false, error: "stage 必须为非空字符串。" };
+  }
+  if (
+    input.actionType !== undefined &&
+    (!actionType ||
+      !INTEGRATION_ALERT_FAILURE_REPORT_ACTION_TYPE_SET.has(
+        actionType as IntegrationAlertFailureReportActionType,
+      ))
+  ) {
+    return {
+      success: false,
+      error:
+        "actionType 必须是 retry_requested/retry_completed/retry_failed/dlq_queried/dlq_replayed/recovery_job_created/recovery_job_completed/recovery_job_failed 之一。",
+    };
+  }
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 500)) {
+    return { success: false, error: "limit 必须是 1 到 500 的整数。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      from,
+      to,
+      externalSystem,
+      stage,
+      actionType: actionType as IntegrationAlertFailureReportActionType | undefined,
+      limit,
+    },
+  };
+}
+
+export function validateIntegrationAlertFailureTrendQueryInput(
+  input: unknown
+): ValidationResult<IntegrationAlertFailureTrendQueryInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "查询参数必须是对象。" };
+  }
+
+  const from = normalizeString(input.from);
+  const to = normalizeString(input.to);
+  const externalSystem = normalizeString(input.externalSystem);
+  const stage = normalizeString(input.stage);
+  const actionType = normalizeString(input.actionType);
+  const top = toOptionalInteger(input.top);
+
+  if (input.from !== undefined && (!from || !isISODate(from))) {
+    return { success: false, error: "from 必须是 ISO 日期字符串。" };
+  }
+  if (input.to !== undefined && (!to || !isISODate(to))) {
+    return { success: false, error: "to 必须是 ISO 日期字符串。" };
+  }
+  if (from && to && Date.parse(from) > Date.parse(to)) {
+    return { success: false, error: "from 必须早于或等于 to。" };
+  }
+  if (input.externalSystem !== undefined && !externalSystem) {
+    return { success: false, error: "externalSystem 必须为非空字符串。" };
+  }
+  if (input.stage !== undefined && !stage) {
+    return { success: false, error: "stage 必须为非空字符串。" };
+  }
+  if (
+    input.actionType !== undefined &&
+    (!actionType ||
+      !INTEGRATION_ALERT_FAILURE_REPORT_ACTION_TYPE_SET.has(
+        actionType as IntegrationAlertFailureReportActionType,
+      ))
+  ) {
+    return {
+      success: false,
+      error:
+        "actionType 必须是 retry_requested/retry_completed/retry_failed/dlq_queried/dlq_replayed/recovery_job_created/recovery_job_completed/recovery_job_failed 之一。",
+    };
+  }
+  if (top !== undefined && (!Number.isInteger(top) || top < 1 || top > 20)) {
+    return { success: false, error: "top 必须是 1 到 20 的整数。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      from,
+      to,
+      externalSystem,
+      stage,
+      actionType: actionType as IntegrationAlertFailureReportActionType | undefined,
+      top,
+    },
+  };
+}
+
 export function validateAlertOrchestrationRuleListInput(
   input: unknown
 ): ValidationResult<AlertOrchestrationRuleListInput> {
@@ -4262,6 +5722,8 @@ export function validateAlertOrchestrationExecutionListInput(
   const dispatchMode = normalizeString(input.dispatchMode);
   const hasConflict = toOptionalBoolean(input.hasConflict);
   const simulated = toOptionalBoolean(input.simulated);
+  const escalated = toOptionalBoolean(input.escalated);
+  const escalationReason = normalizeString(input.escalationReason);
   const from = normalizeString(input.from);
   const to = normalizeString(input.to);
   const limit = toOptionalInteger(input.limit);
@@ -4302,6 +5764,15 @@ export function validateAlertOrchestrationExecutionListInput(
   if (simulated === "invalid") {
     return { success: false, error: "simulated 必须是 true/false 或 1/0。" };
   }
+  if (escalated === "invalid") {
+    return { success: false, error: "escalated 必须是 true/false 或 1/0。" };
+  }
+  if (
+    input.escalationReason !== undefined &&
+    (!escalationReason || !isAlertOrchestrationEscalationReason(escalationReason))
+  ) {
+    return { success: false, error: "escalationReason 必须是 sla_timeout。" };
+  }
   if (from !== undefined && !isISODate(from)) {
     return { success: false, error: "from 必须为 ISO 日期字符串。" };
   }
@@ -4336,6 +5807,9 @@ export function validateAlertOrchestrationExecutionListInput(
       dispatchMode: dispatchMode as AlertOrchestrationDispatchMode | undefined,
       hasConflict: typeof hasConflict === "boolean" ? hasConflict : undefined,
       simulated: typeof simulated === "boolean" ? simulated : undefined,
+      escalated: typeof escalated === "boolean" ? escalated : undefined,
+      escalationReason:
+        escalationReason as AlertOrchestrationEscalationReason | undefined,
       from,
       to,
       limit,
@@ -4386,7 +5860,7 @@ export function validateAlertOrchestrationSimulateInput(
   ) {
     return {
       success: false,
-      error: "channels 仅支持 webhook/wecom/dingtalk/feishu/email/email_webhook/ticket。",
+      error: "channels 仅支持 webhook/wecom/dingtalk/feishu/email/email_webhook/incident/ticket。",
     };
   }
   if (normalizedChannels && new Set(normalizedChannels).size !== normalizedChannels.length) {
@@ -4503,7 +5977,7 @@ export function validateAlertOrchestrationRuleUpsertInput(
   if (!normalizedChannels.every((channel) => isAlertOrchestrationChannel(channel))) {
     return {
       success: false,
-      error: "channels 仅支持 webhook/wecom/dingtalk/feishu/email/email_webhook/ticket。",
+      error: "channels 仅支持 webhook/wecom/dingtalk/feishu/email/email_webhook/incident/ticket。",
     };
   }
   const channelSet = new Set(normalizedChannels);
@@ -4631,6 +6105,123 @@ export function validateReplicationJobCreateInput(
       targetRegion,
       reason,
       metadata,
+    },
+  };
+}
+
+export function validateResidencyKmsKeyMappingUpsertInput(
+  input: unknown
+): ValidationResult<ResidencyKmsKeyMappingUpsertInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+  if (!Array.isArray(input.items)) {
+    return { success: false, error: "items 必填且必须是数组。" };
+  }
+  const updatedAt = normalizeString(input.updatedAt);
+  if (input.updatedAt !== undefined && (!updatedAt || !isISODate(updatedAt))) {
+    return { success: false, error: "updatedAt 必须为 ISO 日期字符串。" };
+  }
+
+  const items: ResidencyKmsKeyMappingUpsertInput["items"] = [];
+  const seenRegionIds = new Set<string>();
+  for (let index = 0; index < input.items.length; index += 1) {
+    const item = input.items[index];
+    if (!isRecord(item)) {
+      return { success: false, error: `items[${index}] 必须是对象。` };
+    }
+    const regionId = normalizeString(item.regionId);
+    const keyProvider = normalizeString(item.keyProvider);
+    const keyRef = normalizeString(item.keyRef);
+    if (!regionId) {
+      return { success: false, error: `items[${index}].regionId 必填且必须为非空字符串。` };
+    }
+    if (seenRegionIds.has(regionId)) {
+      return { success: false, error: `items[${index}].regionId 重复。` };
+    }
+    seenRegionIds.add(regionId);
+    if (!keyProvider) {
+      return { success: false, error: `items[${index}].keyProvider 必填且必须为非空字符串。` };
+    }
+    if (!keyRef) {
+      return { success: false, error: `items[${index}].keyRef 必填且必须为非空字符串。` };
+    }
+    if (typeof item.enabled !== "boolean") {
+      return { success: false, error: `items[${index}].enabled 必填且必须为布尔值。` };
+    }
+    items.push({
+      regionId,
+      keyProvider,
+      keyRef,
+      enabled: item.enabled,
+    });
+  }
+
+  return {
+    success: true,
+    data: {
+      items,
+      updatedAt,
+    },
+  };
+}
+
+export function validateResidencyArchiveRegionPolicyUpsertInput(
+  input: unknown
+): ValidationResult<ResidencyArchiveRegionPolicyUpsertInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+  if (!Array.isArray(input.items)) {
+    return { success: false, error: "items 必填且必须是数组。" };
+  }
+  const updatedAt = normalizeString(input.updatedAt);
+  if (input.updatedAt !== undefined && (!updatedAt || !isISODate(updatedAt))) {
+    return { success: false, error: "updatedAt 必须为 ISO 日期字符串。" };
+  }
+
+  const items: ResidencyArchiveRegionPolicyUpsertInput["items"] = [];
+  const seenSourceRegions = new Set<string>();
+  for (let index = 0; index < input.items.length; index += 1) {
+    const item = input.items[index];
+    if (!isRecord(item)) {
+      return { success: false, error: `items[${index}] 必须是对象。` };
+    }
+    const sourceRegion = normalizeString(item.sourceRegion);
+    const archiveRegion = normalizeString(item.archiveRegion);
+    const archiveClass = normalizeString(item.archiveClass);
+    if (!sourceRegion) {
+      return { success: false, error: `items[${index}].sourceRegion 必填且必须为非空字符串。` };
+    }
+    if (seenSourceRegions.has(sourceRegion)) {
+      return { success: false, error: `items[${index}].sourceRegion 重复。` };
+    }
+    seenSourceRegions.add(sourceRegion);
+    if (!archiveRegion) {
+      return { success: false, error: `items[${index}].archiveRegion 必填且必须为非空字符串。` };
+    }
+    if (sourceRegion === archiveRegion) {
+      return { success: false, error: `items[${index}] 的 sourceRegion 与 archiveRegion 不能相同。` };
+    }
+    if (!archiveClass) {
+      return { success: false, error: `items[${index}].archiveClass 必填且必须为非空字符串。` };
+    }
+    if (typeof item.enabled !== "boolean") {
+      return { success: false, error: `items[${index}].enabled 必填且必须为布尔值。` };
+    }
+    items.push({
+      sourceRegion,
+      archiveRegion,
+      archiveClass,
+      enabled: item.enabled,
+    });
+  }
+
+  return {
+    success: true,
+    data: {
+      items,
+      updatedAt,
     },
   };
 }
@@ -4934,6 +6525,15 @@ export function validateMcpToolPolicyUpsertInput(
   const toolId = normalizeString(input.toolId);
   const riskLevel = normalizeString(input.riskLevel);
   const decision = normalizeString(input.decision);
+  const approvalMode = normalizeString(input.approvalMode);
+  const approvalWorkflow = normalizeMcpApprovalWorkflow(input.approvalWorkflow);
+  const approvalStages = normalizeMcpApprovalStageConfigs(input.approvalStages);
+  const stage1RequiredApprovals = toOptionalInteger(input.stage1RequiredApprovals);
+  const stage2RequiredApprovals = toOptionalInteger(input.stage2RequiredApprovals);
+  const stage1Roles = normalizeStringArray(input.stage1Roles);
+  const stage2Roles = normalizeStringArray(input.stage2Roles);
+  const approvalCondition = input.approvalCondition;
+  const metadata = isRecord(input.metadata) ? input.metadata : undefined;
   const reason = normalizeString(input.reason);
   if (!toolId) {
     return { success: false, error: "toolId 必填且必须为非空字符串。" };
@@ -4950,12 +6550,176 @@ export function validateMcpToolPolicyUpsertInput(
   if (input.reason !== undefined && !reason) {
     return { success: false, error: "reason 必须为非空字符串。" };
   }
+  if (input.metadata !== undefined && !isRecord(input.metadata)) {
+    return { success: false, error: "metadata 必须是对象。" };
+  }
+  if (
+    input.approvalMode !== undefined &&
+    (!approvalMode || !isMcpApprovalMode(approvalMode))
+  ) {
+    return {
+      success: false,
+      error: "approvalMode 必须是 single_stage/two_stage/multi_stage 之一。",
+    };
+  }
+  if (approvalStages === "invalid") {
+    return {
+      success: false,
+      error: "approvalStages 必须是非空数组，且每项都需包含合法的 requiredApprovals 和 roles。",
+    };
+  }
+  if (approvalWorkflow === "invalid") {
+    return {
+      success: false,
+      error:
+        "approvalWorkflow 非法：必须包含合法 entryNodeId、nodes、transitions，审批节点需带 requiredApprovals/roles，且审批节点必须存在且无循环。",
+    };
+  }
+  if (
+    input.stage1RequiredApprovals !== undefined &&
+    (stage1RequiredApprovals === undefined ||
+      !Number.isInteger(stage1RequiredApprovals) ||
+      stage1RequiredApprovals < 1)
+  ) {
+    return { success: false, error: "stage1RequiredApprovals 必须是大于等于 1 的整数。" };
+  }
+  if (
+    input.stage2RequiredApprovals !== undefined &&
+    (stage2RequiredApprovals === undefined ||
+      !Number.isInteger(stage2RequiredApprovals) ||
+      stage2RequiredApprovals < 1)
+  ) {
+    return { success: false, error: "stage2RequiredApprovals 必须是大于等于 1 的整数。" };
+  }
+  if (stage1Roles === "invalid") {
+    return { success: false, error: "stage1Roles 必须是非空字符串数组。" };
+  }
+  if (stage2Roles === "invalid") {
+    return { success: false, error: "stage2Roles 必须是非空字符串数组。" };
+  }
+  let normalizedApprovalCondition:
+    | McpToolPolicyUpsertInput["approvalCondition"]
+    | undefined;
+  if (approvalCondition !== undefined) {
+    if (!isRecord(approvalCondition)) {
+      return { success: false, error: "approvalCondition 必须是对象。" };
+    }
+    const riskLevelAtLeast = normalizeString(approvalCondition.riskLevelAtLeast);
+    const toolIds = normalizeStringArray(approvalCondition.toolIds);
+    const tenantRoles = normalizeStringArray(approvalCondition.tenantRoles);
+    if (
+      approvalCondition.riskLevelAtLeast !== undefined &&
+      (!riskLevelAtLeast || !isMcpRiskLevel(riskLevelAtLeast))
+    ) {
+      return {
+        success: false,
+        error: "approvalCondition.riskLevelAtLeast 必须是 low/medium/high 之一。",
+      };
+    }
+    if (toolIds === "invalid") {
+      return { success: false, error: "approvalCondition.toolIds 必须是非空字符串数组。" };
+    }
+    if (tenantRoles === "invalid") {
+      return { success: false, error: "approvalCondition.tenantRoles 必须是非空字符串数组。" };
+    }
+    normalizedApprovalCondition = {
+      riskLevelAtLeast: riskLevelAtLeast as McpRiskLevel | undefined,
+      toolIds,
+      tenantRoles,
+    };
+  }
+  const workflowStages =
+    approvalWorkflow === undefined
+      ? undefined
+      : projectMcpApprovalStagesFromWorkflow(approvalWorkflow);
+  const legacyStageCount =
+    stage2RequiredApprovals !== undefined ||
+    (Array.isArray(stage2Roles) && stage2Roles.length > 0)
+      ? 2
+      : stage1RequiredApprovals !== undefined ||
+          (Array.isArray(stage1Roles) && stage1Roles.length > 0) ||
+          approvalMode === "single_stage" ||
+          approvalMode === "two_stage"
+        ? 1
+        : undefined;
+  if (
+    approvalMode === "two_stage" &&
+    workflowStages === undefined &&
+    approvalStages === undefined
+  ) {
+    if (stage1RequiredApprovals === undefined || stage2RequiredApprovals === undefined) {
+      return {
+        success: false,
+        error: "approvalMode=two_stage 时 stage1RequiredApprovals 和 stage2RequiredApprovals 必填。",
+      };
+    }
+  }
+  if (
+    approvalMode === "multi_stage" &&
+    approvalStages === undefined &&
+    approvalWorkflow === undefined
+  ) {
+    return {
+      success: false,
+      error: "approvalMode=multi_stage 时 approvalStages 或 approvalWorkflow 必填。",
+    };
+  }
+  const inferredApprovalMode =
+    workflowStages !== undefined
+      ? workflowStages.length === 1
+        ? "single_stage"
+        : workflowStages.length === 2
+          ? "two_stage"
+          : "multi_stage"
+      : approvalStages !== undefined
+        ? approvalStages.length === 1
+          ? "single_stage"
+          : approvalStages.length === 2
+            ? "two_stage"
+            : "multi_stage"
+        : legacyStageCount === 2
+          ? "two_stage"
+          : legacyStageCount === 1
+            ? "single_stage"
+            : undefined;
+  if (
+    (
+      approvalStages !== undefined ||
+      workflowStages !== undefined ||
+      legacyStageCount !== undefined
+    ) &&
+    approvalMode !== undefined &&
+    inferredApprovalMode !== approvalMode
+  ) {
+    return {
+      success: false,
+      error: "approvalMode 与 approvalStages 阶段数量不一致。",
+    };
+  }
   return {
     success: true,
     data: {
       toolId,
       riskLevel: riskLevel as McpRiskLevel,
       decision: decision as McpToolDecision,
+      approvalMode:
+        (inferredApprovalMode ?? approvalMode) as McpApprovalMode | undefined,
+      approvalWorkflow: approvalWorkflow ?? undefined,
+      approvalStages: workflowStages ?? approvalStages ?? undefined,
+      stage1RequiredApprovals:
+        workflowStages?.[0]?.requiredApprovals ??
+        approvalStages?.[0]?.requiredApprovals ??
+        stage1RequiredApprovals ??
+        undefined,
+      stage2RequiredApprovals:
+        workflowStages?.[1]?.requiredApprovals ??
+        approvalStages?.[1]?.requiredApprovals ??
+        stage2RequiredApprovals ??
+        undefined,
+      stage1Roles: workflowStages?.[0]?.roles ?? approvalStages?.[0]?.roles ?? stage1Roles ?? undefined,
+      stage2Roles: workflowStages?.[1]?.roles ?? approvalStages?.[1]?.roles ?? stage2Roles ?? undefined,
+      approvalCondition: normalizedApprovalCondition,
+      metadata,
       reason,
     },
   };
@@ -5030,13 +6794,18 @@ export function validateMcpApprovalReviewInput(
     return { success: false, error: "请求体必须是对象。" };
   }
   const reason = normalizeString(input.reason);
+  const nodeId = normalizeString(input.nodeId);
   if (input.reason !== undefined && !reason) {
     return { success: false, error: "reason 必须为非空字符串。" };
+  }
+  if (input.nodeId !== undefined && !nodeId) {
+    return { success: false, error: "nodeId 必须为非空字符串。" };
   }
   return {
     success: true,
     data: {
       reason,
+      nodeId,
     },
   };
 }
@@ -5050,6 +6819,7 @@ export function validateMcpEvaluateInput(
   const toolId = normalizeString(input.toolId);
   const reason = normalizeString(input.reason);
   const approvalRequestId = normalizeString(input.approvalRequestId);
+  const evaluationTimestamp = normalizeString(input.evaluationTimestamp);
   const metadata = input.metadata;
 
   if (!toolId) {
@@ -5061,6 +6831,12 @@ export function validateMcpEvaluateInput(
   if (input.approvalRequestId !== undefined && !approvalRequestId) {
     return { success: false, error: "approvalRequestId 必须为非空字符串。" };
   }
+  if (
+    input.evaluationTimestamp !== undefined &&
+    (!evaluationTimestamp || Number.isNaN(Date.parse(evaluationTimestamp)))
+  ) {
+    return { success: false, error: "evaluationTimestamp 必须是合法的 ISO 时间字符串。" };
+  }
   if (metadata !== undefined && !isRecord(metadata)) {
     return { success: false, error: "metadata 必须是对象。" };
   }
@@ -5071,6 +6847,7 @@ export function validateMcpEvaluateInput(
       toolId,
       reason,
       approvalRequestId,
+      evaluationTimestamp,
       metadata: metadata as Record<string, unknown> | undefined,
     },
   };
@@ -5397,6 +7174,7 @@ export function validateAuditExportQueryInput(
   const eventId = normalizeString(input.eventId);
   const action = normalizeString(input.action);
   const keyword = normalizeString(input.keyword);
+  const resourceId = normalizeString(input.resourceId);
   const base = validateAuditListInput(input);
 
   if (!base.success) {
@@ -5414,6 +7192,9 @@ export function validateAuditExportQueryInput(
   if (input.keyword !== undefined && !keyword) {
     return { success: false, error: "keyword 必须为非空字符串。" };
   }
+  if (input.resourceId !== undefined && !resourceId) {
+    return { success: false, error: "resourceId 必须为非空字符串。" };
+  }
 
   return {
     success: true,
@@ -5423,6 +7204,103 @@ export function validateAuditExportQueryInput(
       eventId,
       action,
       keyword,
+      resourceId,
+    },
+  };
+}
+
+export function validateLegalHoldCreateInput(
+  input: unknown
+): ValidationResult<LegalHoldCreateInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const resourceType = normalizeString(input.resourceType);
+  const resourceId = normalizeString(input.resourceId);
+  const reason = normalizeString(input.reason);
+
+  if (!resourceType || !isLegalHoldResourceType(resourceType)) {
+    return {
+      success: false,
+      error: "resourceType 必填且必须是 audit/audit_export/evidence_bundle 之一。",
+    };
+  }
+  if (!resourceId) {
+    return { success: false, error: "resourceId 必填且必须为非空字符串。" };
+  }
+  if (!reason) {
+    return { success: false, error: "reason 必填且必须为非空字符串。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      resourceType,
+      resourceId,
+      reason,
+    },
+  };
+}
+
+export function validateLegalHoldListInput(
+  input: unknown
+): ValidationResult<LegalHoldListInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "查询参数必须是对象。" };
+  }
+
+  const resourceType = normalizeString(input.resourceType);
+  const resourceId = normalizeString(input.resourceId);
+  const active = toOptionalBoolean(input.active);
+  const limit = toOptionalInteger(input.limit);
+
+  if (input.resourceType !== undefined && (!resourceType || !isLegalHoldResourceType(resourceType))) {
+    return {
+      success: false,
+      error: "resourceType 必须是 audit/audit_export/evidence_bundle 之一。",
+    };
+  }
+  if (input.resourceId !== undefined && !resourceId) {
+    return { success: false, error: "resourceId 必须为非空字符串。" };
+  }
+  if (active === "invalid") {
+    return { success: false, error: "active 必须是布尔值。" };
+  }
+  if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0 || limit > AUDIT_LIMIT_MAX)) {
+    return { success: false, error: `limit 必须是 1 到 ${AUDIT_LIMIT_MAX} 的整数。` };
+  }
+
+  return {
+    success: true,
+    data: {
+      resourceType: resourceType as LegalHoldResourceType | undefined,
+      resourceId,
+      active,
+      limit,
+    },
+  };
+}
+
+export function validateLegalHoldReleaseInput(
+  input: unknown
+): ValidationResult<LegalHoldReleaseInput> {
+  if (input === undefined || input === null) {
+    return { success: true, data: {} };
+  }
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const reason = normalizeString(input.reason);
+  if (input.reason !== undefined && !reason) {
+    return { success: false, error: "reason 必须为非空字符串。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      reason,
     },
   };
 }
@@ -5613,6 +7491,178 @@ export function validateSystemConfigRestoreInput(
   };
 }
 
+export function validateSystemConfigPackageCreateInput(
+  input: unknown
+): ValidationResult<SystemConfigPackageCreateInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const version = normalizeString(input.version);
+  const issuedAt = normalizeString(input.issuedAt ?? input.issued_at);
+  const signatureStatusRaw = normalizeString(
+    input.signatureStatus ?? input.signature_status,
+  )?.toLowerCase() as SystemConfigPackageSignatureStatus | undefined;
+  const payload = input.payload;
+
+  if (!version) {
+    return { success: false, error: "version 必填且必须为非空字符串。" };
+  }
+  if (issuedAt !== undefined && (!issuedAt || !isISODate(issuedAt))) {
+    return { success: false, error: "issuedAt 必须是 ISO 日期字符串。" };
+  }
+  if (
+    signatureStatusRaw !== undefined &&
+    !SYSTEM_CONFIG_PACKAGE_SIGNATURE_STATUS_SET.has(signatureStatusRaw)
+  ) {
+    return {
+      success: false,
+      error: "signatureStatus 仅支持 verified/unverified/invalid/unsigned/skipped/unknown。",
+    };
+  }
+  if (payload !== undefined && !isRecord(payload)) {
+    return { success: false, error: "payload 必须是对象。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      version,
+      issuedAt: issuedAt || undefined,
+      signatureStatus: signatureStatusRaw,
+      payload: payload ? { ...payload } : undefined,
+    },
+  };
+}
+
+export function validateSystemConfigPackageListInput(
+  input: unknown
+): ValidationResult<SystemConfigPackageListInput> {
+  if (input !== undefined && !isRecord(input)) {
+    return { success: false, error: "查询参数必须是对象。" };
+  }
+  const limit = toOptionalNumber((input as Record<string, unknown> | undefined)?.limit);
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 200)) {
+    return { success: false, error: "limit 必须是 1 到 200 的整数。" };
+  }
+  return {
+    success: true,
+    data: {
+      limit: limit ?? undefined,
+    },
+  };
+}
+
+export function validateAgentReleaseCreateInput(
+  input: unknown
+): ValidationResult<AgentReleaseCreateInput> {
+  if (!isRecord(input)) {
+    return { success: false, error: "请求体必须是对象。" };
+  }
+
+  const version = normalizeString(input.version);
+  const channel =
+    normalizeString(input.channel)?.toLowerCase() as AgentReleaseChannel | undefined;
+  const platform = normalizeString(input.platform);
+  const arch = normalizeString(input.arch);
+  const publishedAt = normalizeString(input.publishedAt ?? input.published_at);
+  const downloadUrl = normalizeString(input.downloadUrl ?? input.download_url);
+  const checksum = normalizeString(input.checksum);
+  const notes = normalizeString(input.notes);
+  const rolloutPercentage = toOptionalNumber(
+    input.rolloutPercentage ?? input.rollout_percentage,
+  );
+  const metadata = input.metadata;
+
+  if (!version) {
+    return { success: false, error: "version 必填且必须为非空字符串。" };
+  }
+  if (channel !== undefined && !AGENT_RELEASE_CHANNEL_SET.has(channel)) {
+    return { success: false, error: "channel 仅支持 stable/beta/canary。" };
+  }
+  if (!platform) {
+    return { success: false, error: "platform 必填且必须为非空字符串。" };
+  }
+  if (!arch) {
+    return { success: false, error: "arch 必填且必须为非空字符串。" };
+  }
+  if (publishedAt !== undefined && !isISODate(publishedAt)) {
+    return { success: false, error: "publishedAt 必须是 ISO 日期字符串。" };
+  }
+  if (downloadUrl !== undefined) {
+    try {
+      new URL(downloadUrl);
+    } catch {
+      return { success: false, error: "downloadUrl 必须是合法 URL。" };
+    }
+  }
+  if (
+    rolloutPercentage !== undefined &&
+    (!Number.isFinite(rolloutPercentage) ||
+      rolloutPercentage < 0 ||
+      rolloutPercentage > 100)
+  ) {
+    return { success: false, error: "rolloutPercentage 必须是 0 到 100 之间的数字。" };
+  }
+  if (metadata !== undefined && !isRecord(metadata)) {
+    return { success: false, error: "metadata 必须是对象。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      version,
+      channel,
+      platform,
+      arch,
+      publishedAt,
+      downloadUrl,
+      checksum,
+      notes,
+      rolloutPercentage,
+      metadata: metadata ? { ...metadata } : undefined,
+    },
+  };
+}
+
+export function validateAgentReleaseListInput(
+  input: unknown
+): ValidationResult<AgentReleaseListInput> {
+  if (input !== undefined && !isRecord(input)) {
+    return { success: false, error: "查询参数必须是对象。" };
+  }
+
+  const record = (input as Record<string, unknown> | undefined) ?? {};
+  const channel =
+    normalizeString(record.channel)?.toLowerCase() as AgentReleaseChannel | undefined;
+  const platform = normalizeString(record.platform);
+  const arch = normalizeString(record.arch);
+  const limit = toOptionalNumber(record.limit);
+
+  if (record.channel !== undefined && (!channel || !AGENT_RELEASE_CHANNEL_SET.has(channel))) {
+    return { success: false, error: "channel 仅支持 stable/beta/canary。" };
+  }
+  if (record.platform !== undefined && !platform) {
+    return { success: false, error: "platform 必须为非空字符串。" };
+  }
+  if (record.arch !== undefined && !arch) {
+    return { success: false, error: "arch 必须为非空字符串。" };
+  }
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 200)) {
+    return { success: false, error: "limit 必须是 1 到 200 的整数。" };
+  }
+
+  return {
+    success: true,
+    data: {
+      channel,
+      platform,
+      arch,
+      limit: limit ?? undefined,
+    },
+  };
+}
+
 export function validateCreateBudgetReleaseRequestInput(
   input: unknown
 ): ValidationResult<CreateBudgetReleaseRequestInput> {
@@ -5671,6 +7721,15 @@ export function validateIntegrationAlertCallbackInput(
   );
   const actorEmail = normalizeString(input.actorEmail ?? input.actor_email ?? input.email);
   const reason = normalizeString(input.reason);
+  const externalType = normalizeString(input.externalType ?? input.external_type);
+  const externalSystem = normalizeString(input.externalSystem ?? input.external_system);
+  const externalId = normalizeString(input.externalId ?? input.external_id);
+  const externalStatus = normalizeString(input.externalStatus ?? input.external_status);
+  const syncResult = normalizeString(input.syncResult ?? input.sync_result);
+  const syncError = normalizeString(input.syncError ?? input.sync_error);
+  const failureStage = normalizeString(input.failureStage ?? input.failure_stage);
+  const failureCode = normalizeString(input.failureCode ?? input.failure_code);
+  const metadata = isRecord(input.metadata) ? input.metadata : undefined;
 
   if (!callbackId) {
     return { success: false, error: "callback_id 必填且必须为非空字符串。" };
@@ -5678,7 +7737,7 @@ export function validateIntegrationAlertCallbackInput(
   if (!action || !isIntegrationAlertCallbackAction(action)) {
     return {
       success: false,
-      error: "action 必须是 ack/resolve/request_release/approve_release/reject_release 之一。",
+      error: "action 必须是 ack/resolve/request_release/approve_release/reject_release/upsert_external_link/sync_external_link_result 之一。",
     };
   }
   if (input.tenantId !== undefined || input.tenant_id !== undefined) {
@@ -5736,6 +7795,60 @@ export function validateIntegrationAlertCallbackInput(
     }
   }
 
+  if (action === "upsert_external_link") {
+    if (!alertId) {
+      return {
+        success: false,
+        error: "action=upsert_external_link 时 alert_id 必填且必须为非空字符串。",
+      };
+    }
+    if (!externalType || !isAlertExternalLinkType(externalType)) {
+      return {
+        success: false,
+        error: "action=upsert_external_link 时 external_type 必须是 ticket/case/incident 之一。",
+      };
+    }
+    if (!externalId) {
+      return {
+        success: false,
+        error: "action=upsert_external_link 时 external_id 必填且必须为非空字符串。",
+      };
+    }
+  }
+
+  if (action === "sync_external_link_result") {
+    if (!alertId) {
+      return {
+        success: false,
+        error: "action=sync_external_link_result 时 alert_id 必填且必须为非空字符串。",
+      };
+    }
+    if (!externalType || !isAlertExternalLinkType(externalType)) {
+      return {
+        success: false,
+        error: "action=sync_external_link_result 时 external_type 必须是 ticket/case/incident 之一。",
+      };
+    }
+    if (!externalId) {
+      return {
+        success: false,
+        error: "action=sync_external_link_result 时 external_id 必填且必须为非空字符串。",
+      };
+    }
+    if (!syncResult || !isAlertExternalLinkSyncResult(syncResult)) {
+      return {
+        success: false,
+        error: "action=sync_external_link_result 时 sync_result 必须是 success/failed 之一。",
+      };
+    }
+    if ((input.syncError !== undefined || input.sync_error !== undefined) && !syncError) {
+      return {
+        success: false,
+        error: "sync_error 必须为非空字符串。",
+      };
+    }
+  }
+
   return {
     success: true,
     data: {
@@ -5748,6 +7861,15 @@ export function validateIntegrationAlertCallbackInput(
       actorUserId,
       actorEmail,
       reason,
+      externalType: externalType as AlertExternalLinkType | undefined,
+      externalSystem,
+      externalId,
+      externalStatus,
+      syncResult: syncResult as AlertExternalLinkSyncResult | undefined,
+      syncError,
+      failureStage,
+      failureCode,
+      metadata,
     },
   };
 }

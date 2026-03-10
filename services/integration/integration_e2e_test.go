@@ -250,27 +250,228 @@ func TestIntegrationE2EAlertFallbackUsesLegacySeverityRouting(t *testing.T) {
 	env := newIntegrationE2EEnv(t)
 	webhookProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
 	wecomProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
+	dingTalkProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
 	feishuProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
+	emailWebhookProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
+	ticketProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
+	smtpServer := newFakeSMTPServer(t)
+	defer smtpServer.Close()
 
-	cfg := newIntegrationE2EConfig(channelWebhook, channelWeCom, channelFeishu)
+	cfg := newIntegrationE2EConfig(
+		channelWebhook,
+		channelWeCom,
+		channelDingTalk,
+		channelFeishu,
+		channelEmail,
+		channelEmailWebhook,
+		channelTicket,
+	)
 	cfg.ChannelURLs[channelWebhook] = webhookProbe.server.URL
 	cfg.ChannelURLs[channelWeCom] = wecomProbe.server.URL
+	cfg.ChannelURLs[channelDingTalk] = dingTalkProbe.server.URL
 	cfg.ChannelURLs[channelFeishu] = feishuProbe.server.URL
+	cfg.ChannelURLs[channelEmailWebhook] = emailWebhookProbe.server.URL
+	cfg.ChannelURLs[channelTicket] = ticketProbe.server.URL
+	cfg.EmailFrom = "alerts@example.com"
+	cfg.EmailSMTPHost = smtpServer.Host()
+	cfg.EmailSMTPPort = smtpServer.Port()
+	cfg.EmailSMTPTLSMode = smtpTLSModeNone
 
 	env.ensureStream(t, cfg.Stream, cfg.Subject)
 	dispatcher := newAlertDispatcher(env.ctx, env.log, env.js, cfg, nil)
 	dispatcher.httpClient = &http.Client{Timeout: time.Second}
 	env.startConsumer(t, cfg, cfg.Stream, cfg.Subject, cfg.Durable, dispatcher.handleAlertMessage)
 
-	payload := []byte(`{"id":"alert-e2e-fallback","severity":"warning","orchestration":{"channels":[],"fallback":true}}`)
-	env.publish(t, cfg.Subject, payload)
+	warningPayload := []byte(`{"id":"alert-e2e-fallback-warning","alert_id":"alert-e2e-fallback-warning","tenant_id":"tenant-e2e","budget_id":"budget-e2e","source_id":"source-e2e","rule_id":"rule-e2e","severity":"warning","status":"open","occurred_at":"2026-03-05T03:04:05Z","email_to":["ops@example.com","sre@example.com"],"orchestration":{"channels":[],"fallback":true}}`)
+	env.publish(t, cfg.Subject, warningPayload)
+	wantWarningText := formatEventTextPayload(warningPayload, eventTypeAlert)
 
 	webhookRequest := webhookProbe.waitForRequest(t)
-	if !bytes.Equal(webhookRequest.Body, payload) {
+	if !bytes.Equal(webhookRequest.Body, warningPayload) {
 		t.Fatalf("webhook should keep raw payload on fallback routing")
 	}
-	wecomProbe.waitForRequest(t)
+	wecomRequest := wecomProbe.waitForRequest(t)
+	var wecomBody weComDingTalkTextPayload
+	if err := json.Unmarshal(wecomRequest.Body, &wecomBody); err != nil {
+		t.Fatalf("unmarshal wecom payload failed: %v", err)
+	}
+	if wecomBody.MsgType != "text" {
+		t.Fatalf("wecom msgtype mismatch: got %q want %q", wecomBody.MsgType, "text")
+	}
+	if wecomBody.Text.Content != wantWarningText {
+		t.Fatalf("wecom text mismatch:\ngot:  %s\nwant: %s", wecomBody.Text.Content, wantWarningText)
+	}
+
+	message := smtpServer.WaitForMessage(t)
+	if message.mailFrom != "<alerts@example.com>" {
+		t.Fatalf("smtp mail from mismatch: got %q want %q", message.mailFrom, "<alerts@example.com>")
+	}
+	if strings.Join(message.rcptTo, ",") != "<ops@example.com>,<sre@example.com>" {
+		t.Fatalf("smtp recipients mismatch: got %v want %v", message.rcptTo, []string{"<ops@example.com>", "<sre@example.com>"})
+	}
+	if !strings.Contains(message.data, "Subject: [agentledger][alert][warning]") {
+		t.Fatalf("smtp subject mismatch: %s", message.data)
+	}
+	if !strings.Contains(message.data, "[agentledger][alert]") ||
+		!strings.Contains(message.data, string(warningPayload)) {
+		t.Fatalf("smtp body mismatch: %s", message.data)
+	}
+
+	emailWebhookRequest := emailWebhookProbe.waitForRequest(t)
+	var emailWebhookBody emailWebhookChannelPayload
+	if err := json.Unmarshal(emailWebhookRequest.Body, &emailWebhookBody); err != nil {
+		t.Fatalf("unmarshal email webhook payload failed: %v", err)
+	}
+	if emailWebhookBody.EventType != normalizeEventTypeLabel(eventTypeAlert) {
+		t.Fatalf("email webhook event type mismatch: got %q want %q", emailWebhookBody.EventType, normalizeEventTypeLabel(eventTypeAlert))
+	}
+	if emailWebhookBody.Subject != buildEmailSubject(warningPayload, eventTypeAlert) {
+		t.Fatalf("email webhook subject mismatch: got %q want %q", emailWebhookBody.Subject, buildEmailSubject(warningPayload, eventTypeAlert))
+	}
+	if emailWebhookBody.From != "alerts@example.com" {
+		t.Fatalf("email webhook from mismatch: got %q want %q", emailWebhookBody.From, "alerts@example.com")
+	}
+	if strings.Join(emailWebhookBody.To, ",") != "ops@example.com,sre@example.com" {
+		t.Fatalf("email webhook recipients mismatch: got %v want %v", emailWebhookBody.To, []string{"ops@example.com", "sre@example.com"})
+	}
+	if emailWebhookBody.Body != wantWarningText {
+		t.Fatalf("email webhook body mismatch:\ngot:  %s\nwant: %s", emailWebhookBody.Body, wantWarningText)
+	}
+	if !bytes.Equal(bytes.TrimSpace(emailWebhookBody.Event), warningPayload) {
+		t.Fatalf("email webhook raw event mismatch: got %s want %s", string(emailWebhookBody.Event), string(warningPayload))
+	}
+
+	ticketRequest := ticketProbe.waitForRequest(t)
+	var ticketBody ticketWebhookChannelPayload
+	if err := json.Unmarshal(ticketRequest.Body, &ticketBody); err != nil {
+		t.Fatalf("unmarshal ticket payload failed: %v", err)
+	}
+	if ticketBody.EventType != normalizeEventTypeLabel(eventTypeAlert) {
+		t.Fatalf("ticket event type mismatch: got %q want %q", ticketBody.EventType, normalizeEventTypeLabel(eventTypeAlert))
+	}
+	if ticketBody.Title != buildEmailSubject(warningPayload, eventTypeAlert) {
+		t.Fatalf("ticket title mismatch: got %q want %q", ticketBody.Title, buildEmailSubject(warningPayload, eventTypeAlert))
+	}
+	if ticketBody.Summary != wantWarningText {
+		t.Fatalf("ticket summary mismatch:\ngot:  %s\nwant: %s", ticketBody.Summary, wantWarningText)
+	}
+	if ticketBody.Severity != "warning" {
+		t.Fatalf("ticket severity mismatch: got %q want %q", ticketBody.Severity, "warning")
+	}
+	if ticketBody.Status != "open" {
+		t.Fatalf("ticket status mismatch: got %q want %q", ticketBody.Status, "open")
+	}
+	if !bytes.Equal(bytes.TrimSpace(ticketBody.Event), warningPayload) {
+		t.Fatalf("ticket raw event mismatch: got %s want %s", string(ticketBody.Event), string(warningPayload))
+	}
+
+	dingTalkProbe.assertNoRequest(t)
 	feishuProbe.assertNoRequest(t)
+
+	criticalPayload := []byte(`{"id":"alert-e2e-fallback-critical","alert_id":"alert-e2e-fallback-critical","tenant_id":"tenant-e2e","budget_id":"budget-e2e","source_id":"source-e2e","rule_id":"rule-e2e","severity":"critical","status":"open","occurred_at":"2026-03-06T03:04:05Z","email_to":["ops@example.com","sre@example.com"],"orchestration":{"channels":[],"fallback":true}}`)
+	env.publish(t, cfg.Subject, criticalPayload)
+	wantCriticalText := formatEventTextPayload(criticalPayload, eventTypeAlert)
+
+	webhookRequest = webhookProbe.waitForRequest(t)
+	if !bytes.Equal(webhookRequest.Body, criticalPayload) {
+		t.Fatalf("critical webhook should keep raw payload on fallback routing")
+	}
+
+	wecomRequest = wecomProbe.waitForRequest(t)
+	if err := json.Unmarshal(wecomRequest.Body, &wecomBody); err != nil {
+		t.Fatalf("unmarshal wecom payload failed: %v", err)
+	}
+	if wecomBody.MsgType != "text" {
+		t.Fatalf("wecom msgtype mismatch: got %q want %q", wecomBody.MsgType, "text")
+	}
+	if wecomBody.Text.Content != wantCriticalText {
+		t.Fatalf("wecom text mismatch:\ngot:  %s\nwant: %s", wecomBody.Text.Content, wantCriticalText)
+	}
+
+	dingTalkRequest := dingTalkProbe.waitForRequest(t)
+	var dingTalkBody weComDingTalkTextPayload
+	if err := json.Unmarshal(dingTalkRequest.Body, &dingTalkBody); err != nil {
+		t.Fatalf("unmarshal dingtalk payload failed: %v", err)
+	}
+	if dingTalkBody.MsgType != "text" {
+		t.Fatalf("dingtalk msgtype mismatch: got %q want %q", dingTalkBody.MsgType, "text")
+	}
+	if dingTalkBody.Text.Content != wantCriticalText {
+		t.Fatalf("dingtalk text mismatch:\ngot:  %s\nwant: %s", dingTalkBody.Text.Content, wantCriticalText)
+	}
+
+	feishuRequest := feishuProbe.waitForRequest(t)
+	var feishuBody feishuTextPayload
+	if err := json.Unmarshal(feishuRequest.Body, &feishuBody); err != nil {
+		t.Fatalf("unmarshal feishu payload failed: %v", err)
+	}
+	if feishuBody.MsgType != "text" {
+		t.Fatalf("feishu msg_type mismatch: got %q want %q", feishuBody.MsgType, "text")
+	}
+	if feishuBody.Content.Text != wantCriticalText {
+		t.Fatalf("feishu text mismatch:\ngot:  %s\nwant: %s", feishuBody.Content.Text, wantCriticalText)
+	}
+
+	message = smtpServer.WaitForMessage(t)
+	if message.mailFrom != "<alerts@example.com>" {
+		t.Fatalf("smtp mail from mismatch: got %q want %q", message.mailFrom, "<alerts@example.com>")
+	}
+	if strings.Join(message.rcptTo, ",") != "<ops@example.com>,<sre@example.com>" {
+		t.Fatalf("smtp recipients mismatch: got %v want %v", message.rcptTo, []string{"<ops@example.com>", "<sre@example.com>"})
+	}
+	if !strings.Contains(message.data, "Subject: [agentledger][alert][critical]") {
+		t.Fatalf("smtp subject mismatch: %s", message.data)
+	}
+	if !strings.Contains(message.data, "[agentledger][alert]") ||
+		!strings.Contains(message.data, string(criticalPayload)) {
+		t.Fatalf("smtp body mismatch: %s", message.data)
+	}
+
+	emailWebhookRequest = emailWebhookProbe.waitForRequest(t)
+	if err := json.Unmarshal(emailWebhookRequest.Body, &emailWebhookBody); err != nil {
+		t.Fatalf("unmarshal email webhook payload failed: %v", err)
+	}
+	if emailWebhookBody.EventType != normalizeEventTypeLabel(eventTypeAlert) {
+		t.Fatalf("email webhook event type mismatch: got %q want %q", emailWebhookBody.EventType, normalizeEventTypeLabel(eventTypeAlert))
+	}
+	if emailWebhookBody.Subject != buildEmailSubject(criticalPayload, eventTypeAlert) {
+		t.Fatalf("email webhook subject mismatch: got %q want %q", emailWebhookBody.Subject, buildEmailSubject(criticalPayload, eventTypeAlert))
+	}
+	if emailWebhookBody.From != "alerts@example.com" {
+		t.Fatalf("email webhook from mismatch: got %q want %q", emailWebhookBody.From, "alerts@example.com")
+	}
+	if strings.Join(emailWebhookBody.To, ",") != "ops@example.com,sre@example.com" {
+		t.Fatalf("email webhook recipients mismatch: got %v want %v", emailWebhookBody.To, []string{"ops@example.com", "sre@example.com"})
+	}
+	if emailWebhookBody.Body != wantCriticalText {
+		t.Fatalf("email webhook body mismatch:\ngot:  %s\nwant: %s", emailWebhookBody.Body, wantCriticalText)
+	}
+	if !bytes.Equal(bytes.TrimSpace(emailWebhookBody.Event), criticalPayload) {
+		t.Fatalf("email webhook raw event mismatch: got %s want %s", string(emailWebhookBody.Event), string(criticalPayload))
+	}
+
+	ticketRequest = ticketProbe.waitForRequest(t)
+	if err := json.Unmarshal(ticketRequest.Body, &ticketBody); err != nil {
+		t.Fatalf("unmarshal ticket payload failed: %v", err)
+	}
+	if ticketBody.EventType != normalizeEventTypeLabel(eventTypeAlert) {
+		t.Fatalf("ticket event type mismatch: got %q want %q", ticketBody.EventType, normalizeEventTypeLabel(eventTypeAlert))
+	}
+	if ticketBody.Title != buildEmailSubject(criticalPayload, eventTypeAlert) {
+		t.Fatalf("ticket title mismatch: got %q want %q", ticketBody.Title, buildEmailSubject(criticalPayload, eventTypeAlert))
+	}
+	if ticketBody.Summary != wantCriticalText {
+		t.Fatalf("ticket summary mismatch:\ngot:  %s\nwant: %s", ticketBody.Summary, wantCriticalText)
+	}
+	if ticketBody.Severity != "critical" {
+		t.Fatalf("ticket severity mismatch: got %q want %q", ticketBody.Severity, "critical")
+	}
+	if ticketBody.Status != "open" {
+		t.Fatalf("ticket status mismatch: got %q want %q", ticketBody.Status, "open")
+	}
+	if !bytes.Equal(bytes.TrimSpace(ticketBody.Event), criticalPayload) {
+		t.Fatalf("ticket raw event mismatch: got %s want %s", string(ticketBody.Event), string(criticalPayload))
+	}
 }
 
 func TestIntegrationE2EAlertOrchestrationSuppressedSkipsExternalDispatch(t *testing.T) {

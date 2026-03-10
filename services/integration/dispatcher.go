@@ -35,11 +35,12 @@ const (
 	maxCallbackPayloadSize = 1 << 20
 	maxInt                 = int(^uint(0) >> 1)
 
-	eventTypeAlert        = "alert"
-	eventTypeWeeklyReport = "weekly_report"
-	eventTypeCallback     = "callback_alert"
-	labelChannelNone      = "none"
-	labelChannelControl   = "control_plane"
+	eventTypeAlert                   = "alert"
+	eventTypeWeeklyReport            = "weekly_report"
+	eventTypeCallback                = "callback_alert"
+	eventTypeAlertExternalStatusSync = "alert_external_status_sync"
+	labelChannelNone                 = "none"
+	labelChannelControl              = "control_plane"
 
 	callbackSecretHeader    = "X-Integration-Callback-Secret"
 	callbackSourceHeader    = "X-Integration-Callback-Source"
@@ -141,12 +142,20 @@ type dispatchProgressCleanupResult struct {
 }
 
 type dlqPayload struct {
-	EventType string          `json:"event_type,omitempty"`
-	Event     json.RawMessage `json:"event,omitempty"`
-	EventRaw  string          `json:"event_raw,omitempty"`
-	Error     string          `json:"error"`
-	Attempt   int             `json:"attempt"`
-	FailedAt  time.Time       `json:"failed_at"`
+	Subject      string          `json:"subject,omitempty"`
+	EventType    string          `json:"event_type,omitempty"`
+	Channel      string          `json:"channel,omitempty"`
+	CallbackID   string          `json:"callback_id,omitempty"`
+	TenantID     string          `json:"tenant_id,omitempty"`
+	AlertID      string          `json:"alert_id,omitempty"`
+	ExternalType string          `json:"external_type,omitempty"`
+	ExternalID   string          `json:"external_id,omitempty"`
+	Event        json.RawMessage `json:"event,omitempty"`
+	EventRaw     string          `json:"event_raw,omitempty"`
+	Error        string          `json:"error"`
+	Retryable    bool            `json:"retryable"`
+	Attempt      int             `json:"attempt"`
+	FailedAt     time.Time       `json:"failed_at"`
 }
 
 func (e *dispatchError) Error() string {
@@ -325,6 +334,143 @@ func (d *alertDispatcher) handleCallbackMessage(msg jetstream.Msg) {
 		"attempt", attempt,
 		"duration_ms", time.Since(started).Milliseconds(),
 		"source", callbackSourceNATS,
+	)
+}
+
+func (d *alertDispatcher) handleAlertExternalStatusSyncMessage(msg jetstream.Msg) {
+	started := time.Now()
+	payload := append([]byte(nil), msg.Data()...)
+	attempt := extractAttempt(msg)
+
+	channel, err := d.forwardAlertExternalStatusSync(payload)
+	if err != nil {
+		retryable := isRetryable(err)
+		if retryable && shouldRetry(attempt, d.cfg.RetryMax) {
+			delay := backoffDelay(attempt, d.cfg.RetryBaseDelay, d.cfg.RetryMaxDelay)
+			d.observeAlertExternalStatusSyncMetrics(outcomeRetry, channel, started)
+			if nakErr := msg.NakWithDelay(delay); nakErr != nil {
+				d.log.Warn(
+					"nak alert external status sync message with delay failed",
+					"error",
+					nakErr,
+					"attempt",
+					attempt,
+					"retry_delay",
+					delay.String(),
+				)
+			}
+			d.log.Warn(
+				"alert external status sync failed, message will retry",
+				"error",
+				err,
+				"channel",
+				channel,
+				"attempt",
+				attempt,
+				"max_retries",
+				d.cfg.RetryMax,
+				"retry_delay",
+				delay.String(),
+				"duration_ms",
+				time.Since(started).Milliseconds(),
+			)
+			return
+		}
+
+		failedAt := time.Now().UTC()
+		if dlqErr := d.publishDLQ(payload, eventTypeAlertExternalStatusSync, err, attempt, failedAt); dlqErr != nil {
+			delay := backoffDelay(attempt, d.cfg.RetryBaseDelay, d.cfg.RetryMaxDelay)
+			d.observeAlertExternalStatusSyncMetrics(outcomeDLQFailed, channel, started)
+			if nakErr := msg.NakWithDelay(delay); nakErr != nil {
+				d.log.Warn(
+					"nak alert external status sync message after dlq publish failure failed",
+					"error",
+					nakErr,
+					"attempt",
+					attempt,
+					"retry_delay",
+					delay.String(),
+				)
+			}
+			d.log.Error(
+				"publish alert external status sync dlq failed, message will retry",
+				"error",
+				dlqErr,
+				"channel",
+				channel,
+				"dlq_subject",
+				d.cfg.DLQSubject,
+				"attempt",
+				attempt,
+				"retry_delay",
+				delay.String(),
+			)
+			return
+		}
+
+		failureStage, failureCode := classifyAlertExternalStatusSyncFailure(err)
+		d.reportAlertExternalStatusSyncResult(
+			d.ctx,
+			payload,
+			"failed",
+			err.Error(),
+			failureStage,
+			failureCode,
+			nil,
+			callbackSourceNATS,
+		)
+		d.observeAlertExternalStatusSyncMetrics(outcomeDLQ, channel, started)
+		if termErr := msg.Term(); termErr != nil {
+			d.log.Warn(
+				"term alert external status sync message failed",
+				"error",
+				termErr,
+				"attempt",
+				attempt,
+			)
+			return
+		}
+
+		d.log.Error(
+			"alert external status sync failed permanently",
+			"error",
+			err,
+			"retryable",
+			retryable,
+			"channel",
+			channel,
+			"attempt",
+			attempt,
+			"max_retries",
+			d.cfg.RetryMax,
+			"duration_ms",
+			time.Since(started).Milliseconds(),
+		)
+		return
+	}
+
+	if ackErr := msg.Ack(); ackErr != nil {
+		d.log.Warn(
+			"ack alert external status sync message failed",
+			"error",
+			ackErr,
+			"channel",
+			channel,
+			"attempt",
+			attempt,
+		)
+		return
+	}
+
+	d.observeAlertExternalStatusSyncMetrics(outcomeSuccess, channel, started)
+	d.log.Info(
+		"alert external status sync message forwarded",
+		"channel",
+		channel,
+		"attempt",
+		attempt,
+		"duration_ms",
+		time.Since(started).Milliseconds(),
 	)
 }
 
@@ -622,7 +768,7 @@ func extractOrchestrationChannels(
 	for _, raw := range envelope.Orchestration.Channels {
 		value := integrationChannel(strings.ToLower(strings.TrimSpace(raw)))
 		switch value {
-		case channelWebhook, channelWeCom, channelDingTalk, channelFeishu, channelEmail, channelEmailWebhook, channelTicket:
+		case channelWebhook, channelWeCom, channelDingTalk, channelFeishu, channelEmail, channelEmailWebhook, channelTicket, channelIncident:
 			if _, exists := seen[value]; exists {
 				continue
 			}
@@ -651,7 +797,7 @@ func (d *alertDispatcher) routeChannelsLegacy(
 	case "critical":
 		return enabled
 	case "warning":
-		routed := filterChannels(enabled, channelWebhook, channelWeCom, channelEmail, channelEmailWebhook, channelTicket)
+		routed := filterChannels(enabled, channelWebhook, channelWeCom, channelEmail, channelEmailWebhook, channelTicket, channelIncident)
 		if len(routed) > 0 {
 			return routed
 		}
@@ -868,7 +1014,7 @@ func buildChannelPayload(channel integrationChannel, payload []byte, eventType s
 			return nil, err
 		}
 		return body, nil
-	case channelTicket:
+	case channelTicket, channelIncident:
 		return buildTicketWebhookPayload(payload, eventType)
 	default:
 		return nil, fmt.Errorf("unsupported channel %s", channel)
@@ -924,6 +1070,16 @@ func normalizeTextField(value string) string {
 
 func formatMetricValue(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
+}
+
+func firstNonEmptyString(values ...any) string {
+	for _, value := range values {
+		text := strings.TrimSpace(fmt.Sprint(value))
+		if text != "" && text != "<nil>" {
+			return text
+		}
+	}
+	return ""
 }
 
 func compactJSONPayload(payload []byte) string {
@@ -991,6 +1147,293 @@ func buildTicketWebhookPayload(payload []byte, eventType string) ([]byte, error)
 	return json.Marshal(wrapped)
 }
 
+func buildExternalLinkCallbackPayload(
+	channel integrationChannel,
+	payload []byte,
+	responseBody []byte,
+) ([]byte, bool) {
+	trimmedPayload := bytes.TrimSpace(payload)
+	trimmedResponse := bytes.TrimSpace(responseBody)
+	if len(trimmedPayload) == 0 || len(trimmedResponse) == 0 || !json.Valid(trimmedResponse) {
+		return nil, false
+	}
+
+	var envelope ticketPayloadEnvelope
+	if err := json.Unmarshal(trimmedPayload, &envelope); err != nil {
+		return nil, false
+	}
+	alertID := strings.TrimSpace(string(envelope.AlertID))
+	if alertID == "" {
+		alertID = strings.TrimSpace(string(envelope.ID))
+	}
+	tenantID := strings.TrimSpace(envelope.TenantID)
+	if alertID == "" || tenantID == "" {
+		return nil, false
+	}
+
+	var responseRecord map[string]any
+	if err := json.Unmarshal(trimmedResponse, &responseRecord); err != nil {
+		return nil, false
+	}
+	externalID := firstNonEmptyString(
+		responseRecord["externalId"],
+		responseRecord["incidentId"],
+		responseRecord["ticketId"],
+		responseRecord["id"],
+	)
+	if externalID == "" {
+		return nil, false
+	}
+	externalStatus := firstNonEmptyString(
+		responseRecord["status"],
+		responseRecord["state"],
+	)
+	externalType := "ticket"
+	if channel == channelIncident {
+		externalType = "incident"
+	}
+	callbackBody, err := json.Marshal(map[string]any{
+		"callback_id":     fmt.Sprintf("extlink:%s:%s:%s", alertID, externalType, externalID),
+		"tenant_id":       tenantID,
+		"action":          "upsert_external_link",
+		"alert_id":        alertID,
+		"external_type":   externalType,
+		"external_system": externalType,
+		"external_id":     externalID,
+		"external_status": externalStatus,
+		"metadata": map[string]any{
+			"response": responseRecord,
+		},
+	})
+	if err != nil {
+		return nil, false
+	}
+	return callbackBody, true
+}
+
+func buildAlertExternalStatusSyncResultCallbackPayload(
+	payload []byte,
+	syncResult string,
+	syncError string,
+	failureStage string,
+	failureCode string,
+	responseBody []byte,
+) ([]byte, bool) {
+	trimmedPayload := bytes.TrimSpace(payload)
+	if len(trimmedPayload) == 0 || strings.TrimSpace(syncResult) == "" {
+		return nil, false
+	}
+
+	var envelope map[string]any
+	if err := json.Unmarshal(trimmedPayload, &envelope); err != nil {
+		return nil, false
+	}
+
+	callbackID := firstNonEmptyString(envelope["callback_id"], envelope["callbackId"])
+	alertID := firstNonEmptyString(envelope["alert_id"], envelope["alertId"])
+	tenantID := firstNonEmptyString(envelope["tenant_id"], envelope["tenantId"])
+	externalType := strings.ToLower(
+		firstNonEmptyString(
+			envelope["external_type"],
+			envelope["externalType"],
+		),
+	)
+	externalSystem := firstNonEmptyString(
+		envelope["external_system"],
+		envelope["externalSystem"],
+		externalType,
+	)
+	externalID := firstNonEmptyString(envelope["external_id"], envelope["externalId"])
+	externalStatus := firstNonEmptyString(
+		envelope["external_status"],
+		envelope["externalStatus"],
+		envelope["to_status"],
+		envelope["toStatus"],
+	)
+	if callbackID == "" || alertID == "" || tenantID == "" || externalType == "" || externalID == "" {
+		return nil, false
+	}
+
+	callbackPayload := map[string]any{
+		"callback_id":     fmt.Sprintf("sync-result:%s", callbackID),
+		"tenant_id":       tenantID,
+		"action":          "sync_external_link_result",
+		"alert_id":        alertID,
+		"external_type":   externalType,
+		"external_system": externalSystem,
+		"external_id":     externalID,
+		"sync_result":     strings.TrimSpace(syncResult),
+	}
+	if externalStatus != "" {
+		callbackPayload["external_status"] = externalStatus
+	}
+
+	metadata := map[string]any{}
+	if strings.TrimSpace(syncError) != "" {
+		callbackPayload["sync_error"] = strings.TrimSpace(syncError)
+		metadata["syncError"] = strings.TrimSpace(syncError)
+	}
+	if strings.TrimSpace(failureStage) != "" {
+		callbackPayload["failure_stage"] = strings.TrimSpace(failureStage)
+		metadata["failureStage"] = strings.TrimSpace(failureStage)
+	}
+	if strings.TrimSpace(failureCode) != "" {
+		callbackPayload["failure_code"] = strings.TrimSpace(failureCode)
+		metadata["failureCode"] = strings.TrimSpace(failureCode)
+	}
+	trimmedResponse := bytes.TrimSpace(responseBody)
+	if len(trimmedResponse) > 0 {
+		var responseRecord map[string]any
+		if json.Unmarshal(trimmedResponse, &responseRecord) == nil {
+			if status := firstNonEmptyString(responseRecord["status"], responseRecord["state"]); status != "" {
+				callbackPayload["external_status"] = status
+			}
+			metadata["response"] = responseRecord
+		} else {
+			metadata["response_raw"] = string(trimmedResponse)
+		}
+	}
+	if len(metadata) > 0 {
+		callbackPayload["metadata"] = metadata
+	}
+
+	raw, err := json.Marshal(callbackPayload)
+	if err != nil {
+		return nil, false
+	}
+	return raw, true
+}
+
+func resolveAlertExternalStatusSyncChannel(payload []byte) (integrationChannel, error) {
+	trimmedPayload := bytes.TrimSpace(payload)
+	if len(trimmedPayload) == 0 {
+		return "", errors.New("alert external status sync payload is empty")
+	}
+
+	var envelope map[string]any
+	if err := json.Unmarshal(trimmedPayload, &envelope); err != nil {
+		return "", fmt.Errorf("unmarshal alert external status sync payload failed: %w", err)
+	}
+
+	externalType := strings.ToLower(
+		firstNonEmptyString(
+			envelope["external_type"],
+			envelope["externalType"],
+			envelope["external_system"],
+			envelope["externalSystem"],
+		),
+	)
+
+	switch externalType {
+	case "incident":
+		return channelIncident, nil
+	case "ticket", "case":
+		return channelTicket, nil
+	default:
+		return "", fmt.Errorf("unsupported external_type %q", externalType)
+	}
+}
+
+func (d *alertDispatcher) forwardAlertExternalStatusSync(
+	payload []byte,
+) (integrationChannel, error) {
+	channel, err := resolveAlertExternalStatusSyncChannel(payload)
+	if err != nil {
+		return "", &dispatchError{
+			retryable: false,
+			message:   "resolve alert external status sync channel failed",
+			err:       err,
+		}
+	}
+
+	if err := d.dispatchHTTPChannel(
+		channel,
+		append([]byte(nil), payload...),
+		payload,
+		eventTypeAlertExternalStatusSync,
+	); err != nil {
+		return channel, err
+	}
+	return channel, nil
+}
+
+func (d *alertDispatcher) reportAlertExternalStatusSyncResult(
+	ctx context.Context,
+	payload []byte,
+	syncResult string,
+	syncError string,
+	failureStage string,
+	failureCode string,
+	responseBody []byte,
+	source string,
+) {
+	callbackPayload, ok := buildAlertExternalStatusSyncResultCallbackPayload(
+		payload,
+		syncResult,
+		syncError,
+		failureStage,
+		failureCode,
+		responseBody,
+	)
+	if !ok {
+		return
+	}
+	if err := d.forwardCallback(ctx, callbackPayload, source); err != nil {
+		if dlqErr := d.publishDLQ(
+			callbackPayload,
+			eventTypeCallback,
+			err,
+			1,
+			time.Now().UTC(),
+		); dlqErr != nil {
+			if d.log != nil {
+				d.log.Error(
+					"report alert external status sync result failed and dlq publish failed",
+					"error",
+					err,
+					"dlq_error",
+					dlqErr,
+					"sync_result",
+					syncResult,
+				)
+			}
+			return
+		}
+		if d.log != nil {
+			d.log.Warn(
+				"report alert external status sync result failed, callback payload moved to dlq",
+				"error",
+				err,
+				"sync_result",
+				syncResult,
+			)
+		}
+	}
+}
+
+func classifyAlertExternalStatusSyncFailure(err error) (string, string) {
+	var dispatchErr *dispatchError
+	if errors.As(err, &dispatchErr) {
+		switch {
+		case strings.Contains(dispatchErr.message, "resolve alert external status sync channel failed"):
+			return "channel_resolution", "unsupported_external_type"
+		case strings.Contains(dispatchErr.message, "is not configured"):
+			return "dispatch_http", "channel_not_configured"
+		case dispatchErr.statusCode == http.StatusTooManyRequests:
+			return "dispatch_http", "downstream_http_429"
+		case dispatchErr.statusCode >= 500:
+			return "dispatch_http", "downstream_http_5xx"
+		case dispatchErr.statusCode >= 400:
+			return "dispatch_http", "downstream_http_4xx"
+		case dispatchErr.retryable:
+			return "dispatch_http", "downstream_transport_error"
+		default:
+			return "dispatch_http", "dispatch_failed"
+		}
+	}
+	return "dispatch_http", "dispatch_failed"
+}
+
 func resolveTicketOccurredAt(envelope ticketPayloadEnvelope) time.Time {
 	for _, candidate := range []string{envelope.OccurredAt, envelope.CreatedAt, envelope.UpdatedAt} {
 		parsed, ok := parseRFC3339Timestamp(candidate)
@@ -1026,7 +1469,7 @@ func (d *alertDispatcher) dispatchToChannel(messageKey string, channel integrati
 				err:       err,
 			}
 		}
-		return d.dispatchHTTPChannel(channel, webhookPayload)
+		return d.dispatchHTTPChannel(channel, webhookPayload, payload, eventType)
 	default:
 		channelPayload, err := buildChannelPayload(channel, payload, eventType)
 		if err != nil {
@@ -1036,11 +1479,16 @@ func (d *alertDispatcher) dispatchToChannel(messageKey string, channel integrati
 				err:       err,
 			}
 		}
-		return d.dispatchHTTPChannel(channel, channelPayload)
+		return d.dispatchHTTPChannel(channel, channelPayload, payload, eventType)
 	}
 }
 
-func (d *alertDispatcher) dispatchHTTPChannel(channel integrationChannel, channelPayload []byte) error {
+func (d *alertDispatcher) dispatchHTTPChannel(
+	channel integrationChannel,
+	channelPayload []byte,
+	originalPayload []byte,
+	eventType string,
+) error {
 	endpoint := strings.TrimSpace(d.cfg.ChannelURLs[channel])
 	if endpoint == "" {
 		return &dispatchError{
@@ -1082,6 +1530,29 @@ func (d *alertDispatcher) dispatchHTTPChannel(channel integrationChannel, channe
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if eventType == eventTypeAlertExternalStatusSync {
+			responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyLogLength))
+			d.reportAlertExternalStatusSyncResult(
+				reqCtx,
+				originalPayload,
+				"success",
+				"",
+				"",
+				"",
+				responseBody,
+				callbackSourceNATS,
+			)
+			return nil
+		}
+		if (channel == channelTicket || channel == channelIncident) && eventType == eventTypeAlert {
+			if responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyLogLength)); readErr == nil {
+				if callbackPayload, ok := buildExternalLinkCallbackPayload(channel, originalPayload, responseBody); ok {
+					if callbackErr := d.forwardCallback(reqCtx, callbackPayload, callbackSourceAPI); callbackErr != nil && d.log != nil {
+						d.log.Warn("sync external link callback failed", "channel", channel, "error", callbackErr)
+					}
+				}
+			}
+		}
 		return nil
 	}
 
@@ -1695,6 +2166,22 @@ func (d *alertDispatcher) observeCallbackMetrics(outcome string, started time.Ti
 	d.metrics.observe(outcome, labelChannelControl, eventTypeCallback, time.Since(started))
 }
 
+func (d *alertDispatcher) observeAlertExternalStatusSyncMetrics(
+	outcome string,
+	channel integrationChannel,
+	started time.Time,
+) {
+	if d.metrics == nil {
+		return
+	}
+	d.metrics.observe(
+		outcome,
+		string(channel),
+		eventTypeAlertExternalStatusSync,
+		time.Since(started),
+	)
+}
+
 func callbackErrorToStatus(err error) int {
 	var dispatchErr *dispatchError
 	if errors.As(err, &dispatchErr) {
@@ -2105,6 +2592,7 @@ func buildDLQPayload(event []byte, eventType string, dispatchErr error, attempt 
 	payload := dlqPayload{
 		EventType: strings.TrimSpace(eventType),
 		Error:     "unknown dispatch error",
+		Retryable: isRetryable(dispatchErr),
 		Attempt:   attempt,
 		FailedAt:  failedAt.UTC(),
 	}
@@ -2125,6 +2613,24 @@ func buildDLQPayload(event []byte, eventType string, dispatchErr error, attempt 
 		payload.EventRaw = string(event)
 	}
 
+	payload.Subject = extractDLQSubject(eventType)
+	payload.Channel = extractDLQChannel(eventType, event, dispatchErr)
+	payload.CallbackID = firstNonEmptyString(
+		extractDLQStringField(event, "callback_id", "callbackId"),
+	)
+	payload.TenantID = firstNonEmptyString(
+		extractDLQStringField(event, "tenant_id", "tenantId"),
+	)
+	payload.AlertID = firstNonEmptyString(
+		extractDLQStringField(event, "alert_id", "alertId", "id"),
+	)
+	payload.ExternalType = strings.ToLower(firstNonEmptyString(
+		extractDLQStringField(event, "external_type", "externalType"),
+	))
+	payload.ExternalID = firstNonEmptyString(
+		extractDLQStringField(event, "external_id", "externalId"),
+	)
+
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal dlq payload failed: %w", err)
@@ -2135,6 +2641,68 @@ func buildDLQPayload(event []byte, eventType string, dispatchErr error, attempt 
 func isRetryable(err error) bool {
 	var rErr retryableError
 	return errors.As(err, &rErr) && rErr.Retryable()
+}
+
+func extractDLQSubject(eventType string) string {
+	switch strings.TrimSpace(eventType) {
+	case eventTypeAlert:
+		return defaultAlertsSubject
+	case eventTypeWeeklyReport:
+		return defaultWeeklySubject
+	case eventTypeCallback:
+		return defaultCallbackSubject
+	case eventTypeAlertExternalStatusSync:
+		return defaultAlertExternalStatusSyncSubject
+	default:
+		return ""
+	}
+}
+
+func extractDLQChannel(eventType string, event []byte, dispatchErr error) string {
+	if strings.TrimSpace(eventType) == eventTypeCallback {
+		return string(callbackSourceAPI)
+	}
+	if strings.TrimSpace(eventType) == eventTypeAlertExternalStatusSync {
+		switch strings.ToLower(strings.TrimSpace(
+			extractDLQStringField(event, "external_type", "externalType"),
+		)) {
+		case string(channelTicket):
+			return string(channelTicket)
+		case string(channelIncident):
+			return string(channelIncident)
+		default:
+			return "unknown"
+		}
+	}
+
+	var multiErr *multiDispatchError
+	if errors.As(dispatchErr, &multiErr) {
+		channels := multiErr.channels()
+		if len(channels) == 1 {
+			return string(channels[0])
+		}
+	}
+	return ""
+}
+
+func extractDLQStringField(event []byte, keys ...string) string {
+	if !json.Valid(event) {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(event, &payload); err != nil {
+		return ""
+	}
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		value := firstNonEmptyString(payload[key])
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func shouldRetry(attempt, maxRetries int) bool {
@@ -2257,40 +2825,114 @@ func (m jetStreamCallbackStreamManager) UpdateStream(ctx context.Context, cfg je
 	return err
 }
 
+func ensureAlertExternalStatusSyncStream(
+	ctx context.Context,
+	manager callbackStreamManager,
+	stream string,
+	subject string,
+	log interface {
+		Info(string, ...any)
+	},
+) error {
+	return ensureManagedStream(
+		ctx,
+		manager,
+		stream,
+		subject,
+		"integration alert external status sync events",
+		"alert external status sync",
+		log,
+	)
+}
+
+func ensureDLQStream(
+	ctx context.Context,
+	manager callbackStreamManager,
+	stream string,
+	subject string,
+	log interface {
+		Info(string, ...any)
+	},
+) error {
+	return ensureManagedStream(
+		ctx,
+		manager,
+		stream,
+		subject,
+		"integration dispatch dead-letter queue events",
+		"dlq",
+		log,
+	)
+}
+
 func ensureCallbackStream(ctx context.Context, manager callbackStreamManager, stream, subject string, log interface {
 	Info(string, ...any)
 }) error {
+	return ensureManagedStream(
+		ctx,
+		manager,
+		stream,
+		subject,
+		"integration callback events",
+		"callback",
+		log,
+	)
+}
+
+func ensureManagedStream(
+	ctx context.Context,
+	manager callbackStreamManager,
+	stream string,
+	subject string,
+	description string,
+	logName string,
+	log interface {
+		Info(string, ...any)
+	},
+) error {
 	info, err := manager.StreamInfo(ctx, stream)
 	if err != nil {
 		if !errors.Is(err, jetstream.ErrStreamNotFound) {
-			return fmt.Errorf("get callback stream failed: %w", err)
+			return fmt.Errorf("get %s stream failed: %w", logName, err)
 		}
 
 		createCfg := jetstream.StreamConfig{
 			Name:        stream,
-			Description: "integration callback events",
+			Description: description,
 			Subjects:    []string{subject},
 		}
 		if createErr := manager.CreateStream(ctx, createCfg); createErr != nil {
 			if !errors.Is(createErr, jetstream.ErrStreamNameAlreadyInUse) {
-				return fmt.Errorf("create callback stream failed: %w", createErr)
+				return fmt.Errorf("create %s stream failed: %w", logName, createErr)
 			}
 
 			info, err = manager.StreamInfo(ctx, stream)
 			if err != nil {
-				return fmt.Errorf("get callback stream after concurrent create failed: %w", err)
+				return fmt.Errorf("get %s stream after concurrent create failed: %w", logName, err)
 			}
 		} else {
-			log.Info("jetstream callback stream created", "stream", stream, "subjects", createCfg.Subjects)
+			log.Info(
+				fmt.Sprintf("jetstream %s stream created", logName),
+				"stream",
+				stream,
+				"subjects",
+				createCfg.Subjects,
+			)
 			return nil
 		}
 	}
 
 	if info == nil {
-		return errors.New("get callback stream failed: empty stream info")
+		return fmt.Errorf("get %s stream failed: empty stream info", logName)
 	}
 	if callbackStreamHasSubject(info.Config.Subjects, subject) {
-		log.Info("jetstream callback stream ensured", "stream", stream, "subjects", info.Config.Subjects)
+		log.Info(
+			fmt.Sprintf("jetstream %s stream ensured", logName),
+			"stream",
+			stream,
+			"subjects",
+			info.Config.Subjects,
+		)
 		return nil
 	}
 
@@ -2301,10 +2943,16 @@ func ensureCallbackStream(ctx context.Context, manager callbackStreamManager, st
 	updatedCfg.Subjects = appendCallbackStreamSubject(updatedCfg.Subjects, subject)
 
 	if err := manager.UpdateStream(ctx, updatedCfg); err != nil {
-		return fmt.Errorf("update callback stream subjects failed: %w", err)
+		return fmt.Errorf("update %s stream subjects failed: %w", logName, err)
 	}
 
-	log.Info("jetstream callback stream subjects updated", "stream", stream, "subjects", updatedCfg.Subjects)
+	log.Info(
+		fmt.Sprintf("jetstream %s stream subjects updated", logName),
+		"stream",
+		stream,
+		"subjects",
+		updatedCfg.Subjects,
+	)
 	return nil
 }
 

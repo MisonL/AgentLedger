@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -41,6 +41,15 @@ import {
   resetWebhookReplayExecutionWorkerForTests,
 } from "../src/routes/open-platform";
 import {
+  __resetAlertExternalStatusSyncPublisherForTests,
+  __setAlertExternalStatusSyncPublisherForTests,
+} from "../src/routes/integration-event-publisher";
+import {
+  __drainIntegrationDlqRecoveryQueueForTests,
+  __resetIntegrationDlqBackendForTests,
+  __setIntegrationDlqBackendForTests,
+} from "../src/routes/integration-dlq";
+import {
   computeTokenPulseRuntimeIdempotencyKey,
   computeTokenPulseRuntimeSignature,
   TOKENPULSE_RUNTIME_DEFAULT_KEY_ID,
@@ -67,6 +76,8 @@ const originalReplayStorageLocalRoot = Bun.env.REPLAY_STORAGE_LOCAL_ROOT;
 Bun.env.REPLAY_STORAGE_LOCAL_ROOT = replayArtifactTestRoot;
 
 afterAll(async () => {
+  await __resetIntegrationDlqBackendForTests();
+  await __resetAlertExternalStatusSyncPublisherForTests();
   if (originalReplayStorageLocalRoot === undefined) {
     delete Bun.env.REPLAY_STORAGE_LOCAL_ROOT;
   } else {
@@ -1025,6 +1036,7 @@ describe("Control Plane API", () => {
     userId?: string,
   ): Promise<{
     items: Array<{
+      id: string;
       action: string;
       level: string;
       detail: string;
@@ -1051,6 +1063,7 @@ describe("Control Plane API", () => {
     );
     const audits = (await auditResponse.json()) as {
       items: Array<{
+        id: string;
         action: string;
         level: string;
         detail: string;
@@ -1078,6 +1091,7 @@ describe("Control Plane API", () => {
     headers: Record<string, string>,
   ): Promise<{
     items: Array<{
+      id: string;
       action: string;
       level: string;
       detail: string;
@@ -1103,6 +1117,7 @@ describe("Control Plane API", () => {
     );
     const audits = (await auditResponse.json()) as {
       items: Array<{
+        id: string;
         action: string;
         level: string;
         detail: string;
@@ -2835,6 +2850,20 @@ describe("Control Plane API", () => {
         authorizationUrl: "https://idp.example.com/auth",
       },
       {
+        id: "corp-saml",
+        type: "saml",
+        displayName: "企业 SAML",
+        metadataUrl: "https://idp.example.com/metadata",
+        ssoUrl: "https://idp.example.com/sso",
+        acsUrl: "https://console.example.com/api/v1/auth/saml/acs",
+        binding: "http-post",
+      },
+      {
+        id: "corp-saml-invalid",
+        type: "saml",
+        displayName: "缺少发现入口的 SAML",
+      },
+      {
         id: "corp-oidc",
         type: "oidc",
         displayName: "重复ID应被忽略",
@@ -2870,8 +2899,25 @@ describe("Control Plane API", () => {
         .filter((id): id is string => typeof id === "string");
 
       expect(providerIds.includes("local")).toBe(false);
-      expect(providerIds).toEqual(["github", "corp-oidc"]);
-      expect(result.payload.total).toBe(2);
+      expect(providerIds).toEqual(["github", "corp-oidc", "corp-saml"]);
+      expect(result.payload.total).toBe(3);
+      const samlProvider = providers.find(
+        (item) => pickString(item, ["id"]) === "corp-saml",
+      );
+      expect(samlProvider).toBeDefined();
+      expect(pickString(samlProvider, ["authorizationUrl"])).toBe(
+        "https://idp.example.com/sso",
+      );
+      expect(pickString(samlProvider, ["metadataUrl"])).toBe(
+        "https://idp.example.com/metadata",
+      );
+      expect(pickString(samlProvider, ["ssoUrl"])).toBe(
+        "https://idp.example.com/sso",
+      );
+      expect(pickString(samlProvider, ["acsUrl"])).toBe(
+        "https://console.example.com/api/v1/auth/saml/acs",
+      );
+      expect(pickString(samlProvider, ["binding"])).toBe("post");
     } finally {
       if (originalDisableLocal === undefined) {
         delete Bun.env.AUTH_DISABLE_LOCAL_LOGIN;
@@ -2923,9 +2969,172 @@ describe("Control Plane API", () => {
     }
   });
 
+  test("本地登录在启用 MFA 时要求 otpCode，provider discovery 支持 saml/requireMfa", async () => {
+    const nonce = createNonce("auth-local-mfa");
+    const originalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+    const originalLocalMfaRequired = Bun.env.AUTH_LOCAL_MFA_REQUIRED;
+    const originalLocalMfaCode = Bun.env.AUTH_LOCAL_MFA_STATIC_CODE;
+    Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = JSON.stringify([
+      {
+        id: "corp-saml",
+        type: "saml",
+        displayName: "企业 SAML",
+        metadataUrl: "https://idp.example.com/metadata",
+        ssoUrl: "https://idp.example.com/sso",
+        enabled: true,
+        requireMfa: true,
+      },
+    ]);
+    Bun.env.AUTH_LOCAL_MFA_REQUIRED = "true";
+    Bun.env.AUTH_LOCAL_MFA_STATIC_CODE = "246810";
+
+    try {
+      const registerResult = await registerLocalUser({
+        email: `local-mfa-${nonce}@example.com`,
+        password: `unit-test-pw-${nonce}`,
+        displayName: `本地MFA-${nonce}`,
+      });
+      expect(registerResult.response.status).toBe(201);
+
+      const providersResult = await requestFirstAvailable([{ path: "/api/v1/auth/providers" }]);
+      expect(providersResult.response.status).toBe(200);
+      if (!isRecord(providersResult.payload) || !Array.isArray(providersResult.payload.items)) {
+        throw new Error("auth/providers 返回结构异常。");
+      }
+      const samlProvider = providersResult.payload.items.find(
+        (item) => isRecord(item) && item.id === "corp-saml",
+      ) as Record<string, unknown> | undefined;
+      expect(samlProvider?.type).toBe("saml");
+      expect(samlProvider?.requireMfa).toBe(true);
+
+      const missingOtpResponse = await app.request("/api/v1/auth/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          email: `local-mfa-${nonce}@example.com`,
+          password: `unit-test-pw-${nonce}`,
+        }),
+      });
+      expect(missingOtpResponse.status).toBe(401);
+
+      const successResponse = await app.request("/api/v1/auth/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          email: `local-mfa-${nonce}@example.com`,
+          password: `unit-test-pw-${nonce}`,
+          otpCode: "246810",
+        }),
+      });
+      expect(successResponse.status).toBe(200);
+    } finally {
+      if (originalProviders === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+      } else {
+        Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = originalProviders;
+      }
+      if (originalLocalMfaRequired === undefined) {
+        delete Bun.env.AUTH_LOCAL_MFA_REQUIRED;
+      } else {
+        Bun.env.AUTH_LOCAL_MFA_REQUIRED = originalLocalMfaRequired;
+      }
+      if (originalLocalMfaCode === undefined) {
+        delete Bun.env.AUTH_LOCAL_MFA_STATIC_CODE;
+      } else {
+        Bun.env.AUTH_LOCAL_MFA_STATIC_CODE = originalLocalMfaCode;
+      }
+    }
+  });
+
+  test("POST /api/v1/auth/external/login 支持 SAML provider 断言登录", async () => {
+    const nonce = createNonce("auth-external-login-saml");
+    const secret = `external-secret-${nonce}`;
+    const originalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+    const originalSecret = Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET;
+    const originalTTL = Bun.env.AUTH_EXTERNAL_ASSERTION_TTL_SECONDS;
+    Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = JSON.stringify([
+      {
+        id: "corp-saml",
+        type: "saml",
+        displayName: "企业 SAML",
+        metadataUrl: "https://idp.example.com/metadata",
+        ssoUrl: "https://idp.example.com/sso",
+        binding: "post",
+        enabled: true,
+      },
+    ]);
+    Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET = secret;
+    Bun.env.AUTH_EXTERNAL_ASSERTION_TTL_SECONDS = "300";
+
+    try {
+      const payload = {
+        providerId: "corp-saml",
+        externalUserId: `saml-user-${nonce}`,
+        email: `saml-${nonce}@example.com`,
+        displayName: `SAML 用户-${nonce}`,
+        timestamp: new Date().toISOString(),
+        nonce: `nonce-${nonce}-001`,
+        signature: "",
+      };
+      const canonical = [
+        payload.providerId,
+        payload.externalUserId,
+        payload.email,
+        "",
+        payload.timestamp,
+        payload.nonce,
+      ].join("\n");
+      payload.signature = createHmac("sha256", secret).update(canonical).digest("hex");
+
+      const response = await app.request("/api/v1/auth/external/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const body = (await response.json()) as {
+        provider?: {
+          id?: string;
+          type?: string;
+        };
+        user?: {
+          email?: string;
+        };
+      };
+
+      expect(response.status).toBe(200);
+      expect(body.provider?.id).toBe("corp-saml");
+      expect(body.provider?.type).toBe("saml");
+      expect(body.user?.email).toBe(payload.email);
+    } finally {
+      if (originalProviders === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+      } else {
+        Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = originalProviders;
+      }
+      if (originalSecret === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET;
+      } else {
+        Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET = originalSecret;
+      }
+      if (originalTTL === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_ASSERTION_TTL_SECONDS;
+      } else {
+        Bun.env.AUTH_EXTERNAL_ASSERTION_TTL_SECONDS = originalTTL;
+      }
+    }
+  });
+
   test("POST /api/v1/auth/external/login 支持外部断言登录与签发会话", async () => {
     const nonce = createNonce("auth-external-login");
     const secret = `external-secret-${nonce}`;
+    const clientIp = "203.0.113.10";
+    const userAgent = "external-login-test/1.0";
     const originalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
     const originalSecret = Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET;
     const originalTTL = Bun.env.AUTH_EXTERNAL_ASSERTION_TTL_SECONDS;
@@ -2966,11 +3175,14 @@ describe("Control Plane API", () => {
         method: "POST",
         headers: {
           "content-type": "application/json",
+          "x-forwarded-for": clientIp,
+          "user-agent": userAgent,
         },
         body: JSON.stringify(payload),
       });
       const body = (await response.json()) as {
         user?: {
+          userId?: string;
           email?: string;
         };
         provider?: {
@@ -2981,14 +3193,38 @@ describe("Control Plane API", () => {
           accessToken?: string;
           refreshToken?: string;
         };
+        riskDecision?: string;
       };
 
       expect(response.status).toBe(200);
       expect(body.provider?.id).toBe("corp-oidc");
       expect(body.provider?.type).toBe("oidc");
       expect(body.user?.email).toBe(payload.email);
+      expect(typeof body.user?.userId).toBe("string");
       expect(typeof body.tokens?.accessToken).toBe("string");
       expect(typeof body.tokens?.refreshToken).toBe("string");
+      expect(body.riskDecision).toBe("allowed");
+
+      const audits = await queryAuditByAction(
+        "auth.external_login",
+        "/api/v1/auth/external/login",
+        body.tokens?.accessToken ?? "",
+        body.user?.userId ?? "",
+      );
+      const matched = audits.items.find(
+        (item) =>
+          item.action === "auth.external_login" &&
+          item.metadata.route === "/api/v1/auth/external/login" &&
+          item.metadata.providerId === "corp-oidc" &&
+          item.metadata.providerType === "oidc" &&
+          item.metadata.clientIp === clientIp &&
+          item.metadata.userAgent === userAgent &&
+          item.metadata.riskLevel === "low" &&
+          Array.isArray(item.metadata.riskSignals) &&
+          item.metadata.riskSignals.includes("assertion_login_succeeded") &&
+          item.metadata.riskSignals.includes("signature_verified"),
+      );
+      expect(matched).toBeDefined();
     } finally {
       if (originalProviders === undefined) {
         delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
@@ -3008,9 +3244,13 @@ describe("Control Plane API", () => {
     }
   });
 
-  test("POST /api/v1/auth/external/login 签名错误与重放请求返回 401", async () => {
+  test(
+    "POST /api/v1/auth/external/login 签名错误、时间窗异常与重放请求返回 401 并写入失败审计",
+    async () => {
     const nonce = createNonce("auth-external-login-fail");
     const secret = `external-secret-${nonce}`;
+    const clientIp = "198.51.100.22";
+    const userAgent = "external-login-fail-test/1.0";
     const originalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
     const originalSecret = Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET;
     Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = JSON.stringify([
@@ -3053,6 +3293,8 @@ describe("Control Plane API", () => {
           method: "POST",
           headers: {
             "content-type": "application/json",
+            "x-forwarded-for": clientIp,
+            "user-agent": userAgent,
           },
           body: JSON.stringify({
             ...basePayload,
@@ -3061,11 +3303,47 @@ describe("Control Plane API", () => {
         },
       );
       expect(badSignatureResponse.status).toBe(401);
+      const badSignatureBody = (await badSignatureResponse.json()) as {
+        riskDecision?: string;
+      };
+      expect(badSignatureBody.riskDecision).toBe("allow_with_risk");
+
+      const expiredPayload = {
+        ...basePayload,
+        timestamp: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+        nonce: `nonce-${nonce}-expired`,
+      };
+      const expiredCanonical = [
+        expiredPayload.providerId,
+        expiredPayload.externalUserId,
+        expiredPayload.email,
+        "",
+        expiredPayload.timestamp,
+        expiredPayload.nonce,
+      ].join("\n");
+      const expiredSignature = createHmac("sha256", secret)
+        .update(expiredCanonical)
+        .digest("hex");
+      const expiredResponse = await app.request("/api/v1/auth/external/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": clientIp,
+          "user-agent": userAgent,
+        },
+        body: JSON.stringify({
+          ...expiredPayload,
+          signature: expiredSignature,
+        }),
+      });
+      expect(expiredResponse.status).toBe(401);
 
       const firstResponse = await app.request("/api/v1/auth/external/login", {
         method: "POST",
         headers: {
           "content-type": "application/json",
+          "x-forwarded-for": clientIp,
+          "user-agent": userAgent,
         },
         body: JSON.stringify({
           ...basePayload,
@@ -3078,6 +3356,8 @@ describe("Control Plane API", () => {
         method: "POST",
         headers: {
           "content-type": "application/json",
+          "x-forwarded-for": clientIp,
+          "user-agent": userAgent,
         },
         body: JSON.stringify({
           ...basePayload,
@@ -3099,6 +3379,40 @@ describe("Control Plane API", () => {
           item.metadata.route === "/api/v1/auth/external/login",
       );
       expect(matched).toBe(true);
+
+      const signatureAudit = audits.items.find(
+        (item) =>
+          item.metadata.reason === "外部登录签名校验失败。" &&
+          item.metadata.providerId === "corp-oidc" &&
+          item.metadata.providerType === "oidc" &&
+          item.metadata.clientIp === clientIp &&
+          item.metadata.userAgent === userAgent &&
+          item.metadata.riskLevel === "high" &&
+          item.metadata.failureStage === "signature_validation" &&
+          Array.isArray(item.metadata.riskSignals) &&
+          item.metadata.riskSignals.includes("signature_invalid"),
+      );
+      expect(signatureAudit).toBeDefined();
+
+      const expiredAudit = audits.items.find(
+        (item) =>
+          item.metadata.reason === "外部登录断言已过期。" &&
+          item.metadata.riskLevel === "high" &&
+          item.metadata.failureStage === "timestamp_validation" &&
+          Array.isArray(item.metadata.riskSignals) &&
+          item.metadata.riskSignals.includes("timestamp_out_of_window"),
+      );
+      expect(expiredAudit).toBeDefined();
+
+      const replayAudit = audits.items.find(
+        (item) =>
+          item.metadata.reason === "外部登录请求疑似重放。" &&
+          item.metadata.riskLevel === "high" &&
+          item.metadata.failureStage === "nonce_validation" &&
+          Array.isArray(item.metadata.riskSignals) &&
+          item.metadata.riskSignals.includes("nonce_replay_detected"),
+      );
+      expect(replayAudit).toBeDefined();
     } finally {
       if (originalProviders === undefined) {
         delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
@@ -3116,6 +3430,8 @@ describe("Control Plane API", () => {
   test("POST /api/v1/auth/external/exchange 成功换取会话（token + userinfo）", async () => {
     const nonce = createNonce("auth-external-exchange-success");
     const providerId = "corp-oidc";
+    const clientIp = "203.0.113.33";
+    const userAgent = "external-exchange-test/1.0";
     const tokenEndpoint = `https://idp.example.com/oauth/token/${nonce}`;
     const userinfoEndpoint = `https://idp.example.com/oidc/userinfo/${nonce}`;
     const idpAccessToken = `idp-access-token-${nonce}`;
@@ -3198,6 +3514,8 @@ describe("Control Plane API", () => {
         method: "POST",
         headers: {
           "content-type": "application/json",
+          "x-forwarded-for": clientIp,
+          "user-agent": userAgent,
         },
         body: JSON.stringify({
           providerId,
@@ -3220,8 +3538,34 @@ describe("Control Plane API", () => {
       expect(pickString(body.user, ["email"])).toBe(
         `exchange-${nonce}@example.com`,
       );
+      expect(pickString(body.user, ["userId"])).toBeTruthy();
       expect(typeof pickString(body.tokens, ["accessToken"])).toBe("string");
       expect(typeof pickString(body.tokens, ["refreshToken"])).toBe("string");
+      expect(pickString(body, ["riskDecision"])).toBe("allowed");
+
+      const audits = await queryAuditByAction(
+        "auth.external_exchange",
+        "/api/v1/auth/external/exchange",
+        pickString(body.tokens, ["accessToken"]) ?? "",
+        pickString(body.user, ["userId"]) ?? "",
+      );
+      const matched = audits.items.find(
+        (item) =>
+          item.action === "auth.external_exchange" &&
+          item.metadata.route === "/api/v1/auth/external/exchange" &&
+          item.metadata.providerId === providerId &&
+          item.metadata.providerType === "oidc" &&
+          item.metadata.clientIp === clientIp &&
+          item.metadata.userAgent === userAgent &&
+          item.metadata.riskLevel === "low" &&
+          Array.isArray(item.metadata.riskSignals) &&
+          item.metadata.riskSignals.includes(
+            "authorization_code_exchange_succeeded",
+          ) &&
+          item.metadata.riskSignals.includes("upstream_token_succeeded") &&
+          item.metadata.riskSignals.includes("upstream_userinfo_succeeded"),
+      );
+      expect(matched).toBeDefined();
     } finally {
       if (originalProviders === undefined) {
         delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
@@ -3234,6 +3578,8 @@ describe("Control Plane API", () => {
 
   test("POST /api/v1/auth/external/exchange provider 未启用或不存在返回 401", async () => {
     const nonce = createNonce("auth-external-exchange-provider-401");
+    const clientIp = "198.51.100.44";
+    const userAgent = "external-exchange-provider-fail-test/1.0";
     const originalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
     const originalFetch = globalThis.fetch;
     Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = JSON.stringify([
@@ -3261,6 +3607,8 @@ describe("Control Plane API", () => {
           method: "POST",
           headers: {
             "content-type": "application/json",
+            "x-forwarded-for": clientIp,
+            "user-agent": userAgent,
           },
           body: JSON.stringify({
             providerId: "corp-oidc",
@@ -3269,12 +3617,17 @@ describe("Control Plane API", () => {
           }),
         },
       );
+      const disabledProviderBody = (await disabledProviderResponse.json()) as {
+        riskDecision?: string;
+      };
       const missingProviderResponse = await app.request(
         "/api/v1/auth/external/exchange",
         {
           method: "POST",
           headers: {
             "content-type": "application/json",
+            "x-forwarded-for": clientIp,
+            "user-agent": userAgent,
           },
           body: JSON.stringify({
             providerId: "missing-provider",
@@ -3285,8 +3638,38 @@ describe("Control Plane API", () => {
       );
 
       expect(disabledProviderResponse.status).toBe(401);
+      expect(disabledProviderBody.riskDecision).toBe("allow_with_risk");
       expect(missingProviderResponse.status).toBe(401);
       expect(upstreamCalls).toBe(0);
+
+      const auth = await getDefaultAuthContext();
+      const audits = await queryAuditByAction(
+        "auth.external_exchange_failed",
+        "/api/v1/auth/external/exchange",
+        auth.accessToken,
+        auth.userId,
+      );
+      const disabledProviderAudit = audits.items.find(
+        (item) =>
+          item.metadata.reason === "外部登录提供方不可用或未启用授权码交换。" &&
+          item.metadata.providerId === "corp-oidc" &&
+          item.metadata.providerType === "oidc" &&
+          item.metadata.clientIp === clientIp &&
+          item.metadata.userAgent === userAgent &&
+          item.metadata.riskLevel === "medium" &&
+          item.metadata.failureStage === "provider_resolution" &&
+          Array.isArray(item.metadata.riskSignals) &&
+          item.metadata.riskSignals.includes("provider_unavailable"),
+      );
+      expect(disabledProviderAudit).toBeDefined();
+
+      const missingProviderAudit = audits.items.find(
+        (item) =>
+          item.metadata.reason === "外部登录提供方不可用或未启用授权码交换。" &&
+          item.metadata.providerId === "missing-provider" &&
+          item.metadata.providerType === "unknown",
+      );
+      expect(missingProviderAudit).toBeDefined();
     } finally {
       if (originalProviders === undefined) {
         delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
@@ -3300,6 +3683,8 @@ describe("Control Plane API", () => {
   test("POST /api/v1/auth/external/exchange 上游 token 或 userinfo 失败返回 502", async () => {
     const nonce = createNonce("auth-external-exchange-upstream-502");
     const providerId = "corp-oidc";
+    const clientIp = "203.0.113.55";
+    const userAgent = "external-exchange-upstream-fail-test/1.0";
     const tokenEndpoint = `https://idp.example.com/oauth/token/${nonce}`;
     const userinfoEndpoint = `https://idp.example.com/oidc/userinfo/${nonce}`;
     const originalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
@@ -3408,6 +3793,8 @@ describe("Control Plane API", () => {
           method: "POST",
           headers: {
             "content-type": "application/json",
+            "x-forwarded-for": clientIp,
+            "user-agent": userAgent,
           },
           body: JSON.stringify({
             providerId,
@@ -3424,6 +3811,37 @@ describe("Control Plane API", () => {
           expect(userinfoCalls).toBeGreaterThan(0);
         }
       }
+
+      const auth = await getDefaultAuthContext();
+      const audits = await queryAuditByAction(
+        "auth.external_exchange_failed",
+        "/api/v1/auth/external/exchange",
+        auth.accessToken,
+        auth.userId,
+      );
+      const tokenFailureAudit = audits.items.find(
+        (item) =>
+          item.metadata.providerId === providerId &&
+          item.metadata.providerType === "oidc" &&
+          item.metadata.clientIp === clientIp &&
+          item.metadata.userAgent === userAgent &&
+          item.metadata.riskLevel === "medium" &&
+          item.metadata.failureStage === "token_endpoint" &&
+          Array.isArray(item.metadata.riskSignals) &&
+          item.metadata.riskSignals.includes("upstream_token_failed"),
+      );
+      expect(tokenFailureAudit).toBeDefined();
+
+      const userinfoFailureAudit = audits.items.find(
+        (item) =>
+          item.metadata.providerId === providerId &&
+          item.metadata.providerType === "oidc" &&
+          item.metadata.riskLevel === "medium" &&
+          item.metadata.failureStage === "userinfo_endpoint" &&
+          Array.isArray(item.metadata.riskSignals) &&
+          item.metadata.riskSignals.includes("upstream_userinfo_failed"),
+      );
+      expect(userinfoFailureAudit).toBeDefined();
     } finally {
       if (originalProviders === undefined) {
         delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
@@ -3482,6 +3900,187 @@ describe("Control Plane API", () => {
         Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = originalProviders;
       }
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("AUTH_EXTERNAL_RISK_MODE=block 时 external login/exchange 失败响应带 blocked", async () => {
+    const nonce = createNonce("auth-external-risk-mode-block");
+    const secret = `external-secret-${nonce}`;
+    const originalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+    const originalSecret = Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET;
+    const originalRiskMode = Bun.env.AUTH_EXTERNAL_RISK_MODE;
+    Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = JSON.stringify([
+      {
+        id: "corp-oidc",
+        type: "oidc",
+        displayName: "企业 OIDC",
+        enabled: true,
+      },
+    ]);
+    Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET = secret;
+    Bun.env.AUTH_EXTERNAL_RISK_MODE = "block";
+
+    try {
+      const response = await app.request("/api/v1/auth/external/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          providerId: "corp-oidc",
+          externalUserId: `ext-user-${nonce}`,
+          email: `external-${nonce}@example.com`,
+          timestamp: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+          nonce: `nonce-${nonce}`,
+          signature: "0".repeat(64),
+        }),
+      });
+      expect(response.status).toBe(401);
+      const body = (await response.json()) as {
+        riskDecision?: string;
+      };
+      expect(body.riskDecision).toBe("blocked");
+
+      const exchangeResponse = await app.request("/api/v1/auth/external/exchange", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          providerId: "missing-provider",
+          code: `authorization-code-${nonce}`,
+          redirectUri: `https://console.example.com/callback/${nonce}`,
+        }),
+      });
+      expect(exchangeResponse.status).toBe(401);
+      const exchangeBody = (await exchangeResponse.json()) as {
+        riskDecision?: string;
+      };
+      expect(exchangeBody.riskDecision).toBe("blocked");
+    } finally {
+      if (originalProviders === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+      } else {
+        Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = originalProviders;
+      }
+      if (originalSecret === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET;
+      } else {
+        Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET = originalSecret;
+      }
+      if (originalRiskMode === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_RISK_MODE;
+      } else {
+        Bun.env.AUTH_EXTERNAL_RISK_MODE = originalRiskMode;
+      }
+    }
+  });
+
+  test("external login 在 requireMfa 与高风险头场景下会被拦截", async () => {
+    const nonce = createNonce("auth-external-mfa-risk");
+    const secret = `external-secret-${nonce}`;
+    const originalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+    const originalSecret = Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET;
+    const originalRiskMode = Bun.env.AUTH_EXTERNAL_RISK_MODE;
+    Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = JSON.stringify([
+      {
+        id: "corp-saml",
+        type: "saml",
+        displayName: "企业 SAML",
+        metadataUrl: "https://idp.example.com/metadata",
+        ssoUrl: "https://idp.example.com/sso",
+        binding: "post",
+        enabled: true,
+        requireMfa: true,
+      },
+    ]);
+    Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET = secret;
+    Bun.env.AUTH_EXTERNAL_RISK_MODE = "block";
+
+    try {
+      const basePayload = {
+        providerId: "corp-saml",
+        externalUserId: `ext-user-${nonce}`,
+        email: `external-saml-${nonce}@example.com`,
+        timestamp: new Date().toISOString(),
+        nonce: `nonce-${nonce}`,
+      };
+      const canonical = [
+        basePayload.providerId,
+        basePayload.externalUserId,
+        basePayload.email,
+        "",
+        basePayload.timestamp,
+        basePayload.nonce,
+      ].join("\n");
+      const signature = createHmac("sha256", secret)
+        .update(canonical)
+        .digest("hex");
+
+      const mfaMissingResponse = await app.request("/api/v1/auth/external/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          ...basePayload,
+          signature,
+        }),
+      });
+      expect(mfaMissingResponse.status).toBe(401);
+      const mfaMissingBody = (await mfaMissingResponse.json()) as {
+        mfaRequired?: boolean;
+      };
+      expect(mfaMissingBody.mfaRequired).toBe(true);
+
+      const highRiskResponse = await app.request("/api/v1/auth/external/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-agentledger-risk-level": "high",
+          "x-agentledger-risk-signals": "suspicious_ip,high_risk_network",
+          "user-agent": "risk-test/1.0",
+          "x-forwarded-for": "203.0.113.99",
+        },
+        body: JSON.stringify({
+          ...basePayload,
+          nonce: `nonce-${nonce}-risk`,
+          signature: createHmac("sha256", secret)
+            .update(
+              [
+                basePayload.providerId,
+                basePayload.externalUserId,
+                basePayload.email,
+                "",
+                basePayload.timestamp,
+                `nonce-${nonce}-risk`,
+              ].join("\n"),
+            )
+            .digest("hex"),
+          mfaVerified: true,
+        }),
+      });
+      expect(highRiskResponse.status).toBe(403);
+      const highRiskBody = (await highRiskResponse.json()) as {
+        riskDecision?: string;
+      };
+      expect(highRiskBody.riskDecision).toBe("blocked");
+    } finally {
+      if (originalProviders === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+      } else {
+        Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = originalProviders;
+      }
+      if (originalSecret === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET;
+      } else {
+        Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET = originalSecret;
+      }
+      if (originalRiskMode === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_RISK_MODE;
+      } else {
+        Bun.env.AUTH_EXTERNAL_RISK_MODE = originalRiskMode;
+      }
     }
   });
 
@@ -3596,6 +4195,108 @@ describe("Control Plane API", () => {
       expect(addedMember.tenantRole).toBe("member");
       expect(addedMember.organizationId).toBe(organizationId);
       expect(addedMember.orgRole).toBe("maintainer");
+    }
+  });
+
+  test("SCIM users/groups 支持最小同步与查询", async () => {
+    const nonce = createNonce("identity-scim");
+    const originalScimToken = Bun.env.SCIM_BEARER_TOKEN;
+    Bun.env.SCIM_BEARER_TOKEN = `scim-token-${nonce}`;
+
+    try {
+      const owner = await registerAndLoginUser(`${nonce}-owner`);
+      if (!owner.userId) {
+        throw new Error("无法解析 SCIM owner userId。");
+      }
+      const createTenantResult = await createTenantByAuth(
+        owner.accessToken,
+        {
+          name: `租户-${nonce}`,
+          slug: `tenant-${nonce}`,
+        },
+        owner.userId,
+      );
+      assertApiStatus(createTenantResult, [201]);
+      const tenantId = extractEntityId(createTenantResult.payload);
+      if (!tenantId) {
+        throw new Error("SCIM 测试租户创建失败。");
+      }
+
+      const orgResponse = await app.request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/organizations`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(await issueTenantScopedAuthHeaders(tenantId, owner.accessToken, owner.userId)),
+          },
+          body: JSON.stringify({ name: `组织-${nonce}` }),
+        },
+      );
+      expect(orgResponse.status).toBe(201);
+      const orgBody = (await orgResponse.json()) as { id: string };
+
+      const scimHeaders = {
+        authorization: `Bearer ${Bun.env.SCIM_BEARER_TOKEN}`,
+        "content-type": "application/json",
+      };
+      const upsertResponse = await app.request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/scim/users`,
+        {
+          method: "POST",
+          headers: scimHeaders,
+          body: JSON.stringify({
+            userName: `scim-${nonce}@example.com`,
+            displayName: `SCIM 用户 ${nonce}`,
+            tenantRole: "maintainer",
+            organizationId: orgBody.id,
+            orgRole: "member",
+          }),
+        },
+      );
+      expect(upsertResponse.status).toBe(201);
+
+      const listUsersResponse = await app.request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/scim/users`,
+        {
+          headers: {
+            authorization: `Bearer ${Bun.env.SCIM_BEARER_TOKEN}`,
+          },
+        },
+      );
+      expect(listUsersResponse.status).toBe(200);
+      const listUsersBody = (await listUsersResponse.json()) as {
+        totalResults: number;
+        Resources: Array<{ userName: string }>;
+      };
+      expect(listUsersBody.totalResults).toBeGreaterThanOrEqual(1);
+      expect(
+        listUsersBody.Resources.some(
+          (item) => item.userName === `scim-${nonce}@example.com`,
+        ),
+      ).toBe(true);
+
+      const listGroupsResponse = await app.request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/scim/groups`,
+        {
+          headers: {
+            authorization: `Bearer ${Bun.env.SCIM_BEARER_TOKEN}`,
+          },
+        },
+      );
+      expect(listGroupsResponse.status).toBe(200);
+      const listGroupsBody = (await listGroupsResponse.json()) as {
+        totalResults: number;
+        Resources: Array<{ id: string }>;
+      };
+      expect(listGroupsBody.totalResults).toBeGreaterThanOrEqual(1);
+      expect(listGroupsBody.Resources.some((item) => item.id === orgBody.id)).toBe(true);
+    } finally {
+      if (originalScimToken === undefined) {
+        delete Bun.env.SCIM_BEARER_TOKEN;
+      } else {
+        Bun.env.SCIM_BEARER_TOKEN = originalScimToken;
+      }
     }
   });
 
@@ -10116,6 +10817,490 @@ describe("Control Plane API", () => {
     }
   });
 
+  test("告警外部联动：integration callback 可写入外部实体并在 ACK/Resolve 时同步本地状态映射", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const originalCallbackSecret = Bun.env.INTEGRATION_CALLBACK_SECRET;
+    const callbackSecret = `integration-secret-${createNonce("cb-external-link")}`;
+    const { alert, cleanup } = await createTestAlert(tenantId, "open");
+    const publishedEvents: Array<Record<string, unknown>> = [];
+
+    try {
+      Bun.env.INTEGRATION_CALLBACK_SECRET = callbackSecret;
+      __setAlertExternalStatusSyncPublisherForTests(async (events) => {
+        publishedEvents.push(
+          ...events.map(
+            (event) => ({ ...event }) as Record<string, unknown>,
+          ),
+        );
+        return {
+          published: events.length,
+          failed: 0,
+          errors: [],
+        };
+      });
+
+      const upsertLinkResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
+          callback_id: createNonce("cb-external-link-create"),
+          tenant_id: tenantId,
+          action: "upsert_external_link",
+          alert_id: alert.id,
+          external_type: "ticket",
+          external_system: "ticket",
+          external_id: "ticket-1001",
+          external_status: "open",
+        },
+      );
+      expect(upsertLinkResponse.status).toBe(200);
+
+      const alertsResponse = await app.request("/api/v1/alerts?limit=50", {
+        headers: authHeaders,
+      });
+      expect(alertsResponse.status).toBe(200);
+      const alertsBody = (await alertsResponse.json()) as {
+        items: Array<{
+          id: string;
+          externalLinks?: Array<{
+            externalId: string;
+            externalStatus?: string;
+          }>;
+        }>;
+      };
+      const target = alertsBody.items.find((item) => item.id === alert.id);
+      expect(target?.externalLinks?.[0]?.externalId).toBe("ticket-1001");
+      expect(target?.externalLinks?.[0]?.externalStatus).toBe("open");
+
+      const acknowledgeResponse = await app.request(
+        `/api/v1/alerts/${encodeURIComponent(alert.id)}/status`,
+        {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+            ...authHeaders,
+          },
+          body: JSON.stringify({ status: "acknowledged" }),
+        },
+      );
+      expect(acknowledgeResponse.status).toBe(200);
+      const acknowledgedAlert = (await acknowledgeResponse.json()) as {
+        externalLinks?: Array<{
+          externalStatus?: string;
+          pendingExternalStatus?: string;
+          publishStatus?: string;
+          publishError?: string;
+          lastSyncResult?: string;
+          lastSyncError?: string;
+        }>;
+      };
+      expect(acknowledgedAlert.externalLinks?.[0]?.externalStatus).toBe("open");
+      expect(acknowledgedAlert.externalLinks?.[0]?.pendingExternalStatus).toBe(
+        "acknowledged",
+      );
+      expect(acknowledgedAlert.externalLinks?.[0]?.publishStatus).toBe(
+        "success",
+      );
+      expect(acknowledgedAlert.externalLinks?.[0]?.lastSyncResult).toBeUndefined();
+      expect(publishedEvents).toContainEqual(
+        expect.objectContaining({
+          tenant_id: tenantId,
+          alert_id: alert.id,
+          external_type: "ticket",
+          external_id: "ticket-1001",
+          external_status: "acknowledged",
+        }),
+      );
+
+      const acknowledgeSyncResultResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
+          callback_id: createNonce("cb-external-link-ack-result"),
+          tenant_id: tenantId,
+          action: "sync_external_link_result",
+          alert_id: alert.id,
+          external_type: "ticket",
+          external_system: "ticket",
+          external_id: "ticket-1001",
+          external_status: "acknowledged",
+          sync_result: "success",
+        },
+      );
+      expect(acknowledgeSyncResultResponse.status).toBe(200);
+
+      const acknowledgedRefreshedResponse = await app.request(
+        "/api/v1/alerts?limit=50",
+        {
+          headers: authHeaders,
+        },
+      );
+      expect(acknowledgedRefreshedResponse.status).toBe(200);
+      const acknowledgedRefreshedBody =
+        (await acknowledgedRefreshedResponse.json()) as {
+          items: Array<{
+            id: string;
+            externalLinks?: Array<{
+              externalStatus?: string;
+              pendingExternalStatus?: string;
+              publishStatus?: string;
+              lastSyncResult?: string;
+              lastSyncError?: string;
+            }>;
+          }>;
+        };
+      const acknowledgedTarget = acknowledgedRefreshedBody.items.find(
+        (item) => item.id === alert.id,
+      );
+      expect(acknowledgedTarget?.externalLinks?.[0]).toMatchObject({
+        externalStatus: "acknowledged",
+        publishStatus: "success",
+        lastSyncResult: "success",
+      });
+      expect(
+        acknowledgedTarget?.externalLinks?.[0]?.pendingExternalStatus,
+      ).toBeUndefined();
+
+      const resolveResponse = await app.request(
+        `/api/v1/alerts/${encodeURIComponent(alert.id)}/status`,
+        {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+            ...authHeaders,
+          },
+          body: JSON.stringify({ status: "resolved" }),
+        },
+      );
+      expect(resolveResponse.status).toBe(200);
+      const resolvedAlert = (await resolveResponse.json()) as {
+        externalLinks?: Array<{
+          externalStatus?: string;
+          pendingExternalStatus?: string;
+          publishStatus?: string;
+          lastSyncResult?: string;
+          lastSyncError?: string;
+        }>;
+      };
+      expect(resolvedAlert.externalLinks?.[0]?.externalStatus).toBe(
+        "acknowledged",
+      );
+      expect(resolvedAlert.externalLinks?.[0]?.pendingExternalStatus).toBe(
+        "resolved",
+      );
+      expect(resolvedAlert.externalLinks?.[0]?.publishStatus).toBe("success");
+      expect(resolvedAlert.externalLinks?.[0]?.lastSyncResult).toBeUndefined();
+      expect(publishedEvents).toContainEqual(
+        expect.objectContaining({
+          tenant_id: tenantId,
+          alert_id: alert.id,
+          external_type: "ticket",
+          external_id: "ticket-1001",
+          external_status: "resolved",
+        }),
+      );
+
+      const resolveSyncResultResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
+          callback_id: createNonce("cb-external-link-resolve-result"),
+          tenant_id: tenantId,
+          action: "sync_external_link_result",
+          alert_id: alert.id,
+          external_type: "ticket",
+          external_system: "ticket",
+          external_id: "ticket-1001",
+          external_status: "resolved",
+          sync_result: "failed",
+          sync_error: "downstream timeout",
+          failure_stage: "dispatch_http",
+          failure_code: "downstream_http_5xx",
+        },
+      );
+      expect(resolveSyncResultResponse.status).toBe(200);
+
+      const resolvedRefreshedResponse = await app.request("/api/v1/alerts?limit=50", {
+        headers: authHeaders,
+      });
+      expect(resolvedRefreshedResponse.status).toBe(200);
+      const resolvedRefreshedBody = (await resolvedRefreshedResponse.json()) as {
+        items: Array<{
+          id: string;
+          externalLinks?: Array<{
+            externalStatus?: string;
+            pendingExternalStatus?: string;
+            publishStatus?: string;
+            lastSyncResult?: string;
+            lastSyncError?: string;
+            lastSyncFailureStage?: string;
+            lastSyncFailureCode?: string;
+          }>;
+        }>;
+      };
+      const resolvedTarget = resolvedRefreshedBody.items.find(
+        (item) => item.id === alert.id,
+      );
+      expect(resolvedTarget?.externalLinks?.[0]).toMatchObject({
+        externalStatus: "acknowledged",
+        pendingExternalStatus: "resolved",
+        publishStatus: "success",
+        lastSyncResult: "failed",
+        lastSyncError: "downstream timeout",
+        lastSyncFailureStage: "dispatch_http",
+        lastSyncFailureCode: "downstream_http_5xx",
+      });
+
+      const opsResponse = await app.request(
+        `/api/v1/alerts/${encodeURIComponent(alert.id)}/external-links?onlyFailed=true&externalType=ticket`,
+        {
+          headers: authHeaders,
+        },
+      );
+      expect(opsResponse.status).toBe(200);
+      const opsBody = (await opsResponse.json()) as {
+        alertId: string;
+        summary: {
+          total: number;
+          pending: number;
+          failed: number;
+        };
+        items: Array<{
+          externalId: string;
+          syncState: string;
+          retryable: boolean;
+          lastSyncFailureStage?: string;
+          lastSyncFailureCode?: string;
+        }>;
+        filters: {
+          externalType?: string;
+          onlyFailed?: boolean;
+        };
+      };
+      expect(opsBody.alertId).toBe(alert.id);
+      expect(opsBody.summary).toEqual({
+        total: 1,
+        pending: 0,
+        failed: 1,
+      });
+      expect(opsBody.filters).toEqual({
+        externalType: "ticket",
+        onlyFailed: true,
+      });
+      expect(opsBody.items).toHaveLength(1);
+      expect(opsBody.items[0]).toMatchObject({
+        externalId: "ticket-1001",
+        syncState: "failed",
+        retryable: true,
+        lastSyncFailureStage: "dispatch_http",
+        lastSyncFailureCode: "downstream_http_5xx",
+      });
+
+      const failuresResponse = await app.request(
+        `/api/v1/alerts/external-links/failures?alertId=${encodeURIComponent(
+          alert.id,
+        )}&externalSystem=ticket&syncState=failed&limit=10`,
+        {
+          headers: authHeaders,
+        },
+      );
+      expect(failuresResponse.status).toBe(200);
+      const failuresBody = (await failuresResponse.json()) as {
+        summary: {
+          total: number;
+          pending: number;
+          failed: number;
+        };
+        items: Array<{
+          alertId: string;
+          externalSystem: string;
+          externalId: string;
+          syncState: string;
+          retryable: boolean;
+        }>;
+        filters: {
+          alertId?: string;
+          externalSystem?: string;
+          syncState?: string;
+          limit?: number;
+        };
+      };
+      expect(failuresBody.summary).toEqual({
+        total: 1,
+        pending: 0,
+        failed: 1,
+      });
+      expect(failuresBody.filters).toEqual({
+        alertId: alert.id,
+        externalSystem: "ticket",
+        syncState: "failed",
+        limit: 10,
+      });
+      expect(failuresBody.items[0]).toMatchObject({
+        alertId: alert.id,
+        externalSystem: "ticket",
+        externalId: "ticket-1001",
+        syncState: "failed",
+        retryable: true,
+      });
+
+      const retryResponse = await app.request(
+        `/api/v1/alerts/${encodeURIComponent(alert.id)}/external-links/retry-sync`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...authHeaders,
+          },
+          body: JSON.stringify({
+            externalType: "ticket",
+            externalId: "ticket-1001",
+          }),
+        },
+      );
+      expect(retryResponse.status).toBe(200);
+      const retriedAlert = (await retryResponse.json()) as {
+        externalLinks?: Array<{
+          externalStatus?: string;
+          pendingExternalStatus?: string;
+          publishStatus?: string;
+          lastSyncResult?: string;
+          lastSyncError?: string;
+        }>;
+      };
+      expect(retriedAlert.externalLinks?.[0]).toMatchObject({
+        externalStatus: "acknowledged",
+        pendingExternalStatus: "resolved",
+        publishStatus: "success",
+      });
+      expect(retriedAlert.externalLinks?.[0]?.lastSyncResult).toBeUndefined();
+      expect(retriedAlert.externalLinks?.[0]?.lastSyncError).toBeUndefined();
+      expect(publishedEvents).toContainEqual(
+        expect.objectContaining({
+          tenant_id: tenantId,
+          alert_id: alert.id,
+          external_type: "ticket",
+          external_id: "ticket-1001",
+          external_status: "resolved",
+        }),
+      );
+
+      const retryAudits = await queryAuditByAction(
+        "control_plane.alert_external_link_retry_completed",
+        alert.id,
+      );
+      const retryAudit = retryAudits.items.find((item) => {
+        return (
+          item.action === "control_plane.alert_external_link_retry_completed" &&
+          item.metadata.alertId === alert.id &&
+          item.metadata.externalId === "ticket-1001" &&
+          item.metadata.scope === "single"
+        );
+      });
+      expect(retryAudit).toBeDefined();
+
+      const batchRetryResponse = await app.request(
+        `/api/v1/alerts/${encodeURIComponent(alert.id)}/external-links/retry-sync-batch`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...authHeaders,
+          },
+          body: JSON.stringify({
+            externalType: "ticket",
+          }),
+        },
+      );
+      expect(batchRetryResponse.status).toBe(200);
+      const batchRetriedAlert = (await batchRetryResponse.json()) as {
+        alertId: string;
+        retriedCount: number;
+        published: number;
+        failed: number;
+        items: Array<{
+          externalId: string;
+          syncState: string;
+          retryable: boolean;
+          pendingExternalStatus?: string;
+        }>;
+      };
+      expect(batchRetriedAlert.alertId).toBe(alert.id);
+      expect(batchRetriedAlert.retriedCount).toBe(1);
+      expect(batchRetriedAlert.published).toBe(1);
+      expect(batchRetriedAlert.failed).toBe(0);
+      expect(batchRetriedAlert.items[0]).toMatchObject({
+        externalId: "ticket-1001",
+        syncState: "pending",
+        retryable: true,
+        pendingExternalStatus: "resolved",
+      });
+
+      const batchRetryAudits = await queryAuditByAction(
+        "control_plane.alert_external_link_retry_completed",
+        alert.id,
+      );
+      const batchRetryAudit = batchRetryAudits.items.find((item) => {
+        return (
+          item.action === "control_plane.alert_external_link_retry_completed" &&
+          item.metadata.alertId === alert.id &&
+          item.metadata.retriedCount === 1 &&
+          item.metadata.scope === "batch"
+        );
+      });
+      expect(batchRetryAudit).toBeDefined();
+
+      const retrySyncResultResponse = await postIntegrationAlertCallback(
+        callbackSecret,
+        {
+          callback_id: createNonce("cb-external-link-retry-result"),
+          tenant_id: tenantId,
+          action: "sync_external_link_result",
+          alert_id: alert.id,
+          external_type: "ticket",
+          external_system: "ticket",
+          external_id: "ticket-1001",
+          external_status: "resolved",
+          sync_result: "success",
+        },
+      );
+      expect(retrySyncResultResponse.status).toBe(200);
+
+      const retryRefreshedResponse = await app.request("/api/v1/alerts?limit=50", {
+        headers: authHeaders,
+      });
+      expect(retryRefreshedResponse.status).toBe(200);
+      const retryRefreshedBody = (await retryRefreshedResponse.json()) as {
+        items: Array<{
+          id: string;
+          externalLinks?: Array<{
+            externalStatus?: string;
+            pendingExternalStatus?: string;
+            publishStatus?: string;
+            lastSyncResult?: string;
+            lastSyncError?: string;
+          }>;
+        }>;
+      };
+      const retryTarget = retryRefreshedBody.items.find(
+        (item) => item.id === alert.id,
+      );
+      expect(retryTarget?.externalLinks?.[0]).toMatchObject({
+        externalStatus: "resolved",
+        publishStatus: "success",
+        lastSyncResult: "success",
+      });
+      expect(retryTarget?.externalLinks?.[0]?.pendingExternalStatus).toBeUndefined();
+      expect(retryTarget?.externalLinks?.[0]?.lastSyncError).toBeUndefined();
+    } finally {
+      await __resetAlertExternalStatusSyncPublisherForTests();
+      if (originalCallbackSecret === undefined) {
+        delete Bun.env.INTEGRATION_CALLBACK_SECRET;
+      } else {
+        Bun.env.INTEGRATION_CALLBACK_SECRET = originalCallbackSecret;
+      }
+      await cleanup();
+    }
+  });
+
   test("POST /api/v1/integrations/callbacks/alerts 同 callback_id 在不同 tenant 不冲突", async () => {
     const authHeaders = await resolveAuthHeaders();
     const tenantAId = resolveTenantIdFromAuthHeaders(authHeaders);
@@ -11000,6 +12185,653 @@ describe("Control Plane API", () => {
         await alertTwoCleanup();
       }
     }
+  });
+
+  test("GET/POST /api/v1/integrations/dlq/messages 支持查询、replay 与审计", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const nonce = createNonce("integration-dlq");
+    const queriedItems = [
+      {
+        messageId: "INTEGRATION_DISPATCH_DLQ:101",
+        stream: "INTEGRATION_DISPATCH_DLQ",
+        subject: "integration.alert.external_status_sync",
+        eventType: "alert_external_status_sync",
+        channel: "ticket",
+        callbackId: `sync-result:${nonce}`,
+        tenantId: resolveTenantIdFromAuthHeaders(authHeaders),
+        alertId: `alert-${nonce}`,
+        externalType: "ticket",
+        externalId: `ticket-${nonce}`,
+        failedAt: "2026-03-08T10:00:00.000Z",
+        attempt: 4,
+        error: "downstream timeout",
+        retryable: true,
+        payload: {
+          subject: "integration.alert.external_status_sync",
+          event_type: "alert_external_status_sync",
+        },
+      },
+    ];
+
+    let listCalls = 0;
+    let replayCalls = 0;
+    __setIntegrationDlqBackendForTests({
+      async listMessages(input) {
+        listCalls += 1;
+        expect(input).toEqual({
+          tenantId: resolveTenantIdFromAuthHeaders(authHeaders),
+          eventType: "alert_external_status_sync",
+          channel: "ticket",
+          callbackId: `sync-result:${nonce}`,
+          alertId: `alert-${nonce}`,
+          limit: 10,
+        });
+        return {
+          items: queriedItems,
+          total: queriedItems.length,
+          filters: {
+            eventType: input.eventType,
+            channel: input.channel,
+            callbackId: input.callbackId,
+            alertId: input.alertId,
+            limit: input.limit,
+          },
+        };
+      },
+      async replayMessages(input) {
+        replayCalls += 1;
+        expect(input).toEqual({
+          tenantId: resolveTenantIdFromAuthHeaders(authHeaders),
+          messageIds: ["INTEGRATION_DISPATCH_DLQ:101"],
+        });
+        return {
+          replayedCount: 1,
+          failedCount: 0,
+          items: [
+            {
+              messageId: "INTEGRATION_DISPATCH_DLQ:101",
+              status: "replayed",
+            },
+          ],
+        };
+      },
+    });
+
+    const listResponse = await app.request(
+      `/api/v1/integrations/dlq/messages?eventType=alert_external_status_sync&channel=ticket&callbackId=${encodeURIComponent(
+        `sync-result:${nonce}`,
+      )}&alertId=${encodeURIComponent(`alert-${nonce}`)}&limit=10`,
+      {
+        headers: authHeaders,
+      },
+    );
+    expect(listResponse.status).toBe(200);
+    const listBody = (await listResponse.json()) as {
+      total: number;
+      items: Array<{ messageId: string; alertId?: string }>;
+      filters: {
+        eventType?: string;
+        channel?: string;
+        callbackId?: string;
+        alertId?: string;
+        limit?: number;
+      };
+    };
+    expect(listBody.total).toBe(1);
+    expect(listBody.items[0]?.messageId).toBe("INTEGRATION_DISPATCH_DLQ:101");
+    expect(listBody.filters).toEqual({
+      eventType: "alert_external_status_sync",
+      channel: "ticket",
+      callbackId: `sync-result:${nonce}`,
+      alertId: `alert-${nonce}`,
+      limit: 10,
+    });
+
+    const replayResponse = await app.request(
+      "/api/v1/integrations/dlq/messages/replay",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          messageIds: ["INTEGRATION_DISPATCH_DLQ:101"],
+        }),
+      },
+    );
+    expect(replayResponse.status).toBe(200);
+    const replayBody = (await replayResponse.json()) as {
+      replayedCount: number;
+      failedCount: number;
+      items: Array<{ messageId: string; status: string }>;
+    };
+    expect(replayBody.replayedCount).toBe(1);
+    expect(replayBody.failedCount).toBe(0);
+    expect(replayBody.items[0]).toEqual({
+      messageId: "INTEGRATION_DISPATCH_DLQ:101",
+      status: "replayed",
+    });
+
+    expect(listCalls).toBe(1);
+    expect(replayCalls).toBe(1);
+
+    const queryAudits = await queryAuditByAction(
+      "control_plane.integration_dlq_messages_queried",
+      `alert-${nonce}`,
+    );
+    expect(
+      queryAudits.items.some(
+        (item) =>
+          item.action === "control_plane.integration_dlq_messages_queried" &&
+          (item.metadata.filters as { alertId?: string } | undefined)?.alertId ===
+            `alert-${nonce}`,
+      ),
+    ).toBe(true);
+
+    const replayAudits = await queryAuditByAction(
+      "control_plane.integration_dlq_messages_replayed",
+      "INTEGRATION_DISPATCH_DLQ:101",
+    );
+    expect(
+      replayAudits.items.some(
+        (item) =>
+          item.action === "control_plane.integration_dlq_messages_replayed" &&
+          Array.isArray(item.metadata.messageIds) &&
+          item.metadata.messageIds.includes("INTEGRATION_DISPATCH_DLQ:101"),
+      ),
+    ).toBe(true);
+
+    await __resetIntegrationDlqBackendForTests();
+  });
+
+  test("integration dlq 查询与 replay 在后端不可用时返回 503，参数非法返回 400", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    __setIntegrationDlqBackendForTests({
+      async listMessages() {
+        throw new Error("dlq backend unavailable");
+      },
+      async replayMessages() {
+        throw new Error("dlq backend unavailable");
+      },
+    });
+
+    const badQueryResponse = await app.request(
+      "/api/v1/integrations/dlq/messages?limit=0",
+      {
+        headers: authHeaders,
+      },
+    );
+    expect(badQueryResponse.status).toBe(400);
+
+    const queryResponse = await app.request(
+      "/api/v1/integrations/dlq/messages?limit=10",
+      {
+        headers: authHeaders,
+      },
+    );
+    expect(queryResponse.status).toBe(503);
+
+    const badReplayResponse = await app.request(
+      "/api/v1/integrations/dlq/messages/replay",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          messageIds: [],
+        }),
+      },
+    );
+    expect(badReplayResponse.status).toBe(400);
+
+    const replayResponse = await app.request(
+      "/api/v1/integrations/dlq/messages/replay",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          messageIds: ["INTEGRATION_DISPATCH_DLQ:999"],
+        }),
+      },
+    );
+    expect(replayResponse.status).toBe(503);
+
+    await __resetIntegrationDlqBackendForTests();
+  });
+
+  test("integration dlq recovery jobs 支持创建、列表、详情与完成审计", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const nonce = createNonce("integration-dlq-recovery");
+
+    __setIntegrationDlqBackendForTests({
+      async listMessages(input) {
+        expect(input.tenantId).toBe(tenantId);
+        return {
+          items: [
+            {
+              messageId: "INTEGRATION_DISPATCH_DLQ:201",
+              stream: "INTEGRATION_DISPATCH_DLQ",
+              subject: "integration.alert.external_status_sync",
+              eventType: "alert_external_status_sync",
+              channel: "ticket",
+              callbackId: `sync-result:${nonce}`,
+              tenantId,
+              alertId: `alert-${nonce}`,
+              externalType: "ticket",
+              externalId: `ticket-${nonce}`,
+              failedAt: "2026-03-08T11:00:00.000Z",
+              attempt: 2,
+              error: "timeout",
+              retryable: true,
+              payload: {},
+            },
+          ],
+          total: 1,
+          filters: {
+            eventType: input.eventType,
+            channel: input.channel,
+            callbackId: input.callbackId,
+            alertId: input.alertId,
+            limit: input.limit,
+          },
+        };
+      },
+      async replayMessages(input) {
+        expect(input.tenantId).toBe(tenantId);
+        expect(input.messageIds).toEqual(["INTEGRATION_DISPATCH_DLQ:201"]);
+        return {
+          replayedCount: 1,
+          failedCount: 0,
+          items: [
+            {
+              messageId: "INTEGRATION_DISPATCH_DLQ:201",
+              status: "replayed",
+            },
+          ],
+        };
+      },
+    });
+
+    const createResponse = await app.request(
+      "/api/v1/integrations/dlq/recovery-jobs",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          filters: {
+            alertId: `alert-${nonce}`,
+            limit: 10,
+          },
+        }),
+      },
+    );
+    expect(createResponse.status).toBe(202);
+    const created = (await createResponse.json()) as {
+      id: string;
+      status: string;
+      summary: { total: number; replayed: number; failed: number };
+      messageIds: string[];
+    };
+    expect(created.status).toBe("queued");
+    expect(created.summary).toEqual({
+      total: 1,
+      replayed: 0,
+      failed: 0,
+    });
+
+    await __drainIntegrationDlqRecoveryQueueForTests();
+
+    const listResponse = await app.request(
+      "/api/v1/integrations/dlq/recovery-jobs?status=completed&limit=10",
+      {
+        headers: authHeaders,
+      },
+    );
+    expect(listResponse.status).toBe(200);
+    const listBody = (await listResponse.json()) as {
+      items: Array<{ id: string; status: string }>;
+      total: number;
+      filters: { status?: string; limit?: number };
+    };
+    expect(listBody.total).toBeGreaterThanOrEqual(1);
+    expect(listBody.filters).toEqual({
+      status: "completed",
+      limit: 10,
+    });
+    expect(
+      listBody.items.some((item) => item.id === created.id && item.status === "completed"),
+    ).toBe(true);
+
+    const detailResponse = await app.request(
+      `/api/v1/integrations/dlq/recovery-jobs/${encodeURIComponent(created.id)}`,
+      {
+        headers: authHeaders,
+      },
+    );
+    expect(detailResponse.status).toBe(200);
+    const detailBody = (await detailResponse.json()) as {
+      id: string;
+      status: string;
+      summary: { total: number; replayed: number; failed: number };
+      items: Array<{ messageId: string; status: string }>;
+    };
+    expect(detailBody.id).toBe(created.id);
+    expect(detailBody.status).toBe("completed");
+    expect(detailBody.summary).toEqual({
+      total: 1,
+      replayed: 1,
+      failed: 0,
+    });
+    expect(detailBody.items).toEqual([
+      {
+        messageId: "INTEGRATION_DISPATCH_DLQ:201",
+        status: "replayed",
+      },
+    ]);
+
+    const createdAudits = await queryAuditByAction(
+      "control_plane.integration_dlq_recovery_job_created",
+      created.id,
+    );
+    expect(
+      createdAudits.items.some(
+        (item) =>
+          item.action === "control_plane.integration_dlq_recovery_job_created" &&
+          item.metadata.jobId === created.id,
+      ),
+    ).toBe(true);
+
+    const completedAudits = await queryAuditByAction(
+      "control_plane.integration_dlq_recovery_job_completed",
+      created.id,
+    );
+    expect(
+      completedAudits.items.some(
+        (item) =>
+          item.action === "control_plane.integration_dlq_recovery_job_completed" &&
+          item.metadata.jobId === created.id,
+      ),
+    ).toBe(true);
+
+    await __resetIntegrationDlqBackendForTests();
+  });
+
+  test("integration alert failure report 支持 summary 与过滤条件", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const repositoryWithAudit = repository as {
+      appendAuditLog?: (input: {
+        tenantId: string;
+        eventId: string;
+        action: string;
+        level: string;
+        detail: string;
+        metadata: Record<string, unknown>;
+      }) => Promise<unknown>;
+    };
+    if (typeof repositoryWithAudit.appendAuditLog !== "function") {
+      throw new Error("repository.appendAuditLog 不可用，无法验证失败审计报表。");
+    }
+
+    const nonce = createNonce("integration-failure-report");
+    await repositoryWithAudit.appendAuditLog({
+      tenantId,
+      eventId: `cp:${nonce}:1`,
+      action: "control_plane.alert_external_link_retry_requested",
+      level: "info",
+      detail: "retry requested",
+      metadata: {
+        alertId: `alert-${nonce}`,
+        externalSystem: "ticket",
+        requestId: `req-${nonce}-1`,
+      },
+    });
+    await repositoryWithAudit.appendAuditLog({
+      tenantId,
+      eventId: `cp:${nonce}:2`,
+      action: "control_plane.alert_external_link_retry_failed",
+      level: "warning",
+      detail: "retry failed",
+      metadata: {
+        alertId: `alert-${nonce}`,
+        externalSystem: "ticket",
+        failureStage: "dispatch_http",
+        failureCode: "downstream_http_5xx",
+        requestId: `req-${nonce}-2`,
+      },
+    });
+    await repositoryWithAudit.appendAuditLog({
+      tenantId,
+      eventId: `cp:${nonce}:3`,
+      action: "control_plane.integration_dlq_recovery_job_completed",
+      level: "info",
+      detail: "recovery completed",
+      metadata: {
+        jobId: `job-${nonce}`,
+        externalSystem: "ticket",
+        requestId: `req-${nonce}-3`,
+      },
+    });
+
+    const response = await app.request(
+      `/api/v1/integrations/failure-reports/alerts?externalSystem=ticket&limit=10`,
+      {
+        headers: authHeaders,
+      },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      summary: {
+        totalEvents: number;
+        retryRequested: number;
+        retryFailed: number;
+        recoveryJobsCompleted: number;
+      };
+      items: Array<{
+        actionType: string;
+        alertId?: string;
+        externalSystem?: string;
+        stage?: string;
+        code?: string;
+        status: string;
+      }>;
+      filters: {
+        from?: string;
+        to?: string;
+        externalSystem?: string;
+        stage?: string;
+        actionType?: string;
+        limit?: number;
+      };
+    };
+    expect(body.summary.totalEvents).toBeGreaterThanOrEqual(3);
+    expect(body.summary.retryRequested).toBeGreaterThanOrEqual(1);
+    expect(body.summary.retryFailed).toBeGreaterThanOrEqual(1);
+    expect(body.summary.recoveryJobsCompleted).toBeGreaterThanOrEqual(1);
+    expect(body.filters).toEqual({
+      from: undefined,
+      to: undefined,
+      externalSystem: "ticket",
+      stage: undefined,
+      actionType: undefined,
+      limit: 10,
+    });
+    expect(
+      body.items.some(
+        (item) =>
+          item.actionType === "retry_failed" &&
+          item.alertId === `alert-${nonce}` &&
+          item.stage === "dispatch_http" &&
+          item.code === "downstream_http_5xx" &&
+          item.status === "failed",
+      ),
+    ).toBe(true);
+  });
+
+  test("integration alert failure trends 支持按日趋势与容量聚合", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const repositoryWithAudit = repository as {
+      appendAuditLog?: (input: {
+        tenantId: string;
+        eventId: string;
+        action: string;
+        level: string;
+        detail: string;
+        metadata: Record<string, unknown>;
+        createdAt?: string;
+      }) => Promise<unknown>;
+    };
+    if (typeof repositoryWithAudit.appendAuditLog !== "function") {
+      throw new Error("repository.appendAuditLog 不可用，无法验证失败趋势报表。");
+    }
+
+    const nonce = createNonce("integration-failure-trends");
+    const externalSystem = `ops-${nonce}`;
+    await repositoryWithAudit.appendAuditLog({
+      tenantId,
+      eventId: `cp:${nonce}:1`,
+      action: "control_plane.alert_external_link_retry_failed",
+      level: "warning",
+      detail: "retry failed",
+      metadata: {
+        alertId: `alert-${nonce}-1`,
+        externalSystem,
+        failureStage: "dispatch_http",
+        failureCode: "downstream_http_5xx",
+      },
+      createdAt: "2026-03-01T10:00:00.000Z",
+    });
+    await repositoryWithAudit.appendAuditLog({
+      tenantId,
+      eventId: `cp:${nonce}:2`,
+      action: "control_plane.integration_dlq_recovery_job_completed",
+      level: "info",
+      detail: "recovery completed",
+      metadata: {
+        alertId: `alert-${nonce}-1`,
+        externalSystem,
+        stage: "dispatch_publish",
+      },
+      createdAt: "2026-03-01T11:00:00.000Z",
+    });
+    await repositoryWithAudit.appendAuditLog({
+      tenantId,
+      eventId: `cp:${nonce}:3`,
+      action: "control_plane.alert_external_link_retry_requested",
+      level: "info",
+      detail: "retry requested",
+      metadata: {
+        alertId: `alert-${nonce}-2`,
+        externalSystem,
+        stage: "publish",
+      },
+      createdAt: "2026-03-02T09:00:00.000Z",
+    });
+
+    const response = await app.request(
+      `/api/v1/integrations/failure-reports/alerts/trends?externalSystem=${encodeURIComponent(externalSystem)}&top=2`,
+      {
+        headers: authHeaders,
+      },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      summary: {
+        totalEvents: number;
+        requestedEvents: number;
+        successEvents: number;
+        failedEvents: number;
+        days: number;
+        averageEventsPerDay: number;
+        peakDate?: string;
+        peakCount: number;
+      };
+      daily: Array<{
+        date: string;
+        totalEvents: number;
+        requestedEvents: number;
+        successEvents: number;
+        failedEvents: number;
+        uniqueAlerts: number;
+        retryRequested: number;
+        retryFailed: number;
+        recoveryJobsCompleted: number;
+      }>;
+      capacity: {
+        externalSystems: Array<{
+          name: string;
+          totalEvents: number;
+          failedEvents: number;
+          successEvents: number;
+          requestedEvents: number;
+          uniqueAlerts: number;
+        }>;
+        stages: Array<{
+          name: string;
+          totalEvents: number;
+        }>;
+      };
+      filters: {
+        externalSystem?: string;
+        top: number;
+      };
+    };
+
+    expect(body.summary.totalEvents).toBeGreaterThanOrEqual(3);
+    expect(body.summary.requestedEvents).toBeGreaterThanOrEqual(1);
+    expect(body.summary.successEvents).toBeGreaterThanOrEqual(1);
+    expect(body.summary.failedEvents).toBeGreaterThanOrEqual(1);
+    expect(body.summary.days).toBeGreaterThanOrEqual(2);
+    expect(body.summary.averageEventsPerDay).toBeGreaterThan(0);
+    expect(body.summary.peakDate).toBe("2026-03-01");
+    expect(body.summary.peakCount).toBeGreaterThanOrEqual(2);
+    expect(body.filters.externalSystem).toBe(externalSystem);
+    expect(body.filters.top).toBe(2);
+
+    expect(
+      body.daily.some(
+        (item) =>
+          item.date === "2026-03-01" &&
+          item.totalEvents >= 2 &&
+          item.failedEvents >= 1 &&
+          item.successEvents >= 1 &&
+          item.recoveryJobsCompleted >= 1,
+      ),
+    ).toBe(true);
+    expect(
+      body.daily.some(
+        (item) =>
+          item.date === "2026-03-02" &&
+          item.totalEvents >= 1 &&
+          item.requestedEvents >= 1 &&
+          item.retryRequested >= 1,
+      ),
+    ).toBe(true);
+
+    expect(
+      body.capacity.externalSystems.some(
+        (item) =>
+          item.name === externalSystem &&
+          item.totalEvents >= 2 &&
+          item.failedEvents >= 1 &&
+          item.successEvents >= 1 &&
+          item.uniqueAlerts >= 1,
+      ),
+    ).toBe(true);
+    expect(
+      body.capacity.stages.some((item) => item.name === "dispatch_http" && item.totalEvents >= 1),
+    ).toBe(true);
   });
 
   test("GET /api/v1/alerts 支持查询参数并返回结构化结果", async () => {
@@ -11920,6 +13752,101 @@ describe("Control Plane API", () => {
     ).toBe(false);
   });
 
+  test("alerts/orchestration executions 列表支持 escalated 与 escalationReason 过滤", async () => {
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const repository = getControlPlaneRepository();
+    const nonce = createNonce("alerts-orchestration-executions-escalated");
+    const ruleId = `rule-escalated-${nonce}`;
+
+    const upsertRuleResponse = await app.request(
+      `/api/v1/alerts/orchestration/rules/${encodeURIComponent(ruleId)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          name: `升级规则-${nonce}`,
+          enabled: true,
+          eventType: "alert",
+          dedupeWindowSeconds: 0,
+          suppressionWindowSeconds: 0,
+          mergeWindowSeconds: 0,
+          slaMinutes: 15,
+          channels: ["ticket"],
+        }),
+      },
+    );
+    expect(upsertRuleResponse.status).toBe(200);
+
+    await repository.createAlertOrchestrationExecutionLog(tenantId, {
+      id: `exec-escalated-${nonce}`,
+      ruleId,
+      eventType: "alert",
+      alertId: `alert-escalated-${nonce}`,
+      severity: "critical",
+      channels: ["ticket"],
+      dispatchMode: "rule",
+      simulated: false,
+      metadata: {
+        dispatchMode: "rule",
+        escalated: true,
+        escalationReason: "sla_timeout",
+        escalationTargetChannels: ["ticket"],
+        slaMinutes: 15,
+      },
+    });
+
+    await repository.createAlertOrchestrationExecutionLog(tenantId, {
+      id: `exec-normal-${nonce}`,
+      ruleId,
+      eventType: "alert",
+      alertId: `alert-normal-${nonce}`,
+      severity: "critical",
+      channels: ["ticket"],
+      dispatchMode: "rule",
+      simulated: false,
+      metadata: {
+        dispatchMode: "rule",
+      },
+    });
+
+    const response = await app.request(
+      `/api/v1/alerts/orchestration/executions?ruleId=${encodeURIComponent(
+        ruleId,
+      )}&escalated=true&escalationReason=sla_timeout&limit=10`,
+      {
+        headers: authHeaders,
+      },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      items: Array<{
+        id: string;
+        escalated: boolean;
+        escalationReason?: string;
+        escalationTargetChannels?: string[];
+        slaMinutes?: number;
+      }>;
+      filters: {
+        escalated?: boolean;
+        escalationReason?: string;
+      };
+    };
+    expect(body.filters.escalated).toBe(true);
+    expect(body.filters.escalationReason).toBe("sla_timeout");
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]).toMatchObject({
+      id: `exec-escalated-${nonce}`,
+      escalated: true,
+      escalationReason: "sla_timeout",
+      escalationTargetChannels: ["ticket"],
+      slaMinutes: 15,
+    });
+  });
+
   test("GET /api/v1/audits 返回结构包含 items/total/filters", async () => {
     const authHeaders = await resolveAuthHeaders();
     const response = await app.request("/api/v1/audits", {
@@ -12477,6 +14404,1315 @@ describe("Control Plane API", () => {
     expect(crossTenantResponse.status).toBe(403);
   });
 
+  test("system-config agent runtime 视图、配置快照与 heartbeat 回填 identity lastSeenAt", async () => {
+    const nonce = createNonce("system-config-agent-runtime");
+    const auth = await getDefaultAuthContext();
+
+    const createTenantResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `SystemConfig Agent Runtime ${nonce}`,
+        slug: `system-config-agent-runtime-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(createTenantResult, [201]);
+    const tenantId = extractEntityId(createTenantResult.payload);
+    if (!tenantId) {
+      throw new Error("system-config agent runtime 测试租户创建失败。");
+    }
+
+    const tenantHeaders = await issueTenantScopedAuthHeaders(
+      tenantId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const createSourceResult = await createIdentitySourceByAuth(
+      auth.accessToken,
+      {
+        tenantId,
+        name: `Runtime Source ${nonce}`,
+        location: `~/.codex/sessions/runtime-${nonce}`,
+        accessMode: "hybrid",
+      },
+      auth.userId,
+    );
+    assertApiStatus(createSourceResult, [201]);
+    const sourceId = extractEntityId(createSourceResult.payload);
+    if (!sourceId) {
+      throw new Error("system-config agent runtime source 创建失败。");
+    }
+
+    const createDeviceResult = await createTenantDeviceByAuth(
+      auth.accessToken,
+      {
+        tenantId,
+        name: `Runtime Device ${nonce}`,
+        slug: `runtime-device-${nonce}`,
+        hostname: `runtime-host-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(createDeviceResult, [201]);
+    const deviceId = extractEntityId(createDeviceResult.payload);
+    if (!deviceId) {
+      throw new Error("system-config agent runtime device 创建失败。");
+    }
+
+    const createAgentResult = await createTenantAgentByAuth(
+      auth.accessToken,
+      {
+        tenantId,
+        name: `Runtime Agent ${nonce}`,
+        slug: `runtime-agent-${nonce}`,
+        agentId: `runtime-agent-${nonce}`,
+        deviceId,
+      },
+      auth.userId,
+    );
+    assertApiStatus(createAgentResult, [201]);
+    const agentId = extractEntityId(createAgentResult.payload);
+    if (!agentId) {
+      throw new Error("system-config agent runtime agent 创建失败。");
+    }
+
+    const createBindingResult = await createTenantSourceBindingByAuth(
+      auth.accessToken,
+      {
+        tenantId,
+        sourceId,
+        agentId,
+      },
+      auth.userId,
+    );
+    assertApiStatus(createBindingResult, [201]);
+
+    const heartbeatOccurredAt = new Date().toISOString();
+    const heartbeatConfigFetchedAt = new Date(Date.now() - 30_000).toISOString();
+    const heartbeatResponse = await app.request(
+      "/api/v1/system/config/agent-heartbeat",
+      jsonRequest(
+        "POST",
+        {
+          agentId,
+          sessionId: `session-${nonce}`,
+          hostname: `daemon-host-${nonce}`,
+          version: "0.2.0",
+          daemon: true,
+          occurredAt: heartbeatOccurredAt,
+          configVersion: `cfg:${nonce}`,
+          configFetchedAt: heartbeatConfigFetchedAt,
+          heartbeatIntervalSec: 45,
+          ingestProtocol: "grpc",
+          ingestEndpoint: "127.0.0.1:9091",
+          sourceCount: 1,
+          sourceIds: [sourceId],
+          lastIngestStatusCode: 202,
+          lastAccepted: 5,
+          lastRejected: 1,
+        },
+        tenantHeaders,
+      ),
+    );
+    expect(heartbeatResponse.status).toBe(202);
+    const heartbeatBody = (await heartbeatResponse.json()) as {
+      agentId: string;
+      tenantId: string;
+      configVersion: string;
+      occurredAt: string;
+      receivedAt: string;
+    };
+    expect(heartbeatBody.agentId).toBe(agentId);
+    expect(heartbeatBody.tenantId).toBe(tenantId);
+    expect(heartbeatBody.configVersion).toBe(`cfg:${nonce}`);
+    expect(heartbeatBody.occurredAt).toBe(heartbeatOccurredAt);
+    expect(typeof heartbeatBody.receivedAt).toBe("string");
+
+    const runtimeViewsResponse = await app.request(
+      "/api/v1/system/config/agents/views",
+      {
+        headers: tenantHeaders,
+      },
+    );
+    expect(runtimeViewsResponse.status).toBe(200);
+    const runtimeViewsBody = (await runtimeViewsResponse.json()) as {
+      items: Array<{
+        agentId: string;
+        displayName: string;
+        hostname: string;
+        version?: string;
+        sourceIds: string[];
+        sourceNames: string[];
+        runtimeStatus: "online" | "stale" | "never_seen";
+        lastHeartbeatAt: string | null;
+        lastConfigVersion?: string;
+        lastIngestStatusCode: number | null;
+        lastAccepted: number;
+        lastRejected: number;
+      }>;
+      total: number;
+      generatedAt: string;
+    };
+    expect(runtimeViewsBody.total).toBe(1);
+    const runtimeView = runtimeViewsBody.items[0];
+    expect(runtimeView?.agentId).toBe(agentId);
+    expect(runtimeView?.displayName).toBe(`Runtime Agent ${nonce}`);
+    expect(runtimeView?.hostname).toBe(`daemon-host-${nonce}`);
+    expect(runtimeView?.version).toBe("0.2.0");
+    expect(runtimeView?.runtimeStatus).toBe("online");
+    expect(runtimeView?.lastHeartbeatAt).toBe(heartbeatOccurredAt);
+    expect(runtimeView?.lastConfigVersion).toBe(`cfg:${nonce}`);
+    expect(runtimeView?.lastIngestStatusCode).toBe(202);
+    expect(runtimeView?.lastAccepted).toBe(5);
+    expect(runtimeView?.lastRejected).toBe(1);
+    expect(runtimeView?.sourceIds).toEqual([sourceId]);
+    expect(runtimeView?.sourceNames).toEqual([`Runtime Source ${nonce}`]);
+    expect(typeof runtimeViewsBody.generatedAt).toBe("string");
+
+    const runtimeConfigResponse = await app.request(
+      `/api/v1/system/config/agent-runtime?agentId=${encodeURIComponent(agentId)}`,
+      {
+        headers: tenantHeaders,
+      },
+    );
+    expect(runtimeConfigResponse.status).toBe(200);
+    const runtimeConfigBody = (await runtimeConfigResponse.json()) as {
+      tenantId: string;
+      agent: {
+        agentId: string;
+        deviceId?: string;
+        hostname: string;
+        displayName: string;
+      };
+      runtime: {
+        heartbeatIntervalSeconds: number;
+        staleAfterSeconds: number;
+        ingestProtocol: "http" | "grpc";
+        sampleGenerateCount: number;
+      };
+      bindings: {
+        sourceCount: number;
+        sourceIds: string[];
+        sources: Array<{
+          sourceId: string;
+          name: string;
+          accessMode: string;
+          enabled: boolean;
+          location: string;
+        }>;
+      };
+      configVersion: string;
+      updatedAt: string;
+    };
+    expect(runtimeConfigBody.tenantId).toBe(tenantId);
+    expect(runtimeConfigBody.agent.agentId).toBe(agentId);
+    expect(runtimeConfigBody.agent.deviceId).toBe(deviceId);
+    expect(runtimeConfigBody.bindings.sourceCount).toBe(1);
+    expect(runtimeConfigBody.bindings.sourceIds).toEqual([sourceId]);
+    expect(runtimeConfigBody.bindings.sources[0]?.name).toBe(`Runtime Source ${nonce}`);
+    expect(runtimeConfigBody.runtime.ingestProtocol).toBe("http");
+    expect(runtimeConfigBody.runtime.sampleGenerateCount).toBeGreaterThanOrEqual(1);
+    expect(typeof runtimeConfigBody.configVersion).toBe("string");
+    expect(typeof runtimeConfigBody.updatedAt).toBe("string");
+
+    const listAgentsResult = await listTenantAgentsByAuth(
+      auth.accessToken,
+      tenantId,
+      auth.userId,
+    );
+    assertApiStatus(listAgentsResult, [200]);
+    const listedAgents = extractListItems(listAgentsResult.payload);
+    const listedAgent = listedAgents.find(
+      (item) => pickString(item, ["id", "agentId"]) === agentId,
+    ) as Record<string, unknown> | undefined;
+    expect(listedAgent?.lastSeenAt).toBe(heartbeatOccurredAt);
+
+    const listDevicesResult = await listTenantDevicesByAuth(
+      auth.accessToken,
+      tenantId,
+      auth.userId,
+    );
+    assertApiStatus(listDevicesResult, [200]);
+    const listedDevices = extractListItems(listDevicesResult.payload);
+    const listedDevice = listedDevices.find(
+      (item) => pickString(item, ["id", "deviceId"]) === deviceId,
+    ) as Record<string, unknown> | undefined;
+    expect(listedDevice?.lastSeenAt).toBe(heartbeatOccurredAt);
+  });
+
+  test("system-config packages create/publish/watch/latest 支持租户隔离", async () => {
+    const nonce = createNonce("system-config-package");
+    const auth = await getDefaultAuthContext();
+
+    const tenantAResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `SystemConfig Package A ${nonce}`,
+        slug: `system-config-package-a-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantAResult, [201]);
+    const tenantAId = extractEntityId(tenantAResult.payload);
+    if (!tenantAId) {
+      throw new Error("system-config package 租户 A 创建失败。");
+    }
+
+    const tenantBResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `SystemConfig Package B ${nonce}`,
+        slug: `system-config-package-b-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantBResult, [201]);
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error("system-config package 租户 B 创建失败。");
+    }
+
+    const tenantAHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      auth.accessToken,
+      auth.userId,
+    );
+    const tenantBHeaders = await issueTenantScopedAuthHeaders(
+      tenantBId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const badCreateResponse = await app.request(
+      "/api/v1/system/config/packages",
+      jsonRequest(
+        "POST",
+        {
+          version: "",
+        },
+        tenantAHeaders,
+      ),
+    );
+    expect(badCreateResponse.status).toBe(400);
+
+    const createResponse = await app.request(
+      "/api/v1/system/config/packages",
+      jsonRequest(
+        "POST",
+        {
+          version: `agent-policy-${nonce}`,
+          issuedAt: "2026-03-08T08:00:00Z",
+          signatureStatus: "verified",
+          requiresApproval: false,
+          targetSelectors: {
+            agentIds: [`agent-${nonce}`],
+            deviceIds: [`device-${nonce}`],
+            channels: ["beta"],
+            hostnames: [`host-${nonce}`],
+          },
+          payload: {
+            rollout: "stage-a",
+            mode: "observe",
+          },
+        },
+        tenantAHeaders,
+      ),
+    );
+    expect(createResponse.status).toBe(201);
+    const created = (await createResponse.json()) as {
+      packageId: string;
+      tenantId: string;
+      version: string;
+      issuedAt: string;
+      signatureStatus: string;
+      requiresApproval: boolean;
+      requiredApprovals: number;
+      isPublished: boolean;
+      publishedAt?: string;
+      targetSelectors: {
+        agentIds?: string[];
+        deviceIds?: string[];
+        channels?: string[];
+        hostnames?: string[];
+      };
+      payload: Record<string, unknown>;
+    };
+    expect(created.tenantId).toBe(tenantAId);
+    expect(created.version).toBe(`agent-policy-${nonce}`);
+    expect(created.issuedAt).toBe("2026-03-08T08:00:00Z");
+    expect(created.signatureStatus).toBe("verified");
+    expect(created.requiresApproval).toBe(false);
+    expect(created.requiredApprovals).toBe(0);
+    expect(created.isPublished).toBe(false);
+    expect(created.publishedAt).toBeUndefined();
+    expect(created.targetSelectors.agentIds).toEqual([`agent-${nonce}`]);
+    expect(created.targetSelectors.deviceIds).toEqual([`device-${nonce}`]);
+    expect(created.targetSelectors.channels).toEqual(["beta"]);
+    expect(created.targetSelectors.hostnames).toEqual([`host-${nonce}`]);
+    expect(created.payload.rollout).toBe("stage-a");
+
+    const listAResponse = await app.request(
+      "/api/v1/system/config/packages?limit=10",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(listAResponse.status).toBe(200);
+    const listABody = (await listAResponse.json()) as {
+      items: Array<{
+        packageId: string;
+        version: string;
+        requiresApproval: boolean;
+        requiredApprovals: number;
+        isPublished: boolean;
+      }>;
+      total: number;
+      filters: { limit?: number };
+    };
+    expect(listABody.total).toBeGreaterThanOrEqual(1);
+    expect(listABody.filters.limit).toBe(10);
+    expect(
+      listABody.items.some(
+        (item) =>
+          item.packageId === created.packageId &&
+          item.version === `agent-policy-${nonce}` &&
+          item.requiresApproval === false &&
+          item.requiredApprovals === 0 &&
+          item.isPublished === false,
+      ),
+    ).toBe(true);
+
+    const detailAResponse = await app.request(
+      `/api/v1/system/config/packages/${encodeURIComponent(created.packageId)}`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(detailAResponse.status).toBe(200);
+    const detailABody = (await detailAResponse.json()) as {
+      packageId: string;
+      version: string;
+      signatureStatus: string;
+      requiresApproval: boolean;
+      requiredApprovals: number;
+      isPublished: boolean;
+      publishedAt?: string;
+      targetSelectors: {
+        channels?: string[];
+      };
+      payload: Record<string, unknown>;
+    };
+    expect(detailABody.packageId).toBe(created.packageId);
+    expect(detailABody.version).toBe(`agent-policy-${nonce}`);
+    expect(detailABody.signatureStatus).toBe("verified");
+    expect(detailABody.requiresApproval).toBe(false);
+    expect(detailABody.requiredApprovals).toBe(0);
+    expect(detailABody.isPublished).toBe(false);
+    expect(detailABody.publishedAt).toBeUndefined();
+    expect(detailABody.targetSelectors.channels).toEqual(["beta"]);
+    expect(detailABody.payload.mode).toBe("observe");
+
+    const watchBeforePublishResponse = await app.request(
+      `/api/v1/system/config/packages/watch/latest?agentId=${encodeURIComponent(
+        `agent-${nonce}`,
+      )}&deviceId=${encodeURIComponent(
+        `device-${nonce}`,
+      )}&channel=beta&hostname=${encodeURIComponent(`host-${nonce}`)}`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(watchBeforePublishResponse.status).toBe(404);
+
+    const publishResponse = await app.request(
+      `/api/v1/system/config/packages/${encodeURIComponent(created.packageId)}/publish`,
+      {
+        method: "POST",
+        headers: tenantAHeaders,
+      },
+    );
+    expect(publishResponse.status).toBe(200);
+    const published = (await publishResponse.json()) as {
+      packageId: string;
+      isPublished: boolean;
+      publishedAt?: string;
+      requiresApproval: boolean;
+      requiredApprovals: number;
+    };
+    expect(published.packageId).toBe(created.packageId);
+    expect(published.isPublished).toBe(true);
+    expect(typeof published.publishedAt).toBe("string");
+    expect(published.requiresApproval).toBe(false);
+    expect(published.requiredApprovals).toBe(0);
+
+    const createNonMatchResponse = await app.request(
+      "/api/v1/system/config/packages",
+      jsonRequest(
+        "POST",
+        {
+          version: `agent-policy-other-${nonce}`,
+          issuedAt: "2026-03-08T09:00:00Z",
+          signatureStatus: "verified",
+          targetSelectors: {
+            channels: ["stable"],
+            hostnames: [`host-${nonce}`],
+          },
+          payload: {
+            rollout: "stage-b",
+          },
+        },
+        tenantAHeaders,
+      ),
+    );
+    expect(createNonMatchResponse.status).toBe(201);
+    const nonMatching = (await createNonMatchResponse.json()) as {
+      packageId: string;
+    };
+    const publishNonMatchResponse = await app.request(
+      `/api/v1/system/config/packages/${encodeURIComponent(nonMatching.packageId)}/publish`,
+      {
+        method: "POST",
+        headers: tenantAHeaders,
+      },
+    );
+    expect(publishNonMatchResponse.status).toBe(200);
+
+    const watchPublishedResponse = await app.request(
+      `/api/v1/system/config/packages/watch/latest?agentId=${encodeURIComponent(
+        `agent-${nonce}`,
+      )}&deviceId=${encodeURIComponent(
+        `device-${nonce}`,
+      )}&channel=beta&hostname=${encodeURIComponent(`host-${nonce}`)}`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(watchPublishedResponse.status).toBe(200);
+    const watchPublishedBody = (await watchPublishedResponse.json()) as {
+      packageId: string;
+      version: string;
+      isPublished: boolean;
+      publishedAt?: string;
+      requiresApproval: boolean;
+      requiredApprovals: number;
+    };
+    expect(watchPublishedBody.packageId).toBe(created.packageId);
+    expect(watchPublishedBody.version).toBe(`agent-policy-${nonce}`);
+    expect(watchPublishedBody.isPublished).toBe(true);
+    expect(watchPublishedBody.requiresApproval).toBe(false);
+    expect(watchPublishedBody.requiredApprovals).toBe(0);
+    expect(typeof watchPublishedBody.publishedAt).toBe("string");
+
+    const listBResponse = await app.request("/api/v1/system/config/packages", {
+      headers: tenantBHeaders,
+    });
+    expect(listBResponse.status).toBe(200);
+    const listBBody = (await listBResponse.json()) as {
+      items: Array<{ packageId: string }>;
+    };
+    expect(
+      listBBody.items.some((item) => item.packageId === created.packageId),
+    ).toBe(false);
+
+    const detailBResponse = await app.request(
+      `/api/v1/system/config/packages/${encodeURIComponent(created.packageId)}`,
+      {
+        headers: tenantBHeaders,
+      },
+    );
+    expect(detailBResponse.status).toBe(404);
+
+    const watchBResponse = await app.request(
+      `/api/v1/system/config/packages/watch/latest?agentId=${encodeURIComponent(
+        `agent-${nonce}`,
+      )}&deviceId=${encodeURIComponent(
+        `device-${nonce}`,
+      )}&channel=beta&hostname=${encodeURIComponent(`host-${nonce}`)}`,
+      {
+        headers: tenantBHeaders,
+      },
+    );
+    expect(watchBResponse.status).toBe(404);
+
+    const createAudits = await queryAuditByActionWithHeaders(
+      "control_plane.system_config_package_created",
+      created.packageId,
+      tenantAHeaders,
+    );
+    const createAudit = createAudits.items.find(
+      (item) =>
+        item.action === "control_plane.system_config_package_created" &&
+        item.metadata.packageId === created.packageId &&
+        item.metadata.tenantId === tenantAId,
+    );
+    expect(createAudit).toBeDefined();
+
+    const publishAudits = await queryAuditByActionWithHeaders(
+      "control_plane.system_config_package_published",
+      created.packageId,
+      tenantAHeaders,
+    );
+    const publishAudit = publishAudits.items.find(
+      (item) =>
+        item.action === "control_plane.system_config_package_published" &&
+        item.metadata.packageId === created.packageId &&
+        item.metadata.tenantId === tenantAId,
+    );
+    expect(publishAudit).toBeDefined();
+  });
+
+  test("system-config packages 审批达标后才能 publish，重复审批写 updated 审计", async () => {
+    const nonce = createNonce("system-config-package-approval");
+    const auth = await getDefaultAuthContext();
+
+    const tenantResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `SystemConfig Package Approval ${nonce}`,
+        slug: `system-config-package-approval-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error("system-config approval tenant 创建失败。");
+    }
+    const tenantHeaders = await issueTenantScopedAuthHeaders(
+      tenantId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const createdResponse = await app.request(
+      "/api/v1/system/config/packages",
+      jsonRequest(
+        "POST",
+        {
+          version: `agent-policy-approval-${nonce}`,
+          signatureStatus: "verified",
+          requiresApproval: true,
+          requiredApprovals: 1,
+          payload: {
+            mode: "enforce",
+          },
+        },
+        tenantHeaders,
+      ),
+    );
+    expect(createdResponse.status).toBe(201);
+    const created = (await createdResponse.json()) as {
+      packageId: string;
+      requiredApprovals: number;
+      isPublished: boolean;
+    };
+    expect(created.requiredApprovals).toBe(1);
+    expect(created.isPublished).toBe(false);
+
+    const publishBeforeApprovalResponse = await app.request(
+      `/api/v1/system/config/packages/${encodeURIComponent(created.packageId)}/publish`,
+      {
+        method: "POST",
+        headers: tenantHeaders,
+      },
+    );
+    expect(publishBeforeApprovalResponse.status).toBe(409);
+
+    const createApprovalResponse = await app.request(
+      `/api/v1/system/config/packages/${encodeURIComponent(created.packageId)}/approvals`,
+      jsonRequest(
+        "POST",
+        {
+          decision: "approved",
+          comment: "looks good",
+        },
+        tenantHeaders,
+      ),
+    );
+    expect(createApprovalResponse.status).toBe(201);
+    const createdApproval = (await createApprovalResponse.json()) as {
+      approvalId: string;
+      packageId: string;
+      approverUserId: string;
+      decision: string;
+    };
+    if (!auth.userId) {
+      throw new Error("system config package approval 测试缺少 userId。");
+    }
+    expect(createdApproval.packageId).toBe(created.packageId);
+    expect(createdApproval.approverUserId).toBe(auth.userId);
+    expect(createdApproval.decision).toBe("approved");
+
+    const updateApprovalResponse = await app.request(
+      `/api/v1/system/config/packages/${encodeURIComponent(created.packageId)}/approvals`,
+      jsonRequest(
+        "POST",
+        {
+          decision: "rejected",
+          comment: "need changes",
+        },
+        tenantHeaders,
+      ),
+    );
+    expect(updateApprovalResponse.status).toBe(200);
+    const updatedApproval = (await updateApprovalResponse.json()) as {
+      approvalId: string;
+      decision: string;
+    };
+    expect(updatedApproval.approvalId).toBe(createdApproval.approvalId);
+    expect(updatedApproval.decision).toBe("rejected");
+
+    const publishAfterRejectedResponse = await app.request(
+      `/api/v1/system/config/packages/${encodeURIComponent(created.packageId)}/publish`,
+      {
+        method: "POST",
+        headers: tenantHeaders,
+      },
+    );
+    expect(publishAfterRejectedResponse.status).toBe(409);
+
+    const approveAgainResponse = await app.request(
+      `/api/v1/system/config/packages/${encodeURIComponent(created.packageId)}/approvals`,
+      jsonRequest(
+        "POST",
+        {
+          decision: "approved",
+        },
+        tenantHeaders,
+      ),
+    );
+    expect(approveAgainResponse.status).toBe(200);
+
+    const listApprovalsResponse = await app.request(
+      `/api/v1/system/config/packages/${encodeURIComponent(created.packageId)}/approvals`,
+      {
+        headers: tenantHeaders,
+      },
+    );
+    expect(listApprovalsResponse.status).toBe(200);
+    const approvalsBody = (await listApprovalsResponse.json()) as {
+      items: Array<{ approvalId: string; decision: string }>;
+      total: number;
+    };
+    expect(approvalsBody.total).toBe(1);
+    expect(approvalsBody.items[0]?.approvalId).toBe(createdApproval.approvalId);
+    expect(approvalsBody.items[0]?.decision).toBe("approved");
+
+    const publishAfterApprovalResponse = await app.request(
+      `/api/v1/system/config/packages/${encodeURIComponent(created.packageId)}/publish`,
+      {
+        method: "POST",
+        headers: tenantHeaders,
+      },
+    );
+    expect(publishAfterApprovalResponse.status).toBe(200);
+
+    const approvalCreatedAudits = await queryAuditByActionWithHeaders(
+      "control_plane.system_config_package_approval_created",
+      createdApproval.approvalId,
+      tenantHeaders,
+    );
+    expect(
+      approvalCreatedAudits.items.some(
+        (item) =>
+          item.action === "control_plane.system_config_package_approval_created" &&
+          item.metadata.approvalId === createdApproval.approvalId,
+      ),
+    ).toBe(true);
+
+    const approvalUpdatedAudits = await queryAuditByActionWithHeaders(
+      "control_plane.system_config_package_approval_updated",
+      createdApproval.approvalId,
+      tenantHeaders,
+    );
+    expect(
+      approvalUpdatedAudits.items.some(
+        (item) =>
+          item.action === "control_plane.system_config_package_approval_updated" &&
+          item.metadata.approvalId === createdApproval.approvalId,
+      ),
+    ).toBe(true);
+  });
+
+  test("system agent releases create/list/detail/check 支持租户隔离与更新检查", async () => {
+    const nonce = createNonce("agent-release");
+    const auth = await getDefaultAuthContext();
+
+    const tenantAResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Agent Release A ${nonce}`,
+        slug: `agent-release-a-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantAResult, [201]);
+    const tenantAId = extractEntityId(tenantAResult.payload);
+    if (!tenantAId) {
+      throw new Error("agent release 租户 A 创建失败。");
+    }
+
+    const tenantBResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Agent Release B ${nonce}`,
+        slug: `agent-release-b-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantBResult, [201]);
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error("agent release 租户 B 创建失败。");
+    }
+
+    const tenantAHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      auth.accessToken,
+      auth.userId,
+    );
+    const tenantBHeaders = await issueTenantScopedAuthHeaders(
+      tenantBId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const badCreateResponse = await app.request(
+      "/api/v1/system/agent-releases",
+      jsonRequest(
+        "POST",
+        {
+          version: "",
+          artifacts: [],
+        },
+        tenantAHeaders,
+      ),
+    );
+    expect(badCreateResponse.status).toBe(400);
+
+    const createV1Response = await app.request(
+      "/api/v1/system/agent-releases",
+      jsonRequest(
+        "POST",
+        {
+          version: "1.0.0",
+          channel: "stable",
+          notes: "首个稳定版本",
+          publishedAt: "2026-03-08T08:00:00Z",
+          artifacts: [
+            {
+              os: "darwin",
+              arch: "arm64",
+              downloadUrl: "https://downloads.example.com/agent-1.0.0-darwin-arm64.zip",
+              checksumSha256: "sha256-darwin-arm64-v1",
+              signature: "c2lnbmF0dXJlLWRhcmd3aW4tYXJtNjQtdjE=",
+              signatureAlgorithm: "ed25519",
+              fileName: "agent-1.0.0-darwin-arm64.zip",
+              installHint: "解压后覆盖 /usr/local/bin/agent",
+            },
+            {
+              os: "linux",
+              arch: "amd64",
+              downloadUrl: "https://downloads.example.com/agent-1.0.0-linux-amd64.tar.gz",
+              checksumSha256: "sha256-linux-amd64-v1",
+              fileName: "agent-1.0.0-linux-amd64.tar.gz",
+              installHint: "解压后覆盖 /usr/local/bin/agent",
+            },
+          ],
+        },
+        tenantAHeaders,
+      ),
+    );
+    expect(createV1Response.status).toBe(201);
+    const releaseV1 = (await createV1Response.json()) as {
+      releaseId: string;
+      tenantId: string;
+      version: string;
+      channel: string;
+      publishedAt: string;
+      artifacts: Array<{ os: string; arch: string; fileName?: string }>;
+    };
+    expect(releaseV1.tenantId).toBe(tenantAId);
+    expect(releaseV1.version).toBe("1.0.0");
+    expect(releaseV1.channel).toBe("stable");
+    expect(releaseV1.publishedAt).toBe("2026-03-08T08:00:00Z");
+    expect(
+      releaseV1.artifacts.some(
+        (item) => item.os === "darwin" && item.arch === "arm64",
+      ),
+    ).toBe(true);
+
+    const createV11Response = await app.request(
+      "/api/v1/system/agent-releases",
+      jsonRequest(
+        "POST",
+        {
+          version: "1.1.0",
+          channel: "stable",
+          notes: "新增 update check 兼容字段",
+          publishedAt: "2026-03-08T09:00:00Z",
+          artifacts: [
+            {
+              os: "darwin",
+              arch: "arm64",
+              downloadUrl: "https://downloads.example.com/agent-1.1.0-darwin-arm64.zip",
+              checksumSha256: "sha256-darwin-arm64-v11",
+              signature: "c2lnbmF0dXJlLWRhcmd3aW4tYXJtNjQtdjEx",
+              signatureAlgorithm: "ed25519",
+              rolloutRing: "stable",
+              rolloutPercentage: 100,
+              minAgentVersion: "1.0.0",
+              fileName: "agent-1.1.0-darwin-arm64.zip",
+              installHint: "解压后覆盖 /usr/local/bin/agent",
+            },
+          ],
+        },
+        tenantAHeaders,
+      ),
+    );
+    expect(createV11Response.status).toBe(201);
+    const releaseV11 = (await createV11Response.json()) as {
+      releaseId: string;
+      version: string;
+      artifacts: Array<{ fileName?: string }>;
+    };
+    expect(releaseV11.version).toBe("1.1.0");
+    expect(releaseV11.artifacts[0]?.fileName).toBe(
+      "agent-1.1.0-darwin-arm64.zip",
+    );
+
+    const createTenantBResponse = await app.request(
+      "/api/v1/system/agent-releases",
+      jsonRequest(
+        "POST",
+        {
+          version: "9.9.9",
+          channel: "stable",
+          publishedAt: "2026-03-08T10:00:00Z",
+          artifacts: [
+            {
+              os: "darwin",
+              arch: "arm64",
+              downloadUrl: "https://downloads.example.com/agent-9.9.9-darwin-arm64.zip",
+            },
+          ],
+        },
+        tenantBHeaders,
+      ),
+    );
+    expect(createTenantBResponse.status).toBe(201);
+
+    const listAResponse = await app.request(
+      "/api/v1/system/agent-releases?limit=10&channel=stable&os=darwin&arch=arm64",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(listAResponse.status).toBe(200);
+    const listABody = (await listAResponse.json()) as {
+      items: Array<{ releaseId: string; version: string }>;
+      total: number;
+      filters: { limit?: number; channel?: string; os?: string; arch?: string };
+    };
+    expect(listABody.total).toBe(2);
+    expect(listABody.filters.limit).toBe(10);
+    expect(listABody.filters.channel).toBe("stable");
+    expect(listABody.items[0]?.version).toBe("1.1.0");
+    expect(
+      listABody.items.some((item) => item.releaseId === releaseV1.releaseId),
+    ).toBe(true);
+
+    const detailAResponse = await app.request(
+      `/api/v1/system/agent-releases/${encodeURIComponent(releaseV11.releaseId)}`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(detailAResponse.status).toBe(200);
+    const detailABody = (await detailAResponse.json()) as {
+      releaseId: string;
+      version: string;
+      channel: string;
+      notes?: string;
+      artifacts: Array<{
+        downloadUrl: string;
+        signatureAlgorithm?: string;
+        rolloutRing?: string;
+        rolloutPercentage?: number;
+        minAgentVersion?: string;
+      }>;
+    };
+    expect(detailABody.releaseId).toBe(releaseV11.releaseId);
+    expect(detailABody.version).toBe("1.1.0");
+    expect(detailABody.channel).toBe("stable");
+    expect(detailABody.notes).toContain("update check");
+    expect(detailABody.artifacts[0]?.downloadUrl).toContain("1.1.0");
+    expect(detailABody.artifacts[0]?.signatureAlgorithm).toBe("ed25519");
+    expect(detailABody.artifacts[0]?.rolloutRing).toBe("stable");
+    expect(detailABody.artifacts[0]?.rolloutPercentage).toBe(100);
+    expect(detailABody.artifacts[0]?.minAgentVersion).toBe("1.0.0");
+
+    const checkResponse = await app.request(
+      "/api/v1/system/agent-releases/check?currentVersion=1.0.0&channel=stable&os=darwin&arch=arm64",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(checkResponse.status).toBe(200);
+    const checkBody = (await checkResponse.json()) as {
+      currentVersion: string;
+      channel: string;
+      updateAvailable: boolean;
+      comparison: string;
+      latestRelease: {
+        releaseId: string;
+        version: string;
+      } | null;
+      selectedArtifact: {
+        os: string;
+        arch: string;
+        fileName?: string;
+        signatureAlgorithm?: string;
+        rolloutRing?: string;
+        rolloutPercentage?: number;
+        minAgentVersion?: string;
+      } | null;
+      instructions: string;
+    };
+    expect(checkBody.currentVersion).toBe("1.0.0");
+    expect(checkBody.channel).toBe("stable");
+    expect(checkBody.updateAvailable).toBe(true);
+    expect(checkBody.comparison).toBe("upgrade_available");
+    expect(checkBody.latestRelease?.releaseId).toBe(releaseV11.releaseId);
+    expect(checkBody.latestRelease?.version).toBe("1.1.0");
+    expect(checkBody.selectedArtifact?.os).toBe("darwin");
+    expect(checkBody.selectedArtifact?.arch).toBe("arm64");
+    expect(checkBody.selectedArtifact?.fileName).toBe(
+      "agent-1.1.0-darwin-arm64.zip",
+    );
+    expect(checkBody.selectedArtifact?.signatureAlgorithm).toBe("ed25519");
+    expect(checkBody.selectedArtifact?.rolloutRing).toBe("stable");
+    expect(checkBody.selectedArtifact?.rolloutPercentage).toBe(100);
+    expect(checkBody.selectedArtifact?.minAgentVersion).toBe("1.0.0");
+    expect(checkBody.instructions).toContain("不执行真实下载升级");
+
+    const badSignatureAlgorithmResponse = await app.request(
+      "/api/v1/system/agent-releases",
+      jsonRequest(
+        "POST",
+        {
+          version: "1.2.0",
+          channel: "stable",
+          artifacts: [
+            {
+              os: "linux",
+              arch: "amd64",
+              downloadUrl: "https://downloads.example.com/agent-1.2.0-linux-amd64.tar.gz",
+              signature: "c2lnbmF0dXJlLWJhZA==",
+              signatureAlgorithm: "rsa-pss",
+            },
+          ],
+        },
+        tenantAHeaders,
+      ),
+    );
+    expect(badSignatureAlgorithmResponse.status).toBe(400);
+
+    const listBResponse = await app.request("/api/v1/system/agent-releases", {
+      headers: tenantBHeaders,
+    });
+    expect(listBResponse.status).toBe(200);
+    const listBBody = (await listBResponse.json()) as {
+      items: Array<{ releaseId: string }>;
+      total: number;
+    };
+    expect(listBBody.total).toBe(1);
+    expect(
+      listBBody.items.some((item) => item.releaseId === releaseV11.releaseId),
+    ).toBe(false);
+
+    const detailBResponse = await app.request(
+      `/api/v1/system/agent-releases/${encodeURIComponent(releaseV11.releaseId)}`,
+      {
+        headers: tenantBHeaders,
+      },
+    );
+    expect(detailBResponse.status).toBe(404);
+
+    const createAudits = await queryAuditByActionWithHeaders(
+      "control_plane.agent_release_created",
+      releaseV11.releaseId,
+      tenantAHeaders,
+    );
+    const createAudit = createAudits.items.find(
+      (item) =>
+        item.action === "control_plane.agent_release_created" &&
+        item.metadata.releaseId === releaseV11.releaseId &&
+        item.metadata.tenantId === tenantAId &&
+        item.metadata.channel === "stable",
+    );
+    expect(createAudit).toBeDefined();
+  });
+
+  test("system agent releases check 支持 rollout ring/percentage/minAgentVersion 筛选", async () => {
+    const nonce = createNonce("agent-release-rollout");
+    const auth = await getDefaultAuthContext();
+
+    const tenantResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Agent Release Rollout ${nonce}`,
+        slug: `agent-release-rollout-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error("agent rollout tenant 创建失败。");
+    }
+    const tenantHeaders = await issueTenantScopedAuthHeaders(
+      tenantId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const rolloutAgentId = `agent-${nonce}`;
+    const rolloutDeviceId = `device-${nonce}`;
+    const rolloutHostname = `host-${nonce}`;
+    const rolloutSeed = `${tenantId}:${rolloutDeviceId}`;
+    const rolloutBucket =
+      Number.parseInt(
+        createHash("sha256").update(rolloutSeed).digest("hex").slice(0, 8),
+        16,
+      ) % 100;
+    const matchedPercentage = Math.min(100, rolloutBucket + 1);
+
+    const createRolloutReleaseResponse = await app.request(
+      "/api/v1/system/agent-releases",
+      jsonRequest(
+        "POST",
+        {
+          version: "2.0.0",
+          channel: "stable",
+          artifacts: [
+            {
+              os: "darwin",
+              arch: "arm64",
+              downloadUrl: "https://downloads.example.com/agent-2.0.0-darwin-arm64.zip",
+              rolloutRing: "beta-ring",
+              rolloutPercentage: matchedPercentage,
+              minAgentVersion: "1.5.0",
+            },
+          ],
+        },
+        tenantHeaders,
+      ),
+    );
+    expect(createRolloutReleaseResponse.status).toBe(201);
+
+    const noRingResponse = await app.request(
+      "/api/v1/system/agent-releases/check?currentVersion=1.5.0&channel=stable&os=darwin&arch=arm64",
+      {
+        headers: tenantHeaders,
+      },
+    );
+    expect(noRingResponse.status).toBe(200);
+    const noRingBody = (await noRingResponse.json()) as {
+      comparison: string;
+      updateAvailable: boolean;
+      latestRelease: unknown;
+      selectedArtifact: unknown;
+      evaluatedRing?: string;
+      rolloutBucket?: number;
+      selectionReason?: string;
+    };
+    expect(noRingBody.comparison).toBe("no_release");
+    expect(noRingBody.updateAvailable).toBe(false);
+    expect(noRingBody.latestRelease).toBeNull();
+    expect(noRingBody.selectedArtifact).toBeNull();
+    expect(noRingBody.evaluatedRing).toBe("stable");
+    expect(typeof noRingBody.rolloutBucket).toBe("number");
+    expect(noRingBody.selectionReason).toBe("ring_mismatch");
+
+    const minVersionMissResponse = await app.request(
+      `/api/v1/system/agent-releases/check?currentVersion=1.4.9&channel=stable&os=darwin&arch=arm64&ring=beta-ring&agentId=${encodeURIComponent(
+        rolloutAgentId,
+      )}&deviceId=${encodeURIComponent(
+        rolloutDeviceId,
+      )}&hostname=${encodeURIComponent(rolloutHostname)}`,
+      {
+        headers: tenantHeaders,
+      },
+    );
+    expect(minVersionMissResponse.status).toBe(200);
+    const minVersionMissBody = (await minVersionMissResponse.json()) as {
+      comparison: string;
+      selectedArtifact: unknown;
+      selectionReason?: string;
+    };
+    expect(minVersionMissBody.comparison).toBe("no_release");
+    expect(minVersionMissBody.selectedArtifact).toBeNull();
+    expect(minVersionMissBody.selectionReason).toBe(
+      "min_agent_version_blocked",
+    );
+
+    const matchedResponse = await app.request(
+      `/api/v1/system/agent-releases/check?currentVersion=1.5.0&channel=stable&os=darwin&arch=arm64&ring=beta-ring&agentId=${encodeURIComponent(
+        rolloutAgentId,
+      )}&deviceId=${encodeURIComponent(
+        rolloutDeviceId,
+      )}&hostname=${encodeURIComponent(rolloutHostname)}`,
+      {
+        headers: tenantHeaders,
+      },
+    );
+    expect(matchedResponse.status).toBe(200);
+    const matchedBody = (await matchedResponse.json()) as {
+      comparison: string;
+      updateAvailable: boolean;
+      latestRelease: { version: string } | null;
+      selectedArtifact: {
+        rolloutRing?: string;
+        rolloutPercentage?: number;
+        minAgentVersion?: string;
+      } | null;
+      evaluatedRing?: string;
+      rolloutBucket?: number;
+      selectionReason?: string;
+    };
+    expect(matchedBody.comparison).toBe("upgrade_available");
+    expect(matchedBody.updateAvailable).toBe(true);
+    expect(matchedBody.latestRelease?.version).toBe("2.0.0");
+    expect(matchedBody.selectedArtifact?.rolloutRing).toBe("beta-ring");
+    expect(matchedBody.selectedArtifact?.rolloutPercentage).toBe(
+      matchedPercentage,
+    );
+    expect(matchedBody.selectedArtifact?.minAgentVersion).toBe("1.5.0");
+    expect(matchedBody.evaluatedRing).toBe("beta-ring");
+    expect(typeof matchedBody.rolloutBucket).toBe("number");
+    expect(matchedBody.selectionReason).toBe("matched");
+  });
+
+  test("system agent releases check batch 支持多 sample 返回与参数校验", async () => {
+    const nonce = createNonce("agent-release-batch");
+    const auth = await getDefaultAuthContext();
+    const tenantResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Agent Release Batch ${nonce}`,
+        slug: `agent-release-batch-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error("agent release batch tenant 创建失败。");
+    }
+    const tenantHeaders = await issueTenantScopedAuthHeaders(
+      tenantId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const createResponse = await app.request(
+      "/api/v1/system/agent-releases",
+      jsonRequest(
+        "POST",
+        {
+          version: "3.0.0",
+          channel: "stable",
+          artifacts: [
+            {
+              os: "darwin",
+              arch: "amd64",
+              downloadUrl: "https://downloads.example.com/agent-darwin-amd64",
+              rolloutRing: "beta-ring",
+              rolloutPercentage: 100,
+              minAgentVersion: "1.0.0",
+            },
+          ],
+        },
+        tenantHeaders,
+      ),
+    );
+    expect(createResponse.status).toBe(201);
+
+    const badResponse = await app.request(
+      "/api/v1/system/agent-releases/check/batch",
+      jsonRequest(
+        "POST",
+        {
+          channel: "stable",
+          os: "darwin",
+          arch: "amd64",
+          samples: [],
+        },
+        tenantHeaders,
+      ),
+    );
+    expect(badResponse.status).toBe(400);
+
+    const batchResponse = await app.request(
+      "/api/v1/system/agent-releases/check/batch",
+      jsonRequest(
+        "POST",
+        {
+          channel: "stable",
+          os: "darwin",
+          arch: "amd64",
+          samples: [
+            {
+              label: "stable-default",
+              currentVersion: "1.0.0",
+              deviceId: "device-stable",
+              ring: "stable",
+            },
+            {
+              label: "beta-ring-1",
+              currentVersion: "1.0.0",
+              deviceId: "device-beta",
+              ring: "beta-ring",
+            },
+          ],
+        },
+        tenantHeaders,
+      ),
+    );
+    expect(batchResponse.status).toBe(200);
+    const batchBody = (await batchResponse.json()) as {
+      items: Array<{
+        label: string;
+        comparison: string;
+        evaluatedRing?: string;
+        rolloutBucket?: number;
+        selectionReason?: string;
+        selectedArtifact: null | {
+          rolloutRing?: string;
+          rolloutPercentage?: number;
+        };
+      }>;
+      total: number;
+    };
+    expect(batchBody.total).toBe(2);
+    expect(batchBody.items.map((item) => item.label)).toEqual([
+      "stable-default",
+      "beta-ring-1",
+    ]);
+    expect(batchBody.items[0]?.comparison).toBe("no_release");
+    expect(batchBody.items[0]?.evaluatedRing).toBe("stable");
+    expect(typeof batchBody.items[0]?.rolloutBucket).toBe("number");
+    expect(batchBody.items[0]?.selectionReason).toBe("ring_mismatch");
+    expect(batchBody.items[0]?.selectedArtifact).toBeNull();
+    expect(batchBody.items[1]?.comparison).toBe("upgrade_available");
+    expect(batchBody.items[1]?.evaluatedRing).toBe("beta-ring");
+    expect(batchBody.items[1]?.selectionReason).toBe("matched");
+    expect(batchBody.items[1]?.selectedArtifact?.rolloutRing).toBe("beta-ring");
+    expect(batchBody.items[1]?.selectedArtifact?.rolloutPercentage).toBe(100);
+  });
+
   test("GET /api/v1/audits/export 支持 CSV 导出并写入 audit.export", async () => {
     const nonce = createNonce("audit-export");
     const authHeaders = await resolveAuthHeaders();
@@ -12743,6 +15979,545 @@ describe("Control Plane API", () => {
       expect(body.message).toContain("审计写入失败");
     } finally {
       repositoryWithAudit.appendAuditLog = rawAppendAuditLog;
+      if (originalSigningKey === undefined) {
+        delete Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY;
+      } else {
+        Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY = originalSigningKey;
+      }
+    }
+  });
+
+  test("POST/GET /api/v1/audits/legal-holds 与 release 支持最小闭环并写入审计", async () => {
+    const nonce = createNonce("audit-legal-hold-lifecycle");
+    const authHeaders = await resolveAuthHeaders();
+
+    const createResponse = await app.request("/api/v1/audits/legal-holds", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        resourceType: "audit_export",
+        resourceId: `audit-export-${nonce}`,
+        reason: `preserve export ${nonce}`,
+      }),
+    });
+    const created = (await createResponse.json()) as {
+      id: string;
+      resourceType: string;
+      resourceId: string;
+      reason: string;
+      releasedAt?: string;
+    };
+    expect(createResponse.status).toBe(201);
+    expect(created.resourceType).toBe("audit_export");
+    expect(created.resourceId).toBe(`audit-export-${nonce}`);
+    expect(created.reason).toContain(nonce);
+    expect(created.releasedAt).toBeUndefined();
+
+    const listActiveResponse = await app.request(
+      `/api/v1/audits/legal-holds?resourceType=audit_export&resourceId=${encodeURIComponent(
+        `audit-export-${nonce}`,
+      )}&active=true&limit=10`,
+      {
+        headers: authHeaders,
+      },
+    );
+    const listActiveBody = (await listActiveResponse.json()) as {
+      items: Array<{ id: string; resourceId: string; releasedAt?: string }>;
+      total: number;
+      filters: {
+        resourceType?: string;
+        resourceId?: string;
+        active?: boolean;
+        limit?: number;
+      };
+    };
+    expect(listActiveResponse.status).toBe(200);
+    expect(listActiveBody.total).toBeGreaterThanOrEqual(1);
+    expect(listActiveBody.filters.resourceType).toBe("audit_export");
+    expect(listActiveBody.filters.resourceId).toBe(`audit-export-${nonce}`);
+    expect(listActiveBody.filters.active).toBe(true);
+    expect(
+      listActiveBody.items.some(
+        (item) =>
+          item.id === created.id &&
+          item.resourceId === `audit-export-${nonce}` &&
+          !item.releasedAt,
+      ),
+    ).toBe(true);
+
+    const releaseResponse = await app.request(
+      `/api/v1/audits/legal-holds/${encodeURIComponent(created.id)}/release`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          reason: `release export ${nonce}`,
+        }),
+      },
+    );
+    const released = (await releaseResponse.json()) as {
+      id: string;
+      resourceId: string;
+      releasedAt?: string;
+      releaseReason?: string;
+    };
+    expect(releaseResponse.status).toBe(200);
+    expect(released.id).toBe(created.id);
+    expect(released.resourceId).toBe(`audit-export-${nonce}`);
+    expect(released.releasedAt).toBeTruthy();
+    expect(released.releaseReason).toBe(`release export ${nonce}`);
+
+    const listReleasedResponse = await app.request(
+      `/api/v1/audits/legal-holds?resourceType=audit_export&resourceId=${encodeURIComponent(
+        `audit-export-${nonce}`,
+      )}&active=false&limit=10`,
+      {
+        headers: authHeaders,
+      },
+    );
+    const listReleasedBody = (await listReleasedResponse.json()) as {
+      items: Array<{ id: string; releasedAt?: string }>;
+      total: number;
+      filters: { active?: boolean };
+    };
+    expect(listReleasedResponse.status).toBe(200);
+    expect(listReleasedBody.filters.active).toBe(false);
+    expect(
+      listReleasedBody.items.some(
+        (item) => item.id === created.id && Boolean(item.releasedAt),
+      ),
+    ).toBe(true);
+
+    const createAudits = await queryAuditByAction(
+      "audit.legal_hold.create",
+      `audit-export-${nonce}`,
+    );
+    expect(
+      createAudits.items.some(
+        (item) =>
+          item.metadata.resourceType === "audit_export" &&
+          item.metadata.resourceId === `audit-export-${nonce}`,
+      ),
+    ).toBe(true);
+
+    const releaseAudits = await queryAuditByAction(
+      "audit.legal_hold.release",
+      created.id,
+    );
+    expect(
+      releaseAudits.items.some(
+        (item) =>
+          item.metadata.legalHoldId === created.id &&
+          item.metadata.resourceId === `audit-export-${nonce}`,
+      ),
+    ).toBe(true);
+  });
+
+  test("DELETE /api/v1/audits/:id 在 audit Legal Hold 生效时返回 409，释放后可删除", async () => {
+    const nonce = createNonce("audit-legal-hold-delete");
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const repositoryWithAudit = repository as {
+      appendAuditLog?: (input: {
+        tenantId: string;
+        eventId: string;
+        action: string;
+        level: string;
+        detail: string;
+        metadata: Record<string, unknown>;
+      }) => Promise<unknown>;
+    };
+
+    if (typeof repositoryWithAudit.appendAuditLog !== "function") {
+      throw new Error("repository.appendAuditLog 不可用，无法验证 audit Legal Hold 删除保护。");
+    }
+
+    await repositoryWithAudit.appendAuditLog({
+      tenantId,
+      eventId: `cp:audit-delete-seed:${nonce}`,
+      action: "test.audit.delete_seed",
+      level: "warning",
+      detail: `audit delete seed ${nonce}`,
+      metadata: {
+        nonce,
+        route: "/api/v1/audits",
+      },
+    });
+
+    const seededAudits = await queryAuditByAction("test.audit.delete_seed", nonce);
+    const seededAudit = seededAudits.items.find((item) =>
+      auditMatchesKeyword(item, "test.audit.delete_seed", nonce),
+    );
+    const auditId = seededAudit?.id;
+    expect(auditId).toBeTruthy();
+    if (!auditId) {
+      throw new Error("未找到用于删除保护测试的 auditId。");
+    }
+
+    const createHoldResponse = await app.request("/api/v1/audits/legal-holds", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        resourceType: "audit",
+        resourceId: auditId,
+        reason: `hold audit ${nonce}`,
+      }),
+    });
+    const holdBody = (await createHoldResponse.json()) as { id: string };
+    expect(createHoldResponse.status).toBe(201);
+
+    const deleteBlockedResponse = await app.request(
+      `/api/v1/audits/${encodeURIComponent(auditId)}`,
+      {
+        method: "DELETE",
+        headers: authHeaders,
+      },
+    );
+    const deleteBlockedBody = (await deleteBlockedResponse.json()) as {
+      message: string;
+      legalHold: { id: string; resourceType: string; resourceId: string };
+    };
+    expect(deleteBlockedResponse.status).toBe(409);
+    expect(deleteBlockedBody.legalHold.id).toBe(holdBody.id);
+    expect(deleteBlockedBody.legalHold.resourceType).toBe("audit");
+    expect(deleteBlockedBody.legalHold.resourceId).toBe(auditId);
+
+    const blockedAudits = await queryAuditByAction("audit.delete_blocked", auditId);
+    expect(
+      blockedAudits.items.some(
+        (item) =>
+          item.metadata.auditId === auditId &&
+          item.metadata.legalHoldId === holdBody.id,
+      ),
+    ).toBe(true);
+
+    const releaseResponse = await app.request(
+      `/api/v1/audits/legal-holds/${encodeURIComponent(holdBody.id)}/release`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({ reason: `release audit ${nonce}` }),
+      },
+    );
+    expect(releaseResponse.status).toBe(200);
+
+    const deleteResponse = await app.request(
+      `/api/v1/audits/${encodeURIComponent(auditId)}`,
+      {
+        method: "DELETE",
+        headers: authHeaders,
+      },
+    );
+    expect(deleteResponse.status).toBe(204);
+
+    const deleteAudits = await queryAuditByAction("audit.delete", auditId);
+    expect(
+      deleteAudits.items.some((item) => item.metadata.auditId === auditId),
+    ).toBe(true);
+  });
+
+  test("GET /api/v1/audits/export 在 audit_export Legal Hold 生效时返回 409，释放后返回目标元信息", async () => {
+    const nonce = createNonce("audit-export-legal-hold");
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const exportResourceId = `audit-export-target-${nonce}`;
+    const repositoryWithAudit = repository as {
+      appendAuditLog?: (input: {
+        tenantId: string;
+        eventId: string;
+        action: string;
+        level: string;
+        detail: string;
+        metadata: Record<string, unknown>;
+      }) => Promise<unknown>;
+    };
+
+    if (typeof repositoryWithAudit.appendAuditLog !== "function") {
+      throw new Error("repository.appendAuditLog 不可用，无法验证 audit export Legal Hold。");
+    }
+
+    await repositoryWithAudit.appendAuditLog({
+      tenantId,
+      eventId: `cp:audit-export-seed:${nonce}`,
+      action: "test.audit.exportable_legal_hold",
+      level: "warning",
+      detail: `audit export legal hold seed ${nonce}`,
+      metadata: {
+        nonce,
+        route: "/api/v1/audits/export",
+      },
+    });
+
+    const createHoldResponse = await app.request("/api/v1/audits/legal-holds", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        resourceType: "audit_export",
+        resourceId: exportResourceId,
+        reason: `preserve export ${nonce}`,
+      }),
+    });
+    const holdBody = (await createHoldResponse.json()) as { id: string };
+    expect(createHoldResponse.status).toBe(201);
+
+    const blockedResponse = await app.request(
+      `/api/v1/audits/export?format=json&action=test.audit.exportable_legal_hold&keyword=${encodeURIComponent(
+        nonce,
+      )}&resourceId=${encodeURIComponent(exportResourceId)}`,
+      {
+        headers: authHeaders,
+      },
+    );
+    const blockedBody = (await blockedResponse.json()) as {
+      message: string;
+      legalHold: { id: string; resourceId: string; resourceType: string };
+    };
+    expect(blockedResponse.status).toBe(409);
+    expect(blockedBody.legalHold.id).toBe(holdBody.id);
+    expect(blockedBody.legalHold.resourceType).toBe("audit_export");
+    expect(blockedBody.legalHold.resourceId).toBe(exportResourceId);
+
+    const blockedAudits = await queryAuditByAction("audit.export_blocked", exportResourceId);
+    expect(
+      blockedAudits.items.some(
+        (item) =>
+          item.metadata.resourceId === exportResourceId &&
+          item.metadata.legalHoldId === holdBody.id,
+      ),
+    ).toBe(true);
+
+    const releaseResponse = await app.request(
+      `/api/v1/audits/legal-holds/${encodeURIComponent(holdBody.id)}/release`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({ reason: `release export ${nonce}` }),
+      },
+    );
+    expect(releaseResponse.status).toBe(200);
+
+    const exportResponse = await app.request(
+      `/api/v1/audits/export?format=json&action=test.audit.exportable_legal_hold&keyword=${encodeURIComponent(
+        nonce,
+      )}&resourceId=${encodeURIComponent(exportResourceId)}`,
+      {
+        headers: authHeaders,
+      },
+    );
+    const exportBody = (await exportResponse.json()) as {
+      format: string;
+      items: Array<{ action: string }>;
+      targetResource: {
+        resourceType: string;
+        resourceId: string | null;
+        legalHold: unknown;
+      };
+    };
+    expect(exportResponse.status).toBe(200);
+    expect(exportBody.format).toBe("json");
+    expect(
+      exportBody.items.some(
+        (item) => item.action === "test.audit.exportable_legal_hold",
+      ),
+    ).toBe(true);
+    expect(exportBody.targetResource.resourceType).toBe("audit_export");
+    expect(exportBody.targetResource.resourceId).toBe(exportResourceId);
+    expect(exportBody.targetResource.legalHold).toBeNull();
+    expect(exportResponse.headers.get("x-agentledger-resource-id")).toBe(exportResourceId);
+    expect(exportResponse.headers.get("x-agentledger-legal-hold-status")).toBe("none");
+  });
+
+  test("GET /api/v1/audits/export 支持 DLP block/redact", async () => {
+    const auth = await getDefaultAuthContext();
+    const headers = await resolveAuthHeaders(auth.accessToken, auth.userId);
+    const tenantId = resolveTenantIdFromAuthHeaders(headers);
+    const repositoryWithAudit = repository as {
+      appendAuditLog?: (input: {
+        tenantId: string;
+        eventId: string;
+        action: string;
+        level: string;
+        detail: string;
+        metadata: Record<string, unknown>;
+      }) => Promise<unknown>;
+    };
+    if (typeof repositoryWithAudit.appendAuditLog !== "function") {
+      throw new Error("repository.appendAuditLog 不可用，无法验证 DLP export。");
+    }
+    const nonce = createNonce("audit-export-dlp");
+    await repositoryWithAudit.appendAuditLog({
+      tenantId,
+      eventId: `cp:${nonce}`,
+      action: "test.audit.export_dlp",
+      level: "warning",
+      detail: `user email is secret-${nonce}@example.com and token=sk_${nonce}abc123`,
+      metadata: {
+        keyword: `dlp-${nonce}`,
+      },
+    });
+
+    const blockResponse = await app.request(
+      `/api/v1/audits/export?format=json&action=test.audit.export_dlp&keyword=${encodeURIComponent(`dlp-${nonce}`)}&dlpMode=block`,
+      { headers },
+    );
+    expect(blockResponse.status).toBe(422);
+
+    const redactResponse = await app.request(
+      `/api/v1/audits/export?format=json&action=test.audit.export_dlp&keyword=${encodeURIComponent(`dlp-${nonce}`)}&dlpMode=redact`,
+      { headers },
+    );
+    expect(redactResponse.status).toBe(200);
+    const redactBody = (await redactResponse.json()) as {
+      items: Array<{ detail: string }>;
+    };
+    expect(redactBody.items[0]?.detail).toContain("[REDACTED_EMAIL]");
+    expect(redactBody.items[0]?.detail).toContain("[REDACTED_SECRET]");
+  });
+
+  test("GET /api/v1/audits/evidence-bundle 在 evidence_bundle Legal Hold 生效时返回 409，释放后返回目标元信息", async () => {
+    const nonce = createNonce("audit-evidence-legal-hold");
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const bundleResourceId = `audit-evidence-target-${nonce}`;
+    const signingKey = `evidence-signing-key-${nonce}`;
+    const originalSigningKey = Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY;
+    Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY = signingKey;
+    const repositoryWithAudit = repository as {
+      appendAuditLog?: (input: {
+        tenantId: string;
+        eventId: string;
+        action: string;
+        level: string;
+        detail: string;
+        metadata: Record<string, unknown>;
+      }) => Promise<unknown>;
+    };
+
+    if (typeof repositoryWithAudit.appendAuditLog !== "function") {
+      throw new Error("repository.appendAuditLog 不可用，无法验证 evidence bundle Legal Hold。");
+    }
+
+    try {
+      await repositoryWithAudit.appendAuditLog({
+        tenantId,
+        eventId: `cp:audit-evidence-seed:${nonce}`,
+        action: "test.audit.evidence_hold_seed",
+        level: "info",
+        detail: `audit evidence hold seed ${nonce}`,
+        metadata: {
+          nonce,
+          route: "/api/v1/audits/evidence-bundle",
+        },
+      });
+
+      const createHoldResponse = await app.request("/api/v1/audits/legal-holds", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          resourceType: "evidence_bundle",
+          resourceId: bundleResourceId,
+          reason: `preserve bundle ${nonce}`,
+        }),
+      });
+      const holdBody = (await createHoldResponse.json()) as { id: string };
+      expect(createHoldResponse.status).toBe(201);
+
+      const blockedResponse = await app.request(
+        `/api/v1/audits/evidence-bundle?action=test.audit.evidence_hold_seed&keyword=${encodeURIComponent(
+          nonce,
+        )}&resourceId=${encodeURIComponent(bundleResourceId)}`,
+        {
+          headers: authHeaders,
+        },
+      );
+      const blockedBody = (await blockedResponse.json()) as {
+        message: string;
+        legalHold: { id: string; resourceType: string; resourceId: string };
+      };
+      expect(blockedResponse.status).toBe(409);
+      expect(blockedBody.legalHold.id).toBe(holdBody.id);
+      expect(blockedBody.legalHold.resourceType).toBe("evidence_bundle");
+      expect(blockedBody.legalHold.resourceId).toBe(bundleResourceId);
+
+      const blockedAudits = await queryAuditByAction(
+        "audit.evidence_bundle.export_blocked",
+        bundleResourceId,
+      );
+      expect(
+        blockedAudits.items.some(
+          (item) =>
+            item.metadata.resourceId === bundleResourceId &&
+            item.metadata.legalHoldId === holdBody.id,
+        ),
+      ).toBe(true);
+
+      const releaseResponse = await app.request(
+        `/api/v1/audits/legal-holds/${encodeURIComponent(holdBody.id)}/release`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...authHeaders,
+          },
+          body: JSON.stringify({ reason: `release bundle ${nonce}` }),
+        },
+      );
+      expect(releaseResponse.status).toBe(200);
+
+      const bundleResponse = await app.request(
+        `/api/v1/audits/evidence-bundle?action=test.audit.evidence_hold_seed&keyword=${encodeURIComponent(
+          nonce,
+        )}&resourceId=${encodeURIComponent(bundleResourceId)}`,
+        {
+          headers: authHeaders,
+        },
+      );
+      const bundleBody = (await bundleResponse.json()) as {
+        manifest: {
+          schemaVersion: string;
+          tenantId: string;
+          recordCount: number;
+        };
+        targetResource: {
+          resourceType: string;
+          resourceId: string | null;
+          legalHold: unknown;
+        };
+        rootHash: string;
+        signature: string;
+      };
+      expect(bundleResponse.status).toBe(200);
+      expect(bundleBody.manifest.schemaVersion).toBe("evidence-bundle.v1");
+      expect(bundleBody.targetResource.resourceType).toBe("evidence_bundle");
+      expect(bundleBody.targetResource.resourceId).toBe(bundleResourceId);
+      expect(bundleBody.targetResource.legalHold).toBeNull();
+      expect(bundleResponse.headers.get("x-agentledger-resource-id")).toBe(bundleResourceId);
+      expect(bundleResponse.headers.get("x-agentledger-legal-hold-status")).toBe("none");
+
+      const verifyResult = verifyEvidenceBundle(bundleBody, signingKey);
+      expect(verifyResult.success).toBe(true);
+    } finally {
       if (originalSigningKey === undefined) {
         delete Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY;
       } else {
@@ -13637,6 +17412,33 @@ describe("Control Plane API", () => {
     );
     expect(badPolicyResponse.status).toBe(400);
 
+    const mismatchPolicyResponse = await app.request(
+      `/api/v1/mcp/policies/${encodeURIComponent(`tool-mismatch-${nonce}`)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          riskLevel: "high",
+          decision: "require_approval",
+          approvalMode: "single_stage",
+          stage1RequiredApprovals: 1,
+          stage1Roles: ["owner"],
+          stage2RequiredApprovals: 1,
+          stage2Roles: ["owner"],
+        }),
+      },
+    );
+    expect(mismatchPolicyResponse.status).toBe(400);
+    const mismatchPolicyBody = (await mismatchPolicyResponse.json()) as {
+      message?: string;
+    };
+    expect(String(mismatchPolicyBody.message ?? "")).toContain(
+      "approvalMode 与 approvalStages 阶段数量不一致",
+    );
+
     const policyResponse = await app.request(
       `/api/v1/mcp/policies/${encodeURIComponent(`tool-${nonce}`)}`,
       {
@@ -13653,6 +17455,98 @@ describe("Control Plane API", () => {
       },
     );
     expect(policyResponse.status).toBe(200);
+
+    const customStagePolicyResponse = await app.request(
+      `/api/v1/mcp/policies/${encodeURIComponent(`tool-custom-stage-${nonce}`)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          riskLevel: "high",
+          decision: "require_approval",
+          approvalMode: "two_stage",
+          approvalStages: [
+            {
+              nodeId: "maintainer-review",
+              stage: "stage1",
+              label: "Maintainer Review",
+              requiredApprovals: 1,
+              roles: ["maintainer"],
+            },
+            {
+              nodeId: "owner-review",
+              stage: "stage2",
+              label: "Owner Review",
+              requiredApprovals: 1,
+              roles: ["owner"],
+            },
+          ],
+        }),
+      },
+    );
+    expect(customStagePolicyResponse.status).toBe(200);
+    const customStagePolicy = (await customStagePolicyResponse.json()) as {
+      approvalStages?: Array<{
+        nodeId?: string;
+        stage: string;
+        label?: string;
+      }>;
+      approvalWorkflow?: {
+        entryNodeId: string;
+      };
+    };
+    expect(customStagePolicy.approvalStages?.[0]).toMatchObject({
+      nodeId: "maintainer-review",
+      stage: "stage1",
+      label: "Maintainer Review",
+    });
+    expect(customStagePolicy.approvalStages?.[1]).toMatchObject({
+      nodeId: "owner-review",
+      stage: "stage2",
+      label: "Owner Review",
+    });
+    expect(customStagePolicy.approvalWorkflow?.entryNodeId).toBe(
+      "maintainer-review",
+    );
+
+    const customStageEvaluateResponse = await app.request(
+      "/api/v1/mcp/evaluate",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          toolId: `tool-custom-stage-${nonce}`,
+          reason: "验证自定义审批节点在策略回读后仍生效",
+        }),
+      },
+    );
+    expect(customStageEvaluateResponse.status).toBe(200);
+    const customStageEvaluate = (await customStageEvaluateResponse.json()) as {
+      approvalMode?: string;
+      currentNodeId?: string | null;
+      currentStage?: string | null;
+      approvalStages?: Array<{
+        nodeId?: string;
+        stage: string;
+        label?: string;
+      }>;
+      pathHistory?: string[];
+    };
+    expect(customStageEvaluate.approvalMode).toBe("two_stage");
+    expect(customStageEvaluate.currentNodeId).toBe("maintainer-review");
+    expect(customStageEvaluate.currentStage).toBe("stage1");
+    expect(customStageEvaluate.approvalStages?.[0]).toMatchObject({
+      nodeId: "maintainer-review",
+      stage: "stage1",
+      label: "Maintainer Review",
+    });
+    expect(customStageEvaluate.pathHistory).toEqual(["maintainer-review"]);
 
     const evaluateBlockedResponse = await app.request("/api/v1/mcp/evaluate", {
       method: "POST",
@@ -13846,6 +17740,1128 @@ describe("Control Plane API", () => {
     expect(listBBody.items.some((item) => item.id === invocation.id)).toBe(
       false,
     );
+  });
+
+  test("mcp 路由：支持 single_stage/two_stage 静态审批流转", async () => {
+    const nonce = createNonce("mcp-static-approval");
+    const auth = await getDefaultAuthContext();
+    const maintainer = await registerAndLoginUser(`${nonce}-maintainer`);
+    if (!maintainer.userId) {
+      throw new Error("maintainer 测试用户缺少 userId。");
+    }
+
+    const tenantResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `MCP Static Approval ${nonce}`,
+        slug: `mcp-static-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error("MCP 静态审批测试租户创建失败。");
+    }
+
+    const addMaintainerResult = await addTenantMemberByAuth(
+      auth.accessToken,
+      {
+        tenantId,
+        userId: maintainer.userId,
+        tenantRole: "maintainer",
+      },
+      auth.userId,
+    );
+    assertApiStatus(addMaintainerResult, [200, 201]);
+
+    const ownerHeaders = await issueTenantScopedAuthHeaders(
+      tenantId,
+      auth.accessToken,
+      auth.userId,
+    );
+    const maintainerHeaders = await issueTenantScopedAuthHeaders(
+      tenantId,
+      maintainer.accessToken,
+      maintainer.userId,
+    );
+
+    const policyResponse = await app.request(
+      `/api/v1/mcp/policies/${encodeURIComponent(`tool-${nonce}`)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          riskLevel: "high",
+          decision: "require_approval",
+          reason: "静态审批流测试",
+        }),
+      },
+    );
+    expect(policyResponse.status).toBe(200);
+
+    const singleStageEvaluateResponse = await app.request(
+      "/api/v1/mcp/evaluate",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          toolId: `tool-${nonce}`,
+          reason: "single-stage 首次评估",
+          approvalConfig: {
+            mode: "single_stage",
+            stage1: {
+              requiredApprovals: 2,
+              roles: ["owner", "maintainer"],
+            },
+          },
+        }),
+      },
+    );
+    expect(singleStageEvaluateResponse.status).toBe(200);
+    const singleStageEvaluate = (await singleStageEvaluateResponse.json()) as {
+      approvalRequestId?: string;
+      approvalMode: string;
+      currentStage: string | null;
+      remainingApprovals: number;
+      approvalConditionMatched: boolean;
+      approvalStages: Array<{
+        stage: string;
+        requiredApprovals: number;
+        roles: string[];
+      }>;
+    };
+    expect(singleStageEvaluate.approvalMode).toBe("single_stage");
+    expect(singleStageEvaluate.currentStage).toBe("stage1");
+    expect(singleStageEvaluate.remainingApprovals).toBe(2);
+    expect(singleStageEvaluate.approvalConditionMatched).toBe(true);
+    expect(singleStageEvaluate.approvalStages).toHaveLength(1);
+    expect(singleStageEvaluate.approvalStages[0]).toMatchObject({
+      stage: "stage1",
+      requiredApprovals: 2,
+    });
+    expect(singleStageEvaluate.approvalStages[0]?.roles).toEqual([
+      "owner",
+      "maintainer",
+    ]);
+    expect(typeof singleStageEvaluate.approvalRequestId).toBe("string");
+
+    const singleStageFirstApproveResponse = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(singleStageEvaluate.approvalRequestId as string)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...maintainerHeaders,
+        },
+        body: JSON.stringify({
+          reason: "maintainer 第一票通过",
+        }),
+      },
+    );
+    expect(singleStageFirstApproveResponse.status).toBe(200);
+    const singleStageFirstApprove =
+      (await singleStageFirstApproveResponse.json()) as {
+        status: string;
+        currentStage: string | null;
+        remainingApprovals: number;
+      };
+    expect(singleStageFirstApprove.status).toBe("pending");
+    expect(singleStageFirstApprove.currentStage).toBe("stage1");
+    expect(singleStageFirstApprove.remainingApprovals).toBe(1);
+
+    const singleStageSecondApproveResponse = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(singleStageEvaluate.approvalRequestId as string)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          reason: "owner 第二票通过",
+        }),
+      },
+    );
+    expect(singleStageSecondApproveResponse.status).toBe(200);
+    const singleStageSecondApprove =
+      (await singleStageSecondApproveResponse.json()) as {
+        status: string;
+        currentStage: string | null;
+        remainingApprovals: number;
+      };
+    expect(singleStageSecondApprove.status).toBe("approved");
+    expect(singleStageSecondApprove.currentStage).toBeNull();
+    expect(singleStageSecondApprove.remainingApprovals).toBe(0);
+
+    const singleStageApprovedEvaluateResponse = await app.request(
+      "/api/v1/mcp/evaluate",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          toolId: `tool-${nonce}`,
+          approvalRequestId: singleStageEvaluate.approvalRequestId,
+          reason: "single-stage 审批后复评",
+        }),
+      },
+    );
+    expect(singleStageApprovedEvaluateResponse.status).toBe(200);
+    const singleStageApprovedEvaluate =
+      (await singleStageApprovedEvaluateResponse.json()) as {
+        result: string;
+        currentStage: string | null;
+        remainingApprovals: number;
+        approvalConditionMatched: boolean;
+      };
+    expect(singleStageApprovedEvaluate.result).toBe("approved");
+    expect(singleStageApprovedEvaluate.currentStage).toBeNull();
+    expect(singleStageApprovedEvaluate.remainingApprovals).toBe(0);
+    expect(singleStageApprovedEvaluate.approvalConditionMatched).toBe(true);
+
+    const twoStageCreateResponse = await app.request("/api/v1/mcp/approvals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...ownerHeaders,
+      },
+      body: JSON.stringify({
+        toolId: `tool-${nonce}`,
+        reason: "two-stage 手工申请",
+        approvalConfig: {
+          mode: "two_stage",
+          stage1: {
+            requiredApprovals: 1,
+            roles: ["maintainer"],
+          },
+          stage2: {
+            requiredApprovals: 1,
+            roles: ["owner"],
+          },
+        },
+      }),
+    });
+    expect(twoStageCreateResponse.status).toBe(201);
+    const twoStageCreated = (await twoStageCreateResponse.json()) as {
+      id: string;
+      status: string;
+      approvalMode: string;
+      currentStage: string | null;
+      remainingApprovals: number;
+      approvalStages: Array<{
+        stage: string;
+        roles: string[];
+        requiredApprovals: number;
+      }>;
+    };
+    expect(twoStageCreated.status).toBe("pending");
+    expect(twoStageCreated.approvalMode).toBe("two_stage");
+    expect(twoStageCreated.currentStage).toBe("stage1");
+    expect(twoStageCreated.remainingApprovals).toBe(1);
+    expect(twoStageCreated.approvalStages).toHaveLength(2);
+    expect(
+      twoStageCreated.approvalStages.find((item) => item.stage === "stage1")
+        ?.roles,
+    ).toEqual([
+      "maintainer",
+    ]);
+    expect(
+      twoStageCreated.approvalStages.find((item) => item.stage === "stage2")
+        ?.roles,
+    ).toEqual(["owner"]);
+
+    const stage1RoleForbiddenResponse = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(twoStageCreated.id)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          reason: "owner 不应通过 stage1 角色校验",
+        }),
+      },
+    );
+    expect(stage1RoleForbiddenResponse.status).toBe(403);
+
+    const stageJumpResponse = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(twoStageCreated.id)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          stage: "stage2",
+          reason: "越阶段审批应被拒绝",
+        }),
+      },
+    );
+    expect(stageJumpResponse.status).toBe(409);
+
+    const twoStageStage1ApproveResponse = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(twoStageCreated.id)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...maintainerHeaders,
+        },
+        body: JSON.stringify({
+          stage: "stage1",
+          reason: "maintainer 完成 stage1",
+        }),
+      },
+    );
+    expect(twoStageStage1ApproveResponse.status).toBe(200);
+    const twoStageStage1Approve =
+      (await twoStageStage1ApproveResponse.json()) as {
+        status: string;
+        currentStage: string | null;
+        remainingApprovals: number;
+      };
+    expect(twoStageStage1Approve.status).toBe("pending");
+    expect(twoStageStage1Approve.currentStage).toBe("stage2");
+    expect(twoStageStage1Approve.remainingApprovals).toBe(1);
+
+    const twoStagePendingEvaluateResponse = await app.request(
+      "/api/v1/mcp/evaluate",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          toolId: `tool-${nonce}`,
+          approvalRequestId: twoStageCreated.id,
+          reason: "two-stage stage1 完成后复评",
+        }),
+      },
+    );
+    expect(twoStagePendingEvaluateResponse.status).toBe(200);
+    const twoStagePendingEvaluate =
+      (await twoStagePendingEvaluateResponse.json()) as {
+        result: string;
+        currentStage: string | null;
+        remainingApprovals: number;
+        approvalConditionMatched: boolean;
+      };
+    expect(twoStagePendingEvaluate.result).toBe("blocked");
+    expect(twoStagePendingEvaluate.currentStage).toBe("stage2");
+    expect(twoStagePendingEvaluate.remainingApprovals).toBe(1);
+    expect(twoStagePendingEvaluate.approvalConditionMatched).toBe(true);
+
+    const twoStageRejectResponse = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(twoStageCreated.id)}/reject`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          stage: "stage2",
+          reason: "owner 在 stage2 驳回",
+        }),
+      },
+    );
+    expect(twoStageRejectResponse.status).toBe(200);
+    const twoStageRejected = (await twoStageRejectResponse.json()) as {
+      status: string;
+      currentStage: string | null;
+      remainingApprovals: number;
+    };
+    expect(twoStageRejected.status).toBe("rejected");
+    expect(twoStageRejected.currentStage).toBeNull();
+    expect(twoStageRejected.remainingApprovals).toBe(0);
+
+    const twoStageRejectedEvaluateResponse = await app.request(
+      "/api/v1/mcp/evaluate",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          toolId: `tool-${nonce}`,
+          approvalRequestId: twoStageCreated.id,
+          reason: "two-stage 驳回后复评",
+        }),
+      },
+    );
+    expect(twoStageRejectedEvaluateResponse.status).toBe(200);
+    const twoStageRejectedEvaluate =
+      (await twoStageRejectedEvaluateResponse.json()) as {
+        result: string;
+        currentStage: string | null;
+        remainingApprovals: number;
+        approvalConditionMatched: boolean;
+      };
+    expect(twoStageRejectedEvaluate.result).toBe("blocked");
+    expect(twoStageRejectedEvaluate.currentStage).toBeNull();
+    expect(twoStageRejectedEvaluate.remainingApprovals).toBe(0);
+    expect(twoStageRejectedEvaluate.approvalConditionMatched).toBe(true);
+
+    const multiStageCreateResponse = await app.request("/api/v1/mcp/approvals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...ownerHeaders,
+      },
+      body: JSON.stringify({
+        toolId: `tool-${nonce}`,
+        reason: "multi-stage 手工申请",
+        approvalConfig: {
+          approvalStages: [
+            {
+              requiredApprovals: 1,
+              roles: ["maintainer"],
+            },
+            {
+              requiredApprovals: 1,
+              roles: ["owner"],
+            },
+            {
+              requiredApprovals: 1,
+              roles: ["owner"],
+            },
+          ],
+        },
+      }),
+    });
+    expect(multiStageCreateResponse.status).toBe(201);
+    const multiStageCreated = (await multiStageCreateResponse.json()) as {
+      id: string;
+      approvalMode: string;
+      currentStage: string | null;
+      remainingApprovals: number;
+      approvalStages: Array<{
+        stage: string;
+        requiredApprovals: number;
+        roles: string[];
+      }>;
+    };
+    expect(multiStageCreated.approvalMode).toBe("multi_stage");
+    expect(multiStageCreated.currentStage).toBe("stage1");
+    expect(multiStageCreated.remainingApprovals).toBe(1);
+    expect(multiStageCreated.approvalStages.map((item) => item.stage)).toEqual([
+      "stage1",
+      "stage2",
+      "stage3",
+    ]);
+
+    const multiStageStage1ApproveResponse = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(multiStageCreated.id)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...maintainerHeaders,
+        },
+        body: JSON.stringify({
+          stage: "stage1",
+          reason: "maintainer 完成 multi-stage stage1",
+        }),
+      },
+    );
+    expect(multiStageStage1ApproveResponse.status).toBe(200);
+    const multiStageStage1Approve =
+      (await multiStageStage1ApproveResponse.json()) as {
+        status: string;
+        currentStage: string | null;
+        remainingApprovals: number;
+        approvalStages: Array<{
+          stage: string;
+          approvedApprovals: number;
+        }>;
+      };
+    expect(multiStageStage1Approve.status).toBe("pending");
+    expect(multiStageStage1Approve.currentStage).toBe("stage2");
+    expect(multiStageStage1Approve.remainingApprovals).toBe(1);
+    expect(
+      multiStageStage1Approve.approvalStages.find((item) => item.stage === "stage1")
+        ?.approvedApprovals,
+    ).toBe(1);
+
+    const multiStageStage2ApproveResponse = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(multiStageCreated.id)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          stage: "stage2",
+          reason: "owner 完成 multi-stage stage2",
+        }),
+      },
+    );
+    expect(multiStageStage2ApproveResponse.status).toBe(200);
+    const multiStageStage2Approve =
+      (await multiStageStage2ApproveResponse.json()) as {
+        status: string;
+        currentStage: string | null;
+        remainingApprovals: number;
+      };
+    expect(multiStageStage2Approve.status).toBe("pending");
+    expect(multiStageStage2Approve.currentStage).toBe("stage3");
+    expect(multiStageStage2Approve.remainingApprovals).toBe(1);
+
+    const multiStageStage3ApproveResponse = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(multiStageCreated.id)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          stage: "stage3",
+          reason: "owner 完成 multi-stage stage3",
+        }),
+      },
+    );
+    expect(multiStageStage3ApproveResponse.status).toBe(200);
+    const multiStageStage3Approve =
+      (await multiStageStage3ApproveResponse.json()) as {
+        status: string;
+        currentStage: string | null;
+        remainingApprovals: number;
+      };
+    expect(multiStageStage3Approve.status).toBe("approved");
+    expect(multiStageStage3Approve.currentStage).toBeNull();
+    expect(multiStageStage3Approve.remainingApprovals).toBe(0);
+  });
+
+  test("mcp 路由：支持 approvalWorkflow 分支跳转与路径历史", async () => {
+    const nonce = createNonce("mcp-branching-workflow");
+    const owner = await getDefaultAuthContext();
+    const maintainer = await registerAndLoginUser(`${nonce}-maintainer`);
+    if (!maintainer.userId) {
+      throw new Error("maintainer 测试用户缺少 userId。");
+    }
+
+    const tenantResult = await createTenantByAuth(
+      owner.accessToken,
+      {
+        name: `MCP Branch Workflow ${nonce}`,
+        slug: `mcp-branch-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error("MCP 分支审批测试租户创建失败。");
+    }
+
+    const addMaintainerResult = await addTenantMemberByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        userId: maintainer.userId,
+        tenantRole: "maintainer",
+      },
+      owner.userId,
+    );
+    assertApiStatus(addMaintainerResult, [200, 201]);
+
+    const ownerHeaders = await issueTenantScopedAuthHeaders(
+      tenantId,
+      owner.accessToken,
+      owner.userId,
+    );
+    const maintainerHeaders = await issueTenantScopedAuthHeaders(
+      tenantId,
+      maintainer.accessToken,
+      maintainer.userId,
+    );
+
+    const workflow = {
+      entryNodeId: "stage1-node",
+      nodes: [
+        {
+          nodeId: "stage1-node",
+          kind: "approval",
+          label: "Stage 1",
+          stage: "stage1",
+          requiredApprovals: 1,
+          roles: ["owner", "maintainer"],
+        },
+        {
+          nodeId: "stage2-node",
+          kind: "approval",
+          label: "Stage 2",
+          stage: "stage2",
+          requiredApprovals: 1,
+          roles: ["owner"],
+        },
+        {
+          nodeId: "approved",
+          kind: "terminal_approved",
+          label: "Approved",
+        },
+        {
+          nodeId: "rejected",
+          kind: "terminal_rejected",
+          label: "Rejected",
+        },
+      ],
+      transitions: [
+        {
+          fromNodeId: "stage1-node",
+          toNodeId: "stage2-node",
+          condition: {
+            tenantRoles: ["owner"],
+          },
+        },
+        {
+          fromNodeId: "stage1-node",
+          toNodeId: "approved",
+          condition: {
+            default: true,
+          },
+        },
+        {
+          fromNodeId: "stage2-node",
+          toNodeId: "approved",
+          condition: {
+            default: true,
+          },
+        },
+      ],
+    };
+
+    const policyResponse = await app.request(
+      `/api/v1/mcp/policies/${encodeURIComponent(`tool-${nonce}`)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          riskLevel: "high",
+          decision: "require_approval",
+          approvalMode: "two_stage",
+          approvalWorkflow: workflow,
+          reason: "分支审批流测试",
+        }),
+      },
+    );
+    expect(policyResponse.status).toBe(200);
+
+    const ownerApprovalResponse = await app.request("/api/v1/mcp/approvals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...ownerHeaders,
+      },
+      body: JSON.stringify({
+        toolId: `tool-${nonce}`,
+        reason: "owner 触发分支审批",
+        approvalConfig: {
+          approvalWorkflow: workflow,
+        },
+      }),
+    });
+    expect(ownerApprovalResponse.status).toBe(201);
+    const ownerApproval = (await ownerApprovalResponse.json()) as {
+      id: string;
+      currentNodeId: string | null;
+      currentStage: string | null;
+      approvalWorkflow?: { entryNodeId: string };
+      nextTransitionPreview?: { fromNodeId: string; toNodeId?: string };
+      pathHistory?: string[];
+    };
+    expect(ownerApproval.currentNodeId).toBe("stage1-node");
+    expect(ownerApproval.currentStage).toBe("stage1");
+    expect(ownerApproval.approvalWorkflow?.entryNodeId).toBe("stage1-node");
+    expect(ownerApproval.nextTransitionPreview?.fromNodeId).toBe("stage1-node");
+    expect(ownerApproval.pathHistory).toEqual(["stage1-node"]);
+
+    const ownerApproveStage1Response = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(ownerApproval.id)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          nodeId: "stage1-node",
+          stage: "stage1",
+          reason: "owner 完成 stage1",
+        }),
+      },
+    );
+    expect(ownerApproveStage1Response.status).toBe(200);
+    const ownerApproveStage1 = (await ownerApproveStage1Response.json()) as {
+      status: string;
+      currentNodeId: string | null;
+      currentStage: string | null;
+      pathHistory?: string[];
+      nextTransitionPreview?: { toNodeId?: string };
+    };
+    expect(ownerApproveStage1.status).toBe("pending");
+    expect(ownerApproveStage1.currentNodeId).toBe("stage2-node");
+    expect(ownerApproveStage1.currentStage).toBe("stage2");
+    expect(ownerApproveStage1.pathHistory).toEqual(["stage1-node", "stage2-node"]);
+    expect(ownerApproveStage1.nextTransitionPreview?.toNodeId).toBe("approved");
+
+    const ownerRejectStage2Response = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(ownerApproval.id)}/reject`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          nodeId: "stage2-node",
+          stage: "stage2",
+          reason: "owner 在 stage2 驳回",
+        }),
+      },
+    );
+    expect(ownerRejectStage2Response.status).toBe(200);
+    const ownerRejectStage2 = (await ownerRejectStage2Response.json()) as {
+      status: string;
+      currentNodeId: string | null;
+      currentStage: string | null;
+      pathHistory?: string[];
+    };
+    expect(ownerRejectStage2.status).toBe("rejected");
+    expect(ownerRejectStage2.currentNodeId).toBe("rejected");
+    expect(ownerRejectStage2.currentStage).toBeNull();
+    expect(ownerRejectStage2.pathHistory).toEqual([
+      "stage1-node",
+      "stage2-node",
+      "rejected",
+    ]);
+
+    const maintainerApprovalResponse = await app.request("/api/v1/mcp/approvals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...maintainerHeaders,
+      },
+      body: JSON.stringify({
+        toolId: `tool-${nonce}`,
+        reason: "maintainer 触发默认分支",
+        approvalConfig: {
+          approvalWorkflow: workflow,
+        },
+      }),
+    });
+    expect(maintainerApprovalResponse.status).toBe(201);
+    const maintainerApproval = (await maintainerApprovalResponse.json()) as {
+      id: string;
+      currentNodeId: string | null;
+    };
+    expect(maintainerApproval.currentNodeId).toBe("stage1-node");
+
+    const maintainerApproveStage1Response = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(maintainerApproval.id)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...maintainerHeaders,
+        },
+        body: JSON.stringify({
+          nodeId: "stage1-node",
+          stage: "stage1",
+          reason: "maintainer 走默认分支通过",
+        }),
+      },
+    );
+    expect(maintainerApproveStage1Response.status).toBe(200);
+    const maintainerApproveStage1 =
+      (await maintainerApproveStage1Response.json()) as {
+        status: string;
+        currentNodeId: string | null;
+        currentStage: string | null;
+        pathHistory?: string[];
+      };
+    expect(maintainerApproveStage1.status).toBe("approved");
+    expect(maintainerApproveStage1.currentNodeId).toBe("approved");
+    expect(maintainerApproveStage1.currentStage).toBeNull();
+    expect(maintainerApproveStage1.pathHistory).toEqual([
+      "stage1-node",
+      "approved",
+    ]);
+  });
+
+  test("mcp 路由：支持基于 evaluationTimestamp 的 timeWindow 分支匹配", async () => {
+    const nonce = createNonce("mcp-time-window");
+    const owner = await getDefaultAuthContext();
+
+    const tenantResult = await createTenantByAuth(
+      owner.accessToken,
+      {
+        name: `MCP Time Window ${nonce}`,
+        slug: `mcp-time-window-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error("MCP 时间窗审批测试租户创建失败。");
+    }
+
+    const ownerHeaders = await issueTenantScopedAuthHeaders(
+      tenantId,
+      owner.accessToken,
+      owner.userId,
+    );
+
+    const workflow = {
+      entryNodeId: "stage1-node",
+      nodes: [
+        {
+          nodeId: "stage1-node",
+          kind: "approval",
+          label: "Stage 1",
+          stage: "stage1",
+          requiredApprovals: 1,
+          roles: ["owner"],
+        },
+        {
+          nodeId: "stage2-node",
+          kind: "approval",
+          label: "Night Shift",
+          stage: "stage2",
+          requiredApprovals: 1,
+          roles: ["owner"],
+        },
+        {
+          nodeId: "stage3-node",
+          kind: "approval",
+          label: "Final Review",
+          stage: "stage3",
+          requiredApprovals: 1,
+          roles: ["owner"],
+        },
+        {
+          nodeId: "approved",
+          kind: "terminal_approved",
+          label: "Approved",
+        },
+        {
+          nodeId: "rejected",
+          kind: "terminal_rejected",
+          label: "Rejected",
+        },
+      ],
+      transitions: [
+        {
+          fromNodeId: "stage1-node",
+          toNodeId: "stage2-node",
+          condition: {
+            timeWindow: {
+              timezone: "Asia/Shanghai",
+              weekdays: [1],
+              startTime: "22:00",
+              endTime: "02:00",
+            },
+          },
+        },
+        {
+          fromNodeId: "stage1-node",
+          toNodeId: "approved",
+          condition: {
+            default: true,
+          },
+        },
+        {
+          fromNodeId: "stage2-node",
+          toNodeId: "stage3-node",
+          condition: {
+            default: true,
+          },
+        },
+        {
+          fromNodeId: "stage3-node",
+          toNodeId: "approved",
+          condition: {
+            default: true,
+          },
+        },
+      ],
+    };
+
+    const policyResponse = await app.request(
+      `/api/v1/mcp/policies/${encodeURIComponent(`tool-${nonce}`)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          riskLevel: "high",
+          decision: "require_approval",
+          approvalMode: "multi_stage",
+          approvalWorkflow: workflow,
+          reason: "时间窗审批流测试",
+        }),
+      },
+    );
+    expect(policyResponse.status).toBe(200);
+
+    const evaluateInWindowResponse = await app.request("/api/v1/mcp/evaluate", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...ownerHeaders,
+      },
+      body: JSON.stringify({
+        toolId: `tool-${nonce}`,
+        reason: "夜间窗口内触发",
+        evaluationTimestamp: "2026-03-09T15:30:00.000Z",
+      }),
+    });
+    expect(evaluateInWindowResponse.status).toBe(200);
+    const evaluateInWindow = (await evaluateInWindowResponse.json()) as {
+      approvalRequestId?: string;
+      currentNodeId?: string | null;
+      nextTransitionPreview?: {
+        toNodeId?: string;
+        condition?: {
+          timeWindow?: {
+            timezone: string;
+            weekdays?: number[];
+            startTime: string;
+            endTime: string;
+          };
+        };
+      };
+    };
+    expect(evaluateInWindow.currentNodeId).toBe("stage1-node");
+    expect(evaluateInWindow.nextTransitionPreview?.toNodeId).toBe("stage2-node");
+    expect(evaluateInWindow.nextTransitionPreview?.condition?.timeWindow).toEqual({
+      timezone: "Asia/Shanghai",
+      weekdays: [1],
+      startTime: "22:00",
+      endTime: "02:00",
+    });
+
+    const inWindowApprovalResponse = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(evaluateInWindow.approvalRequestId as string)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          nodeId: "stage1-node",
+          stage: "stage1",
+          reason: "窗口内通过 stage1",
+        }),
+      },
+    );
+    expect(inWindowApprovalResponse.status).toBe(200);
+    const inWindowApproval = (await inWindowApprovalResponse.json()) as {
+      status: string;
+      currentNodeId: string | null;
+      currentStage: string | null;
+      pathHistory?: string[];
+      nextTransitionPreview?: { toNodeId?: string };
+    };
+    expect(inWindowApproval.status).toBe("pending");
+    expect(inWindowApproval.currentNodeId).toBe("stage2-node");
+    expect(inWindowApproval.currentStage).toBe("stage2");
+    expect(inWindowApproval.pathHistory).toEqual(["stage1-node", "stage2-node"]);
+    expect(inWindowApproval.nextTransitionPreview?.toNodeId).toBe("stage3-node");
+
+    const evaluateOutsideWindowResponse = await app.request("/api/v1/mcp/evaluate", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...ownerHeaders,
+      },
+      body: JSON.stringify({
+        toolId: `tool-${nonce}`,
+        reason: "非窗口时间触发",
+        evaluationTimestamp: "2026-03-10T15:30:00.000Z",
+      }),
+    });
+    expect(evaluateOutsideWindowResponse.status).toBe(200);
+    const evaluateOutsideWindow = (await evaluateOutsideWindowResponse.json()) as {
+      approvalRequestId?: string;
+      currentNodeId?: string | null;
+      nextTransitionPreview?: { toNodeId?: string; matchedBy?: string };
+    };
+    expect(evaluateOutsideWindow.currentNodeId).toBe("stage1-node");
+    expect(evaluateOutsideWindow.nextTransitionPreview?.toNodeId).toBe("approved");
+    expect(evaluateOutsideWindow.nextTransitionPreview?.matchedBy).toBe("default");
+
+    const outsideWindowApprovalResponse = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(evaluateOutsideWindow.approvalRequestId as string)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          nodeId: "stage1-node",
+          stage: "stage1",
+          reason: "非窗口时间通过 stage1",
+        }),
+      },
+    );
+    expect(outsideWindowApprovalResponse.status).toBe(200);
+    const outsideWindowApproval = (await outsideWindowApprovalResponse.json()) as {
+      status: string;
+      currentNodeId: string | null;
+      currentStage: string | null;
+      pathHistory?: string[];
+    };
+    expect(outsideWindowApproval.status).toBe("approved");
+    expect(outsideWindowApproval.currentNodeId).toBe("approved");
+    expect(outsideWindowApproval.currentStage).toBeNull();
+    expect(outsideWindowApproval.pathHistory).toEqual(["stage1-node", "approved"]);
+  });
+
+  test("mcp 路由：approvalCondition 未命中时不触发审批", async () => {
+    const nonce = createNonce("mcp-approval-condition");
+    const owner = await getDefaultAuthContext();
+    const maintainer = await registerAndLoginUser(`${nonce}-maintainer`);
+    if (!maintainer.userId) {
+      throw new Error("maintainer 测试用户缺少 userId。");
+    }
+
+    const tenantResult = await createTenantByAuth(
+      owner.accessToken,
+      {
+        name: `MCP Approval Condition ${nonce}`,
+        slug: `mcp-approval-condition-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error("MCP approvalCondition 测试租户创建失败。");
+    }
+
+    const addMaintainerResult = await addTenantMemberByAuth(
+      owner.accessToken,
+      {
+        tenantId,
+        userId: maintainer.userId,
+        tenantRole: "maintainer",
+      },
+      owner.userId,
+    );
+    assertApiStatus(addMaintainerResult, [200, 201]);
+
+    const ownerHeaders = await issueTenantScopedAuthHeaders(
+      tenantId,
+      owner.accessToken,
+      owner.userId,
+    );
+    const maintainerHeaders = await issueTenantScopedAuthHeaders(
+      tenantId,
+      maintainer.accessToken,
+      maintainer.userId,
+    );
+
+    const policyResponse = await app.request(
+      `/api/v1/mcp/policies/${encodeURIComponent(`tool-${nonce}`)}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...ownerHeaders,
+        },
+        body: JSON.stringify({
+          riskLevel: "high",
+          decision: "require_approval",
+          approvalCondition: {
+            tenantRoles: ["owner"],
+          },
+          reason: "仅 owner 触发审批",
+        }),
+      },
+    );
+    expect(policyResponse.status).toBe(200);
+
+    const maintainerEvaluateResponse = await app.request("/api/v1/mcp/evaluate", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...maintainerHeaders,
+      },
+      body: JSON.stringify({
+        toolId: `tool-${nonce}`,
+        reason: "maintainer 不应触发审批",
+      }),
+    });
+    expect(maintainerEvaluateResponse.status).toBe(200);
+    const maintainerEvaluate = (await maintainerEvaluateResponse.json()) as {
+      result: string;
+      approvalRequestId?: string;
+      approvalConditionMatched?: boolean;
+    };
+    expect(maintainerEvaluate.result).toBe("allowed");
+    expect(maintainerEvaluate.approvalRequestId).toBeUndefined();
+    expect(maintainerEvaluate.approvalConditionMatched).toBe(false);
+
+    const maintainerApprovalsResponse = await app.request(
+      "/api/v1/mcp/approvals?status=pending",
+      {
+        headers: maintainerHeaders,
+      },
+    );
+    expect(maintainerApprovalsResponse.status).toBe(200);
+    const maintainerApprovals = (await maintainerApprovalsResponse.json()) as {
+      total: number;
+      items: Array<{ id: string }>;
+    };
+    expect(maintainerApprovals.total).toBe(0);
+    expect(maintainerApprovals.items).toHaveLength(0);
+
+    const ownerEvaluateResponse = await app.request("/api/v1/mcp/evaluate", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...ownerHeaders,
+      },
+      body: JSON.stringify({
+        toolId: `tool-${nonce}`,
+        reason: "owner 命中审批条件",
+      }),
+    });
+    expect(ownerEvaluateResponse.status).toBe(200);
+    const ownerEvaluate = (await ownerEvaluateResponse.json()) as {
+      result: string;
+      approvalRequestId?: string;
+      approvalConditionMatched?: boolean;
+      currentStage?: string | null;
+    };
+    expect(ownerEvaluate.result).toBe("blocked");
+    expect(typeof ownerEvaluate.approvalRequestId).toBe("string");
+    expect(ownerEvaluate.approvalConditionMatched).toBe(true);
+    expect(ownerEvaluate.currentStage).toBe("stage1");
   });
 
   test("open-platform 路由：401/403/400/主流程与租户隔离", async () => {
@@ -14116,6 +19132,46 @@ describe("Control Plane API", () => {
       ),
     ).toBe(true);
     expect(
+      Boolean(openapiBody.paths?.["/api/v2/replay/datasets/{id}/versions"]),
+    ).toBe(true);
+    expect(
+      Boolean(
+        openapiBody.paths?.[
+          "/api/v2/replay/datasets/{id}/versions/{versionId}/cases"
+        ],
+      ),
+    ).toBe(true);
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/replay/datasets/{id}/promote"]),
+    ).toBe(true);
+    expect(Boolean(openapiBody.paths?.["/api/v2/replay/experiments"])).toBe(
+      true,
+    );
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/replay/experiments/compare"]),
+    ).toBe(true);
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/replay/experiments/{id}"]),
+    ).toBe(true);
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/replay/experiments/{id}/run"]),
+    ).toBe(true);
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/replay/experiments/{id}/cancel"]),
+    ).toBe(true);
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/replay/experiments/{id}/results"]),
+    ).toBe(true);
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/replay/experiments/{id}/compare"]),
+    ).toBe(true);
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/replay/experiments/{id}/workflow"]),
+    ).toBe(true);
+    expect(
+      Boolean(openapiBody.paths?.["/api/v2/replay/experiments/{id}/artifacts"]),
+    ).toBe(true);
+    expect(
       Boolean(openapiBody.paths?.["/api/v2/residency/policies/current"]),
     ).toBe(true);
     expect(
@@ -14212,6 +19268,315 @@ describe("Control Plane API", () => {
       | {
           required?: string[];
           properties?: Record<string, { description?: string }>;
+        }
+      | undefined;
+    const replayDatasetV2 = openapiBody.components?.schemas?.[
+      "ReplayDatasetV2"
+    ] as
+      | {
+          properties?: Record<string, { description?: string }>;
+        }
+      | undefined;
+    const replayDatasetVersionsPath = openapiBody.paths?.[
+      "/api/v2/replay/datasets/{id}/versions"
+    ] as
+      | {
+          get?: {
+            responses?: {
+              [status: string]: {
+                content?: {
+                  [contentType: string]: {
+                    schema?: {
+                      $ref?: string;
+                    };
+                  };
+                };
+              };
+            };
+          };
+          post?: {
+            requestBody?: {
+              content?: {
+                [contentType: string]: {
+                  schema?: {
+                    $ref?: string;
+                  };
+                };
+              };
+            };
+            responses?: {
+              [status: string]: {
+                content?: {
+                  [contentType: string]: {
+                    schema?: {
+                      $ref?: string;
+                    };
+                  };
+                };
+              };
+            };
+          };
+        }
+      | undefined;
+    const replayDatasetVersionCasesPath = openapiBody.paths?.[
+      "/api/v2/replay/datasets/{id}/versions/{versionId}/cases"
+    ] as
+      | {
+          get?: {
+            parameters?: Array<{ name?: string; in?: string }>;
+            responses?: {
+              [status: string]: {
+                content?: {
+                  [contentType: string]: {
+                    schema?: {
+                      $ref?: string;
+                    };
+                  };
+                };
+              };
+            };
+          };
+        }
+      | undefined;
+    const replayDatasetPromotePath = openapiBody.paths?.[
+      "/api/v2/replay/datasets/{id}/promote"
+    ] as
+      | {
+          post?: {
+            requestBody?: {
+              content?: {
+                [contentType: string]: {
+                  schema?: {
+                    $ref?: string;
+                  };
+                };
+              };
+            };
+            responses?: {
+              [status: string]: {
+                content?: {
+                  [contentType: string]: {
+                    schema?: {
+                      $ref?: string;
+                    };
+                  };
+                };
+              };
+            };
+          };
+        }
+      | undefined;
+    const replayExperimentPath = openapiBody.paths?.[
+      "/api/v2/replay/experiments"
+    ] as
+      | {
+          get?: {
+            parameters?: Array<{ name?: string; in?: string }>;
+            responses?: {
+              [status: string]: {
+                content?: {
+                  [contentType: string]: {
+                    schema?: {
+                      $ref?: string;
+                    };
+                  };
+                };
+              };
+            };
+          };
+          post?: {
+            requestBody?: {
+              content?: {
+                [contentType: string]: {
+                  schema?: {
+                    $ref?: string;
+                  };
+                };
+              };
+            };
+            responses?: {
+              [status: string]: {
+                content?: {
+                  [contentType: string]: {
+                    schema?: {
+                      $ref?: string;
+                    };
+                  };
+                };
+              };
+            };
+          };
+        }
+      | undefined;
+    const replayExperimentBatchComparePath = openapiBody.paths?.[
+      "/api/v2/replay/experiments/compare"
+    ] as
+      | {
+          get?: {
+            responses?: {
+              [status: string]: {
+                content?: {
+                  [contentType: string]: {
+                    schema?: {
+                      $ref?: string;
+                    };
+                  };
+                };
+              };
+            };
+          };
+        }
+      | undefined;
+    const replayExperimentByIdPath = openapiBody.paths?.[
+      "/api/v2/replay/experiments/{id}"
+    ] as
+      | {
+          get?: {
+            responses?: {
+              [status: string]: {
+                content?: {
+                  [contentType: string]: {
+                    schema?: {
+                      $ref?: string;
+                    };
+                  };
+                };
+              };
+            };
+          };
+        }
+      | undefined;
+    const replayExperimentComparePath = openapiBody.paths?.[
+      "/api/v2/replay/experiments/{id}/compare"
+    ] as
+      | {
+          get?: {
+            responses?: {
+              [status: string]: {
+                content?: {
+                  [contentType: string]: {
+                    schema?: {
+                      $ref?: string;
+                    };
+                  };
+                };
+              };
+            };
+          };
+        }
+      | undefined;
+    const replayExperimentWorkflowPath = openapiBody.paths?.[
+      "/api/v2/replay/experiments/{id}/workflow"
+    ] as
+      | {
+          get?: {
+            responses?: {
+              [status: string]: {
+                content?: {
+                  [contentType: string]: {
+                    schema?: {
+                      $ref?: string;
+                    };
+                  };
+                };
+              };
+            };
+          };
+        }
+      | undefined;
+    const replayExperimentArtifactsPath = openapiBody.paths?.[
+      "/api/v2/replay/experiments/{id}/artifacts"
+    ] as
+      | {
+          get?: {
+            responses?: {
+              [status: string]: {
+                content?: {
+                  [contentType: string]: {
+                    schema?: {
+                      $ref?: string;
+                    };
+                  };
+                };
+              };
+            };
+          };
+        }
+      | undefined;
+    const replayDatasetVersionCreateInputV2 = openapiBody.components?.schemas?.[
+      "ReplayDatasetVersionCreateInputV2"
+    ] as
+      | {
+          required?: string[];
+          properties?: Record<string, { description?: string }>;
+        }
+      | undefined;
+    const replayDatasetVersionListResponseV2 = openapiBody.components?.schemas?.[
+      "ReplayDatasetVersionListResponseV2"
+    ] as
+      | {
+          required?: string[];
+          properties?: Record<string, { description?: string; $ref?: string }>;
+        }
+      | undefined;
+    const replayDatasetVersionPromoteResponseV2 = openapiBody.components?.schemas?.[
+      "ReplayDatasetVersionPromoteResponseV2"
+    ] as
+      | {
+          required?: string[];
+          properties?: Record<string, { $ref?: string }>;
+        }
+      | undefined;
+    const replayDatasetVersionCasesResponseV2 = openapiBody.components?.schemas?.[
+      "ReplayDatasetVersionCasesResponseV2"
+    ] as
+      | {
+          required?: string[];
+          properties?: Record<string, { $ref?: string; description?: string }>;
+        }
+      | undefined;
+    const replayExperimentInputV2 = openapiBody.components?.schemas?.[
+      "ReplayExperimentInputV2"
+    ] as
+      | {
+          required?: string[];
+          properties?: Record<string, { description?: string }>;
+        }
+      | undefined;
+    const replayExperimentV2 = openapiBody.components?.schemas?.[
+      "ReplayExperimentV2"
+    ] as
+      | {
+          required?: string[];
+          properties?: Record<string, { description?: string; $ref?: string }>;
+        }
+      | undefined;
+    const replayExperimentCompareResponseV2 = openapiBody.components?.schemas?.[
+      "ReplayExperimentCompareResponseV2"
+    ] as
+      | {
+          properties?: Record<string, { $ref?: string }>;
+        }
+      | undefined;
+    const replayExperimentBatchCompareResponseV2 = openapiBody.components?.schemas?.[
+      "ReplayExperimentBatchCompareResponseV2"
+    ] as
+      | {
+          properties?: Record<string, { $ref?: string }>;
+        }
+      | undefined;
+    const replayExperimentWorkflowResponseV2 = openapiBody.components?.schemas?.[
+      "ReplayExperimentWorkflowResponseV2"
+    ] as
+      | {
+          properties?: Record<string, { $ref?: string }>;
+        }
+      | undefined;
+    const replayExperimentArtifactsResponseV2 = openapiBody.components?.schemas?.[
+      "ReplayExperimentArtifactsResponseV2"
+    ] as
+      | {
+          properties?: Record<string, { $ref?: string }>;
         }
       | undefined;
     const replayDatasetMaterializeInputV2 = openapiBody.components?.schemas?.[
@@ -14319,6 +19684,32 @@ describe("Control Plane API", () => {
       ),
     ).toBe(true);
     expect(
+      replayDatasetVersionCasesPath?.get?.parameters?.some(
+        (parameter: { name?: string; in?: string }) =>
+          parameter.name === "versionId" && parameter.in === "path",
+      ),
+    ).toBe(true);
+    expect(
+      replayDatasetVersionCasesPath?.get?.parameters?.some(
+        (parameter: { name?: string; in?: string }) =>
+          parameter.name === "limit" && parameter.in === "query",
+      ),
+    ).toBe(true);
+    expect(
+      replayDatasetVersionCasesPath?.get?.responses?.["200"]?.content?.[
+        "application/json"
+      ]?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayDatasetVersionCasesResponseV2");
+    expect(replayDatasetVersionCasesResponseV2?.required).toEqual(
+      expect.arrayContaining(["datasetId", "versionId", "items", "total"]),
+    );
+    expect(
+      replayDatasetVersionCasesResponseV2?.properties?.versionId,
+    ).toBeDefined();
+    expect(
+      replayDatasetVersionCasesResponseV2?.properties?.items,
+    ).toBeDefined();
+    expect(
       replayMaterializePath?.post?.requestBody?.content?.["application/json"]
         ?.schema?.$ref,
     ).toBe("#/components/schemas/ReplayDatasetMaterializeInputV2");
@@ -14359,6 +19750,139 @@ describe("Control Plane API", () => {
     expect(replayDatasetInputV2?.properties?.datasetId?.description).toContain(
       "兼容别名",
     );
+    expect(replayDatasetV2?.properties?.currentVersionId?.description).toContain(
+      "当前生效",
+    );
+    expect(
+      replayDatasetV2?.properties?.currentVersionNumber?.description,
+    ).toContain("当前生效");
+    expect(
+      replayDatasetVersionsPath?.get?.responses?.["200"]?.content?.[
+        "application/json"
+      ]?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayDatasetVersionListResponseV2");
+    expect(
+      replayDatasetVersionsPath?.post?.requestBody?.content?.[
+        "application/json"
+      ]?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayDatasetVersionCreateInputV2");
+    expect(
+      replayDatasetVersionsPath?.post?.responses?.["201"]?.content?.[
+        "application/json"
+      ]?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayDatasetVersionV2");
+    expect(
+      replayDatasetPromotePath?.post?.requestBody?.content?.[
+        "application/json"
+      ]?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayDatasetVersionPromoteInputV2");
+    expect(
+      replayDatasetPromotePath?.post?.responses?.["200"]?.content?.[
+        "application/json"
+      ]?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayDatasetVersionPromoteResponseV2");
+    expect(replayDatasetVersionCreateInputV2?.required).toContain("datasetRef");
+    expect(
+      replayDatasetVersionCreateInputV2?.required?.includes("versionDatasetId"),
+    ).toBe(false);
+    expect(
+      replayDatasetVersionCreateInputV2?.properties?.versionDatasetId?.description,
+    ).toContain("兼容别名");
+    expect(replayDatasetVersionListResponseV2?.required).toContain(
+      "currentVersionId",
+    );
+    expect(replayDatasetVersionListResponseV2?.required).toContain(
+      "currentVersionNumber",
+    );
+    expect(
+      replayDatasetVersionListResponseV2?.properties?.items?.$ref,
+    ).toBeUndefined();
+    expect(replayDatasetVersionPromoteResponseV2?.required).toContain("dataset");
+    expect(replayDatasetVersionPromoteResponseV2?.required).toContain("version");
+    expect(
+      replayDatasetVersionPromoteResponseV2?.properties?.version?.$ref,
+    ).toBe("#/components/schemas/ReplayDatasetVersionV2");
+    expect(
+      replayExperimentPath?.post?.requestBody?.content?.["application/json"]
+        ?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayExperimentInputV2");
+    expect(
+      replayExperimentPath?.post?.responses?.["201"]?.content?.[
+        "application/json"
+      ]?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayExperimentV2");
+    expect(
+      replayExperimentPath?.get?.responses?.["200"]?.content?.[
+        "application/json"
+      ]?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayExperimentListResponseV2");
+    expect(
+      replayExperimentPath?.get?.parameters?.some(
+        (parameter: { name?: string; in?: string }) =>
+          parameter.name === "datasetId" && parameter.in === "query",
+      ),
+    ).toBe(true);
+    expect(replayExperimentInputV2?.required).toContain("datasetId");
+    expect(replayExperimentInputV2?.required?.includes("baselineId")).toBe(false);
+    expect(
+      replayExperimentInputV2?.required?.includes("baselineVersionId"),
+    ).toBe(false);
+    expect(
+      replayExperimentInputV2?.properties?.baselineId?.description,
+    ).toContain("兼容别名");
+    expect(
+      replayExperimentInputV2?.properties?.baselineVersionId?.description,
+    ).toContain("数据集版本");
+    expect(replayExperimentV2?.required).toContain("baselineVersionId");
+    expect(replayExperimentV2?.properties?.metadata?.$ref).toBe(
+      "#/components/schemas/ReplayExperimentMetadataV2",
+    );
+    expect(replayExperimentV2?.properties?.runStatusSummary?.$ref).toBe(
+      "#/components/schemas/ReplayExperimentStatusSummaryV2",
+    );
+    expect(replayExperimentV2?.properties?.aggregateSummary?.$ref).toBe(
+      "#/components/schemas/ReplayExperimentAggregateSummaryV2",
+    );
+    expect(
+      replayExperimentV2?.properties?.baselineVersionId?.description,
+    ).toContain("metadata");
+    expect(
+      replayExperimentBatchComparePath?.get?.responses?.["200"]?.content?.[
+        "application/json"
+      ]?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayExperimentBatchCompareResponseV2");
+    expect(
+      replayExperimentByIdPath?.get?.responses?.["200"]?.content?.[
+        "application/json"
+      ]?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayExperimentV2");
+    expect(
+      replayExperimentComparePath?.get?.responses?.["200"]?.content?.[
+        "application/json"
+      ]?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayExperimentCompareResponseV2");
+    expect(
+      replayExperimentWorkflowPath?.get?.responses?.["200"]?.content?.[
+        "application/json"
+      ]?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayExperimentWorkflowResponseV2");
+    expect(
+      replayExperimentArtifactsPath?.get?.responses?.["200"]?.content?.[
+        "application/json"
+      ]?.schema?.$ref,
+    ).toBe("#/components/schemas/ReplayExperimentArtifactsResponseV2");
+    expect(replayExperimentCompareResponseV2?.properties?.summary?.$ref).toBe(
+      "#/components/schemas/ReplayExperimentCompareSummaryV2",
+    );
+    expect(
+      replayExperimentBatchCompareResponseV2?.properties?.summary?.$ref,
+    ).toBe("#/components/schemas/ReplayExperimentBatchCompareSummaryV2");
+    expect(
+      replayExperimentWorkflowResponseV2?.properties?.nodes?.$ref,
+    ).toBeUndefined();
+    expect(
+      replayExperimentArtifactsResponseV2?.properties?.items?.$ref,
+    ).toBeUndefined();
     expect(replayRunInputV2?.required).toContain("datasetId");
     expect(replayRunInputV2?.required?.includes("baselineId")).toBe(false);
     expect(replayRunInputV2?.properties?.baselineId?.description).toContain(
@@ -15195,6 +20719,173 @@ describe("Control Plane API", () => {
     );
     expect(badBaselineFilterResponse.status).toBe(400);
 
+    const listBaselineVersionsResponse = await app.request(
+      `/api/v1/replay/baselines/${encodeURIComponent(baseline.id)}/versions`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(listBaselineVersionsResponse.status).toBe(200);
+    const listBaselineVersionsBody =
+      (await listBaselineVersionsResponse.json()) as {
+        items: Array<{
+          id: string;
+          version: number;
+          datasetId: string;
+          model: string;
+          sampleCount: number;
+          promotedAt: string | null;
+        }>;
+        total: number;
+        currentVersionId: string | null;
+        currentVersionNumber: number | null;
+      };
+    expect(listBaselineVersionsBody.total).toBe(1);
+    expect(listBaselineVersionsBody.currentVersionNumber).toBe(1);
+    expect(listBaselineVersionsBody.items[0]?.version).toBe(1);
+    expect(listBaselineVersionsBody.items[0]?.datasetId).toBe("golden-set-v1");
+    expect(listBaselineVersionsBody.items[0]?.model).toBe("gpt-4.1");
+
+    const createBaselineVersionResponse = await app.request(
+      `/api/v1/replay/baselines/${encodeURIComponent(baseline.id)}/versions`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          datasetId: "golden-set-v2",
+          model: "gpt-4.1-mini",
+          promptVersion: "prompt-v2",
+          sampleCount: 8,
+          note: "promote-ready",
+          metadata: {
+            rollout: "candidate",
+          },
+        }),
+      },
+    );
+    expect(createBaselineVersionResponse.status).toBe(201);
+    const createdBaselineVersion =
+      (await createBaselineVersionResponse.json()) as {
+        id: string;
+        version: number;
+        datasetId: string;
+        model: string;
+        promptVersion?: string;
+        sampleCount: number;
+        note?: string;
+      };
+    expect(createdBaselineVersion.version).toBe(2);
+    expect(createdBaselineVersion.datasetId).toBe("golden-set-v2");
+    expect(createdBaselineVersion.model).toBe("gpt-4.1-mini");
+    expect(createdBaselineVersion.promptVersion).toBe("prompt-v2");
+    expect(createdBaselineVersion.sampleCount).toBe(8);
+    expect(createdBaselineVersion.note).toBe("promote-ready");
+
+    const listBaselineVersionsAfterCreateResponse = await app.request(
+      `/api/v1/replay/baselines/${encodeURIComponent(baseline.id)}/versions`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(listBaselineVersionsAfterCreateResponse.status).toBe(200);
+    const listBaselineVersionsAfterCreateBody =
+      (await listBaselineVersionsAfterCreateResponse.json()) as {
+        items: Array<{ id: string; version: number; promotedAt: string | null }>;
+        total: number;
+        currentVersionId: string | null;
+        currentVersionNumber: number | null;
+      };
+    expect(listBaselineVersionsAfterCreateBody.total).toBe(2);
+    expect(listBaselineVersionsAfterCreateBody.currentVersionNumber).toBe(1);
+    expect(listBaselineVersionsAfterCreateBody.currentVersionId).toBe(
+      listBaselineVersionsBody.currentVersionId,
+    );
+    expect(
+      listBaselineVersionsAfterCreateBody.items.some(
+        (item) => item.id === createdBaselineVersion.id && item.version === 2,
+      ),
+    ).toBe(true);
+
+    const promoteBaselineVersionResponse = await app.request(
+      `/api/v1/replay/baselines/${encodeURIComponent(baseline.id)}/promote`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          versionId: createdBaselineVersion.id,
+        }),
+      },
+    );
+    expect(promoteBaselineVersionResponse.status).toBe(200);
+    const promoteBaselineVersionBody =
+      (await promoteBaselineVersionResponse.json()) as {
+        baseline: {
+          id: string;
+          datasetId: string;
+          model: string;
+          promptVersion?: string;
+          sampleCount: number;
+          currentVersionId: string;
+          currentVersionNumber: number;
+          metadata: Record<string, unknown>;
+        } | null;
+        version: {
+          id: string;
+          version: number;
+          datasetId: string;
+          model: string;
+          promptVersion?: string;
+          sampleCount: number;
+          promotedAt: string | null;
+        };
+      };
+    expect(promoteBaselineVersionBody.version.id).toBe(createdBaselineVersion.id);
+    expect(promoteBaselineVersionBody.version.version).toBe(2);
+    expect(promoteBaselineVersionBody.version.datasetId).toBe("golden-set-v2");
+    expect(promoteBaselineVersionBody.version.promotedAt).toEqual(
+      expect.any(String),
+    );
+    expect(promoteBaselineVersionBody.baseline?.datasetId).toBe("golden-set-v2");
+    expect(promoteBaselineVersionBody.baseline?.model).toBe("gpt-4.1-mini");
+    expect(promoteBaselineVersionBody.baseline?.promptVersion).toBe("prompt-v2");
+    expect(promoteBaselineVersionBody.baseline?.sampleCount).toBe(8);
+    expect(promoteBaselineVersionBody.baseline?.metadata.rollout).toBe("candidate");
+    expect(promoteBaselineVersionBody.baseline?.currentVersionId).toBe(
+      createdBaselineVersion.id,
+    );
+    expect(promoteBaselineVersionBody.baseline?.currentVersionNumber).toBe(2);
+
+    const listBaselineVersionsAfterPromoteResponse = await app.request(
+      `/api/v1/replay/baselines/${encodeURIComponent(baseline.id)}/versions`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(listBaselineVersionsAfterPromoteResponse.status).toBe(200);
+    const listBaselineVersionsAfterPromoteBody =
+      (await listBaselineVersionsAfterPromoteResponse.json()) as {
+        items: Array<{ id: string; promotedAt: string | null }>;
+        total: number;
+        currentVersionId: string | null;
+        currentVersionNumber: number | null;
+      };
+    expect(listBaselineVersionsAfterPromoteBody.total).toBe(2);
+    expect(listBaselineVersionsAfterPromoteBody.currentVersionId).toBe(
+      createdBaselineVersion.id,
+    );
+    expect(listBaselineVersionsAfterPromoteBody.currentVersionNumber).toBe(2);
+    expect(
+      listBaselineVersionsAfterPromoteBody.items.find(
+        (item) => item.id === createdBaselineVersion.id,
+      )?.promotedAt,
+    ).toEqual(expect.any(String));
+
     const badCreateJobResponse = await app.request("/api/v1/replay/jobs", {
       method: "POST",
       headers: {
@@ -15468,6 +21159,208 @@ describe("Control Plane API", () => {
       },
     );
     expect(createEvaluationResponse.status).toBe(201);
+    const createEvaluationBody = (await createEvaluationResponse.json()) as {
+      automation?: {
+        triggered?: boolean;
+        reason?: string;
+      };
+    };
+    expect(createEvaluationBody.automation?.triggered).toBe(false);
+    expect(createEvaluationBody.automation?.reason).toBe("score_within_threshold");
+
+    const defaultAutomationPolicyResponse = await app.request(
+      "/api/v2/quality/automation-policy",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(defaultAutomationPolicyResponse.status).toBe(200);
+    const defaultAutomationPolicy =
+      (await defaultAutomationPolicyResponse.json()) as {
+        toolId: string;
+        scope: string;
+        decision: string;
+        evaluationScoreThreshold: number;
+        triggerOnEvaluationFailure: boolean;
+        triggerOnReplayRegression: boolean;
+        defaultActionType?: string;
+      };
+    expect(defaultAutomationPolicy.toolId).toBe("quality.replay.advice.execute");
+    expect(defaultAutomationPolicy.scope).toBe("quality_replay_advice");
+    expect(defaultAutomationPolicy.decision).toBe("allow");
+    expect(defaultAutomationPolicy.evaluationScoreThreshold).toBe(80);
+    expect(defaultAutomationPolicy.triggerOnEvaluationFailure).toBe(true);
+    expect(defaultAutomationPolicy.triggerOnReplayRegression).toBe(true);
+    expect(defaultAutomationPolicy.defaultActionType).toBe(
+      "scorecard_adjustment",
+    );
+
+    const updateAutomationPolicyResponse = await app.request(
+      "/api/v2/quality/automation-policy",
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          riskLevel: "high",
+          decision: "require_approval",
+          reason: "低分评估需要审批后再自动治理",
+          evaluationScoreThreshold: 75,
+          triggerOnEvaluationFailure: true,
+          triggerOnReplayRegression: false,
+          strategyMatrix: [
+            {
+              ruleId: "critical-replay",
+              metric: "accuracy",
+              severity: "critical",
+              trendDirection: "down",
+              provider: "github",
+              workflow: "ci-main",
+              projectPattern: "agentledger/*",
+              minConfidence: 0.6,
+              regressionProbabilityAtLeast: 0.5,
+              replayRegressionAtLeast: 1,
+              actionType: "scorecard_adjustment",
+              requiresApproval: true,
+              cooldownMinutes: 30,
+            },
+          ],
+        }),
+      },
+    );
+    expect(updateAutomationPolicyResponse.status).toBe(200);
+    const updatedAutomationPolicy =
+      (await updateAutomationPolicyResponse.json()) as {
+        evaluationScoreThreshold: number;
+        triggerOnEvaluationFailure: boolean;
+        triggerOnReplayRegression: boolean;
+      };
+    expect(updatedAutomationPolicy.evaluationScoreThreshold).toBe(75);
+    expect(updatedAutomationPolicy.triggerOnEvaluationFailure).toBe(true);
+    expect(updatedAutomationPolicy.triggerOnReplayRegression).toBe(false);
+    expect(
+      Array.isArray((updatedAutomationPolicy as { strategyMatrix?: unknown[] }).strategyMatrix),
+    ).toBe(true);
+    expect(
+      ((updatedAutomationPolicy as {
+        strategyMatrix?: Array<{
+          ruleId?: string;
+          provider?: string;
+          workflow?: string;
+          projectPattern?: string;
+          reason?: string;
+        }>;
+      }).strategyMatrix ?? [])[0],
+    ).toMatchObject({
+      ruleId: "critical-replay",
+      provider: "github",
+      workflow: "ci-main",
+      projectPattern: "agentledger/*",
+    });
+
+    const invalidAutomationPolicyResponse = await app.request(
+      "/api/v2/quality/automation-policy",
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          riskLevel: "high",
+          decision: "require_approval",
+          reason: "非法矩阵应被阻断",
+          evaluationScoreThreshold: 75,
+          triggerOnEvaluationFailure: true,
+          triggerOnReplayRegression: false,
+          strategyMatrix: [
+            {
+              ruleId: "invalid-replay",
+              metric: "accuracy",
+              minConfidence: 1.2,
+              actionType: "scorecard_adjustment",
+              requiresApproval: true,
+            },
+          ],
+        }),
+      },
+    );
+    expect(invalidAutomationPolicyResponse.status).toBe(400);
+    await expect(invalidAutomationPolicyResponse.json()).resolves.toEqual({
+      message: "strategyMatrix[0].minConfidence 必须小于等于 1。",
+    });
+
+    const simulateAutomationPolicyResponse = await app.request(
+      "/api/v2/quality/automation-policy/simulate",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          metric: "accuracy",
+          score: 63,
+          sampleCount: 10,
+          trendDirection: "down",
+          provider: "github",
+          workflow: "ci-main",
+          project: `agentledger/${nonce}`,
+          confidence: 0.82,
+          regressionProbability: 0.73,
+          replayRegressionCount: 2,
+        }),
+      },
+    );
+    expect(simulateAutomationPolicyResponse.status).toBe(200);
+    const simulateAutomationPolicyBody =
+      (await simulateAutomationPolicyResponse.json()) as {
+        matchedRuleId?: string | null;
+        resolvedAction?: string | null;
+        recommendedActionType?: string | null;
+        requiresApproval?: boolean;
+      };
+    expect(simulateAutomationPolicyBody.matchedRuleId).toBe("critical-replay");
+    expect(simulateAutomationPolicyBody.resolvedAction).toBe("scorecard_adjustment");
+    expect(simulateAutomationPolicyBody.recommendedActionType).toBe(
+      "scorecard_adjustment",
+    );
+    expect(simulateAutomationPolicyBody.requiresApproval).toBe(true);
+
+    const simulateAutomationPolicyMismatchResponse = await app.request(
+      "/api/v2/quality/automation-policy/simulate",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          metric: "accuracy",
+          score: 63,
+          sampleCount: 10,
+          trendDirection: "down",
+          provider: "slack",
+          workflow: "ci-other",
+          project: `other/${nonce}`,
+          confidence: 0.82,
+          regressionProbability: 0.73,
+          replayRegressionCount: 2,
+        }),
+      },
+    );
+    expect(simulateAutomationPolicyMismatchResponse.status).toBe(200);
+    const simulateAutomationPolicyMismatchBody =
+      (await simulateAutomationPolicyMismatchResponse.json()) as {
+        matchedRuleId?: string | null;
+        recommendedActionType?: string | null;
+      };
+    expect(simulateAutomationPolicyMismatchBody.matchedRuleId).toBeNull();
+    expect(simulateAutomationPolicyMismatchBody.recommendedActionType).toBe(
+      "scorecard_adjustment",
+    );
 
     const createExternalEvaluationResponse = await app.request(
       "/api/v2/quality/evaluations",
@@ -15493,6 +21386,212 @@ describe("Control Plane API", () => {
       },
     );
     expect(createExternalEvaluationResponse.status).toBe(201);
+
+    const automationEvaluationResponse = await app.request(
+      "/api/v2/quality/evaluations",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          sessionId: `v2-sess-automation-${nonce}`,
+          metric: "accuracy",
+          score: 62,
+          sampleCount: 10,
+          occurredAt: "2026-03-04T12:30:00.000Z",
+        }),
+      },
+    );
+    expect(automationEvaluationResponse.status).toBe(201);
+    const automationEvaluationBody =
+      (await automationEvaluationResponse.json()) as {
+        automation?: {
+          triggered?: boolean;
+          reason?: string;
+          execution?: {
+            executionId?: string;
+            adviceExecutionId?: string;
+            status?: string;
+            result?: string;
+            approvalRequestId?: string;
+            advice?: {
+              summary?: string;
+            };
+          };
+        };
+      };
+    expect(automationEvaluationBody.automation?.triggered).toBe(true);
+    expect(automationEvaluationBody.automation?.reason).toBe(
+      "score_below_threshold",
+    );
+    expect(automationEvaluationBody.automation?.execution?.status).toBe(
+      "blocked",
+    );
+    expect(automationEvaluationBody.automation?.execution?.result).toBe(
+      "blocked",
+    );
+    expect(
+      typeof automationEvaluationBody.automation?.execution?.adviceExecutionId,
+    ).toBe("string");
+    expect(
+      typeof automationEvaluationBody.automation?.execution?.approvalRequestId,
+    ).toBe("string");
+    expect(
+      automationEvaluationBody.automation?.execution?.advice?.summary,
+    ).toContain("accuracy");
+
+    const automationAdviceExecutionsResponse = await app.request(
+      "/api/v2/quality/advice/executions?limit=20",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(automationAdviceExecutionsResponse.status).toBe(200);
+    const automationAdviceExecutionsBody =
+      (await automationAdviceExecutionsResponse.json()) as {
+        items: Array<{
+          id: string;
+          triggerSource: string;
+          actionType: string;
+          status: string;
+          metric?: string;
+          resultSummary?: Record<string, unknown>;
+        }>;
+      };
+    const automationAdviceExecution = automationAdviceExecutionsBody.items.find(
+      (item) =>
+        item.id === automationEvaluationBody.automation?.execution?.adviceExecutionId,
+    );
+    expect(automationAdviceExecution).toBeDefined();
+    expect(automationAdviceExecution?.triggerSource).toBe("automatic");
+    expect(
+      ["pending", "running", "completed", "failed"].includes(
+        automationAdviceExecution?.status ?? "",
+      ),
+    ).toBe(true);
+    if (automationEvaluationBody.automation?.execution?.approvalRequestId) {
+      expect(automationAdviceExecution?.resultSummary?.["approvalRequestId"]).toBe(
+        automationEvaluationBody.automation?.execution?.approvalRequestId,
+      );
+    }
+
+    const approveAutomationResponse = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(
+        automationEvaluationBody.automation?.execution?.approvalRequestId as string,
+      )}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          reason: "approve automation advice execution",
+        }),
+      },
+    );
+    expect(approveAutomationResponse.status).toBe(200);
+    const approveAutomationBody = (await approveAutomationResponse.json()) as {
+      status?: string;
+      continuedExecution?: {
+        id?: string;
+        status?: string;
+        scorecardKey?: string;
+      } | null;
+    };
+    expect(approveAutomationBody.status).toBe("approved");
+    expect(approveAutomationBody.continuedExecution?.id).toBe(
+      automationEvaluationBody.automation?.execution?.adviceExecutionId,
+    );
+    expect(approveAutomationBody.continuedExecution?.status).toBe("completed");
+    expect(approveAutomationBody.continuedExecution?.scorecardKey).toBe(
+      "accuracy",
+    );
+
+    const approvedAdviceExecutionResponse = await app.request(
+      `/api/v2/quality/advice/executions/${encodeURIComponent(
+        automationEvaluationBody.automation?.execution?.adviceExecutionId as string,
+      )}`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(approvedAdviceExecutionResponse.status).toBe(200);
+    const approvedAdviceExecutionBody =
+      (await approvedAdviceExecutionResponse.json()) as {
+        status?: string;
+        scorecardKey?: string;
+        resultSummary?: Record<string, unknown>;
+      };
+    expect(approvedAdviceExecutionBody.status).toBe("completed");
+    expect(approvedAdviceExecutionBody.scorecardKey).toBe("accuracy");
+    expect(approvedAdviceExecutionBody.resultSummary?.["targetScore"]).toBe(75);
+
+    const rejectAutomationEvaluationResponse = await app.request(
+      "/api/v2/quality/evaluations",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          sessionId: `v2-sess-automation-reject-${nonce}`,
+          metric: "accuracy",
+          score: 58,
+          sampleCount: 8,
+          occurredAt: "2026-03-04T13:00:00.000Z",
+        }),
+      },
+    );
+    expect(rejectAutomationEvaluationResponse.status).toBe(201);
+    const rejectAutomationEvaluationBody =
+      (await rejectAutomationEvaluationResponse.json()) as {
+        automation?: {
+          execution?: {
+            adviceExecutionId?: string;
+            approvalRequestId?: string;
+          };
+        };
+      };
+    expect(
+      typeof rejectAutomationEvaluationBody.automation?.execution?.approvalRequestId,
+    ).toBe("string");
+
+    const rejectAutomationResponse = await app.request(
+      `/api/v1/mcp/approvals/${encodeURIComponent(
+        rejectAutomationEvaluationBody.automation?.execution?.approvalRequestId as string,
+      )}/reject`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          reason: "reject automation advice execution",
+        }),
+      },
+    );
+    expect(rejectAutomationResponse.status).toBe(200);
+    const rejectAutomationBody = (await rejectAutomationResponse.json()) as {
+      status?: string;
+      continuedExecution?: {
+        id?: string;
+        status?: string;
+        error?: string;
+      } | null;
+    };
+    expect(rejectAutomationBody.status).toBe("rejected");
+    expect(rejectAutomationBody.continuedExecution?.id).toBe(
+      rejectAutomationEvaluationBody.automation?.execution?.adviceExecutionId,
+    );
+    expect(rejectAutomationBody.continuedExecution?.status).toBe("failed");
+    expect(rejectAutomationBody.continuedExecution?.error).toBe(
+      "automation_approval_rejected",
+    );
 
     const metricsResponse = await app.request(
       "/api/v2/quality/metrics?from=2026-03-04&to=2026-03-04&groupBy=repo&provider=github",
@@ -15654,6 +21753,334 @@ describe("Control Plane API", () => {
     expect(
       listTenantBScorecardsBody.items.some((item) => item.id === "accuracy"),
     ).toBe(false);
+
+    const automationInvocationsResponse = await app.request(
+      `/api/v1/mcp/invocations?toolId=${encodeURIComponent("quality.replay.advice.execute")}&limit=20`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(automationInvocationsResponse.status).toBe(200);
+    const automationInvocationsBody =
+      (await automationInvocationsResponse.json()) as {
+        items: Array<{
+          id: string;
+          toolId: string;
+          approvalRequestId?: string;
+          metadata: Record<string, unknown>;
+        }>;
+      };
+    expect(
+      automationInvocationsBody.items.some(
+        (item) =>
+          item.id === automationEvaluationBody.automation?.execution?.executionId &&
+          item.toolId === "quality.replay.advice.execute" &&
+          item.metadata["source"] === "quality.v2.automation",
+      ),
+    ).toBe(true);
+  });
+
+  test("api-v2 quality 路由：forecast 与 advice", async () => {
+    const nonce = createNonce("quality-v2-forecast-advice");
+    const auth = await getDefaultAuthContext();
+    const tenantResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Quality Forecast Tenant ${nonce}`,
+        slug: `quality-forecast-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error("租户创建失败，缺少 tenantId。");
+    }
+    const headers = await issueTenantScopedAuthHeaders(
+      tenantId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const createEvaluationResponse = await app.request(
+      "/api/v2/quality/evaluations",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          replayRunId: `forecast-run-${nonce}`,
+          metric: "accuracy",
+          score: 72,
+          sampleCount: 12,
+          occurredAt: "2026-03-05T10:00:00.000Z",
+          externalSource: {
+            provider: "github",
+            repo: `agentledger/${nonce}`,
+            workflow: "ci-main",
+            runId: `run-${nonce}`,
+          },
+        }),
+      },
+    );
+    expect(createEvaluationResponse.status).toBe(201);
+
+    const forecastResponse = await app.request(
+      "/api/v2/quality/reports/forecast?from=2026-03-05&to=2026-03-05&provider=github&workflow=ci-main&limit=10",
+      {
+        headers,
+      },
+    );
+    expect(forecastResponse.status).toBe(200);
+    const forecastBody = (await forecastResponse.json()) as {
+      items: Array<{
+        project: string;
+        metric: string;
+        predictedScore: number;
+        confidence: number;
+        modelVersion?: string;
+        regressionProbability?: number;
+        rationale?: string;
+        confidenceLabel?: string;
+        riskDrivers?: string[];
+        featureContributions?: unknown[];
+      }>;
+      total: number;
+    };
+    expect(forecastBody.total).toBeGreaterThanOrEqual(1);
+    expect(
+      forecastBody.items.some(
+        (item) =>
+          item.project === `agentledger/${nonce}` &&
+          item.metric === "all" &&
+          item.predictedScore >= 0 &&
+          item.confidence > 0 &&
+          item.modelVersion === "quality-heuristic-v2" &&
+          typeof item.regressionProbability === "number" &&
+          typeof item.rationale === "string" &&
+          ["low", "medium", "high"].includes(item.confidenceLabel ?? "") &&
+          Array.isArray(item.riskDrivers) &&
+          Array.isArray(item.featureContributions),
+      ),
+    ).toBe(true);
+
+    const adviceResponse = await app.request(
+      "/api/v2/quality/reports/advice?from=2026-03-05&to=2026-03-05&provider=github&workflow=ci-main",
+      {
+        headers,
+      },
+    );
+    expect(adviceResponse.status).toBe(200);
+    const adviceBody = (await adviceResponse.json()) as {
+      items: Array<{
+        project: string;
+        severity: string;
+        recommendation: string;
+        explanation?: string;
+        automationReadiness?: string;
+        executionOptions?: Array<{ actionType: string; availability: string }>;
+        strategyMatrixMatch?: string | null;
+        recommendedPlan?: Record<string, unknown>;
+        autoExecutionDecision?: string;
+      }>;
+      total: number;
+    };
+    expect(adviceBody.total).toBeGreaterThanOrEqual(1);
+    expect(
+      adviceBody.items.some(
+        (item) =>
+          item.project === `agentledger/${nonce}` &&
+          ["info", "warn", "critical"].includes(item.severity) &&
+          item.recommendation.length > 0 &&
+          typeof item.explanation === "string" &&
+          ["monitor_only", "manual_review", "ready_for_execution", "execution_in_progress"].includes(
+            item.automationReadiness ?? "",
+          ) &&
+          Array.isArray(item.executionOptions) &&
+          "strategyMatrixMatch" in item &&
+          typeof item.recommendedPlan === "object" &&
+          typeof item.autoExecutionDecision === "string",
+      ),
+    ).toBe(true);
+  });
+
+  test("api-v2 quality 路由：advice execute/list/cancel", async () => {
+    const nonce = createNonce("quality-advice-execution");
+    const auth = await getDefaultAuthContext();
+    const tenantResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Quality Advice Execution ${nonce}`,
+        slug: `quality-advice-exec-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error("quality advice execution 测试租户创建失败。");
+    }
+    const headers = await issueTenantScopedAuthHeaders(
+      tenantId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const evaluationResponse = await app.request("/api/v2/quality/evaluations", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...headers,
+      },
+      body: JSON.stringify({
+        metric: "accuracy",
+        score: 62,
+        sampleCount: 10,
+        occurredAt: "2026-03-05T11:00:00.000Z",
+        externalSource: {
+          provider: "github",
+          repo: `repo-${nonce}`,
+          workflow: "ci-advice",
+          runId: `run-${nonce}`,
+        },
+      }),
+    });
+    expect(evaluationResponse.status).toBe(201);
+
+    const adviceResponse = await app.request(
+      "/api/v2/quality/reports/advice?from=2026-03-05&to=2026-03-05&provider=github&workflow=ci-advice",
+      { headers },
+    );
+    expect(adviceResponse.status).toBe(200);
+    const adviceBody = (await adviceResponse.json()) as {
+      items: Array<{
+        id: string;
+        project: string;
+        severity: "info" | "warn" | "critical";
+      }>;
+    };
+    const advice = adviceBody.items[0];
+    expect(advice).toBeDefined();
+
+    const createReplayDatasetResponse = await app.request(
+      "/api/v2/replay/datasets",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          name: `Advice Replay Dataset ${nonce}`,
+          datasetRef: `quality-advice-dataset-${nonce}`,
+          model: "gpt-4.1-mini",
+          sampleCount: 6,
+        }),
+      },
+    );
+    expect(createReplayDatasetResponse.status).toBe(201);
+    const replayDataset = (await createReplayDatasetResponse.json()) as {
+      id: string;
+      currentVersionId?: string | null;
+    };
+
+    const executeResponse = await app.request(
+      `/api/v2/quality/advice/${encodeURIComponent(advice.id)}/execute`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          project: advice.project,
+          severity: advice.severity,
+          actionType: "scorecard_adjustment",
+          metric: "accuracy",
+          targetScore: 81,
+          warningScore: 72,
+          criticalScore: 63,
+        }),
+      },
+    );
+    expect(executeResponse.status).toBe(201);
+    const executeBody = (await executeResponse.json()) as {
+      id: string;
+      status: string;
+      resultSummary?: { scorecardKey?: string };
+    };
+    expect(executeBody.status).toBe("completed");
+    expect(executeBody.resultSummary?.scorecardKey).toBe("accuracy");
+
+    const replayExecuteResponse = await app.request(
+      `/api/v2/quality/advice/${encodeURIComponent(advice.id)}/execute`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          project: advice.project,
+          severity: advice.severity,
+          actionType: "replay_experiment",
+          metric: "accuracy",
+          datasetId: replayDataset.id,
+          candidateLabels: ["candidate-a", "candidate-b"],
+        }),
+      },
+    );
+    expect(replayExecuteResponse.status).toBe(201);
+    const replayExecuteBody = (await replayExecuteResponse.json()) as {
+      id: string;
+      status: string;
+      experimentId?: string;
+      resultSummary?: {
+        experimentId?: string;
+        baselineVersionId?: string | null;
+        runIds?: string[];
+        candidateLabels?: string[];
+      };
+    };
+    expect(replayExecuteBody.status).toBe("completed");
+    expect(replayExecuteBody.experimentId).toEqual(expect.any(String));
+    expect(replayExecuteBody.resultSummary?.experimentId).toBe(
+      replayExecuteBody.experimentId,
+    );
+    expect(replayExecuteBody.resultSummary?.baselineVersionId ?? null).toBe(
+      replayDataset.currentVersionId ?? null,
+    );
+    expect(replayExecuteBody.resultSummary?.candidateLabels).toEqual([
+      "candidate-a",
+      "candidate-b",
+    ]);
+    expect(replayExecuteBody.resultSummary?.runIds?.length).toBe(2);
+
+    const listResponse = await app.request(
+      `/api/v2/quality/advice/executions?adviceId=${encodeURIComponent(advice.id)}&limit=10`,
+      { headers },
+    );
+    expect(listResponse.status).toBe(200);
+    const listBody = (await listResponse.json()) as {
+      items: Array<{ id: string }>;
+      total: number;
+    };
+    expect(listBody.total).toBeGreaterThanOrEqual(2);
+    expect(listBody.items.some((item) => item.id === executeBody.id)).toBe(true);
+    expect(listBody.items.some((item) => item.id === replayExecuteBody.id)).toBe(true);
+
+    const cancelResponse = await app.request(
+      `/api/v2/quality/advice/executions/${encodeURIComponent(replayExecuteBody.id)}/cancel`,
+      {
+        method: "POST",
+        headers,
+      },
+    );
+    expect(cancelResponse.status).toBe(200);
+    const cancelBody = (await cancelResponse.json()) as { status: string };
+    expect(cancelBody.status).toBe("cancelled");
   });
 
   test("api-v2 replay 路由：数据集、运行、差异与工件链路", async () => {
@@ -15757,10 +22184,14 @@ describe("Control Plane API", () => {
         tenantId: string;
         datasetId?: string;
         datasetRef?: string | null;
+        currentVersionId?: string | null;
+        currentVersionNumber?: number | null;
       };
       expect(dataset.tenantId).toBe(tenantAId);
       expect(dataset.datasetId).toBe(dataset.id);
       expect(dataset.datasetRef).toBe(`dataset-${nonce}`);
+      expect(dataset.currentVersionNumber).toBe(1);
+      expect(dataset.currentVersionId).toEqual(expect.any(String));
 
       const createLegacyDatasetResponse = await app.request(
         "/api/v2/replay/datasets",
@@ -15783,6 +22214,129 @@ describe("Control Plane API", () => {
       };
       expect(legacyDataset.datasetRef).toBe(`legacy-dataset-${nonce}`);
 
+      const listVersionsResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/versions`,
+        {
+          headers: tenantAHeaders,
+        },
+      );
+      expect(listVersionsResponse.status).toBe(200);
+      const listVersionsBody = (await listVersionsResponse.json()) as {
+        datasetId: string;
+        currentVersionId: string | null;
+        currentVersionNumber: number | null;
+        total: number;
+        items: Array<{
+          id: string;
+          version: number;
+          datasetId: string;
+          datasetRef: string | null;
+          model: string;
+          sampleCount: number;
+        }>;
+      };
+      expect(listVersionsBody.datasetId).toBe(dataset.id);
+      expect(listVersionsBody.total).toBe(1);
+      expect(listVersionsBody.currentVersionNumber).toBe(1);
+      expect(listVersionsBody.items[0]?.datasetRef).toBe(`dataset-${nonce}`);
+
+      const createVersionResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/versions`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...tenantAHeaders,
+          },
+          body: JSON.stringify({
+            datasetId: `dataset-version-${nonce}`,
+            model: "gpt-4.1-mini",
+            promptVersion: "v3",
+            sampleCount: 9,
+            note: "candidate-version",
+            metadata: {
+              rollout: "candidate",
+            },
+          }),
+        },
+      );
+      expect(createVersionResponse.status).toBe(201);
+      const createdVersion = (await createVersionResponse.json()) as {
+        id: string;
+        version: number;
+        datasetId: string;
+        datasetRef: string | null;
+        model: string;
+        promptVersion: string | null;
+        sampleCount: number;
+        note: string | null;
+      };
+      expect(createdVersion.version).toBe(2);
+      expect(createdVersion.datasetId).toBe(dataset.id);
+      expect(createdVersion.datasetRef).toBe(`dataset-version-${nonce}`);
+      expect(createdVersion.model).toBe("gpt-4.1-mini");
+      expect(createdVersion.promptVersion).toBe("v3");
+      expect(createdVersion.sampleCount).toBe(9);
+      expect(createdVersion.note).toBe("candidate-version");
+
+      const promoteVersionResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/promote`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...tenantAHeaders,
+          },
+          body: JSON.stringify({
+            versionId: createdVersion.id,
+          }),
+        },
+      );
+      expect(promoteVersionResponse.status).toBe(200);
+      const promoteVersionBody = (await promoteVersionResponse.json()) as {
+        dataset: {
+          id: string;
+          datasetRef?: string | null;
+          model: string;
+          promptVersion?: string | null;
+          sampleCount?: number;
+          currentVersionId?: string | null;
+          currentVersionNumber?: number | null;
+          metadata?: Record<string, unknown>;
+        } | null;
+        version: {
+          id: string;
+          version: number;
+          promotedAt: string | null;
+        };
+      };
+      expect(promoteVersionBody.dataset?.currentVersionId).toBe(createdVersion.id);
+      expect(promoteVersionBody.dataset?.currentVersionNumber).toBe(2);
+      expect(promoteVersionBody.dataset?.model).toBe("gpt-4.1-mini");
+      expect(promoteVersionBody.dataset?.promptVersion).toBe("v3");
+      expect(promoteVersionBody.dataset?.metadata?.rollout).toBe("candidate");
+      expect(promoteVersionBody.version.promotedAt).toEqual(expect.any(String));
+
+      const listVersionsAfterPromoteResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/versions`,
+        {
+          headers: tenantAHeaders,
+        },
+      );
+      expect(listVersionsAfterPromoteResponse.status).toBe(200);
+      const listVersionsAfterPromoteBody =
+        (await listVersionsAfterPromoteResponse.json()) as {
+          currentVersionId: string | null;
+          currentVersionNumber: number | null;
+          items: Array<{ id: string; promotedAt: string | null }>;
+        };
+      expect(listVersionsAfterPromoteBody.currentVersionId).toBe(createdVersion.id);
+      expect(listVersionsAfterPromoteBody.currentVersionNumber).toBe(2);
+      expect(
+        listVersionsAfterPromoteBody.items.find((item) => item.id === createdVersion.id)
+          ?.promotedAt,
+      ).toEqual(expect.any(String));
+
       const listDatasetsResponse = await app.request(
         "/api/v2/replay/datasets?limit=20",
         {
@@ -15791,11 +22345,16 @@ describe("Control Plane API", () => {
       );
       expect(listDatasetsResponse.status).toBe(200);
       const listDatasetsBody = (await listDatasetsResponse.json()) as {
-        items: Array<{ id: string }>;
+        items: Array<{
+          id: string;
+          currentVersionId?: string | null;
+          currentVersionNumber?: number | null;
+        }>;
       };
-      expect(
-        listDatasetsBody.items.some((item) => item.id === dataset.id),
-      ).toBe(true);
+      const listedDataset = listDatasetsBody.items.find((item) => item.id === dataset.id);
+      expect(listedDataset).toBeTruthy();
+      expect(listedDataset?.currentVersionId).toBe(createdVersion.id);
+      expect(listedDataset?.currentVersionNumber).toBe(2);
 
       const replaceCasesResponse = await app.request(
         `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/cases`,
@@ -16058,7 +22617,897 @@ describe("Control Plane API", () => {
     }
   });
 
-  test("api-v2 residency 路由：策略、区域映射、复制审批取消与租户隔离", async () => {
+  test("api-v2 replay 路由：baselineVersionId 使用版本快照并支持样本回溯", async () => {
+    resetReplayJobExecutionWorkerForTests();
+    try {
+      const nonce = createNonce("replay-version-snapshot");
+      const auth = await getDefaultAuthContext();
+      const tenantResult = await createTenantByAuth(
+        auth.accessToken,
+        {
+          name: `Replay Version Snapshot ${nonce}`,
+          slug: `replay-version-snapshot-${nonce}`,
+        },
+        auth.userId,
+      );
+      assertApiStatus(tenantResult, [201]);
+      const tenantId = extractEntityId(tenantResult.payload);
+      if (!tenantId) {
+        throw new Error("replay version snapshot 测试租户创建失败。");
+      }
+      const headers = await issueTenantScopedAuthHeaders(
+        tenantId,
+        auth.accessToken,
+        auth.userId,
+      );
+
+      const createDatasetResponse = await app.request("/api/v2/replay/datasets", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          name: `Replay Version Dataset ${nonce}`,
+          datasetRef: `dataset-version-${nonce}`,
+          model: "gpt-4.1-mini",
+          sampleCount: 4,
+        }),
+      });
+      expect(createDatasetResponse.status).toBe(201);
+      const dataset = (await createDatasetResponse.json()) as {
+        id: string;
+        currentVersionId?: string | null;
+      };
+      expect(dataset.currentVersionId).toEqual(expect.any(String));
+      const initialVersionId = dataset.currentVersionId;
+      if (!initialVersionId) {
+        throw new Error("replay version snapshot 缺少 currentVersionId。");
+      }
+
+      const seedCasesResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/cases`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({
+            items: [
+              {
+                caseId: "case-v1",
+                input: "请总结退款流程",
+                expectedOutput: "总结退款流程的关键步骤",
+              },
+            ],
+          }),
+        },
+      );
+      expect(seedCasesResponse.status).toBe(200);
+
+      const initialVersionCasesResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/versions/${encodeURIComponent(
+          initialVersionId,
+        )}/cases`,
+        {
+          headers,
+        },
+      );
+      expect(initialVersionCasesResponse.status).toBe(200);
+      const initialVersionCasesBody = (await initialVersionCasesResponse.json()) as {
+        versionId: string;
+        total: number;
+        items: Array<{ caseId: string; input: string }>;
+      };
+      expect(initialVersionCasesBody.versionId).toBe(initialVersionId);
+      expect(initialVersionCasesBody.total).toBe(1);
+      expect(initialVersionCasesBody.items).toEqual([
+        expect.objectContaining({
+          caseId: "case-v1",
+          input: "请总结退款流程",
+        }),
+      ]);
+
+      const createVersionResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/versions`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({
+            datasetId: `dataset-version-snapshot-${nonce}`,
+            note: "snapshot-before-edit",
+          }),
+        },
+      );
+      expect(createVersionResponse.status).toBe(201);
+      const createdVersion = (await createVersionResponse.json()) as {
+        id: string;
+        version: number;
+      };
+      expect(createdVersion.version).toBe(2);
+
+      const createdVersionCasesResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/versions/${encodeURIComponent(
+          createdVersion.id,
+        )}/cases`,
+        {
+          headers,
+        },
+      );
+      expect(createdVersionCasesResponse.status).toBe(200);
+      const createdVersionCasesBody = (await createdVersionCasesResponse.json()) as {
+        total: number;
+        items: Array<{ caseId: string; input: string }>;
+      };
+      expect(createdVersionCasesBody.total).toBe(1);
+      expect(createdVersionCasesBody.items).toEqual([
+        expect.objectContaining({
+          caseId: "case-v1",
+          input: "请总结退款流程",
+        }),
+      ]);
+
+      const replaceCurrentCasesResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/cases`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({
+            items: [
+              {
+                caseId: "case-v1",
+                input: "请总结退款流程（已改写）",
+                expectedOutput: "总结新版退款流程",
+              },
+              {
+                caseId: "case-v2",
+                input: "请说明发票申请步骤",
+                expectedOutput: "说明发票申请步骤",
+              },
+            ],
+          }),
+        },
+      );
+      expect(replaceCurrentCasesResponse.status).toBe(200);
+
+      const currentCasesResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/cases?limit=10`,
+        {
+          headers,
+        },
+      );
+      expect(currentCasesResponse.status).toBe(200);
+      const currentCasesBody = (await currentCasesResponse.json()) as {
+        total: number;
+        items: Array<{ caseId: string; input: string }>;
+      };
+      expect(currentCasesBody.total).toBe(2);
+      expect(currentCasesBody.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            caseId: "case-v1",
+            input: "请总结退款流程（已改写）",
+          }),
+          expect.objectContaining({
+            caseId: "case-v2",
+            input: "请说明发票申请步骤",
+          }),
+        ]),
+      );
+
+      const snapshotCasesResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/versions/${encodeURIComponent(
+          createdVersion.id,
+        )}/cases`,
+        {
+          headers,
+        },
+      );
+      expect(snapshotCasesResponse.status).toBe(200);
+      const snapshotCasesBody = (await snapshotCasesResponse.json()) as {
+        total: number;
+        items: Array<{ caseId: string; input: string }>;
+      };
+      expect(snapshotCasesBody.total).toBe(1);
+      expect(snapshotCasesBody.items).toEqual([
+        expect.objectContaining({
+          caseId: "case-v1",
+          input: "请总结退款流程",
+        }),
+      ]);
+
+      const createRunResponse = await app.request("/api/v2/replay/runs", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          datasetId: dataset.id,
+          candidateLabel: "candidate-version-snapshot",
+          sampleLimit: 10,
+          baselineVersionId: createdVersion.id,
+        }),
+      });
+      expect(createRunResponse.status).toBe(201);
+      const replayRun = (await createRunResponse.json()) as {
+        id: string;
+        status: string;
+      };
+      expect(replayRun.status).toBe("pending");
+
+      await flushReplayJobExecutionQueueForTests();
+
+      const getRunResponse = await app.request(
+        `/api/v2/replay/runs/${encodeURIComponent(replayRun.id)}`,
+        {
+          headers,
+        },
+      );
+      expect(getRunResponse.status).toBe(200);
+      const getRunBody = (await getRunResponse.json()) as {
+        status: string;
+        totalCases: number;
+        processedCases: number;
+        summary?: {
+          baselineVersionId?: string | null;
+          executionSource?: string;
+        };
+      };
+      expect(getRunBody.status).toBe("completed");
+      expect(getRunBody.totalCases).toBe(1);
+      expect(getRunBody.processedCases).toBe(1);
+      expect(getRunBody.summary?.baselineVersionId ?? null).toBe(createdVersion.id);
+      expect(getRunBody.summary?.executionSource).toBe("dataset_cases");
+
+      const runArtifactsResponse = await app.request(
+        `/api/v2/replay/runs/${encodeURIComponent(replayRun.id)}/artifacts/summary/download`,
+        {
+          headers,
+        },
+      );
+      expect(runArtifactsResponse.status).toBe(200);
+      const runArtifactsBody = (await runArtifactsResponse.json()) as {
+        totalCases?: number;
+        baselineVersionId?: string | null;
+      };
+      expect(runArtifactsBody.totalCases).toBe(1);
+      expect(runArtifactsBody.baselineVersionId ?? null).toBe(createdVersion.id);
+
+      const promoteVersionResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/promote`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({
+            versionId: createdVersion.id,
+          }),
+        },
+      );
+      expect(promoteVersionResponse.status).toBe(200);
+
+      const casesAfterPromoteResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/cases?limit=10`,
+        {
+          headers,
+        },
+      );
+      expect(casesAfterPromoteResponse.status).toBe(200);
+      const casesAfterPromoteBody = (await casesAfterPromoteResponse.json()) as {
+        total: number;
+        items: Array<{ caseId: string; input: string }>;
+      };
+      expect(casesAfterPromoteBody.total).toBe(1);
+      expect(casesAfterPromoteBody.items).toEqual([
+        expect.objectContaining({
+          caseId: "case-v1",
+          input: "请总结退款流程",
+        }),
+      ]);
+    } finally {
+      resetReplayJobExecutionWorkerForTests();
+    }
+  });
+
+  test("api-v2 replay 路由：experiments create/list/detail", async () => {
+    resetReplayJobExecutionWorkerForTests();
+    setReplayJobExecutionHandlerForTests(async ({ replayJob }) => ({
+      status: "completed",
+      summary: {
+        metric: "accuracy",
+        totalCases:
+          typeof replayJob.summary["totalCases"] === "number"
+            ? replayJob.summary["totalCases"]
+            : 0,
+        processedCases:
+          typeof replayJob.summary["totalCases"] === "number"
+            ? replayJob.summary["totalCases"]
+            : 0,
+        improvedCases: 1,
+        regressedCases: 0,
+        unchangedCases: 0,
+      },
+      diff: {
+        items: [],
+      },
+    }));
+    try {
+      const nonce = createNonce("replay-experiment-routes");
+      const auth = await getDefaultAuthContext();
+      const tenantResult = await createTenantByAuth(
+        auth.accessToken,
+        {
+          name: `Replay Experiment Tenant ${nonce}`,
+          slug: `replay-experiment-${nonce}`,
+        },
+        auth.userId,
+      );
+      assertApiStatus(tenantResult, [201]);
+      const tenantId = extractEntityId(tenantResult.payload);
+      if (!tenantId) {
+        throw new Error("租户创建失败，缺少 tenantId。");
+      }
+      const headers = await issueTenantScopedAuthHeaders(
+        tenantId,
+        auth.accessToken,
+        auth.userId,
+      );
+
+      const createDatasetResponse = await app.request(
+        "/api/v2/replay/datasets",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({
+            name: `Replay Experiment Dataset ${nonce}`,
+            datasetRef: `dataset-exp-${nonce}`,
+            model: "gpt-4.1",
+            sampleCount: 5,
+          }),
+        },
+      );
+      expect(createDatasetResponse.status).toBe(201);
+      const dataset = (await createDatasetResponse.json()) as { id: string };
+
+      const createRunResponse = await app.request("/api/v2/replay/runs", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          datasetId: dataset.id,
+          candidateLabel: "candidate-exp",
+          sampleLimit: 5,
+        }),
+      });
+      expect(createRunResponse.status).toBe(201);
+      const replayRun = (await createRunResponse.json()) as { id: string };
+
+      await flushReplayJobExecutionQueueForTests();
+
+      const createExperimentResponse = await app.request(
+        "/api/v2/replay/experiments",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({
+            name: `Experiment ${nonce}`,
+            datasetId: dataset.id,
+            baselineVersionId: "baseline-version-exp-1",
+            runIds: [replayRun.id],
+          }),
+        },
+      );
+      expect(createExperimentResponse.status).toBe(201);
+      const experiment = (await createExperimentResponse.json()) as {
+        id: string;
+        datasetId: string;
+        baselineVersionId?: string | null;
+        metadata?: {
+          baselineVersionId?: string | null;
+        };
+        runIds: string[];
+        summary: {
+          totalRuns: number;
+          baselineVersionId?: string | null;
+        };
+      };
+      expect(experiment.datasetId).toBe(dataset.id);
+      expect(experiment.baselineVersionId).toBe("baseline-version-exp-1");
+      expect(experiment.metadata?.baselineVersionId).toBe("baseline-version-exp-1");
+      expect(experiment.runIds).toEqual([replayRun.id]);
+      expect(experiment.summary.totalRuns).toBe(1);
+      expect(experiment.summary.baselineVersionId).toBe("baseline-version-exp-1");
+
+      const listExperimentsResponse = await app.request(
+        `/api/v2/replay/experiments?datasetId=${encodeURIComponent(dataset.id)}`,
+        {
+          headers,
+        },
+      );
+      expect(listExperimentsResponse.status).toBe(200);
+      const listExperimentsBody = (await listExperimentsResponse.json()) as {
+        items: Array<{
+          id: string;
+          baselineVersionId?: string | null;
+          metadata?: {
+            baselineVersionId?: string | null;
+          };
+        }>;
+        total: number;
+      };
+      expect(listExperimentsBody.total).toBe(1);
+      const listedExperiment = listExperimentsBody.items.find(
+        (item) => item.id === experiment.id,
+      );
+      expect(listedExperiment).toBeTruthy();
+      expect(listedExperiment?.baselineVersionId).toBe("baseline-version-exp-1");
+      expect(listedExperiment?.metadata?.baselineVersionId).toBe(
+        "baseline-version-exp-1",
+      );
+
+      const getExperimentResponse = await app.request(
+        `/api/v2/replay/experiments/${encodeURIComponent(experiment.id)}`,
+        {
+          headers,
+        },
+      );
+      expect(getExperimentResponse.status).toBe(200);
+      const getExperimentBody = (await getExperimentResponse.json()) as {
+        id: string;
+        baselineVersionId?: string | null;
+        metadata?: {
+          baselineVersionId?: string | null;
+        };
+        runs: Array<{ id: string }>;
+      };
+      expect(getExperimentBody.id).toBe(experiment.id);
+      expect(getExperimentBody.baselineVersionId).toBe("baseline-version-exp-1");
+      expect(getExperimentBody.metadata?.baselineVersionId).toBe(
+        "baseline-version-exp-1",
+      );
+      expect(getExperimentBody.runs.some((item) => item.id === replayRun.id)).toBe(
+        true,
+      );
+    } finally {
+      resetReplayJobExecutionWorkerForTests();
+    }
+  });
+
+  test("api-v2 replay 路由：experiment run/cancel/results/artifacts", async () => {
+    resetReplayJobExecutionWorkerForTests();
+    setReplayJobExecutionHandlerForTests(async ({ replayJob }) => ({
+      status: "completed",
+      summary: {
+        metric: "accuracy",
+        totalCases: 3,
+        processedCases: 3,
+        improvedCases: 2,
+        regressedCases: 1,
+      },
+      diffs: [
+        {
+          caseId: `case-${replayJob.id}`,
+          metric: "accuracy",
+          baselineScore: 0.72,
+          candidateScore: 0.84,
+          delta: 0.12,
+          verdict: "improved",
+        },
+      ],
+    }));
+    try {
+      const nonce = createNonce("replay-experiment-workflow");
+      const auth = await getDefaultAuthContext();
+      const tenantResult = await createTenantByAuth(
+        auth.accessToken,
+        {
+          name: `Replay Experiment Workflow ${nonce}`,
+          slug: `replay-exp-flow-${nonce}`,
+        },
+        auth.userId,
+      );
+      assertApiStatus(tenantResult, [201]);
+      const tenantId = extractEntityId(tenantResult.payload);
+      if (!tenantId) {
+        throw new Error("replay experiment workflow 测试租户创建失败。");
+      }
+      const headers = await issueTenantScopedAuthHeaders(
+        tenantId,
+        auth.accessToken,
+        auth.userId,
+      );
+
+      const datasetResponse = await app.request("/api/v2/replay/datasets", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          name: `dataset-${nonce}`,
+          datasetRef: `dataset-ref-${nonce}`,
+          model: "gpt-5",
+        }),
+      });
+      expect(datasetResponse.status).toBe(201);
+      const dataset = (await datasetResponse.json()) as {
+        id: string;
+        currentVersionId?: string | null;
+      };
+      expect(dataset.currentVersionId).toEqual(expect.any(String));
+
+      const createExperimentResponse = await app.request(
+        "/api/v2/replay/experiments",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({
+            name: `Experiment ${nonce}`,
+            datasetId: dataset.id,
+            candidateLabels: ["candidate-a", "candidate-b"],
+            autoRun: true,
+          }),
+        },
+      );
+      expect(createExperimentResponse.status).toBe(201);
+      const experiment = (await createExperimentResponse.json()) as {
+        id: string;
+        status?: string;
+        baselineVersionId?: string | null;
+        runIds: string[];
+      };
+      expect(["queued", "running", "completed"]).toContain(
+        experiment.status ?? "queued",
+      );
+      expect(experiment.baselineVersionId ?? null).toBe(dataset.currentVersionId ?? null);
+      expect(experiment.runIds.length).toBeGreaterThanOrEqual(2);
+
+      const createCompareTargetResponse = await app.request(
+        "/api/v2/replay/experiments",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({
+            name: `Experiment Compare ${nonce}`,
+            datasetId: dataset.id,
+            candidateLabels: ["candidate-c"],
+            autoRun: true,
+          }),
+        },
+      );
+      expect(createCompareTargetResponse.status).toBe(201);
+      const compareTarget = (await createCompareTargetResponse.json()) as {
+        id: string;
+      };
+
+      await flushReplayJobExecutionQueueForTests();
+
+      const resultsResponse = await app.request(
+        `/api/v2/replay/experiments/${encodeURIComponent(experiment.id)}/results`,
+        { headers },
+      );
+      expect(resultsResponse.status).toBe(200);
+      const resultsBody = (await resultsResponse.json()) as {
+        id: string;
+        status?: string;
+        runIds: string[];
+      };
+      expect(resultsBody.id).toBe(experiment.id);
+      expect(resultsBody.runIds.length).toBeGreaterThanOrEqual(2);
+      expect(resultsBody.status).toBe("completed");
+
+      const compareResponse = await app.request(
+        `/api/v2/replay/experiments/${encodeURIComponent(experiment.id)}/compare`,
+        { headers },
+      );
+      expect(compareResponse.status).toBe(200);
+      const compareBody = (await compareResponse.json()) as {
+        experimentId: string;
+        total: number;
+        summary: {
+          totalRuns: number;
+          completedRuns: number;
+          bestRunId?: string | null;
+        };
+        items: Array<{
+          runId: string;
+          candidateLabel: string;
+          passRate: number;
+          netDelta: number;
+        }>;
+      };
+      expect(compareBody.experimentId).toBe(experiment.id);
+      expect(compareBody.total).toBeGreaterThanOrEqual(2);
+      expect(compareBody.summary.totalRuns).toBe(compareBody.total);
+      expect(compareBody.summary.completedRuns).toBeGreaterThanOrEqual(2);
+      expect(compareBody.summary.bestRunId).toBeTruthy();
+      expect(
+        compareBody.items.every(
+          (item) =>
+            item.runId.length > 0 &&
+            item.candidateLabel.length > 0 &&
+            Number.isFinite(item.passRate) &&
+            Number.isFinite(item.netDelta),
+        ),
+      ).toBe(true);
+
+      const workflowResponse = await app.request(
+        `/api/v2/replay/experiments/${encodeURIComponent(experiment.id)}/workflow`,
+        { headers },
+      );
+      expect(workflowResponse.status).toBe(200);
+      const workflowBody = (await workflowResponse.json()) as {
+        experimentId: string;
+        status: string;
+        nodes: Array<{ id: string; type: string; label: string; metadata?: Record<string, unknown> }>;
+        edges: Array<{ from: string; to: string; label: string }>;
+        summary: {
+          totalNodes: number;
+          totalRuns: number;
+          completedRuns: number;
+        };
+      };
+      expect(workflowBody.experimentId).toBe(experiment.id);
+      expect(["queued", "running", "completed", "failed", "cancelled"]).toContain(
+        workflowBody.status,
+      );
+      expect(workflowBody.summary.totalRuns).toBeGreaterThanOrEqual(2);
+      expect(workflowBody.summary.totalNodes).toBe(workflowBody.nodes.length);
+      expect(
+        workflowBody.nodes.some(
+          (node) =>
+            node.type === "experiment" &&
+            node.label === `Experiment ${nonce}` &&
+            node.metadata?.["datasetId"] === dataset.id,
+        ),
+      ).toBe(true);
+      expect(workflowBody.edges.length).toBeGreaterThanOrEqual(2);
+
+      const artifactsResponse = await app.request(
+        `/api/v2/replay/experiments/${encodeURIComponent(experiment.id)}/artifacts`,
+        { headers },
+      );
+      expect(artifactsResponse.status).toBe(200);
+      const artifactsBody = (await artifactsResponse.json()) as {
+        experimentId: string;
+        total: number;
+      };
+      expect(artifactsBody.experimentId).toBe(experiment.id);
+      expect(artifactsBody.total).toBeGreaterThanOrEqual(2);
+
+      const batchCompareResponse = await app.request(
+        `/api/v2/replay/experiments/compare?experimentIds=${encodeURIComponent(
+          `${experiment.id},${compareTarget.id}`,
+        )}&datasetId=${encodeURIComponent(dataset.id)}`,
+        { headers },
+      );
+      expect(batchCompareResponse.status).toBe(200);
+      const batchCompareBody = (await batchCompareResponse.json()) as {
+        total: number;
+        summary: {
+          comparedExperimentCount: number;
+          bestExperimentId?: string | null;
+        };
+        items: Array<{
+          experimentId: string;
+          runs: Array<{ runId: string; netDelta: number }>;
+        }>;
+      };
+      expect(batchCompareBody.total).toBe(2);
+      expect(batchCompareBody.summary.comparedExperimentCount).toBe(2);
+      expect(
+        batchCompareBody.items.some(
+          (item) =>
+            item.experimentId === experiment.id &&
+            item.runs.length >= 1 &&
+            item.runs.every((run) => typeof run.runId === "string"),
+        ),
+      ).toBe(true);
+      expect(
+        batchCompareBody.items.some(
+          (item) =>
+            item.experimentId === compareTarget.id &&
+            item.runs.every((run) => Number.isFinite(run.netDelta)),
+        ),
+      ).toBe(true);
+
+      const cancelResponse = await app.request(
+        `/api/v2/replay/experiments/${encodeURIComponent(experiment.id)}/cancel`,
+        {
+          method: "POST",
+          headers,
+        },
+      );
+      expect(cancelResponse.status).toBe(200);
+      const cancelBody = (await cancelResponse.json()) as { status?: string };
+      expect(cancelBody.status).toBe("cancelled");
+    } finally {
+      resetReplayJobExecutionWorkerForTests();
+    }
+  });
+
+  test("api-v2 replay 路由：experiments batch compare", async () => {
+    resetReplayJobExecutionWorkerForTests();
+    setReplayJobExecutionHandlerForTests(async ({ replayJob }) => {
+      const parameters =
+        replayJob.parameters && typeof replayJob.parameters === "object"
+          ? (replayJob.parameters as Record<string, unknown>)
+          : {};
+      const candidateLabel =
+        typeof parameters.candidateLabel === "string"
+          ? parameters.candidateLabel
+          : "candidate";
+      const isPreferred = candidateLabel.includes("preferred");
+      return {
+        status: "completed",
+        summary: {
+          metric: "accuracy",
+          totalCases: 4,
+          processedCases: 4,
+          improvedCases: isPreferred ? 3 : 1,
+          regressedCases: isPreferred ? 0 : 2,
+          unchangedCases: isPreferred ? 1 : 1,
+        },
+        diffs: [
+          {
+            caseId: `case-${replayJob.id}`,
+            metric: "accuracy",
+            baselineScore: 0.7,
+            candidateScore: isPreferred ? 0.92 : 0.63,
+            delta: isPreferred ? 0.22 : -0.07,
+            verdict: isPreferred ? "improved" : "regressed",
+          },
+        ],
+      };
+    });
+    try {
+      const nonce = createNonce("replay-experiment-batch-compare");
+      const auth = await getDefaultAuthContext();
+      const tenantResult = await createTenantByAuth(
+        auth.accessToken,
+        {
+          name: `Replay Experiment Compare ${nonce}`,
+          slug: `replay-exp-compare-${nonce}`,
+        },
+        auth.userId,
+      );
+      assertApiStatus(tenantResult, [201]);
+      const tenantId = extractEntityId(tenantResult.payload);
+      if (!tenantId) {
+        throw new Error("replay experiment batch compare 测试租户创建失败。");
+      }
+      const headers = await issueTenantScopedAuthHeaders(
+        tenantId,
+        auth.accessToken,
+        auth.userId,
+      );
+
+      const datasetResponse = await app.request("/api/v2/replay/datasets", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          name: `dataset-${nonce}`,
+          datasetRef: `dataset-ref-${nonce}`,
+          model: "gpt-5",
+        }),
+      });
+      expect(datasetResponse.status).toBe(201);
+      const dataset = (await datasetResponse.json()) as { id: string };
+
+      const preferredResponse = await app.request(
+        "/api/v2/replay/experiments",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({
+            name: `Preferred ${nonce}`,
+            datasetId: dataset.id,
+            candidateLabels: ["candidate-preferred"],
+            autoRun: true,
+          }),
+        },
+      );
+      expect(preferredResponse.status).toBe(201);
+      const preferredExperiment = (await preferredResponse.json()) as { id: string };
+
+      const baselineResponse = await app.request(
+        "/api/v2/replay/experiments",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({
+            name: `Baseline ${nonce}`,
+            datasetId: dataset.id,
+            candidateLabels: ["candidate-baseline"],
+            autoRun: true,
+          }),
+        },
+      );
+      expect(baselineResponse.status).toBe(201);
+      const baselineExperiment = (await baselineResponse.json()) as { id: string };
+
+      await flushReplayJobExecutionQueueForTests();
+
+      const compareResponse = await app.request(
+        `/api/v2/replay/experiments/compare?experimentIds=${encodeURIComponent(
+          `${preferredExperiment.id},${baselineExperiment.id}`,
+        )}&datasetId=${encodeURIComponent(dataset.id)}`,
+        { headers },
+      );
+      expect(compareResponse.status).toBe(200);
+      const compareBody = (await compareResponse.json()) as {
+        items: Array<{
+          experimentId: string;
+          bestRunId?: string | null;
+          netDelta: number;
+          workflowStage: string;
+        }>;
+        total: number;
+        summary: {
+          comparedExperimentCount: number;
+          bestExperimentId?: string | null;
+          worstExperimentId?: string | null;
+        };
+      };
+      expect(compareBody.total).toBe(2);
+      expect(compareBody.summary.comparedExperimentCount).toBe(2);
+      expect(compareBody.summary.bestExperimentId).toBe(preferredExperiment.id);
+      expect(compareBody.summary.worstExperimentId).toBe(baselineExperiment.id);
+      expect(
+        compareBody.items.some(
+          (item) =>
+            item.experimentId === preferredExperiment.id &&
+            item.netDelta > 0 &&
+            item.workflowStage === "completed",
+        ),
+      ).toBe(true);
+      expect(
+        compareBody.items.some(
+          (item) =>
+            item.experimentId === baselineExperiment.id &&
+            item.netDelta < 0 &&
+            item.workflowStage === "completed",
+        ),
+      ).toBe(true);
+    } finally {
+      resetReplayJobExecutionWorkerForTests();
+    }
+  });
+
+  test("api-v2 residency 路由：策略、KMS/归档映射、区域映射、复制审批取消与租户隔离", async () => {
     const nonce = createNonce("residency-v2-routes");
     const auth = await getDefaultAuthContext();
 
@@ -16135,6 +23584,124 @@ describe("Control Plane API", () => {
     expect(getPolicyBody.tenantId).toBe(tenantAId);
     expect(getPolicyBody.mode).toBe("active_active");
     expect(getPolicyBody.replicaRegions).toContain("cn-shanghai");
+
+    const upsertKmsResponse = await app.request(
+      "/api/v2/residency/kms-key-mappings",
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          items: [
+            {
+              regionId: "cn-hangzhou",
+              keyProvider: "kms",
+              keyRef: "kms://primary-cn-hangzhou",
+              enabled: true,
+            },
+            {
+              regionId: "cn-shanghai",
+              keyProvider: "kms",
+              keyRef: "kms://replica-cn-shanghai",
+              enabled: true,
+            },
+          ],
+        }),
+      },
+    );
+    expect(upsertKmsResponse.status).toBe(200);
+    const upsertKmsBody = (await upsertKmsResponse.json()) as {
+      items: Array<{ regionId: string; keyRef: string }>;
+      total: number;
+    };
+    expect(upsertKmsBody.total).toBe(2);
+    expect(
+      upsertKmsBody.items.some(
+        (item) =>
+          item.regionId === "cn-hangzhou" &&
+          item.keyRef === "kms://primary-cn-hangzhou",
+      ),
+    ).toBe(true);
+
+    const listKmsResponse = await app.request(
+      "/api/v2/residency/kms-key-mappings",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(listKmsResponse.status).toBe(200);
+    const listKmsBody = (await listKmsResponse.json()) as {
+      items: Array<{ regionId: string }>;
+      total: number;
+    };
+    expect(listKmsBody.total).toBe(2);
+
+    const upsertArchivePolicyResponse = await app.request(
+      "/api/v2/residency/archive-region-policies",
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          items: [
+            {
+              sourceRegion: "cn-hangzhou",
+              archiveRegion: "ap-southeast-1",
+              archiveClass: "cold",
+              enabled: true,
+            },
+          ],
+        }),
+      },
+    );
+    expect(upsertArchivePolicyResponse.status).toBe(200);
+    const upsertArchivePolicyBody = (await upsertArchivePolicyResponse.json()) as {
+      items: Array<{ sourceRegion: string; archiveRegion: string; archiveClass: string }>;
+      total: number;
+    };
+    expect(upsertArchivePolicyBody.total).toBe(1);
+    expect(upsertArchivePolicyBody.items[0]?.sourceRegion).toBe("cn-hangzhou");
+    expect(upsertArchivePolicyBody.items[0]?.archiveRegion).toBe("ap-southeast-1");
+    expect(upsertArchivePolicyBody.items[0]?.archiveClass).toBe("cold");
+
+    const listArchivePolicyResponse = await app.request(
+      "/api/v2/residency/archive-region-policies",
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(listArchivePolicyResponse.status).toBe(200);
+    const listArchivePolicyBody = (await listArchivePolicyResponse.json()) as {
+      items: Array<{ sourceRegion: string }>;
+      total: number;
+    };
+    expect(listArchivePolicyBody.total).toBe(1);
+
+    const invalidArchivePolicyResponse = await app.request(
+      "/api/v2/residency/archive-region-policies",
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          ...tenantAHeaders,
+        },
+        body: JSON.stringify({
+          items: [
+            {
+              sourceRegion: "cn-hangzhou",
+              archiveRegion: "cn-hangzhou",
+              archiveClass: "cold",
+              enabled: true,
+            },
+          ],
+        }),
+      },
+    );
+    expect(invalidArchivePolicyResponse.status).toBe(400);
 
     const mappingsResponse = await app.request(
       "/api/v2/residency/region-mappings",
@@ -16246,6 +23813,34 @@ describe("Control Plane API", () => {
     expect(
       listTenantBBody.items.some((item) => item.id === replication.id),
     ).toBe(false);
+
+    const tenantBKmsResponse = await app.request(
+      "/api/v2/residency/kms-key-mappings",
+      {
+        headers: tenantBHeaders,
+      },
+    );
+    expect(tenantBKmsResponse.status).toBe(200);
+    const tenantBKmsBody = (await tenantBKmsResponse.json()) as {
+      items: Array<{ regionId: string }>;
+      total: number;
+    };
+    expect(tenantBKmsBody.total).toBe(0);
+    expect(tenantBKmsBody.items).toHaveLength(0);
+
+    const tenantBArchiveResponse = await app.request(
+      "/api/v2/residency/archive-region-policies",
+      {
+        headers: tenantBHeaders,
+      },
+    );
+    expect(tenantBArchiveResponse.status).toBe(200);
+    const tenantBArchiveBody = (await tenantBArchiveResponse.json()) as {
+      items: Array<{ sourceRegion: string }>;
+      total: number;
+    };
+    expect(tenantBArchiveBody.total).toBe(0);
+    expect(tenantBArchiveBody.items).toHaveLength(0);
   });
 
   test("api-v2 replay 支持从历史会话物化样本并产出真实执行摘要", async () => {
@@ -16518,6 +24113,464 @@ describe("Control Plane API", () => {
       ).toBe(true);
     } finally {
       resetReplayJobExecutionWorkerForTests();
+    }
+  });
+
+  test("agent lifecycle events create/list 支持租户隔离并写入审计", async () => {
+    const nonce = createNonce("agent-lifecycle-events");
+    const auth = await getDefaultAuthContext();
+
+    const tenantAResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Agent Lifecycle Tenant A ${nonce}`,
+        slug: `agent-lifecycle-a-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantAResult, [201]);
+    const tenantAId = extractEntityId(tenantAResult.payload);
+    if (!tenantAId) {
+      throw new Error("agent lifecycle 租户 A 创建失败。");
+    }
+
+    const tenantBResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Agent Lifecycle Tenant B ${nonce}`,
+        slug: `agent-lifecycle-b-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantBResult, [201]);
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error("agent lifecycle 租户 B 创建失败。");
+    }
+
+    const tenantAHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      auth.accessToken,
+      auth.userId,
+    );
+    const tenantBHeaders = await issueTenantScopedAuthHeaders(
+      tenantBId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const badCreateResponse = await app.request(
+      "/api/v1/agents/lifecycle-events",
+      jsonRequest(
+        "POST",
+        {
+          agentId: "agent-bad",
+          action: "unknown",
+          result: "success",
+        },
+        tenantAHeaders,
+      ),
+    );
+    expect(badCreateResponse.status).toBe(400);
+
+    const createResponse = await app.request(
+      "/api/v1/agents/lifecycle-events",
+      jsonRequest(
+        "POST",
+        {
+          tenantId: tenantAId,
+          agentId: `agent-${nonce}`,
+          deviceId: `device-${nonce}`,
+          hostname: `host-${nonce}`,
+          version: "1.2.3",
+          action: "doctor",
+          result: "warn",
+          occurredAt: "2026-03-08T12:00:00Z",
+          metadata: {
+            command: "doctor",
+            overallStatus: "warn",
+          },
+        },
+        tenantAHeaders,
+      ),
+    );
+    expect(createResponse.status).toBe(201);
+    const created = (await createResponse.json()) as {
+      id: string;
+      tenantId: string;
+      agentId: string;
+      action: string;
+      result: string;
+      metadata: Record<string, unknown>;
+    };
+    expect(created.tenantId).toBe(tenantAId);
+    expect(created.agentId).toBe(`agent-${nonce}`);
+    expect(created.action).toBe("doctor");
+    expect(created.result).toBe("warn");
+    expect(created.metadata.command).toBe("doctor");
+
+    const listAResponse = await app.request(
+      `/api/v1/agents/lifecycle-events?agentId=${encodeURIComponent(
+        created.agentId,
+      )}&action=doctor&result=warn&limit=10`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(listAResponse.status).toBe(200);
+    const listABody = (await listAResponse.json()) as {
+      items: Array<{ id: string; agentId: string; action: string; result: string }>;
+      total: number;
+      filters: { agentId?: string; action?: string; result?: string; limit?: number };
+    };
+    expect(listABody.total).toBeGreaterThanOrEqual(1);
+    expect(listABody.filters.agentId).toBe(created.agentId);
+    expect(listABody.filters.action).toBe("doctor");
+    expect(listABody.filters.result).toBe("warn");
+    expect(listABody.filters.limit).toBe(10);
+    expect(
+      listABody.items.some(
+        (item) =>
+          item.id === created.id &&
+          item.agentId === created.agentId &&
+          item.action === "doctor" &&
+          item.result === "warn",
+      ),
+    ).toBe(true);
+
+    const listBResponse = await app.request("/api/v1/agents/lifecycle-events", {
+      headers: tenantBHeaders,
+    });
+    expect(listBResponse.status).toBe(200);
+    const listBBody = (await listBResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(listBBody.items.some((item) => item.id === created.id)).toBe(false);
+
+    const audits = await queryAuditByActionWithHeaders(
+      "identity.agent_lifecycle_event.created",
+      created.agentId,
+      tenantAHeaders,
+    );
+    expect(
+      audits.items.some(
+        (item) =>
+          item.action === "identity.agent_lifecycle_event.created" &&
+          item.metadata.agentId === created.agentId &&
+          item.metadata.tenantId === tenantAId,
+      ),
+    ).toBe(true);
+  });
+
+  test("audit legal hold create/list/release 支持重复保护与租户隔离", async () => {
+    const nonce = createNonce("audit-legal-hold");
+    const auth = await getDefaultAuthContext();
+
+    const tenantAResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Audit Legal Hold Tenant A ${nonce}`,
+        slug: `audit-legal-hold-a-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantAResult, [201]);
+    const tenantAId = extractEntityId(tenantAResult.payload);
+    if (!tenantAId) {
+      throw new Error("audit legal hold 租户 A 创建失败。");
+    }
+
+    const tenantBResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Audit Legal Hold Tenant B ${nonce}`,
+        slug: `audit-legal-hold-b-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantBResult, [201]);
+    const tenantBId = extractEntityId(tenantBResult.payload);
+    if (!tenantBId) {
+      throw new Error("audit legal hold 租户 B 创建失败。");
+    }
+
+    const tenantAHeaders = await issueTenantScopedAuthHeaders(
+      tenantAId,
+      auth.accessToken,
+      auth.userId,
+    );
+    const tenantBHeaders = await issueTenantScopedAuthHeaders(
+      tenantBId,
+      auth.accessToken,
+      auth.userId,
+    );
+    const resourceId = `audit-export-${nonce}`;
+
+    const createResponse = await app.request(
+      "/api/v1/audits/legal-holds",
+      jsonRequest(
+        "POST",
+        {
+          resourceType: "audit_export",
+          resourceId,
+          reason: `hold reason ${nonce}`,
+        },
+        tenantAHeaders,
+      ),
+    );
+    expect(createResponse.status).toBe(201);
+    const created = (await createResponse.json()) as {
+      id: string;
+      tenantId: string;
+      resourceType: string;
+      resourceId: string;
+      reason: string;
+      releasedAt?: string;
+    };
+    expect(created.tenantId).toBe(tenantAId);
+    expect(created.resourceType).toBe("audit_export");
+    expect(created.resourceId).toBe(resourceId);
+
+    const duplicateResponse = await app.request(
+      "/api/v1/audits/legal-holds",
+      jsonRequest(
+        "POST",
+        {
+          resourceType: "audit_export",
+          resourceId,
+          reason: "duplicate hold",
+        },
+        tenantAHeaders,
+      ),
+    );
+    expect(duplicateResponse.status).toBe(409);
+
+    const listAResponse = await app.request(
+      `/api/v1/audits/legal-holds?resourceType=audit_export&resourceId=${encodeURIComponent(
+        resourceId,
+      )}&active=true&limit=10`,
+      {
+        headers: tenantAHeaders,
+      },
+    );
+    expect(listAResponse.status).toBe(200);
+    const listABody = (await listAResponse.json()) as {
+      items: Array<{ id: string; resourceId: string }>;
+      total: number;
+      filters: { resourceId?: string; active?: boolean; limit?: number };
+    };
+    expect(listABody.total).toBeGreaterThanOrEqual(1);
+    expect(listABody.filters.resourceId).toBe(resourceId);
+    expect(listABody.filters.active).toBe(true);
+    expect(listABody.filters.limit).toBe(10);
+    expect(listABody.items.some((item) => item.id === created.id)).toBe(true);
+
+    const listBResponse = await app.request("/api/v1/audits/legal-holds", {
+      headers: tenantBHeaders,
+    });
+    expect(listBResponse.status).toBe(200);
+    const listBBody = (await listBResponse.json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(listBBody.items.some((item) => item.id === created.id)).toBe(false);
+
+    const releaseResponse = await app.request(
+      `/api/v1/audits/legal-holds/${encodeURIComponent(created.id)}/release`,
+      jsonRequest(
+        "POST",
+        {
+          reason: `released ${nonce}`,
+        },
+        tenantAHeaders,
+      ),
+    );
+    expect(releaseResponse.status).toBe(200);
+    const released = (await releaseResponse.json()) as {
+      id: string;
+      releasedAt?: string;
+      releaseReason?: string;
+    };
+    expect(released.id).toBe(created.id);
+    expect(released.releasedAt).toBeDefined();
+    expect(released.releaseReason).toBe(`released ${nonce}`);
+
+    const secondReleaseResponse = await app.request(
+      `/api/v1/audits/legal-holds/${encodeURIComponent(created.id)}/release`,
+      jsonRequest("POST", {}, tenantAHeaders),
+    );
+    expect(secondReleaseResponse.status).toBe(409);
+
+    const createAudits = await queryAuditByActionWithHeaders(
+      "audit.legal_hold.create",
+      resourceId,
+      tenantAHeaders,
+    );
+    expect(
+      createAudits.items.some(
+        (item) =>
+          item.action === "audit.legal_hold.create" &&
+          item.metadata.resourceId === resourceId,
+      ),
+    ).toBe(true);
+
+    const releaseAudits = await queryAuditByActionWithHeaders(
+      "audit.legal_hold.release",
+      resourceId,
+      tenantAHeaders,
+    );
+    expect(
+      releaseAudits.items.some(
+        (item) =>
+          item.action === "audit.legal_hold.release" &&
+          item.metadata.resourceId === resourceId,
+      ),
+    ).toBe(true);
+  });
+
+  test("audit export/evidence bundle legal hold 可回显并阻止受保护资源覆盖", async () => {
+    const nonce = createNonce("audit-export-legal-hold");
+    const authHeaders = await resolveAuthHeaders();
+    const tenantId = resolveTenantIdFromAuthHeaders(authHeaders);
+    const repositoryWithAudit = repository as {
+      appendAuditLog?: (input: {
+        tenantId: string;
+        eventId: string;
+        action: string;
+        level: string;
+        detail: string;
+        metadata: Record<string, unknown>;
+      }) => Promise<unknown>;
+    };
+    if (typeof repositoryWithAudit.appendAuditLog !== "function") {
+      throw new Error("repository.appendAuditLog 不可用，无法验证 Legal Hold 导出。");
+    }
+
+    await repositoryWithAudit.appendAuditLog({
+      tenantId,
+      eventId: `cp:audit-legal-hold-export:${nonce}`,
+      action: "test.audit.legal_hold_export",
+      level: "info",
+      detail: `audit legal hold export ${nonce}`,
+      metadata: {
+        nonce,
+      },
+    });
+
+    const exportResourceId = `audit-export-resource-${nonce}`;
+    const exportResponse = await app.request(
+      `/api/v1/audits/export?format=json&action=test.audit.legal_hold_export&keyword=${encodeURIComponent(
+        nonce,
+      )}&resourceId=${encodeURIComponent(exportResourceId)}`,
+      {
+        headers: authHeaders,
+      },
+    );
+    expect(exportResponse.status).toBe(200);
+    expect(exportResponse.headers.get("x-agentledger-resource-id")).toBe(
+      exportResourceId,
+    );
+    expect(
+      exportResponse.headers.get("x-agentledger-legal-hold-status"),
+    ).toBe("none");
+    const exportBody = (await exportResponse.json()) as {
+      targetResource?: {
+        resourceId?: string | null;
+        legalHold?: Record<string, unknown> | null;
+      };
+    };
+    expect(exportBody.targetResource?.resourceId).toBe(exportResourceId);
+    expect(exportBody.targetResource?.legalHold ?? null).toBeNull();
+
+    const exportHoldResponse = await app.request(
+      "/api/v1/audits/legal-holds",
+      jsonRequest(
+        "POST",
+        {
+          resourceType: "audit_export",
+          resourceId: exportResourceId,
+          reason: `hold export ${nonce}`,
+        },
+        authHeaders,
+      ),
+    );
+    expect(exportHoldResponse.status).toBe(201);
+
+    const blockedExportResponse = await app.request(
+      `/api/v1/audits/export?format=json&action=test.audit.legal_hold_export&keyword=${encodeURIComponent(
+        nonce,
+      )}&resourceId=${encodeURIComponent(exportResourceId)}`,
+      {
+        headers: authHeaders,
+      },
+    );
+    expect(blockedExportResponse.status).toBe(409);
+    const blockedExportBody = (await blockedExportResponse.json()) as {
+      message: string;
+      legalHold?: { resourceId?: string };
+    };
+    expect(blockedExportBody.message).toContain("Legal Hold");
+    expect(blockedExportBody.legalHold?.resourceId).toBe(exportResourceId);
+
+    const originalSigningKey = Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY;
+    Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY = `evidence-signing-key-${nonce}`;
+    try {
+      const evidenceResourceId = `evidence-bundle-resource-${nonce}`;
+      const evidenceResponse = await app.request(
+        `/api/v1/audits/evidence-bundle?action=test.audit.legal_hold_export&keyword=${encodeURIComponent(
+          nonce,
+        )}&resourceId=${encodeURIComponent(evidenceResourceId)}`,
+        {
+          headers: authHeaders,
+        },
+      );
+      expect(evidenceResponse.status).toBe(200);
+      expect(evidenceResponse.headers.get("x-agentledger-resource-id")).toBe(
+        evidenceResourceId,
+      );
+      const evidenceBody = (await evidenceResponse.json()) as {
+        targetResource?: {
+          resourceId?: string | null;
+          legalHold?: Record<string, unknown> | null;
+        };
+      };
+      expect(evidenceBody.targetResource?.resourceId).toBe(evidenceResourceId);
+      expect(evidenceBody.targetResource?.legalHold ?? null).toBeNull();
+
+      const evidenceHoldResponse = await app.request(
+        "/api/v1/audits/legal-holds",
+        jsonRequest(
+          "POST",
+          {
+            resourceType: "evidence_bundle",
+            resourceId: evidenceResourceId,
+            reason: `hold evidence ${nonce}`,
+          },
+          authHeaders,
+        ),
+      );
+      expect(evidenceHoldResponse.status).toBe(201);
+
+      const blockedEvidenceResponse = await app.request(
+        `/api/v1/audits/evidence-bundle?action=test.audit.legal_hold_export&keyword=${encodeURIComponent(
+          nonce,
+        )}&resourceId=${encodeURIComponent(evidenceResourceId)}`,
+        {
+          headers: authHeaders,
+        },
+      );
+      expect(blockedEvidenceResponse.status).toBe(409);
+      const blockedEvidenceBody = (await blockedEvidenceResponse.json()) as {
+        message: string;
+        legalHold?: { resourceId?: string };
+      };
+      expect(blockedEvidenceBody.message).toContain("Legal Hold");
+      expect(blockedEvidenceBody.legalHold?.resourceId).toBe(evidenceResourceId);
+    } finally {
+      if (originalSigningKey === undefined) {
+        delete Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY;
+      } else {
+        Bun.env.EVIDENCE_BUNDLE_SIGNING_KEY = originalSigningKey;
+      }
     }
   });
 });
