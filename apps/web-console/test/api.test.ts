@@ -17,6 +17,8 @@ import {
   executeOpenPlatformQualityAdvice,
   exportSessions,
   exportUsage,
+  exportAudits,
+  exportAuditEvidenceBundle,
   exchangeExternalAuthCode,
   fetchAgentRuntimeConfig,
   fetchAgentRuntimeViews,
@@ -141,6 +143,7 @@ function mockFileResponse(
     status?: number;
     contentType?: string;
     contentDisposition?: string;
+    headers?: Record<string, string>;
   }
 ): Response {
   const status = options?.status ?? 200;
@@ -148,6 +151,10 @@ function mockFileResponse(
   const blob = new Blob([content], { type: contentType });
   const contentDisposition =
     options?.contentDisposition ?? 'attachment; filename="export.csv"';
+  const extraHeaders: Record<string, string> = {};
+  for (const [key, value] of Object.entries(options?.headers ?? {})) {
+    extraHeaders[key.toLowerCase()] = value;
+  }
 
   return {
     ok: status >= 200 && status < 300,
@@ -160,6 +167,9 @@ function mockFileResponse(
         }
         if (normalized === "content-disposition") {
           return contentDisposition;
+        }
+        if (Object.prototype.hasOwnProperty.call(extraHeaders, normalized)) {
+          return extraHeaders[normalized] ?? null;
         }
         return null;
       },
@@ -3142,6 +3152,70 @@ describe("api mock fallback gate", () => {
         contentType: expect.stringContaining("text/csv"),
         blob: expect.any(Blob),
       })
+    );
+  });
+
+  test("exportAudits 与 exportAuditEvidenceBundle 支持解析 DLP 响应头", async () => {
+    env.DEV = false;
+    setAuthTokens({
+      accessToken: "access-token-export-audit",
+      refreshToken: "refresh-token-export-audit",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = toUrl(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.includes("/api/v1/audits/export") && method === "GET") {
+        expect(url).toContain("format=csv");
+        expect(url).toContain("dlpMode=redact");
+        return mockFileResponse("id,action\n1,audit.export\n", {
+          contentType: "text/csv; charset=utf-8",
+          contentDisposition: 'attachment; filename="audits-2026.csv"',
+          headers: {
+            "x-agentledger-dlp-mode": "redact",
+            "x-agentledger-dlp-matched": "true",
+          },
+        });
+      }
+
+      if (url.includes("/api/v1/audits/evidence-bundle") && method === "GET") {
+        expect(url).toContain("dlpMode=block");
+        return mockFileResponse(JSON.stringify({ version: "v1", records: [] }), {
+          contentType: "application/json; charset=utf-8",
+          contentDisposition: 'attachment; filename="evidence-2026.json"',
+          headers: {
+            "x-agentledger-dlp-mode": "block",
+            "x-agentledger-dlp-matched": "false",
+          },
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url}`);
+    });
+
+    await expect(
+      exportAudits("csv", { limit: 20, dlpMode: "redact" }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        filename: "audits-2026.csv",
+        dlpMode: "redact",
+        dlpMatched: true,
+        blob: expect.any(Blob),
+      }),
+    );
+
+    await expect(
+      exportAuditEvidenceBundle({ limit: 200, dlpMode: "block" }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        filename: "evidence-2026.json",
+        dlpMode: "block",
+        dlpMatched: false,
+        blob: expect.any(Blob),
+      }),
     );
   });
 
