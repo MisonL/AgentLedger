@@ -33,6 +33,7 @@ const REPLAY_STATUS_SET = new Set(["pending", "running", "completed", "failed", 
 
 type QualityMetric = "accuracy" | "consistency" | "groundedness" | "safety" | "latency";
 type ReplayExecutionSource = "synthetic" | "dataset_cases" | "session_materialized";
+type ReplayExecutionBackend = "synthetic" | "tokenpulse";
 type ReplayJobTerminalStatus = "completed" | "failed" | "cancelled";
 type ReplayJobExecutionTask = {
   tenantId: string;
@@ -348,6 +349,20 @@ function toReplayExecutionSource(value: unknown): ReplayExecutionSource | undefi
   return undefined;
 }
 
+function toReplayExecutionBackend(value: unknown): ReplayExecutionBackend | undefined {
+  const normalized = firstNonEmptyString(value)?.toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized === "synthetic") {
+    return "synthetic";
+  }
+  if (normalized === "tokenpulse") {
+    return "tokenpulse";
+  }
+  return undefined;
+}
+
 function summarizeReplayCaseSources(
   cases: Array<{ metadata?: Record<string, unknown> }>
 ): Record<string, number> {
@@ -572,6 +587,470 @@ function evaluateReplayCase(input: {
   } as const;
 }
 
+type TokenPulseReplayRouteHeaders = {
+  provider?: string;
+  routePolicy?: string;
+  fallback?: boolean;
+  accountId?: string;
+};
+
+type TokenPulseReplayExecutionTrace = {
+  traceId?: string;
+  route?: TokenPulseReplayRouteHeaders;
+};
+
+type TokenPulseReplayPerRequestTrace = TokenPulseReplayExecutionTrace & {
+  requestTraceId?: string;
+  httpStatus?: number;
+  durationMs?: number;
+  error?: string;
+};
+
+type TokenPulseReplayCaseExecution = {
+  baseline?: TokenPulseReplayPerRequestTrace;
+  candidate?: TokenPulseReplayPerRequestTrace;
+};
+
+type TokenPulseReplayConfig = {
+  baseUrl?: string;
+  apiSecret?: string;
+  timeoutMs: number;
+  maxConcurrency: number;
+  maxCasesPerRun: number;
+  failFastThreshold: number;
+};
+
+function normalizeTokenPulseBaseUrl(value: string | undefined): string | undefined {
+  const normalized = firstNonEmptyString(value);
+  if (!normalized) {
+    return undefined;
+  }
+  return normalized.replace(/\/+$/u, "");
+}
+
+function resolveTokenPulseReplayConfig(): TokenPulseReplayConfig {
+  const timeoutMs = Math.max(1000, toInteger(Bun.env.REPLAY_TOKENPULSE_TIMEOUT_MS, 30_000));
+  const maxConcurrency = Math.max(1, toInteger(Bun.env.REPLAY_TOKENPULSE_MAX_CONCURRENCY, 6));
+  const maxCasesPerRun = Math.max(1, toInteger(Bun.env.REPLAY_TOKENPULSE_MAX_CASES_PER_RUN, 200));
+  const failFastThresholdRaw = firstNonEmptyString(Bun.env.REPLAY_TOKENPULSE_FAIL_FAST_THRESHOLD);
+  const failFastThreshold =
+    failFastThresholdRaw && Number.isFinite(Number(failFastThresholdRaw))
+      ? Math.max(0, Number(failFastThresholdRaw))
+      : 0;
+  return {
+    baseUrl: normalizeTokenPulseBaseUrl(Bun.env.REPLAY_TOKENPULSE_BASE_URL),
+    apiSecret: firstNonEmptyString(Bun.env.REPLAY_TOKENPULSE_API_SECRET),
+    timeoutMs,
+    maxConcurrency,
+    maxCasesPerRun,
+    failFastThreshold,
+  };
+}
+
+function computeTokenPulseReplayFailureLimit(input: {
+  threshold: number;
+  totalCases: number;
+}): number {
+  if (input.totalCases <= 0) {
+    return 0;
+  }
+  const threshold = input.threshold;
+  if (!Number.isFinite(threshold) || threshold <= 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+  if (threshold > 0 && threshold <= 1) {
+    return Math.max(1, Math.ceil(input.totalCases * threshold));
+  }
+  return Math.max(1, Math.floor(threshold));
+}
+
+function extractTokenPulseReplayRouteHeaders(headers: Headers): TokenPulseReplayExecutionTrace {
+  const traceId =
+    firstNonEmptyString(headers.get("x-tokenpulse-trace-id"), headers.get("x-trace-id")) ??
+    undefined;
+  const provider = firstNonEmptyString(headers.get("x-tokenpulse-provider")) ?? undefined;
+  const routePolicy = firstNonEmptyString(headers.get("x-tokenpulse-route-policy")) ?? undefined;
+  const accountId = firstNonEmptyString(headers.get("x-tokenpulse-account-id")) ?? undefined;
+  const fallbackRaw = firstNonEmptyString(headers.get("x-tokenpulse-fallback"));
+  const fallback =
+    fallbackRaw === undefined
+      ? undefined
+      : fallbackRaw.toLowerCase() === "true" ||
+          fallbackRaw === "1" ||
+          fallbackRaw.toLowerCase() === "yes" ||
+          fallbackRaw.toLowerCase() === "on";
+
+  const route: TokenPulseReplayRouteHeaders = {
+    ...(provider ? { provider } : {}),
+    ...(routePolicy ? { routePolicy } : {}),
+    ...(fallbackRaw !== undefined ? { fallback } : {}),
+    ...(accountId ? { accountId } : {}),
+  };
+  return {
+    ...(traceId ? { traceId } : {}),
+    ...(Object.keys(route).length > 0 ? { route } : {}),
+  };
+}
+
+function buildTokenPulseReplayRequestTraceId(input: {
+  tenantId: string;
+  runId: string;
+  caseId: string;
+  mode: "baseline" | "candidate";
+}): string {
+  const digest = sha256Hex(`${input.tenantId}:${input.runId}:${input.caseId}:${input.mode}`);
+  return `replay-${digest.slice(0, 24)}`;
+}
+
+function buildTokenPulseChatCompletionRequest(input: {
+  model: string;
+  userText: string;
+  systemPrompt?: string;
+}): Record<string, unknown> {
+  const systemPrompt = firstNonEmptyString(input.systemPrompt) ?? "你是一个严谨、简洁的助手。";
+  return {
+    model: input.model,
+    stream: false,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: input.userText },
+    ],
+  };
+}
+
+function parseTokenPulseChatCompletionText(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  const choices = Array.isArray(record.choices) ? record.choices : null;
+  if (!choices || choices.length === 0) {
+    return undefined;
+  }
+  const first = choices[0];
+  if (!first || typeof first !== "object" || Array.isArray(first)) {
+    return undefined;
+  }
+  const choice = first as Record<string, unknown>;
+  const message =
+    choice.message && typeof choice.message === "object" && !Array.isArray(choice.message)
+      ? (choice.message as Record<string, unknown>)
+      : null;
+  const content = message ? message.content : choice.text;
+  if (typeof content === "string") {
+    return firstNonEmptyString(content);
+  }
+  if (Array.isArray(content)) {
+    const parts: string[] = [];
+    for (const item of content) {
+      if (typeof item === "string") {
+        parts.push(item);
+        continue;
+      }
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        const segment = firstNonEmptyString(
+          (item as Record<string, unknown>).text,
+          (item as Record<string, unknown>).content,
+        );
+        if (segment) {
+          parts.push(segment);
+        }
+      }
+    }
+    return firstNonEmptyString(parts.join("\n"));
+  }
+  return undefined;
+}
+
+async function callTokenPulseChatCompletion(input: {
+  config: TokenPulseReplayConfig;
+  tenantId: string;
+  replayJob: ReplayJob;
+  caseId: string;
+  mode: "baseline" | "candidate";
+  model: string;
+  userText: string;
+  systemPrompt?: string;
+  runAbortSignal?: AbortSignal;
+}): Promise<{
+  text?: string;
+  trace: TokenPulseReplayPerRequestTrace;
+}> {
+  const requestTraceId = buildTokenPulseReplayRequestTraceId({
+    tenantId: input.tenantId,
+    runId: input.replayJob.id,
+    caseId: input.caseId,
+    mode: input.mode,
+  });
+  const trace: TokenPulseReplayPerRequestTrace = {
+    requestTraceId,
+  };
+
+  const baseUrl = normalizeTokenPulseBaseUrl(input.config.baseUrl);
+  const apiSecret = firstNonEmptyString(input.config.apiSecret);
+  if (!baseUrl || !apiSecret) {
+    return {
+      text: undefined,
+      trace: {
+        ...trace,
+        error: "tokenpulse 配置缺失：需要 REPLAY_TOKENPULSE_BASE_URL 与 REPLAY_TOKENPULSE_API_SECRET。",
+      },
+    };
+  }
+
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, Math.max(1, input.config.timeoutMs));
+  const forwardAbort = () => controller.abort();
+  input.runAbortSignal?.addEventListener("abort", forwardAbort, { once: true });
+  try {
+    const requestPayload = buildTokenPulseChatCompletionRequest({
+      model: input.model,
+      userText: input.userText,
+      systemPrompt: input.systemPrompt,
+    });
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${apiSecret}`,
+        "x-trace-id": requestTraceId,
+      },
+      body: JSON.stringify(requestPayload),
+      signal: controller.signal,
+    });
+    trace.httpStatus = response.status;
+    const routeTrace = extractTokenPulseReplayRouteHeaders(response.headers);
+    trace.traceId = routeTrace.traceId;
+    trace.route = routeTrace.route;
+
+    const body = await response.json().catch(() => undefined);
+    const text = parseTokenPulseChatCompletionText(body);
+    if (!response.ok) {
+      return {
+        text: undefined,
+        trace: {
+          ...trace,
+          durationMs: Date.now() - startedAt,
+          error:
+            firstNonEmptyString(
+              body && typeof body === "object" && !Array.isArray(body)
+                ? (body as Record<string, unknown>).message
+                : undefined,
+              body && typeof body === "object" && !Array.isArray(body)
+                ? normalizeRecord((body as Record<string, unknown>).error).message
+                : undefined,
+            ) ?? `tokenpulse 请求失败（HTTP ${response.status}）。`,
+        },
+      };
+    }
+    if (!text) {
+      return {
+        text: undefined,
+        trace: {
+          ...trace,
+          durationMs: Date.now() - startedAt,
+          error: "tokenpulse 响应缺少可解析的文本内容。",
+        },
+      };
+    }
+    return {
+      text,
+      trace: {
+        ...trace,
+        durationMs: Date.now() - startedAt,
+      },
+    };
+  } catch (error) {
+    const timeout = error instanceof Error && error.name === "AbortError";
+    return {
+      text: undefined,
+      trace: {
+        ...trace,
+        durationMs: Date.now() - startedAt,
+        error: timeout
+          ? `tokenpulse 请求超时（>${input.config.timeoutMs}ms）。`
+          : `tokenpulse 请求异常：${toReplayExecutionErrorMessage(error)}`,
+      },
+    };
+  } finally {
+    clearTimeout(timeoutId);
+    input.runAbortSignal?.removeEventListener("abort", forwardAbort);
+  }
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const safeConcurrency = Math.max(1, Math.min(concurrency, items.length || 1));
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  await Promise.all(
+    Array.from({ length: safeConcurrency }, async () => {
+      while (true) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= items.length) {
+          return;
+        }
+        results[index] = await mapper(items[index]!, index);
+      }
+    }),
+  );
+  return results;
+}
+
+async function executeReplayCasesWithTokenPulse(input: {
+  tenantId: string;
+  replayJob: ReplayJob;
+  selectedCases: Array<{
+    caseId: string;
+    input: string;
+    expectedOutput?: string;
+    baselineOutput?: string;
+    candidateInput?: string;
+    metadata?: Record<string, unknown>;
+  }>;
+  baselineModel?: string;
+  candidateModel?: string;
+  systemPrompt?: string;
+  config: TokenPulseReplayConfig;
+}): Promise<{
+  executedCases: Array<{
+    caseId: string;
+    input: string;
+    expectedOutput?: string;
+    baselineOutput?: string;
+    candidateInput?: string;
+    metadata?: Record<string, unknown>;
+    tokenpulse?: TokenPulseReplayCaseExecution;
+  }>;
+  processedCaseIds: Set<string>;
+  failedCases: number;
+  failFastTriggered: boolean;
+}> {
+  const runAbortController = new AbortController();
+  let failedCases = 0;
+  let failFastTriggered = false;
+  const failureLimit = computeTokenPulseReplayFailureLimit({
+    threshold: input.config.failFastThreshold,
+    totalCases: input.selectedCases.length,
+  });
+  const processedCaseIds = new Set<string>();
+
+  const executedCases = await mapWithConcurrency(
+    input.selectedCases,
+    input.config.maxConcurrency,
+    async (item) => {
+      if (runAbortController.signal.aborted) {
+        return {
+          ...item,
+          tokenpulse: {},
+        };
+      }
+
+      const perCase: TokenPulseReplayCaseExecution = {};
+
+      let baselineOutput = firstNonEmptyString(item.baselineOutput);
+      if (!baselineOutput) {
+        const baselineModel = firstNonEmptyString(input.baselineModel);
+        if (baselineModel) {
+          const baselineCall = await callTokenPulseChatCompletion({
+            config: input.config,
+            tenantId: input.tenantId,
+            replayJob: input.replayJob,
+            caseId: item.caseId,
+            mode: "baseline",
+            model: baselineModel,
+            userText: item.input,
+            systemPrompt: input.systemPrompt,
+            runAbortSignal: runAbortController.signal,
+          });
+          perCase.baseline = baselineCall.trace;
+          baselineOutput = firstNonEmptyString(baselineCall.text);
+        } else {
+          perCase.baseline = {
+            error:
+              "baselineModel 缺失：请提供 baselineModel（或确保数据集/版本具备 model）。",
+          };
+        }
+      }
+
+      const candidateModel = firstNonEmptyString(
+        input.candidateModel,
+        normalizeRecord(input.replayJob.parameters).candidateLabel,
+      );
+      let candidateOutput: string | undefined;
+      if (candidateModel) {
+        const candidateCall = await callTokenPulseChatCompletion({
+          config: input.config,
+          tenantId: input.tenantId,
+          replayJob: input.replayJob,
+          caseId: item.caseId,
+          mode: "candidate",
+          model: candidateModel,
+          userText: item.input,
+          systemPrompt: input.systemPrompt,
+          runAbortSignal: runAbortController.signal,
+        });
+        perCase.candidate = candidateCall.trace;
+        candidateOutput = firstNonEmptyString(candidateCall.text);
+      } else {
+        perCase.candidate = {
+          error: "candidateModel 缺失：请提供 candidateModel。",
+        };
+      }
+
+      const success = Boolean(baselineOutput) && Boolean(candidateOutput);
+      if (success) {
+        processedCaseIds.add(item.caseId);
+      } else {
+        failedCases += 1;
+        if (!failFastTriggered && failedCases >= failureLimit) {
+          failFastTriggered = true;
+          runAbortController.abort();
+        }
+      }
+
+      return {
+        ...item,
+        baselineOutput: baselineOutput ?? item.baselineOutput,
+        candidateInput: candidateOutput ?? item.candidateInput,
+        tokenpulse: perCase,
+      };
+    },
+  );
+
+  return {
+    executedCases,
+    processedCaseIds,
+    failedCases,
+    failFastTriggered,
+  };
+}
+
+async function resolveReplayBaselineModel(input: {
+  tenantId: string;
+  datasetId: string;
+  baselineVersionId?: string;
+}): Promise<string | undefined> {
+  const dataset = await repository.getReplayDatasetById(input.tenantId, input.datasetId);
+  if (!dataset) {
+    return undefined;
+  }
+  const versionId = firstNonEmptyString(input.baselineVersionId);
+  if (!versionId) {
+    return firstNonEmptyString(dataset.model);
+  }
+  const versions = await repository.listReplayBaselineVersions(input.tenantId, input.datasetId);
+  const version = versions.find((item) => item.id === versionId);
+  return firstNonEmptyString(version?.model, dataset.model);
+}
+
 async function persistReplayArtifacts(input: {
   tenantId: string;
   replayJob: ReplayJob;
@@ -688,6 +1167,9 @@ async function defaultReplayJobExecutionHandler(input: {
   const parameters = normalizeRecord(input.replayJob.parameters);
   const summary = normalizeRecord(input.replayJob.summary);
   const metric = toQualityMetric(parameters.metric ?? summary.metric);
+  const executionBackend =
+    toReplayExecutionBackend(parameters.executionBackend ?? parameters.execution_backend) ??
+    "synthetic";
   const requestedExecutionSource = toReplayExecutionSource(parameters.executionSource);
   const sampleLimitRaw = toNumber(parameters.sampleLimit, Number.NaN);
   const sampleLimit =
@@ -719,7 +1201,15 @@ async function defaultReplayJobExecutionHandler(input: {
           candidateInput: item.candidateInput,
           metadata: item.metadata,
         }));
-  if (selectedCases.length === 0) {
+  const tokenPulseConfig = resolveTokenPulseReplayConfig();
+  const executionCases =
+    executionBackend === "tokenpulse"
+      ? selectedCases.slice(
+          0,
+          Math.min(selectedCases.length, tokenPulseConfig.maxCasesPerRun),
+        )
+      : selectedCases;
+  if (executionCases.length === 0) {
     const emptySummary = buildReplaySummaryPayload(
       {
         ...summary,
@@ -730,6 +1220,7 @@ async function defaultReplayJobExecutionHandler(input: {
         regressedCases: 0,
         unchangedCases: 0,
         executionSource: requestedExecutionSource ?? "dataset_cases",
+        executionBackend,
         materializedCaseCount: 0,
         ...(baselineVersionId ? { baselineVersionId } : {}),
         sourceSummary: {},
@@ -759,34 +1250,102 @@ async function defaultReplayJobExecutionHandler(input: {
       error: "回放数据集缺少可执行样本，请先录入样本或从历史会话物化样本。",
     };
   }
-  const diffItems = selectedCases.map((item) =>
-    evaluateReplayCase({
+  let casesArtifactItems: Array<Record<string, unknown>> = executionCases;
+  let processedCaseIds = new Set(executionCases.map((item) => item.caseId));
+  let tokenpulseFailures = 0;
+  let failFastTriggered = false;
+
+  if (executionBackend === "tokenpulse") {
+    const systemPrompt = firstNonEmptyString(parameters.systemPrompt, parameters.system_prompt);
+    const baselineModelFromParameters = firstNonEmptyString(
+      parameters.baselineModel,
+      parameters.baseline_model,
+    );
+    const candidateModelFromParameters = firstNonEmptyString(
+      parameters.candidateModel,
+      parameters.candidate_model,
+      parameters.model,
+    );
+    const baselineModel =
+      baselineModelFromParameters ??
+      (await resolveReplayBaselineModel({
+        tenantId: input.tenantId,
+        datasetId: input.replayJob.baselineId,
+        baselineVersionId,
+      }));
+    const execution = await executeReplayCasesWithTokenPulse({
+      tenantId: input.tenantId,
       replayJob: input.replayJob,
-      caseId: item.caseId,
-      metric,
-      source: item,
+      selectedCases: executionCases,
+      baselineModel,
+      candidateModel: candidateModelFromParameters,
+      systemPrompt,
+      config: tokenPulseConfig,
+    });
+    casesArtifactItems = execution.executedCases as Array<Record<string, unknown>>;
+    processedCaseIds = execution.processedCaseIds;
+    tokenpulseFailures = execution.failedCases;
+    failFastTriggered = execution.failFastTriggered;
+  }
+
+  const diffItems = casesArtifactItems
+    .filter((item) => {
+      const record =
+        item && typeof item === "object" && !Array.isArray(item)
+          ? (item as Record<string, unknown>)
+          : null;
+      const caseId = firstNonEmptyString(record?.caseId);
+      return Boolean(caseId && processedCaseIds.has(caseId));
     })
-  );
+    .map((item) => {
+      const record = item as Record<string, unknown>;
+      const caseId = firstNonEmptyString(record.caseId) ?? "unknown";
+      return evaluateReplayCase({
+        replayJob: input.replayJob,
+        caseId,
+        metric,
+        source: {
+          input: firstNonEmptyString(record.input) ?? "",
+          expectedOutput: firstNonEmptyString(record.expectedOutput),
+          baselineOutput: firstNonEmptyString(record.baselineOutput),
+          candidateInput: firstNonEmptyString(record.candidateInput),
+          metadata: normalizeRecord(record.metadata),
+        },
+      });
+    });
   const summaryCounts = summarizeDiffItems(diffItems);
-  const totalCases = selectedCases.length;
-  const sourceSummary = summarizeReplayCaseSources(selectedCases);
+  const totalCases = executionCases.length;
+  const sourceSummary = summarizeReplayCaseSources(executionCases);
   const executionSource = inferReplayExecutionSource({
     requested: requestedExecutionSource,
-    selectedCases,
+    selectedCases: executionCases,
   });
   const completedSummary = buildReplaySummaryPayload(
     {
       ...summary,
       metric,
       totalCases,
-      processedCases: summaryCounts.processedCases,
+      processedCases: diffItems.length,
       improvedCases: summaryCounts.improvedCases,
       regressedCases: summaryCounts.regressedCases,
       unchangedCases: summaryCounts.unchangedCases,
       executionSource,
+      executionBackend,
       materializedCaseCount: totalCases,
       ...(baselineVersionId ? { baselineVersionId } : {}),
       sourceSummary,
+      ...(executionBackend === "tokenpulse"
+        ? {
+            tokenpulse: {
+              failures: tokenpulseFailures,
+              failFastTriggered,
+              maxCasesPerRun: tokenPulseConfig.maxCasesPerRun,
+              maxConcurrency: tokenPulseConfig.maxConcurrency,
+              timeoutMs: tokenPulseConfig.timeoutMs,
+              failFastThreshold: tokenPulseConfig.failFastThreshold,
+            },
+          }
+        : {}),
     },
     {
       metric,
@@ -796,7 +1355,10 @@ async function defaultReplayJobExecutionHandler(input: {
   );
 
   return {
-    status: "completed",
+    status:
+      executionBackend === "tokenpulse" && (failFastTriggered || diffItems.length === 0)
+        ? "failed"
+        : "completed",
     summary: completedSummary,
     diff: {
       items: diffItems,
@@ -826,12 +1388,19 @@ async function defaultReplayJobExecutionHandler(input: {
         payload: {
           datasetId: input.replayJob.baselineId,
           runId: input.replayJob.id,
-          total: selectedCases.length,
+          total: totalCases,
           sourceSummary,
-          items: selectedCases,
+          items: casesArtifactItems,
         },
       },
     ],
+    ...(executionBackend === "tokenpulse" && (failFastTriggered || diffItems.length === 0)
+      ? {
+          error: failFastTriggered
+            ? `tokenpulse 执行触发 fail-fast：失败样本数达到阈值（failures=${tokenpulseFailures}）。`
+            : "tokenpulse 执行未产生成功样本输出，请检查 REPLAY_TOKENPULSE 配置与网关可用性。",
+        }
+      : {}),
   };
 }
 
