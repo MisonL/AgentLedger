@@ -22327,6 +22327,206 @@ describe("Control Plane API", () => {
     ).toBe(true);
   });
 
+  test("api-v2 quality 路由：automation policy 非法 modelVersion 应返回 400", async () => {
+    const nonce = createNonce("quality-v2-automation-policy-model-version-invalid");
+    const auth = await getDefaultAuthContext();
+    const tenantResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Quality Automation Policy Invalid ModelVersion Tenant ${nonce}`,
+        slug: `quality-automation-policy-invalid-model-version-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error("租户创建失败，缺少 tenantId。");
+    }
+    const headers = await issueTenantScopedAuthHeaders(
+      tenantId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const response = await app.request("/api/v2/quality/automation-policy", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...headers,
+      },
+      body: JSON.stringify({
+        riskLevel: "high",
+        decision: "allow",
+        reason: "非法 modelVersion 应被阻断",
+        modelVersion: `quality-timeseries-${nonce}`,
+      }),
+    });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      message: "modelVersion 必须是 quality-heuristic-v2/quality-timeseries-v1 之一。",
+    });
+  });
+
+  test("api-v2 quality 路由：automation policy modelVersion=quality-timeseries-v1 触发 automation 时应包含 timeseries 信号字段", async () => {
+    const nonce = createNonce("quality-v2-automation-timeseries-signals");
+    const auth = await getDefaultAuthContext();
+    const tenantResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `Quality Automation Timeseries Tenant ${nonce}`,
+        slug: `quality-automation-timeseries-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error("租户创建失败，缺少 tenantId。");
+    }
+    const headers = await issueTenantScopedAuthHeaders(
+      tenantId,
+      auth.accessToken,
+      auth.userId,
+    );
+
+    const policyResponse = await app.request("/api/v2/quality/automation-policy", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...headers,
+      },
+      body: JSON.stringify({
+        riskLevel: "high",
+        decision: "require_approval",
+        reason: "timeseries 模型下的自动治理需要审批",
+        evaluationScoreThreshold: 80,
+        triggerOnEvaluationFailure: true,
+        triggerOnReplayRegression: false,
+        modelVersion: "quality-timeseries-v1",
+      }),
+    });
+    expect(policyResponse.status).toBe(200);
+    const policyBody = (await policyResponse.json()) as {
+      modelVersion?: string;
+      evaluationScoreThreshold?: number;
+      triggerOnEvaluationFailure?: boolean;
+      triggerOnReplayRegression?: boolean;
+    };
+    expect(policyBody.modelVersion).toBe("quality-timeseries-v1");
+    expect(policyBody.evaluationScoreThreshold).toBe(80);
+    expect(policyBody.triggerOnEvaluationFailure).toBe(true);
+    expect(policyBody.triggerOnReplayRegression).toBe(false);
+
+    const project = `agentledger/${nonce}`;
+    const dates = [
+      "2026-03-01",
+      "2026-03-02",
+      "2026-03-03",
+      "2026-03-04",
+      "2026-03-05",
+      "2026-03-06",
+    ];
+    for (const date of dates) {
+      for (let i = 0; i < 2; i += 1) {
+        const createEvaluationResponse = await app.request(
+          "/api/v2/quality/evaluations",
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              ...headers,
+            },
+            body: JSON.stringify({
+              replayRunId: `automation-ts-run-${nonce}-${date}-${i}`,
+              metric: "accuracy",
+              score: 90 - i,
+              sampleCount: 12,
+              occurredAt: `${date}T10:00:00.000Z`,
+              externalSource: {
+                provider: "github",
+                repo: project,
+                workflow: "ci-main",
+                runId: `run-${nonce}-${date}-${i}`,
+              },
+            }),
+          },
+        );
+        expect(createEvaluationResponse.status).toBe(201);
+      }
+    }
+
+    const triggerResponse = await app.request("/api/v2/quality/evaluations", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...headers,
+      },
+      body: JSON.stringify({
+        sessionId: `v2-sess-automation-timeseries-trigger-${nonce}`,
+        metric: "accuracy",
+        score: 52,
+        sampleCount: 10,
+        occurredAt: "2026-03-06T12:30:00.000Z",
+        externalSource: {
+          provider: "github",
+          repo: project,
+          workflow: "ci-main",
+          runId: `run-${nonce}-trigger`,
+        },
+      }),
+    });
+    expect(triggerResponse.status).toBe(201);
+    const triggerBody = (await triggerResponse.json()) as {
+      automation?: {
+        triggered?: boolean;
+        reason?: string;
+        execution?: {
+          adviceExecutionId?: string;
+          metadata?: Record<string, unknown>;
+        } | null;
+      };
+    };
+    expect(triggerBody.automation?.triggered).toBe(true);
+    expect(triggerBody.automation?.reason).toBe("score_below_threshold");
+    expect(typeof triggerBody.automation?.execution?.adviceExecutionId).toBe("string");
+
+    const metadata = triggerBody.automation?.execution?.metadata ?? {};
+    expect(metadata["modelVersion"]).toBe("quality-timeseries-v1");
+    expect(["up", "down", "flat"].includes(String(metadata["trendDirection"]))).toBe(
+      true,
+    );
+    expect(metadata["projectedDelta"]).toSatisfy(
+      (value) => typeof value === "number" && Number.isFinite(value),
+    );
+    expect(metadata["basisWindowCount"]).toSatisfy(
+      (value) => typeof value === "number" && Number.isInteger(value) && value >= 10,
+    );
+    expect(metadata["forecastWindowStart"]).toEqual(expect.any(String));
+    expect(metadata["forecastWindowEnd"]).toEqual(expect.any(String));
+
+    const adviceExecutionId = triggerBody.automation?.execution?.adviceExecutionId as string;
+    const adviceExecutionResponse = await app.request(
+      `/api/v2/quality/advice/executions/${encodeURIComponent(adviceExecutionId)}`,
+      { headers },
+    );
+    expect(adviceExecutionResponse.status).toBe(200);
+    const adviceExecutionBody = (await adviceExecutionResponse.json()) as {
+      resultSummary?: Record<string, unknown>;
+    };
+    const resultSummary = adviceExecutionBody.resultSummary ?? {};
+    expect(resultSummary["modelVersion"]).toBe("quality-timeseries-v1");
+    expect(["up", "down", "flat"].includes(String(resultSummary["trendDirection"]))).toBe(
+      true,
+    );
+    expect(resultSummary["projectedDelta"]).toSatisfy(
+      (value) => typeof value === "number" && Number.isFinite(value),
+    );
+    expect(resultSummary["basisWindowCount"]).toSatisfy(
+      (value) => typeof value === "number" && Number.isInteger(value) && value >= 10,
+    );
+  });
+
   test("api-v2 quality 路由：advice execute/list/cancel", async () => {
     const nonce = createNonce("quality-advice-execution");
     const auth = await getDefaultAuthContext();
