@@ -2445,6 +2445,7 @@ type agentStatusQueue struct {
 	Enabled          bool   `json:"enabled"`
 	Path             string `json:"path,omitempty"`
 	PendingCount     int    `json:"pending_count"`
+	CorruptCount     int    `json:"corrupt_count,omitempty"`
 	OldestEnqueuedAt string `json:"oldest_enqueued_at,omitempty"`
 	TotalBytes       int64  `json:"total_bytes"`
 }
@@ -3782,11 +3783,17 @@ func readStatusQueue(rawQueueDir string) (agentStatusQueue, error) {
 	if err != nil {
 		return agentStatusQueue{}, err
 	}
+	corruptCount, err := countAgentQueueCorruptFiles(resolvedPath)
+	if err != nil {
+		// corrupt_count 是可选字段，不应因为隔离目录读取失败导致 status/run 失败。
+		corruptCount = 0
+	}
 
 	queueStatus := agentStatusQueue{
 		Enabled:      true,
 		Path:         resolvedPath,
 		PendingCount: len(files),
+		CorruptCount: corruptCount,
 		TotalBytes:   0,
 	}
 	var oldest time.Time
@@ -3904,7 +3911,13 @@ func loadAgentQueueFiles(queueDir string) ([]agentQueueFile, error) {
 	for _, path := range candidates {
 		item, err := readAgentQueueFile(path)
 		if err != nil {
-			return nil, err
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if quarantineErr := quarantineCorruptAgentQueueFile(queueDir, path); quarantineErr != nil {
+				return nil, quarantineErr
+			}
+			continue
 		}
 		files = append(files, item)
 	}
@@ -3930,6 +3943,9 @@ func readAgentQueueFile(path string) (agentQueueFile, error) {
 	if strings.TrimSpace(entry.EnqueuedAt) == "" {
 		return agentQueueFile{}, fmt.Errorf("队列文件缺少 enqueued_at")
 	}
+	if _, err := time.Parse(time.RFC3339Nano, entry.EnqueuedAt); err != nil {
+		return agentQueueFile{}, fmt.Errorf("队列文件 enqueued_at 非法: %w", err)
+	}
 	if strings.TrimSpace(entry.Request.BatchID) == "" {
 		return agentQueueFile{}, fmt.Errorf("队列文件缺少 request.batch_id")
 	}
@@ -3938,6 +3954,90 @@ func readAgentQueueFile(path string) (agentQueueFile, error) {
 		SizeBytes: info.Size(),
 		Entry:     entry,
 	}, nil
+}
+
+func countAgentQueueCorruptFiles(queueDir string) (int, error) {
+	corruptDir := filepath.Join(queueDir, "corrupt")
+	entries, err := os.ReadDir(corruptDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("读取队列损坏隔离目录失败: %w", err)
+	}
+
+	count := 0
+	for _, item := range entries {
+		if item.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(item.Name(), ".") || !strings.HasSuffix(item.Name(), ".json") {
+			continue
+		}
+		count++
+	}
+	return count, nil
+}
+
+func quarantineCorruptAgentQueueFile(queueDir, path string) error {
+	corruptDir := filepath.Join(queueDir, "corrupt")
+	if err := os.MkdirAll(corruptDir, 0o700); err != nil {
+		return fmt.Errorf("创建队列损坏隔离目录失败: %w", err)
+	}
+
+	base := filepath.Base(path)
+	targetPath := filepath.Join(corruptDir, base)
+	if _, err := os.Stat(targetPath); err == nil {
+		targetPath = filepath.Join(
+			corruptDir,
+			fmt.Sprintf(
+				"%s.%d%s",
+				strings.TrimSuffix(base, filepath.Ext(base)),
+				time.Now().UTC().UnixNano(),
+				filepath.Ext(base),
+			),
+		)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("检查隔离队列文件失败: %w", err)
+	}
+
+	if err := os.Rename(path, targetPath); err == nil {
+		return nil
+	} else if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("读取队列文件信息失败: %w", err)
+	}
+	source, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("打开队列文件失败: %w", err)
+	}
+	defer source.Close()
+
+	target, err := os.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode())
+	if err != nil {
+		return fmt.Errorf("创建隔离队列文件失败: %w", err)
+	}
+	_, copyErr := io.Copy(target, source)
+	closeErr := target.Close()
+	if copyErr != nil {
+		_ = os.Remove(targetPath)
+		return fmt.Errorf("复制隔离队列文件失败: %w", copyErr)
+	}
+	if closeErr != nil {
+		_ = os.Remove(targetPath)
+		return fmt.Errorf("写入隔离队列文件失败: %w", closeErr)
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("删除损坏队列文件失败: %w", err)
+	}
+	return nil
 }
 
 func flushAgentQueue(

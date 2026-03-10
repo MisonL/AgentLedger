@@ -7,6 +7,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -1350,6 +1352,100 @@ func TestRunCommand_WithQueueFlushesRecoveredEntriesInOrder(t *testing.T) {
 	}
 	if queueStatus.PendingCount != 0 || queueStatus.TotalBytes != 0 {
 		t.Fatalf("queue status after flush=%+v, want empty queue", queueStatus)
+	}
+}
+
+func TestRunCommand_WithQueueSkipsCorruptEntriesAndQuarantinesFiles(t *testing.T) {
+	queueDir := filepath.Join(t.TempDir(), "queue")
+	recoveredTime1 := time.Date(2026, 3, 7, 9, 0, 0, 0, time.UTC)
+	recoveredTime2 := recoveredTime1.Add(2 * time.Minute)
+
+	if _, _, err := enqueueAgentQueueRequest(queueDir, ingestBatchRequest{
+		BatchID: "batch-recovered-1",
+		Events: []agentEvent{{
+			EventID:    "evt-recovered-1",
+			SessionID:  "session-recovered-1",
+			EventType:  "message",
+			OccurredAt: recoveredTime1.Format(time.RFC3339),
+		}},
+	}, recoveredTime1); err != nil {
+		t.Fatalf("enqueueAgentQueueRequest(recovered1) error: %v", err)
+	}
+
+	corruptTime := recoveredTime1.Add(1 * time.Minute)
+	corruptFile := filepath.Join(queueDir, fmt.Sprintf("%020d_corrupt.json", corruptTime.UnixNano()))
+	if err := os.WriteFile(corruptFile, []byte(`{"broken":`), 0o600); err != nil {
+		t.Fatalf("os.WriteFile(corrupt) error: %v", err)
+	}
+
+	if _, _, err := enqueueAgentQueueRequest(queueDir, ingestBatchRequest{
+		BatchID: "batch-recovered-2",
+		Events: []agentEvent{{
+			EventID:    "evt-recovered-2",
+			SessionID:  "session-recovered-2",
+			EventType:  "message",
+			OccurredAt: recoveredTime2.Format(time.RFC3339),
+		}},
+	}, recoveredTime2); err != nil {
+		t.Fatalf("enqueueAgentQueueRequest(recovered2) error: %v", err)
+	}
+
+	receivedBatchIDs := make([]string, 0, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request ingestBatchRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("json.NewDecoder(request) error: %v", err)
+		}
+		receivedBatchIDs = append(receivedBatchIDs, request.BatchID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(ingestBatchResponse{
+			BatchID:    request.BatchID,
+			Accepted:   len(request.Events),
+			Rejected:   0,
+			DurationMS: 1,
+		})
+	}))
+	defer server.Close()
+
+	exitCode, _, stderr := captureOutput(t, func() int {
+		return runCommand([]string{
+			"--protocol=http",
+			"--endpoint=" + server.URL,
+			"--queue-dir=" + queueDir,
+			"--generate=1",
+			"--batch-id=batch-current",
+			"--session-id=session-current",
+		})
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCommand()=%d, want=0, stderr=%s", exitCode, stderr)
+	}
+	if strings.TrimSpace(stderr) != "" &&
+		!strings.Contains(stderr, "提示: 未找到本地 token") {
+		t.Fatalf("stderr=%q, want empty or token prompt", stderr)
+	}
+	if strings.Join(receivedBatchIDs, ",") != "batch-recovered-1,batch-recovered-2,batch-current" {
+		t.Fatalf("received batch ids=%v, want [batch-recovered-1 batch-recovered-2 batch-current]", receivedBatchIDs)
+	}
+
+	if _, err := os.Stat(corruptFile); err == nil || !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("corrupt file should be moved, stat err=%v", err)
+	}
+	quarantinedPath := filepath.Join(queueDir, "corrupt", filepath.Base(corruptFile))
+	if _, err := os.Stat(quarantinedPath); err != nil {
+		t.Fatalf("quarantined file stat error: %v", err)
+	}
+
+	queueStatus, err := readStatusQueue(queueDir)
+	if err != nil {
+		t.Fatalf("readStatusQueue() error: %v", err)
+	}
+	if queueStatus.PendingCount != 0 || queueStatus.TotalBytes != 0 {
+		t.Fatalf("queue status after flush=%+v, want empty queue", queueStatus)
+	}
+	if queueStatus.CorruptCount != 1 {
+		t.Fatalf("queue.corrupt_count=%d, want=1", queueStatus.CorruptCount)
 	}
 }
 
