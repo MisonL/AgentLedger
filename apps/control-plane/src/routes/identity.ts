@@ -30,6 +30,16 @@ const WRITABLE_ROLES = new Set(["owner", "maintainer"]);
 const AGENT_LIFECYCLE_EVENT_DEFAULT_LIMIT = 50;
 const SCIM_BEARER_TOKEN_ENV = "SCIM_BEARER_TOKEN";
 const memoryAgentLifecycleEvents = new Map<string, AgentLifecycleEventItem[]>();
+const SCIM_ROLE_SET = new Set(["owner", "maintainer", "member", "readonly"]);
+
+type ScimRole = "owner" | "maintainer" | "member" | "readonly";
+type ScimPaginationParseResult =
+  | { kind: "ok"; startIndex: number; count?: number }
+  | { kind: "error"; error: string };
+type ScimEqFilterParseResult =
+  | { kind: "none" }
+  | { kind: "eq"; attribute: string; value: string }
+  | { kind: "error"; error: string };
 
 interface TenantMemberView extends TenantMember {
   email: string;
@@ -63,6 +73,104 @@ function normalizeString(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function parsePositiveInt(value: string, options: { min: number }): number | null {
+  const normalized = value.trim();
+  if (!/^\d+$/.test(normalized)) {
+    return null;
+  }
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isFinite(parsed) || parsed < options.min) {
+    return null;
+  }
+  return parsed;
+}
+
+function parseScimPagination(query: Record<string, string | undefined>): ScimPaginationParseResult {
+  const rawStartIndex = query.startIndex;
+  const rawCount = query.count;
+  let startIndex = 1;
+  if (rawStartIndex !== undefined) {
+    const parsed = parsePositiveInt(rawStartIndex, { min: 1 });
+    if (parsed === null) {
+      return { kind: "error", error: "startIndex 必须为 >= 1 的整数。" };
+    }
+    startIndex = parsed;
+  }
+  let count: number | undefined;
+  if (rawCount !== undefined) {
+    const parsed = parsePositiveInt(rawCount, { min: 0 });
+    if (parsed === null) {
+      return { kind: "error", error: "count 必须为 >= 0 的整数。" };
+    }
+    count = parsed;
+  }
+  return { kind: "ok", startIndex, count };
+}
+
+function buildScimEqFilterHelp(allowedAttributes: string[]): string {
+  if (allowedAttributes.length === 0) {
+    return 'filter 仅支持形如 attribute eq "..." 的表达式。';
+  }
+  if (allowedAttributes.length === 1) {
+    return `filter 仅支持 ${allowedAttributes[0]} eq "..."。`;
+  }
+  return `filter 仅支持 ${allowedAttributes
+    .map((attribute) => `${attribute} eq "..."`)
+    .join(" 或 ")}。`;
+}
+
+function parseScimEqFilter(
+  rawFilter: string | undefined,
+  options: { allowedAttributes: string[] },
+): ScimEqFilterParseResult {
+  const filter = normalizeString(rawFilter);
+  if (!filter) {
+    return { kind: "none" };
+  }
+  const match = filter.match(/^\s*([a-zA-Z][a-zA-Z0-9_-]*)\s+eq\s+"([^"]+)"\s*$/i);
+  if (!match) {
+    return {
+      kind: "error",
+      error: buildScimEqFilterHelp(options.allowedAttributes),
+    };
+  }
+  const rawAttribute = match[1] ?? "";
+  const rawValue = match[2] ?? "";
+  const value = rawValue.trim();
+  if (!value) {
+    return {
+      kind: "error",
+      error: buildScimEqFilterHelp(options.allowedAttributes),
+    };
+  }
+  const allowed = new Map(
+    options.allowedAttributes.map((attribute) => [attribute.toLowerCase(), attribute] as const),
+  );
+  const attribute = allowed.get(rawAttribute.toLowerCase());
+  if (!attribute) {
+    return {
+      kind: "error",
+      error: buildScimEqFilterHelp(options.allowedAttributes),
+    };
+  }
+  return {
+    kind: "eq",
+    attribute,
+    value,
+  };
+}
+
+function parseScimRole(value: unknown, field: string): { role: ScimRole } | { error: string } {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return { error: `${field} 必须为非空字符串。` };
+  }
+  if (!SCIM_ROLE_SET.has(normalized)) {
+    return { error: `${field} 仅支持 owner/maintainer/member/readonly。` };
+  }
+  return { role: normalized as ScimRole };
 }
 
 function resolveScimBearerToken(): string | undefined {
@@ -440,12 +548,29 @@ identityRoutes.get("/tenants/:tenantId/scim/users", async (c) => {
   if (!tenantId) {
     return c.json({ message: "tenantId 必须为非空字符串。" }, 400);
   }
+  const pagination = parseScimPagination(c.req.query());
+  if (pagination.kind === "error") {
+    return c.json({ message: pagination.error }, 400);
+  }
+  const filter = parseScimEqFilter(c.req.query().filter, {
+    allowedAttributes: ["userName", "email"],
+  });
+  if (filter.kind === "error") {
+    return c.json({ message: filter.error }, 400);
+  }
+  const normalizedFilterValue = filter.kind === "eq" ? filter.value.toLowerCase() : undefined;
   const memberships = await repository.listTenantMembers(tenantId);
   const resources = await Promise.all(
     memberships.map(async (membership) => {
       const user = await repository.getUserById(membership.userId);
       if (!user) {
         return null;
+      }
+      if (normalizedFilterValue) {
+        const candidate = user.email.toLowerCase();
+        if (candidate !== normalizedFilterValue) {
+          return null;
+        }
       }
       return toScimUserResource({
         userId: user.id,
@@ -457,12 +582,15 @@ identityRoutes.get("/tenants/:tenantId/scim/users", async (c) => {
     }),
   );
   const items = resources.filter(Boolean);
+  const start = Math.max(0, pagination.startIndex - 1);
+  const end = pagination.count === undefined ? undefined : start + pagination.count;
+  const pageItems = items.slice(start, end);
   return c.json({
     schemas: ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
     totalResults: items.length,
-    startIndex: 1,
-    itemsPerPage: items.length,
-    Resources: items,
+    startIndex: pagination.startIndex,
+    itemsPerPage: pageItems.length,
+    Resources: pageItems,
   });
 });
 
@@ -535,6 +663,146 @@ identityRoutes.post("/tenants/:tenantId/scim/users", async (c) => {
   );
 });
 
+identityRoutes.put("/tenants/:tenantId/scim/users/:userId", async (c) => {
+  const scimAuth = requireScimBearer(c);
+  if (scimAuth) {
+    return scimAuth;
+  }
+  const tenantId = resolveTenantId(c.req.param("tenantId"));
+  if (!tenantId) {
+    return c.json({ message: "tenantId 必须为非空字符串。" }, 400);
+  }
+  const userId = normalizeString(c.req.param("userId"));
+  if (!userId) {
+    return c.json({ message: "userId 必须为非空字符串。" }, 400);
+  }
+  const body = (await c.req.json().catch(() => undefined)) as Record<string, unknown> | undefined;
+  if (!isRecord(body)) {
+    return c.json({ message: "请求体必须为 JSON 对象。" }, 400);
+  }
+
+  const [user, membership] = await Promise.all([
+    repository.getUserById(userId),
+    repository.getTenantMemberByUser(tenantId, userId),
+  ]);
+  if (!user) {
+    return c.json({ message: "未找到要更新的 SCIM 用户。" }, 404);
+  }
+  if (!membership) {
+    return c.json({ message: "未找到要更新的租户成员关系。" }, 404);
+  }
+
+  const previous = {
+    displayName: user.displayName,
+    tenantRole: membership.tenantRole,
+    organizationId: membership.organizationId,
+    orgRole: membership.orgRole,
+  };
+
+  let nextDisplayName = user.displayName;
+  if ("displayName" in body) {
+    const normalized = normalizeString(body.displayName);
+    if (!normalized) {
+      return c.json({ message: "displayName 必须为非空字符串。" }, 400);
+    }
+    nextDisplayName = normalized;
+  }
+
+  let nextTenantRole: ScimRole = membership.tenantRole as ScimRole;
+  if ("tenantRole" in body) {
+    const parsed = parseScimRole(body.tenantRole, "tenantRole");
+    if ("error" in parsed) {
+      return c.json({ message: parsed.error }, 400);
+    }
+    nextTenantRole = parsed.role;
+  }
+
+  let nextOrganizationId = membership.organizationId;
+  if ("organizationId" in body) {
+    const rawOrganizationId = body.organizationId;
+    if (rawOrganizationId === null || rawOrganizationId === undefined) {
+      nextOrganizationId = undefined;
+    } else if (typeof rawOrganizationId === "string") {
+      nextOrganizationId = normalizeString(rawOrganizationId);
+    } else {
+      return c.json({ message: "organizationId 必须为字符串或 null。" }, 400);
+    }
+  }
+
+  let nextOrgRole = membership.orgRole as ScimRole | undefined;
+  if ("orgRole" in body) {
+    if (!nextOrganizationId) {
+      return c.json({ message: "organizationId 为空时不允许设置 orgRole。" }, 400);
+    }
+    const parsed = parseScimRole(body.orgRole, "orgRole");
+    if ("error" in parsed) {
+      return c.json({ message: parsed.error }, 400);
+    }
+    nextOrgRole = parsed.role;
+  }
+  if (!nextOrganizationId) {
+    nextOrgRole = undefined;
+  }
+
+  const updatedUser =
+    nextDisplayName === user.displayName
+      ? user
+      : await repository.createLocalUser({
+          email: user.email,
+          passwordHash: user.passwordHash,
+          displayName: nextDisplayName,
+        });
+
+  let updatedMembership = membership;
+  if (
+    nextTenantRole !== membership.tenantRole ||
+    nextOrganizationId !== membership.organizationId ||
+    nextOrgRole !== membership.orgRole
+  ) {
+    try {
+      updatedMembership = await repository.addTenantMember({
+        tenantId,
+        userId: user.id,
+        tenantRole: nextTenantRole,
+        organizationId: nextOrganizationId,
+        orgRole: nextOrganizationId ? nextOrgRole : undefined,
+      });
+    } catch {
+      return c.json({ message: "SCIM 用户更新失败：租户或参数无效。" }, 400);
+    }
+  }
+
+  const requestId = c.get("requestId");
+  await appendIdentityAuditLogSafely({
+    tenantId,
+    eventId: `cp:${requestId}:scim-user-updated`,
+    action: "identity.scim.user_updated",
+    level: "info",
+    detail: "SCIM 用户更新完成。",
+    metadata: {
+      tenantId,
+      userId: updatedUser.id,
+      email: updatedUser.email,
+      displayName: updatedUser.displayName,
+      tenantRole: updatedMembership.tenantRole,
+      organizationId: updatedMembership.organizationId,
+      orgRole: updatedMembership.orgRole,
+      previous,
+    },
+  });
+
+  return c.json(
+    toScimUserResource({
+      userId: updatedUser.id,
+      email: updatedUser.email,
+      displayName: updatedUser.displayName,
+      tenantRole: updatedMembership.tenantRole,
+      organizationId: updatedMembership.organizationId,
+    }),
+    200,
+  );
+});
+
 identityRoutes.get("/tenants/:tenantId/scim/groups", async (c) => {
   const scimAuth = requireScimBearer(c);
   if (scimAuth) {
@@ -544,10 +812,28 @@ identityRoutes.get("/tenants/:tenantId/scim/groups", async (c) => {
   if (!tenantId) {
     return c.json({ message: "tenantId 必须为非空字符串。" }, 400);
   }
+  const pagination = parseScimPagination(c.req.query());
+  if (pagination.kind === "error") {
+    return c.json({ message: pagination.error }, 400);
+  }
+  const filter = parseScimEqFilter(c.req.query().filter, {
+    allowedAttributes: ["displayName"],
+  });
+  if (filter.kind === "error") {
+    return c.json({ message: filter.error }, 400);
+  }
   const organizations = await repository.listOrganizations(tenantId);
+  const filteredOrganizations =
+    filter.kind === "eq"
+      ? organizations.filter((organization) => organization.name.toLowerCase() === filter.value.toLowerCase())
+      : organizations;
+  const totalResults = filteredOrganizations.length;
+  const start = Math.max(0, pagination.startIndex - 1);
+  const end = pagination.count === undefined ? undefined : start + pagination.count;
+  const pageOrganizations = filteredOrganizations.slice(start, end);
   const memberships = await repository.listTenantMembers(tenantId);
   const resources = await Promise.all(
-    organizations.map(async (organization) => {
+    pageOrganizations.map(async (organization) => {
       const members = await Promise.all(
         memberships
           .filter((membership) => membership.organizationId === organization.id)
@@ -571,8 +857,8 @@ identityRoutes.get("/tenants/:tenantId/scim/groups", async (c) => {
   );
   return c.json({
     schemas: ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
-    totalResults: resources.length,
-    startIndex: 1,
+    totalResults,
+    startIndex: pagination.startIndex,
     itemsPerPage: resources.length,
     Resources: resources,
   });

@@ -3976,6 +3976,88 @@ describe("Control Plane API", () => {
     }
   });
 
+  test("AUTH_EXTERNAL_RISK_BLOCK_LEVEL=medium 时 medium 风险会被阻断", async () => {
+    const nonce = createNonce("auth-external-risk-block-level-medium");
+    const secret = `external-secret-${nonce}`;
+    const originalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+    const originalSecret = Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET;
+    const originalRiskMode = Bun.env.AUTH_EXTERNAL_RISK_MODE;
+    const originalRiskBlockLevel = Bun.env.AUTH_EXTERNAL_RISK_BLOCK_LEVEL;
+    Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = JSON.stringify([
+      {
+        id: "corp-saml",
+        type: "saml",
+        displayName: "企业 SAML",
+        metadataUrl: "https://idp.example.com/metadata",
+        ssoUrl: "https://idp.example.com/sso",
+        binding: "post",
+        enabled: true,
+      },
+    ]);
+    Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET = secret;
+    Bun.env.AUTH_EXTERNAL_RISK_MODE = "block";
+    Bun.env.AUTH_EXTERNAL_RISK_BLOCK_LEVEL = "medium";
+
+    try {
+      const basePayload = {
+        providerId: "corp-saml",
+        externalUserId: `ext-user-${nonce}`,
+        email: `external-${nonce}@example.com`,
+        timestamp: new Date().toISOString(),
+        nonce: `nonce-${nonce}`,
+      };
+      const canonical = [
+        basePayload.providerId,
+        basePayload.externalUserId,
+        basePayload.email,
+        "",
+        basePayload.timestamp,
+        basePayload.nonce,
+      ].join("\n");
+      const signature = createHmac("sha256", secret)
+        .update(canonical)
+        .digest("hex");
+
+      const response = await app.request("/api/v1/auth/external/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-agentledger-risk-level": "medium",
+          "user-agent": "risk-test/1.0",
+          "x-forwarded-for": "203.0.113.101",
+        },
+        body: JSON.stringify({
+          ...basePayload,
+          signature,
+        }),
+      });
+      expect(response.status).toBe(403);
+      const body = (await response.json()) as { riskDecision?: string };
+      expect(body.riskDecision).toBe("blocked");
+    } finally {
+      if (originalProviders === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+      } else {
+        Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = originalProviders;
+      }
+      if (originalSecret === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET;
+      } else {
+        Bun.env.AUTH_EXTERNAL_ASSERTION_SECRET = originalSecret;
+      }
+      if (originalRiskMode === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_RISK_MODE;
+      } else {
+        Bun.env.AUTH_EXTERNAL_RISK_MODE = originalRiskMode;
+      }
+      if (originalRiskBlockLevel === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_RISK_BLOCK_LEVEL;
+      } else {
+        Bun.env.AUTH_EXTERNAL_RISK_BLOCK_LEVEL = originalRiskBlockLevel;
+      }
+    }
+  });
+
   test("external login 在 requireMfa 与高风险头场景下会被拦截", async () => {
     const nonce = createNonce("auth-external-mfa-risk");
     const secret = `external-secret-${nonce}`;
@@ -4240,13 +4322,14 @@ describe("Control Plane API", () => {
         authorization: `Bearer ${Bun.env.SCIM_BEARER_TOKEN}`,
         "content-type": "application/json",
       };
+      const scimEmail = `scim-${nonce}@example.com`;
       const upsertResponse = await app.request(
         `/api/v1/tenants/${encodeURIComponent(tenantId)}/scim/users`,
         {
           method: "POST",
           headers: scimHeaders,
           body: JSON.stringify({
-            userName: `scim-${nonce}@example.com`,
+            userName: scimEmail,
             displayName: `SCIM 用户 ${nonce}`,
             tenantRole: "maintainer",
             organizationId: orgBody.id,
@@ -4255,6 +4338,13 @@ describe("Control Plane API", () => {
         },
       );
       expect(upsertResponse.status).toBe(201);
+      const upsertBody = (await upsertResponse.json()) as {
+        id?: string;
+        userName?: string;
+      };
+      const scimUserId = typeof upsertBody.id === "string" ? upsertBody.id : null;
+      expect(scimUserId).toBeTruthy();
+      expect(upsertBody.userName).toBe(scimEmail);
 
       const listUsersResponse = await app.request(
         `/api/v1/tenants/${encodeURIComponent(tenantId)}/scim/users`,
@@ -4272,7 +4362,7 @@ describe("Control Plane API", () => {
       expect(listUsersBody.totalResults).toBeGreaterThanOrEqual(1);
       expect(
         listUsersBody.Resources.some(
-          (item) => item.userName === `scim-${nonce}@example.com`,
+          (item) => item.userName === scimEmail,
         ),
       ).toBe(true);
 
@@ -4291,6 +4381,119 @@ describe("Control Plane API", () => {
       };
       expect(listGroupsBody.totalResults).toBeGreaterThanOrEqual(1);
       expect(listGroupsBody.Resources.some((item) => item.id === orgBody.id)).toBe(true);
+
+      const filteredUsersResponse = await app.request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/scim/users?filter=${encodeURIComponent(
+          `userName eq \"${scimEmail}\"`,
+        )}`,
+        {
+          headers: {
+            authorization: `Bearer ${Bun.env.SCIM_BEARER_TOKEN}`,
+          },
+        },
+      );
+      expect(filteredUsersResponse.status).toBe(200);
+      const filteredUsersBody = (await filteredUsersResponse.json()) as {
+        totalResults: number;
+        Resources: Array<{ id: string; userName: string }>;
+      };
+      expect(filteredUsersBody.totalResults).toBe(1);
+      expect(filteredUsersBody.Resources.length).toBe(1);
+      expect(filteredUsersBody.Resources[0]?.userName).toBe(scimEmail);
+
+      const pagedUsersResponse = await app.request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/scim/users?startIndex=1&count=0`,
+        {
+          headers: {
+            authorization: `Bearer ${Bun.env.SCIM_BEARER_TOKEN}`,
+          },
+        },
+      );
+      expect(pagedUsersResponse.status).toBe(200);
+      const pagedUsersBody = (await pagedUsersResponse.json()) as {
+        itemsPerPage: number;
+        Resources: Array<{ userName: string }>;
+      };
+      expect(pagedUsersBody.itemsPerPage).toBe(0);
+      expect(pagedUsersBody.Resources.length).toBe(0);
+
+      const filteredGroupsResponse = await app.request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/scim/groups?filter=${encodeURIComponent(
+          `displayName eq \"组织-${nonce}\"`,
+        )}`,
+        {
+          headers: {
+            authorization: `Bearer ${Bun.env.SCIM_BEARER_TOKEN}`,
+          },
+        },
+      );
+      expect(filteredGroupsResponse.status).toBe(200);
+      const filteredGroupsBody = (await filteredGroupsResponse.json()) as {
+        totalResults: number;
+        Resources: Array<{ id: string }>;
+      };
+      expect(filteredGroupsBody.totalResults).toBe(1);
+      expect(filteredGroupsBody.Resources[0]?.id).toBe(orgBody.id);
+
+      const membersBeforeResult = await listTenantMembersByAuth(
+        owner.accessToken,
+        tenantId,
+        owner.userId,
+      );
+      assertApiStatus(membersBeforeResult, [200]);
+      const membersBefore = extractListItems(membersBeforeResult.payload);
+      const scimMemberBefore = membersBefore.find((item) => {
+        const id = pickString(item, ["userId"]);
+        return Boolean(scimUserId && id === scimUserId);
+      });
+      expect(scimMemberBefore).toBeDefined();
+      if (scimMemberBefore && isRecord(scimMemberBefore)) {
+        expect(pickString(scimMemberBefore, ["tenantRole"])).toBe("maintainer");
+        expect(pickString(scimMemberBefore, ["organizationId"])).toBe(orgBody.id);
+        expect(pickString(scimMemberBefore, ["orgRole"])).toBe("member");
+      }
+
+      const updateResponse = await app.request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/scim/users/${encodeURIComponent(
+          scimUserId ?? "missing",
+        )}`,
+        {
+          method: "PUT",
+          headers: scimHeaders,
+          body: JSON.stringify({
+            displayName: `SCIM 用户 Updated ${nonce}`,
+            tenantRole: "readonly",
+            organizationId: null,
+          }),
+        },
+      );
+      expect(updateResponse.status).toBe(200);
+      const updateBody = (await updateResponse.json()) as {
+        displayName?: string;
+        roles?: Array<{ value?: string }>;
+        meta?: Record<string, unknown>;
+      };
+      expect(updateBody.displayName).toBe(`SCIM 用户 Updated ${nonce}`);
+      expect(updateBody.roles?.[0]?.value).toBe("readonly");
+      expect((updateBody.meta ?? {})["organizationId"]).toBeUndefined();
+
+      const membersAfterResult = await listTenantMembersByAuth(
+        owner.accessToken,
+        tenantId,
+        owner.userId,
+      );
+      assertApiStatus(membersAfterResult, [200]);
+      const membersAfter = extractListItems(membersAfterResult.payload);
+      const scimMemberAfter = membersAfter.find((item) => {
+        const id = pickString(item, ["userId"]);
+        return Boolean(scimUserId && id === scimUserId);
+      });
+      expect(scimMemberAfter).toBeDefined();
+      if (scimMemberAfter && isRecord(scimMemberAfter)) {
+        expect(pickString(scimMemberAfter, ["tenantRole"])).toBe("readonly");
+        expect(pickString(scimMemberAfter, ["organizationId"])).toBeUndefined();
+        expect(pickString(scimMemberAfter, ["orgRole"])).toBeUndefined();
+      }
     } finally {
       if (originalScimToken === undefined) {
         delete Bun.env.SCIM_BEARER_TOKEN;

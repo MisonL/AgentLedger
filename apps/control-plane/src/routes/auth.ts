@@ -34,6 +34,7 @@ const AUTH_EXTERNAL_PROVIDERS_JSON_ENV = "AUTH_EXTERNAL_PROVIDERS_JSON";
 const AUTH_EXTERNAL_ASSERTION_SECRET_ENV = "AUTH_EXTERNAL_ASSERTION_SECRET";
 const AUTH_EXTERNAL_ASSERTION_TTL_SECONDS_ENV = "AUTH_EXTERNAL_ASSERTION_TTL_SECONDS";
 const AUTH_EXTERNAL_RISK_MODE_ENV = "AUTH_EXTERNAL_RISK_MODE";
+const AUTH_EXTERNAL_RISK_BLOCK_LEVEL_ENV = "AUTH_EXTERNAL_RISK_BLOCK_LEVEL";
 const AUTH_LOCAL_MFA_REQUIRED_ENV = "AUTH_LOCAL_MFA_REQUIRED";
 const AUTH_LOCAL_MFA_STATIC_CODE_ENV = "AUTH_LOCAL_MFA_STATIC_CODE";
 const AUTH_RISK_LEVEL_HEADER = "x-agentledger-risk-level";
@@ -763,6 +764,26 @@ function resolveExternalRiskMode(): ExternalAuthRiskMode {
   return raw === "block" ? "block" : "audit_only";
 }
 
+function resolveExternalRiskBlockLevel(): ExternalAuthRiskLevel {
+  const raw = normalizeOptionalString(Bun.env[AUTH_EXTERNAL_RISK_BLOCK_LEVEL_ENV])?.toLowerCase();
+  if (raw === "low" || raw === "medium" || raw === "high") {
+    return raw;
+  }
+  return "high";
+}
+
+function isRiskAtOrAboveThreshold(
+  riskLevel: ExternalAuthRiskLevel,
+  threshold: ExternalAuthRiskLevel,
+): boolean {
+  const order: Record<ExternalAuthRiskLevel, number> = {
+    low: 0,
+    medium: 1,
+    high: 2,
+  };
+  return order[riskLevel] >= order[threshold];
+}
+
 function isLocalMfaRequired(): boolean {
   return parseBooleanEnv(Bun.env[AUTH_LOCAL_MFA_REQUIRED_ENV]);
 }
@@ -816,11 +837,14 @@ function evaluateRequestRisk(c: Context<AppEnv>): {
       : mergedSignals.length > 0
         ? "medium"
         : "low");
+  const externalRiskMode = resolveExternalRiskMode();
+  const isBlocked =
+    externalRiskMode === "block" && isRiskAtOrAboveThreshold(riskLevel, resolveExternalRiskBlockLevel());
   return {
     riskLevel,
     riskSignals: mergedSignals.length > 0 ? mergedSignals : ["no_additional_risk_signals"],
     riskDecision:
-      resolveExternalRiskMode() === "block" && riskLevel === "high"
+      isBlocked
         ? "blocked"
         : riskLevel === "low"
           ? "allowed"
