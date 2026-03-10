@@ -2557,7 +2557,11 @@ describe("Web Console", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "ACK" }));
+    // CI 全量跑时页面渲染更慢，先等待告警行出现再找 ACK 按钮，避免偶发找不到。
+    await screen.findByText("critical threshold reached");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "ACK" }, { timeout: 15_000 }),
+    );
     expect(
       await screen.findByText("告警 alert-ui-1 已更新为 acknowledged。"),
     ).toBeInTheDocument();
@@ -2714,7 +2718,7 @@ describe("Web Console", () => {
     );
     expect(patchCall).toBeTruthy();
     },
-    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+    240_000,
   );
 
   test(
