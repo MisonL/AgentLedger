@@ -21780,9 +21780,9 @@ describe("Control Plane API", () => {
     ).toBe(true);
   });
 
-  test("api-v2 quality 路由：forecast 与 advice", async () => {
-    const nonce = createNonce("quality-v2-forecast-advice");
-    const auth = await getDefaultAuthContext();
+	  test("api-v2 quality 路由：forecast 与 advice", async () => {
+	    const nonce = createNonce("quality-v2-forecast-advice");
+	    const auth = await getDefaultAuthContext();
     const tenantResult = await createTenantByAuth(
       auth.accessToken,
       {
@@ -21850,25 +21850,48 @@ describe("Control Plane API", () => {
       total: number;
     };
     expect(forecastBody.total).toBeGreaterThanOrEqual(1);
-    expect(
-      forecastBody.items.some(
-        (item) =>
-          item.project === `agentledger/${nonce}` &&
-          item.metric === "all" &&
-          item.predictedScore >= 0 &&
-          item.confidence > 0 &&
-          item.modelVersion === "quality-heuristic-v2" &&
-          typeof item.regressionProbability === "number" &&
-          typeof item.rationale === "string" &&
-          ["low", "medium", "high"].includes(item.confidenceLabel ?? "") &&
-          Array.isArray(item.riskDrivers) &&
-          Array.isArray(item.featureContributions),
-      ),
-    ).toBe(true);
+	    expect(
+	      forecastBody.items.some(
+	        (item) =>
+	          item.project === `agentledger/${nonce}` &&
+	          item.metric === "all" &&
+	          item.predictedScore >= 0 &&
+	          item.confidence > 0 &&
+	          item.modelVersion === "quality-heuristic-v2" &&
+	          typeof item.regressionProbability === "number" &&
+	          typeof item.rationale === "string" &&
+	          ["low", "medium", "high"].includes(item.confidenceLabel ?? "") &&
+	          Array.isArray(item.riskDrivers) &&
+	          Array.isArray(item.featureContributions),
+	      ),
+	    ).toBe(true);
 
-    const adviceResponse = await app.request(
-      "/api/v2/quality/reports/advice?from=2026-03-05&to=2026-03-05&provider=github&workflow=ci-main",
-      {
+	    const timeseriesFallbackResponse = await app.request(
+	      "/api/v2/quality/reports/forecast?from=2026-03-05&to=2026-03-05&provider=github&workflow=ci-main&limit=10&modelVersion=quality-timeseries-v1",
+	      {
+	        headers,
+	      },
+	    );
+	    expect(timeseriesFallbackResponse.status).toBe(200);
+	    const timeseriesFallbackBody = (await timeseriesFallbackResponse.json()) as {
+	      items: Array<{
+	        project: string;
+	        modelVersion?: string;
+	      }>;
+	      total: number;
+	    };
+	    expect(timeseriesFallbackBody.total).toBeGreaterThanOrEqual(1);
+	    expect(
+	      timeseriesFallbackBody.items.some(
+	        (item) =>
+	          item.project === `agentledger/${nonce}` &&
+	          item.modelVersion === "quality-heuristic-v2",
+	      ),
+	    ).toBe(true);
+
+	    const adviceResponse = await app.request(
+	      "/api/v2/quality/reports/advice?from=2026-03-05&to=2026-03-05&provider=github&workflow=ci-main",
+	      {
         headers,
       },
     );
@@ -21903,8 +21926,97 @@ describe("Control Plane API", () => {
           typeof item.recommendedPlan === "object" &&
           typeof item.autoExecutionDecision === "string",
       ),
-    ).toBe(true);
-  });
+	    ).toBe(true);
+	  });
+
+	  test("api-v2 quality 路由：forecast 支持 quality-timeseries-v1", async () => {
+	    const nonce = createNonce("quality-v2-forecast-timeseries");
+	    const auth = await getDefaultAuthContext();
+	    const tenantResult = await createTenantByAuth(
+	      auth.accessToken,
+	      {
+	        name: `Quality Forecast Timeseries Tenant ${nonce}`,
+	        slug: `quality-forecast-timeseries-${nonce}`,
+	      },
+	      auth.userId,
+	    );
+	    assertApiStatus(tenantResult, [201]);
+	    const tenantId = extractEntityId(tenantResult.payload);
+	    if (!tenantId) {
+	      throw new Error("租户创建失败，缺少 tenantId。");
+	    }
+	    const headers = await issueTenantScopedAuthHeaders(
+	      tenantId,
+	      auth.accessToken,
+	      auth.userId,
+	    );
+
+	    const project = `agentledger/${nonce}`;
+	    const dates = [
+	      "2026-03-01",
+	      "2026-03-02",
+	      "2026-03-03",
+	      "2026-03-04",
+	      "2026-03-05",
+	    ];
+	    for (const date of dates) {
+	      for (let i = 0; i < 2; i += 1) {
+	        const createEvaluationResponse = await app.request(
+	          "/api/v2/quality/evaluations",
+	          {
+	            method: "POST",
+	            headers: {
+	              "content-type": "application/json",
+	              ...headers,
+	            },
+	            body: JSON.stringify({
+	              replayRunId: `forecast-run-${nonce}-${date}-${i}`,
+	              metric: "accuracy",
+	              score: 70 + i,
+	              sampleCount: 12,
+	              occurredAt: `${date}T10:00:00.000Z`,
+	              externalSource: {
+	                provider: "github",
+	                repo: project,
+	                workflow: "ci-main",
+	                runId: `run-${nonce}-${date}-${i}`,
+	              },
+	            }),
+	          },
+	        );
+	        expect(createEvaluationResponse.status).toBe(201);
+	      }
+	    }
+
+	    const forecastResponse = await app.request(
+	      "/api/v2/quality/reports/forecast?from=2026-03-01&to=2026-03-05&provider=github&workflow=ci-main&limit=10&modelVersion=quality-timeseries-v1",
+	      {
+	        headers,
+	      },
+	    );
+	    expect(forecastResponse.status).toBe(200);
+	    const forecastBody = (await forecastResponse.json()) as {
+	      items: Array<{
+	        project: string;
+	        metric: string;
+	        modelVersion?: string;
+	        predictedScore: number;
+	        confidence: number;
+	      }>;
+	      total: number;
+	    };
+	    expect(forecastBody.total).toBeGreaterThanOrEqual(1);
+	    expect(
+	      forecastBody.items.some(
+	        (item) =>
+	          item.project === project &&
+	          item.metric === "all" &&
+	          item.modelVersion === "quality-timeseries-v1" &&
+	          item.predictedScore >= 0 &&
+	          item.confidence > 0,
+	      ),
+	    ).toBe(true);
+	  });
 
   test("api-v2 quality 路由：advice execute/list/cancel", async () => {
     const nonce = createNonce("quality-advice-execution");
