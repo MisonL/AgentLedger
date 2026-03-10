@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { generateKeyPairSync } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 const tempDirectories: string[] = [];
+const repoRoot = resolve(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
 
 afterEach(async () => {
   while (tempDirectories.length > 0) {
@@ -19,7 +21,7 @@ afterEach(async () => {
 async function runWriteAgentDistributionManifestCli(args: string[]) {
   const proc = Bun.spawn({
     cmd: ["bun", "./scripts/write-agent-distribution-manifest.ts", ...args],
-    cwd: "/Volumes/Work/code/AgentLedger",
+    cwd: repoRoot,
     stdout: "pipe",
     stderr: "pipe",
   });
