@@ -432,6 +432,127 @@ describe("Control Plane Repository - replay job state machine", () => {
   });
 });
 
+describe("Control Plane Repository - rule approvals", () => {
+  test("createRuleApproval upsert 应正确区分 created vs updated（避免依赖 xmax）", async () => {
+    const nonce = createNonce("repo-rule-approval-upsert");
+    const module = await import(`../src/data/repository?rule-approval-upsert=${nonce}`);
+    const repo = module.getControlPlaneRepository() as any;
+
+    let existingRow: null | {
+      id: string;
+      tenant_id: string;
+      asset_id: string;
+      version: number;
+      approver_user_id: string;
+      approver_email: string | null;
+      decision: string;
+      reason: string | null;
+      created_at: string;
+    } = null;
+
+    const fakePool = {
+      query: async (text: string, params: unknown[] = []) => {
+        if (text.includes("FROM rule_asset_versions")) {
+          return { rows: [{ ok: 1 }] };
+        }
+
+        if (text.includes("INSERT INTO rule_approvals")) {
+          expect(text.includes("(id = $1) AS inserted")).toBe(true);
+          expect(text.includes("xmax")).toBe(false);
+
+          const [
+            attemptedId,
+            tenantId,
+            assetId,
+            version,
+            approverUserId,
+            approverEmail,
+            decision,
+            reason,
+            createdAt,
+          ] = params as [
+            string,
+            string,
+            string,
+            number,
+            string,
+            string | null,
+            string,
+            string | null,
+            string,
+          ];
+
+          if (!existingRow) {
+            existingRow = {
+              id: attemptedId,
+              tenant_id: tenantId,
+              asset_id: assetId,
+              version,
+              approver_user_id: approverUserId,
+              approver_email: approverEmail,
+              decision,
+              reason,
+              created_at: createdAt,
+            };
+          } else {
+            // ON CONFLICT DO UPDATE: id 不变，其余字段更新
+            existingRow = {
+              ...existingRow,
+              approver_email: approverEmail,
+              decision,
+              reason,
+              created_at: createdAt,
+            };
+          }
+
+          const inserted = existingRow.id === attemptedId;
+          return { rows: [{ ...existingRow, inserted }] };
+        }
+
+        throw new Error(`unexpected query in fakePool: ${text}`);
+      },
+    };
+
+    repo.getPool = async () => fakePool;
+
+    const first = await repo.createRuleApproval(
+      `tenant-${nonce}`,
+      `asset-${nonce}`,
+      {
+        version: 1,
+        decision: "approved",
+        reason: "first submit",
+      },
+      {
+        approverUserId: `user-${nonce}`,
+        approverEmail: "approver@example.com",
+      },
+    );
+    expect(first?.created).toBe(true);
+    expect(first?.approval.decision).toBe("approved");
+    const approvalId = first?.approval.id;
+    expect(typeof approvalId).toBe("string");
+
+    const second = await repo.createRuleApproval(
+      `tenant-${nonce}`,
+      `asset-${nonce}`,
+      {
+        version: 1,
+        decision: "rejected",
+        reason: "second submit",
+      },
+      {
+        approverUserId: `user-${nonce}`,
+        approverEmail: "approver@example.com",
+      },
+    );
+    expect(second?.created).toBe(false);
+    expect(second?.approval.id).toBe(approvalId);
+    expect(second?.approval.decision).toBe("rejected");
+    expect(second?.approval.reason).toBe("second submit");
+  });
+});
+
 describe("Control Plane Repository - quality advice executions and replay experiments", () => {
   test("quality advice execution 支持 upsert/list/get latest", async () => {
     const nonce = createNonce("repo-quality-advice");

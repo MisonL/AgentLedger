@@ -36,6 +36,7 @@
     "test:coverage": "bash ./scripts/test-coverage.sh",
     "test:callback-chain-targeted": "bash ./scripts/test-callback-chain-targeted.sh",
     "test:e2e-governance-callback-chain": "bash ./scripts/e2e-governance-callback-chain.sh",
+    "test:e2e-rulehub-approvals-db": "bash ./scripts/e2e-rulehub-approvals-db.sh",
     "check:coverage": "bash ./scripts/check-coverage-threshold.sh",
     "proto:lint": "bash ./scripts/proto-lint.sh",
     "proto:gen": "bash ./scripts/proto-gen.sh",

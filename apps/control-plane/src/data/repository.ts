@@ -11911,7 +11911,7 @@ class ControlPlaneRepository {
                    decision,
                    reason,
                    created_at,
-                   (xmax = 0) AS inserted`,
+                   (id = $1) AS inserted`,
         [
           approval.id,
           approval.tenantId,
@@ -21252,11 +21252,11 @@ class ControlPlaneRepository {
            WHERE constraints.conrelid = 'public.integration_alert_callbacks'::regclass
              AND constraints.contype IN ('p', 'u')
              AND ARRAY(
-               SELECT attrs.attname
-               FROM unnest(constraints.conkey) WITH ORDINALITY AS keys(attnum, ord)
-               JOIN pg_attribute AS attrs
-                 ON attrs.attrelid = constraints.conrelid
-                AND attrs.attnum = keys.attnum
+	               SELECT attrs.attname::text
+	               FROM unnest(constraints.conkey) WITH ORDINALITY AS keys(attnum, ord)
+	               JOIN pg_attribute AS attrs
+	                 ON attrs.attrelid = constraints.conrelid
+	                AND attrs.attnum = keys.attnum
                ORDER BY keys.ord
              ) = ARRAY['callback_id']
          LOOP
