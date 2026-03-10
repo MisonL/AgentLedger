@@ -485,6 +485,90 @@ public final class AgentLedgerClient {
         return try await self.request(method: "POST", pathTemplate: "/api/v2/replay/datasets/{id}/materialize", request: normalizedRequest)
     }
 
+    // promote_replay_dataset_version_v2 | POST /api/v2/replay/datasets/{id}/promote
+    public func promoteReplayDatasetVersionV2(request: OperationRequest = OperationRequest()) async throws -> Any {
+        let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "promote_replay_dataset_version_v2", request: request)
+        return try await self.request(method: "POST", pathTemplate: "/api/v2/replay/datasets/{id}/promote", request: normalizedRequest)
+    }
+
+    // list_replay_dataset_versions_v2 | GET /api/v2/replay/datasets/{id}/versions
+    public func listReplayDatasetVersionsV2(request: OperationRequest = OperationRequest()) async throws -> Any {
+        let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "list_replay_dataset_versions_v2", request: request)
+        return try await self.request(method: "GET", pathTemplate: "/api/v2/replay/datasets/{id}/versions", request: normalizedRequest)
+    }
+
+    // create_replay_dataset_version_v2 | POST /api/v2/replay/datasets/{id}/versions
+    public func createReplayDatasetVersionV2(request: OperationRequest = OperationRequest()) async throws -> Any {
+        let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "create_replay_dataset_version_v2", request: request)
+        return try await self.request(method: "POST", pathTemplate: "/api/v2/replay/datasets/{id}/versions", request: normalizedRequest)
+    }
+
+    // list_replay_dataset_version_cases_v2 | GET /api/v2/replay/datasets/{id}/versions/{versionId}/cases
+    public func listReplayDatasetVersionCasesV2(request: OperationRequest = OperationRequest()) async throws -> Any {
+        let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "list_replay_dataset_version_cases_v2", request: request)
+        return try await self.request(method: "GET", pathTemplate: "/api/v2/replay/datasets/{id}/versions/{versionId}/cases", request: normalizedRequest)
+    }
+
+    // list_replay_experiments_v2 | GET /api/v2/replay/experiments
+    public func listReplayExperimentsV2(request: OperationRequest = OperationRequest()) async throws -> Any {
+        let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "list_replay_experiments_v2", request: request)
+        return try await self.request(method: "GET", pathTemplate: "/api/v2/replay/experiments", request: normalizedRequest)
+    }
+
+    // create_replay_experiment_v2 | POST /api/v2/replay/experiments
+    public func createReplayExperimentV2(request: OperationRequest = OperationRequest()) async throws -> Any {
+        let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "create_replay_experiment_v2", request: request)
+        return try await self.request(method: "POST", pathTemplate: "/api/v2/replay/experiments", request: normalizedRequest)
+    }
+
+    // get_replay_experiment_v2 | GET /api/v2/replay/experiments/{id}
+    public func getReplayExperimentV2(request: OperationRequest = OperationRequest()) async throws -> Any {
+        let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "get_replay_experiment_v2", request: request)
+        return try await self.request(method: "GET", pathTemplate: "/api/v2/replay/experiments/{id}", request: normalizedRequest)
+    }
+
+    // get_replay_experiment_artifacts_v2 | GET /api/v2/replay/experiments/{id}/artifacts
+    public func getReplayExperimentArtifactsV2(request: OperationRequest = OperationRequest()) async throws -> Any {
+        let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "get_replay_experiment_artifacts_v2", request: request)
+        return try await self.request(method: "GET", pathTemplate: "/api/v2/replay/experiments/{id}/artifacts", request: normalizedRequest)
+    }
+
+    // cancel_replay_experiment_v2 | POST /api/v2/replay/experiments/{id}/cancel
+    public func cancelReplayExperimentV2(request: OperationRequest = OperationRequest()) async throws -> Any {
+        let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "cancel_replay_experiment_v2", request: request)
+        return try await self.request(method: "POST", pathTemplate: "/api/v2/replay/experiments/{id}/cancel", request: normalizedRequest)
+    }
+
+    // get_replay_experiment_compare_v2 | GET /api/v2/replay/experiments/{id}/compare
+    public func getReplayExperimentCompareV2(request: OperationRequest = OperationRequest()) async throws -> Any {
+        let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "get_replay_experiment_compare_v2", request: request)
+        return try await self.request(method: "GET", pathTemplate: "/api/v2/replay/experiments/{id}/compare", request: normalizedRequest)
+    }
+
+    // get_replay_experiment_results_v2 | GET /api/v2/replay/experiments/{id}/results
+    public func getReplayExperimentResultsV2(request: OperationRequest = OperationRequest()) async throws -> Any {
+        let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "get_replay_experiment_results_v2", request: request)
+        return try await self.request(method: "GET", pathTemplate: "/api/v2/replay/experiments/{id}/results", request: normalizedRequest)
+    }
+
+    // run_replay_experiment_v2 | POST /api/v2/replay/experiments/{id}/run
+    public func runReplayExperimentV2(request: OperationRequest = OperationRequest()) async throws -> Any {
+        let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "run_replay_experiment_v2", request: request)
+        return try await self.request(method: "POST", pathTemplate: "/api/v2/replay/experiments/{id}/run", request: normalizedRequest)
+    }
+
+    // get_replay_experiment_workflow_v2 | GET /api/v2/replay/experiments/{id}/workflow
+    public func getReplayExperimentWorkflowV2(request: OperationRequest = OperationRequest()) async throws -> Any {
+        let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "get_replay_experiment_workflow_v2", request: request)
+        return try await self.request(method: "GET", pathTemplate: "/api/v2/replay/experiments/{id}/workflow", request: normalizedRequest)
+    }
+
+    // compare_replay_experiments_v2 | GET /api/v2/replay/experiments/compare
+    public func compareReplayExperimentsV2(request: OperationRequest = OperationRequest()) async throws -> Any {
+        let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "compare_replay_experiments_v2", request: request)
+        return try await self.request(method: "GET", pathTemplate: "/api/v2/replay/experiments/compare", request: normalizedRequest)
+    }
+
     // list_replay_runs_v2 | GET /api/v2/replay/runs
     public func listReplayRunsV2(request: OperationRequest = OperationRequest()) async throws -> Any {
         let normalizedRequest = self.normalizeCompatibilityRequest(operationId: "list_replay_runs_v2", request: request)

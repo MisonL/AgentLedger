@@ -433,6 +433,76 @@ export class AgentLedgerClient {
     return this.request("POST", "/api/v2/replay/datasets/{id}/materialize", this.normalizeCompatibilityRequest("materialize_replay_dataset_cases_v2", request));
   }
 
+  /** promote_replay_dataset_version_v2 | POST /api/v2/replay/datasets/{id}/promote */
+  async promoteReplayDatasetVersionV2(request: OperationRequest = {}): Promise<unknown> {
+    return this.request("POST", "/api/v2/replay/datasets/{id}/promote", this.normalizeCompatibilityRequest("promote_replay_dataset_version_v2", request));
+  }
+
+  /** list_replay_dataset_versions_v2 | GET /api/v2/replay/datasets/{id}/versions */
+  async listReplayDatasetVersionsV2(request: OperationRequest = {}): Promise<unknown> {
+    return this.request("GET", "/api/v2/replay/datasets/{id}/versions", this.normalizeCompatibilityRequest("list_replay_dataset_versions_v2", request));
+  }
+
+  /** create_replay_dataset_version_v2 | POST /api/v2/replay/datasets/{id}/versions */
+  async createReplayDatasetVersionV2(request: OperationRequest = {}): Promise<unknown> {
+    return this.request("POST", "/api/v2/replay/datasets/{id}/versions", this.normalizeCompatibilityRequest("create_replay_dataset_version_v2", request));
+  }
+
+  /** list_replay_dataset_version_cases_v2 | GET /api/v2/replay/datasets/{id}/versions/{versionId}/cases */
+  async listReplayDatasetVersionCasesV2(request: OperationRequest = {}): Promise<unknown> {
+    return this.request("GET", "/api/v2/replay/datasets/{id}/versions/{versionId}/cases", this.normalizeCompatibilityRequest("list_replay_dataset_version_cases_v2", request));
+  }
+
+  /** list_replay_experiments_v2 | GET /api/v2/replay/experiments */
+  async listReplayExperimentsV2(request: OperationRequest = {}): Promise<unknown> {
+    return this.request("GET", "/api/v2/replay/experiments", this.normalizeCompatibilityRequest("list_replay_experiments_v2", request));
+  }
+
+  /** create_replay_experiment_v2 | POST /api/v2/replay/experiments */
+  async createReplayExperimentV2(request: OperationRequest = {}): Promise<unknown> {
+    return this.request("POST", "/api/v2/replay/experiments", this.normalizeCompatibilityRequest("create_replay_experiment_v2", request));
+  }
+
+  /** get_replay_experiment_v2 | GET /api/v2/replay/experiments/{id} */
+  async getReplayExperimentV2(request: OperationRequest = {}): Promise<unknown> {
+    return this.request("GET", "/api/v2/replay/experiments/{id}", this.normalizeCompatibilityRequest("get_replay_experiment_v2", request));
+  }
+
+  /** get_replay_experiment_artifacts_v2 | GET /api/v2/replay/experiments/{id}/artifacts */
+  async getReplayExperimentArtifactsV2(request: OperationRequest = {}): Promise<unknown> {
+    return this.request("GET", "/api/v2/replay/experiments/{id}/artifacts", this.normalizeCompatibilityRequest("get_replay_experiment_artifacts_v2", request));
+  }
+
+  /** cancel_replay_experiment_v2 | POST /api/v2/replay/experiments/{id}/cancel */
+  async cancelReplayExperimentV2(request: OperationRequest = {}): Promise<unknown> {
+    return this.request("POST", "/api/v2/replay/experiments/{id}/cancel", this.normalizeCompatibilityRequest("cancel_replay_experiment_v2", request));
+  }
+
+  /** get_replay_experiment_compare_v2 | GET /api/v2/replay/experiments/{id}/compare */
+  async getReplayExperimentCompareV2(request: OperationRequest = {}): Promise<unknown> {
+    return this.request("GET", "/api/v2/replay/experiments/{id}/compare", this.normalizeCompatibilityRequest("get_replay_experiment_compare_v2", request));
+  }
+
+  /** get_replay_experiment_results_v2 | GET /api/v2/replay/experiments/{id}/results */
+  async getReplayExperimentResultsV2(request: OperationRequest = {}): Promise<unknown> {
+    return this.request("GET", "/api/v2/replay/experiments/{id}/results", this.normalizeCompatibilityRequest("get_replay_experiment_results_v2", request));
+  }
+
+  /** run_replay_experiment_v2 | POST /api/v2/replay/experiments/{id}/run */
+  async runReplayExperimentV2(request: OperationRequest = {}): Promise<unknown> {
+    return this.request("POST", "/api/v2/replay/experiments/{id}/run", this.normalizeCompatibilityRequest("run_replay_experiment_v2", request));
+  }
+
+  /** get_replay_experiment_workflow_v2 | GET /api/v2/replay/experiments/{id}/workflow */
+  async getReplayExperimentWorkflowV2(request: OperationRequest = {}): Promise<unknown> {
+    return this.request("GET", "/api/v2/replay/experiments/{id}/workflow", this.normalizeCompatibilityRequest("get_replay_experiment_workflow_v2", request));
+  }
+
+  /** compare_replay_experiments_v2 | GET /api/v2/replay/experiments/compare */
+  async compareReplayExperimentsV2(request: OperationRequest = {}): Promise<unknown> {
+    return this.request("GET", "/api/v2/replay/experiments/compare", this.normalizeCompatibilityRequest("compare_replay_experiments_v2", request));
+  }
+
   /** list_replay_runs_v2 | GET /api/v2/replay/runs */
   async listReplayRunsV2(request: OperationRequest = {}): Promise<unknown> {
     return this.request("GET", "/api/v2/replay/runs", this.normalizeCompatibilityRequest("list_replay_runs_v2", request));

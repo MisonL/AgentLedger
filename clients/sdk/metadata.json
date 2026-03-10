@@ -6,7 +6,7 @@
     "title": "AgentLedger Control Plane API",
     "version": "1.2.0",
     "specVersion": "3.0.3",
-    "digest": "de8d8da4c92c012317f485438578d84c02dc733c63a9b5e2f5d1310ec0a9f178"
+    "digest": "fcfc683106d12835d9a35482758fdcc77be00477f175fd2dd7c75c8a630f72da"
   },
   "operations": [
     {
@@ -559,6 +559,241 @@
       }
     },
     {
+      "id": "promote_replay_dataset_version_v2",
+      "operationId": "promoteReplayDatasetVersionV2",
+      "method": "POST",
+      "path": "/api/v2/replay/datasets/{id}/promote",
+      "methodNameCamel": "promoteReplayDatasetVersionV2",
+      "methodNameSnake": "promote_replay_dataset_version_v2",
+      "methodNamePascal": "PromoteReplayDatasetVersionV2",
+      "hasRequestBody": true,
+      "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": []
+    },
+    {
+      "id": "list_replay_dataset_versions_v2",
+      "operationId": "listReplayDatasetVersionsV2",
+      "method": "GET",
+      "path": "/api/v2/replay/datasets/{id}/versions",
+      "methodNameCamel": "listReplayDatasetVersionsV2",
+      "methodNameSnake": "list_replay_dataset_versions_v2",
+      "methodNamePascal": "ListReplayDatasetVersionsV2",
+      "hasRequestBody": false,
+      "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": []
+    },
+    {
+      "id": "create_replay_dataset_version_v2",
+      "operationId": "createReplayDatasetVersionV2",
+      "method": "POST",
+      "path": "/api/v2/replay/datasets/{id}/versions",
+      "methodNameCamel": "createReplayDatasetVersionV2",
+      "methodNameSnake": "create_replay_dataset_version_v2",
+      "methodNamePascal": "CreateReplayDatasetVersionV2",
+      "hasRequestBody": true,
+      "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": []
+    },
+    {
+      "id": "list_replay_dataset_version_cases_v2",
+      "operationId": "listReplayDatasetVersionCasesV2",
+      "method": "GET",
+      "path": "/api/v2/replay/datasets/{id}/versions/{versionId}/cases",
+      "methodNameCamel": "listReplayDatasetVersionCasesV2",
+      "methodNameSnake": "list_replay_dataset_version_cases_v2",
+      "methodNamePascal": "ListReplayDatasetVersionCasesV2",
+      "hasRequestBody": false,
+      "pathParams": [
+        "id",
+        "versionId"
+      ],
+      "wirePathParams": [
+        "id",
+        "versionId"
+      ],
+      "queryParams": [
+        "limit"
+      ]
+    },
+    {
+      "id": "list_replay_experiments_v2",
+      "operationId": "listReplayExperimentsV2",
+      "method": "GET",
+      "path": "/api/v2/replay/experiments",
+      "methodNameCamel": "listReplayExperimentsV2",
+      "methodNameSnake": "list_replay_experiments_v2",
+      "methodNamePascal": "ListReplayExperimentsV2",
+      "hasRequestBody": false,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": [
+        "datasetId"
+      ]
+    },
+    {
+      "id": "create_replay_experiment_v2",
+      "operationId": "createReplayExperimentV2",
+      "method": "POST",
+      "path": "/api/v2/replay/experiments",
+      "methodNameCamel": "createReplayExperimentV2",
+      "methodNameSnake": "create_replay_experiment_v2",
+      "methodNamePascal": "CreateReplayExperimentV2",
+      "hasRequestBody": true,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": []
+    },
+    {
+      "id": "get_replay_experiment_v2",
+      "operationId": "getReplayExperimentV2",
+      "method": "GET",
+      "path": "/api/v2/replay/experiments/{id}",
+      "methodNameCamel": "getReplayExperimentV2",
+      "methodNameSnake": "get_replay_experiment_v2",
+      "methodNamePascal": "GetReplayExperimentV2",
+      "hasRequestBody": false,
+      "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": []
+    },
+    {
+      "id": "get_replay_experiment_artifacts_v2",
+      "operationId": "getReplayExperimentArtifactsV2",
+      "method": "GET",
+      "path": "/api/v2/replay/experiments/{id}/artifacts",
+      "methodNameCamel": "getReplayExperimentArtifactsV2",
+      "methodNameSnake": "get_replay_experiment_artifacts_v2",
+      "methodNamePascal": "GetReplayExperimentArtifactsV2",
+      "hasRequestBody": false,
+      "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": []
+    },
+    {
+      "id": "cancel_replay_experiment_v2",
+      "operationId": "cancelReplayExperimentV2",
+      "method": "POST",
+      "path": "/api/v2/replay/experiments/{id}/cancel",
+      "methodNameCamel": "cancelReplayExperimentV2",
+      "methodNameSnake": "cancel_replay_experiment_v2",
+      "methodNamePascal": "CancelReplayExperimentV2",
+      "hasRequestBody": false,
+      "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": []
+    },
+    {
+      "id": "get_replay_experiment_compare_v2",
+      "operationId": "getReplayExperimentCompareV2",
+      "method": "GET",
+      "path": "/api/v2/replay/experiments/{id}/compare",
+      "methodNameCamel": "getReplayExperimentCompareV2",
+      "methodNameSnake": "get_replay_experiment_compare_v2",
+      "methodNamePascal": "GetReplayExperimentCompareV2",
+      "hasRequestBody": false,
+      "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": []
+    },
+    {
+      "id": "get_replay_experiment_results_v2",
+      "operationId": "getReplayExperimentResultsV2",
+      "method": "GET",
+      "path": "/api/v2/replay/experiments/{id}/results",
+      "methodNameCamel": "getReplayExperimentResultsV2",
+      "methodNameSnake": "get_replay_experiment_results_v2",
+      "methodNamePascal": "GetReplayExperimentResultsV2",
+      "hasRequestBody": false,
+      "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": []
+    },
+    {
+      "id": "run_replay_experiment_v2",
+      "operationId": "runReplayExperimentV2",
+      "method": "POST",
+      "path": "/api/v2/replay/experiments/{id}/run",
+      "methodNameCamel": "runReplayExperimentV2",
+      "methodNameSnake": "run_replay_experiment_v2",
+      "methodNamePascal": "RunReplayExperimentV2",
+      "hasRequestBody": false,
+      "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": []
+    },
+    {
+      "id": "get_replay_experiment_workflow_v2",
+      "operationId": "getReplayExperimentWorkflowV2",
+      "method": "GET",
+      "path": "/api/v2/replay/experiments/{id}/workflow",
+      "methodNameCamel": "getReplayExperimentWorkflowV2",
+      "methodNameSnake": "get_replay_experiment_workflow_v2",
+      "methodNamePascal": "GetReplayExperimentWorkflowV2",
+      "hasRequestBody": false,
+      "pathParams": [
+        "id"
+      ],
+      "wirePathParams": [
+        "id"
+      ],
+      "queryParams": []
+    },
+    {
+      "id": "compare_replay_experiments_v2",
+      "operationId": "compareReplayExperimentsV2",
+      "method": "GET",
+      "path": "/api/v2/replay/experiments/compare",
+      "methodNameCamel": "compareReplayExperimentsV2",
+      "methodNameSnake": "compare_replay_experiments_v2",
+      "methodNamePascal": "CompareReplayExperimentsV2",
+      "hasRequestBody": false,
+      "pathParams": [],
+      "wirePathParams": [],
+      "queryParams": [
+        "experimentIds",
+        "datasetId"
+      ]
+    },
+    {
       "id": "list_replay_runs_v2",
       "operationId": "listReplayRunsV2",
       "method": "GET",
@@ -846,7 +1081,7 @@
       "id": "typescript",
       "name": "TypeScript",
       "directory": "typescript",
-      "operationCount": 45,
+      "operationCount": 59,
       "generatedFiles": [
         "operations.json",
         "package.json",
@@ -859,7 +1094,7 @@
       "id": "python",
       "name": "Python",
       "directory": "python",
-      "operationCount": 45,
+      "operationCount": 59,
       "generatedFiles": [
         "agentledger_sdk/__init__.py",
         "agentledger_sdk/client.py",
@@ -872,7 +1107,7 @@
       "id": "go",
       "name": "Go",
       "directory": "go",
-      "operationCount": 45,
+      "operationCount": 59,
       "generatedFiles": [
         "client.go",
         "go.mod",
@@ -884,7 +1119,7 @@
       "id": "java",
       "name": "Java",
       "directory": "java",
-      "operationCount": 45,
+      "operationCount": 59,
       "generatedFiles": [
         "operations.json",
         "pom.xml",
@@ -896,7 +1131,7 @@
       "id": "csharp",
       "name": "C#",
       "directory": "csharp",
-      "operationCount": 45,
+      "operationCount": 59,
       "generatedFiles": [
         "AgentLedger.Sdk.csproj",
         "AgentLedgerClient.cs",
@@ -908,7 +1143,7 @@
       "id": "php",
       "name": "PHP",
       "directory": "php",
-      "operationCount": 45,
+      "operationCount": 59,
       "generatedFiles": [
         "composer.json",
         "operations.json",
@@ -920,7 +1155,7 @@
       "id": "ruby",
       "name": "Ruby",
       "directory": "ruby",
-      "operationCount": 45,
+      "operationCount": 59,
       "generatedFiles": [
         "agentledger-sdk.gemspec",
         "lib/agentledger_sdk.rb",
@@ -933,7 +1168,7 @@
       "id": "swift",
       "name": "Swift",
       "directory": "swift",
-      "operationCount": 45,
+      "operationCount": 59,
       "generatedFiles": [
         "operations.json",
         "Package.swift",

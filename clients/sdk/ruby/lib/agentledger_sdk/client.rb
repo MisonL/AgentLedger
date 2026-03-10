@@ -445,6 +445,90 @@ JSON
       request_api("POST", "/api/v2/replay/datasets/{id}/materialize", normalized_request)
     end
 
+    # promote_replay_dataset_version_v2 | POST /api/v2/replay/datasets/{id}/promote
+    def promote_replay_dataset_version_v2(request = {})
+      normalized_request = normalize_compatibility_request("promote_replay_dataset_version_v2", request)
+      request_api("POST", "/api/v2/replay/datasets/{id}/promote", normalized_request)
+    end
+
+    # list_replay_dataset_versions_v2 | GET /api/v2/replay/datasets/{id}/versions
+    def list_replay_dataset_versions_v2(request = {})
+      normalized_request = normalize_compatibility_request("list_replay_dataset_versions_v2", request)
+      request_api("GET", "/api/v2/replay/datasets/{id}/versions", normalized_request)
+    end
+
+    # create_replay_dataset_version_v2 | POST /api/v2/replay/datasets/{id}/versions
+    def create_replay_dataset_version_v2(request = {})
+      normalized_request = normalize_compatibility_request("create_replay_dataset_version_v2", request)
+      request_api("POST", "/api/v2/replay/datasets/{id}/versions", normalized_request)
+    end
+
+    # list_replay_dataset_version_cases_v2 | GET /api/v2/replay/datasets/{id}/versions/{versionId}/cases
+    def list_replay_dataset_version_cases_v2(request = {})
+      normalized_request = normalize_compatibility_request("list_replay_dataset_version_cases_v2", request)
+      request_api("GET", "/api/v2/replay/datasets/{id}/versions/{versionId}/cases", normalized_request)
+    end
+
+    # list_replay_experiments_v2 | GET /api/v2/replay/experiments
+    def list_replay_experiments_v2(request = {})
+      normalized_request = normalize_compatibility_request("list_replay_experiments_v2", request)
+      request_api("GET", "/api/v2/replay/experiments", normalized_request)
+    end
+
+    # create_replay_experiment_v2 | POST /api/v2/replay/experiments
+    def create_replay_experiment_v2(request = {})
+      normalized_request = normalize_compatibility_request("create_replay_experiment_v2", request)
+      request_api("POST", "/api/v2/replay/experiments", normalized_request)
+    end
+
+    # get_replay_experiment_v2 | GET /api/v2/replay/experiments/{id}
+    def get_replay_experiment_v2(request = {})
+      normalized_request = normalize_compatibility_request("get_replay_experiment_v2", request)
+      request_api("GET", "/api/v2/replay/experiments/{id}", normalized_request)
+    end
+
+    # get_replay_experiment_artifacts_v2 | GET /api/v2/replay/experiments/{id}/artifacts
+    def get_replay_experiment_artifacts_v2(request = {})
+      normalized_request = normalize_compatibility_request("get_replay_experiment_artifacts_v2", request)
+      request_api("GET", "/api/v2/replay/experiments/{id}/artifacts", normalized_request)
+    end
+
+    # cancel_replay_experiment_v2 | POST /api/v2/replay/experiments/{id}/cancel
+    def cancel_replay_experiment_v2(request = {})
+      normalized_request = normalize_compatibility_request("cancel_replay_experiment_v2", request)
+      request_api("POST", "/api/v2/replay/experiments/{id}/cancel", normalized_request)
+    end
+
+    # get_replay_experiment_compare_v2 | GET /api/v2/replay/experiments/{id}/compare
+    def get_replay_experiment_compare_v2(request = {})
+      normalized_request = normalize_compatibility_request("get_replay_experiment_compare_v2", request)
+      request_api("GET", "/api/v2/replay/experiments/{id}/compare", normalized_request)
+    end
+
+    # get_replay_experiment_results_v2 | GET /api/v2/replay/experiments/{id}/results
+    def get_replay_experiment_results_v2(request = {})
+      normalized_request = normalize_compatibility_request("get_replay_experiment_results_v2", request)
+      request_api("GET", "/api/v2/replay/experiments/{id}/results", normalized_request)
+    end
+
+    # run_replay_experiment_v2 | POST /api/v2/replay/experiments/{id}/run
+    def run_replay_experiment_v2(request = {})
+      normalized_request = normalize_compatibility_request("run_replay_experiment_v2", request)
+      request_api("POST", "/api/v2/replay/experiments/{id}/run", normalized_request)
+    end
+
+    # get_replay_experiment_workflow_v2 | GET /api/v2/replay/experiments/{id}/workflow
+    def get_replay_experiment_workflow_v2(request = {})
+      normalized_request = normalize_compatibility_request("get_replay_experiment_workflow_v2", request)
+      request_api("GET", "/api/v2/replay/experiments/{id}/workflow", normalized_request)
+    end
+
+    # compare_replay_experiments_v2 | GET /api/v2/replay/experiments/compare
+    def compare_replay_experiments_v2(request = {})
+      normalized_request = normalize_compatibility_request("compare_replay_experiments_v2", request)
+      request_api("GET", "/api/v2/replay/experiments/compare", normalized_request)
+    end
+
     # list_replay_runs_v2 | GET /api/v2/replay/runs
     def list_replay_runs_v2(request = {})
       normalized_request = normalize_compatibility_request("list_replay_runs_v2", request)

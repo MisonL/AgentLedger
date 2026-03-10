@@ -439,6 +439,90 @@ public class AgentLedgerClient {
     return this.request("POST", "/api/v2/replay/datasets/{id}/materialize", resolved);
   }
 
+  // promote_replay_dataset_version_v2 | POST /api/v2/replay/datasets/{id}/promote
+  public String promoteReplayDatasetVersionV2(OperationRequest request) throws IOException, InterruptedException {
+    OperationRequest resolved = normalizeCompatibilityRequest("promote_replay_dataset_version_v2", request == null ? new OperationRequest() : request);
+    return this.request("POST", "/api/v2/replay/datasets/{id}/promote", resolved);
+  }
+
+  // list_replay_dataset_versions_v2 | GET /api/v2/replay/datasets/{id}/versions
+  public String listReplayDatasetVersionsV2(OperationRequest request) throws IOException, InterruptedException {
+    OperationRequest resolved = normalizeCompatibilityRequest("list_replay_dataset_versions_v2", request == null ? new OperationRequest() : request);
+    return this.request("GET", "/api/v2/replay/datasets/{id}/versions", resolved);
+  }
+
+  // create_replay_dataset_version_v2 | POST /api/v2/replay/datasets/{id}/versions
+  public String createReplayDatasetVersionV2(OperationRequest request) throws IOException, InterruptedException {
+    OperationRequest resolved = normalizeCompatibilityRequest("create_replay_dataset_version_v2", request == null ? new OperationRequest() : request);
+    return this.request("POST", "/api/v2/replay/datasets/{id}/versions", resolved);
+  }
+
+  // list_replay_dataset_version_cases_v2 | GET /api/v2/replay/datasets/{id}/versions/{versionId}/cases
+  public String listReplayDatasetVersionCasesV2(OperationRequest request) throws IOException, InterruptedException {
+    OperationRequest resolved = normalizeCompatibilityRequest("list_replay_dataset_version_cases_v2", request == null ? new OperationRequest() : request);
+    return this.request("GET", "/api/v2/replay/datasets/{id}/versions/{versionId}/cases", resolved);
+  }
+
+  // list_replay_experiments_v2 | GET /api/v2/replay/experiments
+  public String listReplayExperimentsV2(OperationRequest request) throws IOException, InterruptedException {
+    OperationRequest resolved = normalizeCompatibilityRequest("list_replay_experiments_v2", request == null ? new OperationRequest() : request);
+    return this.request("GET", "/api/v2/replay/experiments", resolved);
+  }
+
+  // create_replay_experiment_v2 | POST /api/v2/replay/experiments
+  public String createReplayExperimentV2(OperationRequest request) throws IOException, InterruptedException {
+    OperationRequest resolved = normalizeCompatibilityRequest("create_replay_experiment_v2", request == null ? new OperationRequest() : request);
+    return this.request("POST", "/api/v2/replay/experiments", resolved);
+  }
+
+  // get_replay_experiment_v2 | GET /api/v2/replay/experiments/{id}
+  public String getReplayExperimentV2(OperationRequest request) throws IOException, InterruptedException {
+    OperationRequest resolved = normalizeCompatibilityRequest("get_replay_experiment_v2", request == null ? new OperationRequest() : request);
+    return this.request("GET", "/api/v2/replay/experiments/{id}", resolved);
+  }
+
+  // get_replay_experiment_artifacts_v2 | GET /api/v2/replay/experiments/{id}/artifacts
+  public String getReplayExperimentArtifactsV2(OperationRequest request) throws IOException, InterruptedException {
+    OperationRequest resolved = normalizeCompatibilityRequest("get_replay_experiment_artifacts_v2", request == null ? new OperationRequest() : request);
+    return this.request("GET", "/api/v2/replay/experiments/{id}/artifacts", resolved);
+  }
+
+  // cancel_replay_experiment_v2 | POST /api/v2/replay/experiments/{id}/cancel
+  public String cancelReplayExperimentV2(OperationRequest request) throws IOException, InterruptedException {
+    OperationRequest resolved = normalizeCompatibilityRequest("cancel_replay_experiment_v2", request == null ? new OperationRequest() : request);
+    return this.request("POST", "/api/v2/replay/experiments/{id}/cancel", resolved);
+  }
+
+  // get_replay_experiment_compare_v2 | GET /api/v2/replay/experiments/{id}/compare
+  public String getReplayExperimentCompareV2(OperationRequest request) throws IOException, InterruptedException {
+    OperationRequest resolved = normalizeCompatibilityRequest("get_replay_experiment_compare_v2", request == null ? new OperationRequest() : request);
+    return this.request("GET", "/api/v2/replay/experiments/{id}/compare", resolved);
+  }
+
+  // get_replay_experiment_results_v2 | GET /api/v2/replay/experiments/{id}/results
+  public String getReplayExperimentResultsV2(OperationRequest request) throws IOException, InterruptedException {
+    OperationRequest resolved = normalizeCompatibilityRequest("get_replay_experiment_results_v2", request == null ? new OperationRequest() : request);
+    return this.request("GET", "/api/v2/replay/experiments/{id}/results", resolved);
+  }
+
+  // run_replay_experiment_v2 | POST /api/v2/replay/experiments/{id}/run
+  public String runReplayExperimentV2(OperationRequest request) throws IOException, InterruptedException {
+    OperationRequest resolved = normalizeCompatibilityRequest("run_replay_experiment_v2", request == null ? new OperationRequest() : request);
+    return this.request("POST", "/api/v2/replay/experiments/{id}/run", resolved);
+  }
+
+  // get_replay_experiment_workflow_v2 | GET /api/v2/replay/experiments/{id}/workflow
+  public String getReplayExperimentWorkflowV2(OperationRequest request) throws IOException, InterruptedException {
+    OperationRequest resolved = normalizeCompatibilityRequest("get_replay_experiment_workflow_v2", request == null ? new OperationRequest() : request);
+    return this.request("GET", "/api/v2/replay/experiments/{id}/workflow", resolved);
+  }
+
+  // compare_replay_experiments_v2 | GET /api/v2/replay/experiments/compare
+  public String compareReplayExperimentsV2(OperationRequest request) throws IOException, InterruptedException {
+    OperationRequest resolved = normalizeCompatibilityRequest("compare_replay_experiments_v2", request == null ? new OperationRequest() : request);
+    return this.request("GET", "/api/v2/replay/experiments/compare", resolved);
+  }
+
   // list_replay_runs_v2 | GET /api/v2/replay/runs
   public String listReplayRunsV2(OperationRequest request) throws IOException, InterruptedException {
     OperationRequest resolved = normalizeCompatibilityRequest("list_replay_runs_v2", request == null ? new OperationRequest() : request);

@@ -381,6 +381,76 @@ class AgentLedgerClient:
         req = self._normalize_compatibility_request("materialize_replay_dataset_cases_v2", request or OperationRequest())
         return self._request("POST", "/api/v2/replay/datasets/{id}/materialize", req)
 
+    # promote_replay_dataset_version_v2 | POST /api/v2/replay/datasets/{id}/promote
+    def promote_replay_dataset_version_v2(self, request: Optional[OperationRequest] = None) -> Any:
+        req = self._normalize_compatibility_request("promote_replay_dataset_version_v2", request or OperationRequest())
+        return self._request("POST", "/api/v2/replay/datasets/{id}/promote", req)
+
+    # list_replay_dataset_versions_v2 | GET /api/v2/replay/datasets/{id}/versions
+    def list_replay_dataset_versions_v2(self, request: Optional[OperationRequest] = None) -> Any:
+        req = self._normalize_compatibility_request("list_replay_dataset_versions_v2", request or OperationRequest())
+        return self._request("GET", "/api/v2/replay/datasets/{id}/versions", req)
+
+    # create_replay_dataset_version_v2 | POST /api/v2/replay/datasets/{id}/versions
+    def create_replay_dataset_version_v2(self, request: Optional[OperationRequest] = None) -> Any:
+        req = self._normalize_compatibility_request("create_replay_dataset_version_v2", request or OperationRequest())
+        return self._request("POST", "/api/v2/replay/datasets/{id}/versions", req)
+
+    # list_replay_dataset_version_cases_v2 | GET /api/v2/replay/datasets/{id}/versions/{versionId}/cases
+    def list_replay_dataset_version_cases_v2(self, request: Optional[OperationRequest] = None) -> Any:
+        req = self._normalize_compatibility_request("list_replay_dataset_version_cases_v2", request or OperationRequest())
+        return self._request("GET", "/api/v2/replay/datasets/{id}/versions/{versionId}/cases", req)
+
+    # list_replay_experiments_v2 | GET /api/v2/replay/experiments
+    def list_replay_experiments_v2(self, request: Optional[OperationRequest] = None) -> Any:
+        req = self._normalize_compatibility_request("list_replay_experiments_v2", request or OperationRequest())
+        return self._request("GET", "/api/v2/replay/experiments", req)
+
+    # create_replay_experiment_v2 | POST /api/v2/replay/experiments
+    def create_replay_experiment_v2(self, request: Optional[OperationRequest] = None) -> Any:
+        req = self._normalize_compatibility_request("create_replay_experiment_v2", request or OperationRequest())
+        return self._request("POST", "/api/v2/replay/experiments", req)
+
+    # get_replay_experiment_v2 | GET /api/v2/replay/experiments/{id}
+    def get_replay_experiment_v2(self, request: Optional[OperationRequest] = None) -> Any:
+        req = self._normalize_compatibility_request("get_replay_experiment_v2", request or OperationRequest())
+        return self._request("GET", "/api/v2/replay/experiments/{id}", req)
+
+    # get_replay_experiment_artifacts_v2 | GET /api/v2/replay/experiments/{id}/artifacts
+    def get_replay_experiment_artifacts_v2(self, request: Optional[OperationRequest] = None) -> Any:
+        req = self._normalize_compatibility_request("get_replay_experiment_artifacts_v2", request or OperationRequest())
+        return self._request("GET", "/api/v2/replay/experiments/{id}/artifacts", req)
+
+    # cancel_replay_experiment_v2 | POST /api/v2/replay/experiments/{id}/cancel
+    def cancel_replay_experiment_v2(self, request: Optional[OperationRequest] = None) -> Any:
+        req = self._normalize_compatibility_request("cancel_replay_experiment_v2", request or OperationRequest())
+        return self._request("POST", "/api/v2/replay/experiments/{id}/cancel", req)
+
+    # get_replay_experiment_compare_v2 | GET /api/v2/replay/experiments/{id}/compare
+    def get_replay_experiment_compare_v2(self, request: Optional[OperationRequest] = None) -> Any:
+        req = self._normalize_compatibility_request("get_replay_experiment_compare_v2", request or OperationRequest())
+        return self._request("GET", "/api/v2/replay/experiments/{id}/compare", req)
+
+    # get_replay_experiment_results_v2 | GET /api/v2/replay/experiments/{id}/results
+    def get_replay_experiment_results_v2(self, request: Optional[OperationRequest] = None) -> Any:
+        req = self._normalize_compatibility_request("get_replay_experiment_results_v2", request or OperationRequest())
+        return self._request("GET", "/api/v2/replay/experiments/{id}/results", req)
+
+    # run_replay_experiment_v2 | POST /api/v2/replay/experiments/{id}/run
+    def run_replay_experiment_v2(self, request: Optional[OperationRequest] = None) -> Any:
+        req = self._normalize_compatibility_request("run_replay_experiment_v2", request or OperationRequest())
+        return self._request("POST", "/api/v2/replay/experiments/{id}/run", req)
+
+    # get_replay_experiment_workflow_v2 | GET /api/v2/replay/experiments/{id}/workflow
+    def get_replay_experiment_workflow_v2(self, request: Optional[OperationRequest] = None) -> Any:
+        req = self._normalize_compatibility_request("get_replay_experiment_workflow_v2", request or OperationRequest())
+        return self._request("GET", "/api/v2/replay/experiments/{id}/workflow", req)
+
+    # compare_replay_experiments_v2 | GET /api/v2/replay/experiments/compare
+    def compare_replay_experiments_v2(self, request: Optional[OperationRequest] = None) -> Any:
+        req = self._normalize_compatibility_request("compare_replay_experiments_v2", request or OperationRequest())
+        return self._request("GET", "/api/v2/replay/experiments/compare", req)
+
     # list_replay_runs_v2 | GET /api/v2/replay/runs
     def list_replay_runs_v2(self, request: Optional[OperationRequest] = None) -> Any:
         req = self._normalize_compatibility_request("list_replay_runs_v2", request or OperationRequest())

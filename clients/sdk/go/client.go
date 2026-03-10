@@ -683,6 +683,132 @@ func (c *Client) MaterializeReplayDatasetCasesV2(ctx context.Context, req *Opera
 	return c.request(ctx, "POST", "/api/v2/replay/datasets/{id}/materialize", resolved)
 }
 
+// promote_replay_dataset_version_v2 | POST /api/v2/replay/datasets/{id}/promote
+func (c *Client) PromoteReplayDatasetVersionV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
+	if req == nil {
+		req = &OperationRequest{}
+	}
+	resolved := c.normalizeCompatibilityRequest("promote_replay_dataset_version_v2", req)
+	return c.request(ctx, "POST", "/api/v2/replay/datasets/{id}/promote", resolved)
+}
+
+// list_replay_dataset_versions_v2 | GET /api/v2/replay/datasets/{id}/versions
+func (c *Client) ListReplayDatasetVersionsV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
+	if req == nil {
+		req = &OperationRequest{}
+	}
+	resolved := c.normalizeCompatibilityRequest("list_replay_dataset_versions_v2", req)
+	return c.request(ctx, "GET", "/api/v2/replay/datasets/{id}/versions", resolved)
+}
+
+// create_replay_dataset_version_v2 | POST /api/v2/replay/datasets/{id}/versions
+func (c *Client) CreateReplayDatasetVersionV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
+	if req == nil {
+		req = &OperationRequest{}
+	}
+	resolved := c.normalizeCompatibilityRequest("create_replay_dataset_version_v2", req)
+	return c.request(ctx, "POST", "/api/v2/replay/datasets/{id}/versions", resolved)
+}
+
+// list_replay_dataset_version_cases_v2 | GET /api/v2/replay/datasets/{id}/versions/{versionId}/cases
+func (c *Client) ListReplayDatasetVersionCasesV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
+	if req == nil {
+		req = &OperationRequest{}
+	}
+	resolved := c.normalizeCompatibilityRequest("list_replay_dataset_version_cases_v2", req)
+	return c.request(ctx, "GET", "/api/v2/replay/datasets/{id}/versions/{versionId}/cases", resolved)
+}
+
+// list_replay_experiments_v2 | GET /api/v2/replay/experiments
+func (c *Client) ListReplayExperimentsV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
+	if req == nil {
+		req = &OperationRequest{}
+	}
+	resolved := c.normalizeCompatibilityRequest("list_replay_experiments_v2", req)
+	return c.request(ctx, "GET", "/api/v2/replay/experiments", resolved)
+}
+
+// create_replay_experiment_v2 | POST /api/v2/replay/experiments
+func (c *Client) CreateReplayExperimentV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
+	if req == nil {
+		req = &OperationRequest{}
+	}
+	resolved := c.normalizeCompatibilityRequest("create_replay_experiment_v2", req)
+	return c.request(ctx, "POST", "/api/v2/replay/experiments", resolved)
+}
+
+// get_replay_experiment_v2 | GET /api/v2/replay/experiments/{id}
+func (c *Client) GetReplayExperimentV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
+	if req == nil {
+		req = &OperationRequest{}
+	}
+	resolved := c.normalizeCompatibilityRequest("get_replay_experiment_v2", req)
+	return c.request(ctx, "GET", "/api/v2/replay/experiments/{id}", resolved)
+}
+
+// get_replay_experiment_artifacts_v2 | GET /api/v2/replay/experiments/{id}/artifacts
+func (c *Client) GetReplayExperimentArtifactsV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
+	if req == nil {
+		req = &OperationRequest{}
+	}
+	resolved := c.normalizeCompatibilityRequest("get_replay_experiment_artifacts_v2", req)
+	return c.request(ctx, "GET", "/api/v2/replay/experiments/{id}/artifacts", resolved)
+}
+
+// cancel_replay_experiment_v2 | POST /api/v2/replay/experiments/{id}/cancel
+func (c *Client) CancelReplayExperimentV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
+	if req == nil {
+		req = &OperationRequest{}
+	}
+	resolved := c.normalizeCompatibilityRequest("cancel_replay_experiment_v2", req)
+	return c.request(ctx, "POST", "/api/v2/replay/experiments/{id}/cancel", resolved)
+}
+
+// get_replay_experiment_compare_v2 | GET /api/v2/replay/experiments/{id}/compare
+func (c *Client) GetReplayExperimentCompareV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
+	if req == nil {
+		req = &OperationRequest{}
+	}
+	resolved := c.normalizeCompatibilityRequest("get_replay_experiment_compare_v2", req)
+	return c.request(ctx, "GET", "/api/v2/replay/experiments/{id}/compare", resolved)
+}
+
+// get_replay_experiment_results_v2 | GET /api/v2/replay/experiments/{id}/results
+func (c *Client) GetReplayExperimentResultsV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
+	if req == nil {
+		req = &OperationRequest{}
+	}
+	resolved := c.normalizeCompatibilityRequest("get_replay_experiment_results_v2", req)
+	return c.request(ctx, "GET", "/api/v2/replay/experiments/{id}/results", resolved)
+}
+
+// run_replay_experiment_v2 | POST /api/v2/replay/experiments/{id}/run
+func (c *Client) RunReplayExperimentV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
+	if req == nil {
+		req = &OperationRequest{}
+	}
+	resolved := c.normalizeCompatibilityRequest("run_replay_experiment_v2", req)
+	return c.request(ctx, "POST", "/api/v2/replay/experiments/{id}/run", resolved)
+}
+
+// get_replay_experiment_workflow_v2 | GET /api/v2/replay/experiments/{id}/workflow
+func (c *Client) GetReplayExperimentWorkflowV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
+	if req == nil {
+		req = &OperationRequest{}
+	}
+	resolved := c.normalizeCompatibilityRequest("get_replay_experiment_workflow_v2", req)
+	return c.request(ctx, "GET", "/api/v2/replay/experiments/{id}/workflow", resolved)
+}
+
+// compare_replay_experiments_v2 | GET /api/v2/replay/experiments/compare
+func (c *Client) CompareReplayExperimentsV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
+	if req == nil {
+		req = &OperationRequest{}
+	}
+	resolved := c.normalizeCompatibilityRequest("compare_replay_experiments_v2", req)
+	return c.request(ctx, "GET", "/api/v2/replay/experiments/compare", resolved)
+}
+
 // list_replay_runs_v2 | GET /api/v2/replay/runs
 func (c *Client) ListReplayRunsV2(ctx context.Context, req *OperationRequest) (json.RawMessage, error) {
 	if req == nil {

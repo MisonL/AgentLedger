@@ -567,6 +567,104 @@ public sealed class AgentLedgerClient
         return this.RequestAsync("POST", "/api/v2/replay/datasets/{id}/materialize", request, cancellationToken);
     }
 
+    // promote_replay_dataset_version_v2 | POST /api/v2/replay/datasets/{id}/promote
+    public Task<string> PromoteReplayDatasetVersionV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
+    {
+        request = this.NormalizeCompatibilityRequest("promote_replay_dataset_version_v2", request ?? new OperationRequest());
+        return this.RequestAsync("POST", "/api/v2/replay/datasets/{id}/promote", request, cancellationToken);
+    }
+
+    // list_replay_dataset_versions_v2 | GET /api/v2/replay/datasets/{id}/versions
+    public Task<string> ListReplayDatasetVersionsV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
+    {
+        request = this.NormalizeCompatibilityRequest("list_replay_dataset_versions_v2", request ?? new OperationRequest());
+        return this.RequestAsync("GET", "/api/v2/replay/datasets/{id}/versions", request, cancellationToken);
+    }
+
+    // create_replay_dataset_version_v2 | POST /api/v2/replay/datasets/{id}/versions
+    public Task<string> CreateReplayDatasetVersionV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
+    {
+        request = this.NormalizeCompatibilityRequest("create_replay_dataset_version_v2", request ?? new OperationRequest());
+        return this.RequestAsync("POST", "/api/v2/replay/datasets/{id}/versions", request, cancellationToken);
+    }
+
+    // list_replay_dataset_version_cases_v2 | GET /api/v2/replay/datasets/{id}/versions/{versionId}/cases
+    public Task<string> ListReplayDatasetVersionCasesV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
+    {
+        request = this.NormalizeCompatibilityRequest("list_replay_dataset_version_cases_v2", request ?? new OperationRequest());
+        return this.RequestAsync("GET", "/api/v2/replay/datasets/{id}/versions/{versionId}/cases", request, cancellationToken);
+    }
+
+    // list_replay_experiments_v2 | GET /api/v2/replay/experiments
+    public Task<string> ListReplayExperimentsV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
+    {
+        request = this.NormalizeCompatibilityRequest("list_replay_experiments_v2", request ?? new OperationRequest());
+        return this.RequestAsync("GET", "/api/v2/replay/experiments", request, cancellationToken);
+    }
+
+    // create_replay_experiment_v2 | POST /api/v2/replay/experiments
+    public Task<string> CreateReplayExperimentV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
+    {
+        request = this.NormalizeCompatibilityRequest("create_replay_experiment_v2", request ?? new OperationRequest());
+        return this.RequestAsync("POST", "/api/v2/replay/experiments", request, cancellationToken);
+    }
+
+    // get_replay_experiment_v2 | GET /api/v2/replay/experiments/{id}
+    public Task<string> GetReplayExperimentV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
+    {
+        request = this.NormalizeCompatibilityRequest("get_replay_experiment_v2", request ?? new OperationRequest());
+        return this.RequestAsync("GET", "/api/v2/replay/experiments/{id}", request, cancellationToken);
+    }
+
+    // get_replay_experiment_artifacts_v2 | GET /api/v2/replay/experiments/{id}/artifacts
+    public Task<string> GetReplayExperimentArtifactsV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
+    {
+        request = this.NormalizeCompatibilityRequest("get_replay_experiment_artifacts_v2", request ?? new OperationRequest());
+        return this.RequestAsync("GET", "/api/v2/replay/experiments/{id}/artifacts", request, cancellationToken);
+    }
+
+    // cancel_replay_experiment_v2 | POST /api/v2/replay/experiments/{id}/cancel
+    public Task<string> CancelReplayExperimentV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
+    {
+        request = this.NormalizeCompatibilityRequest("cancel_replay_experiment_v2", request ?? new OperationRequest());
+        return this.RequestAsync("POST", "/api/v2/replay/experiments/{id}/cancel", request, cancellationToken);
+    }
+
+    // get_replay_experiment_compare_v2 | GET /api/v2/replay/experiments/{id}/compare
+    public Task<string> GetReplayExperimentCompareV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
+    {
+        request = this.NormalizeCompatibilityRequest("get_replay_experiment_compare_v2", request ?? new OperationRequest());
+        return this.RequestAsync("GET", "/api/v2/replay/experiments/{id}/compare", request, cancellationToken);
+    }
+
+    // get_replay_experiment_results_v2 | GET /api/v2/replay/experiments/{id}/results
+    public Task<string> GetReplayExperimentResultsV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
+    {
+        request = this.NormalizeCompatibilityRequest("get_replay_experiment_results_v2", request ?? new OperationRequest());
+        return this.RequestAsync("GET", "/api/v2/replay/experiments/{id}/results", request, cancellationToken);
+    }
+
+    // run_replay_experiment_v2 | POST /api/v2/replay/experiments/{id}/run
+    public Task<string> RunReplayExperimentV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
+    {
+        request = this.NormalizeCompatibilityRequest("run_replay_experiment_v2", request ?? new OperationRequest());
+        return this.RequestAsync("POST", "/api/v2/replay/experiments/{id}/run", request, cancellationToken);
+    }
+
+    // get_replay_experiment_workflow_v2 | GET /api/v2/replay/experiments/{id}/workflow
+    public Task<string> GetReplayExperimentWorkflowV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
+    {
+        request = this.NormalizeCompatibilityRequest("get_replay_experiment_workflow_v2", request ?? new OperationRequest());
+        return this.RequestAsync("GET", "/api/v2/replay/experiments/{id}/workflow", request, cancellationToken);
+    }
+
+    // compare_replay_experiments_v2 | GET /api/v2/replay/experiments/compare
+    public Task<string> CompareReplayExperimentsV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
+    {
+        request = this.NormalizeCompatibilityRequest("compare_replay_experiments_v2", request ?? new OperationRequest());
+        return this.RequestAsync("GET", "/api/v2/replay/experiments/compare", request, cancellationToken);
+    }
+
     // list_replay_runs_v2 | GET /api/v2/replay/runs
     public Task<string> ListReplayRunsV2(OperationRequest? request = null, CancellationToken cancellationToken = default)
     {

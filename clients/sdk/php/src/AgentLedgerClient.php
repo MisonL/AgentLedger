@@ -534,6 +534,104 @@ JSON;
         return $this->request('POST', '/api/v2/replay/datasets/{id}/materialize', $normalizedRequest);
     }
 
+    // promote_replay_dataset_version_v2 | POST /api/v2/replay/datasets/{id}/promote
+    public function promoteReplayDatasetVersionV2(array $request = []): mixed
+    {
+        $normalizedRequest = $this->normalizeCompatibilityRequest('promote_replay_dataset_version_v2', $request);
+        return $this->request('POST', '/api/v2/replay/datasets/{id}/promote', $normalizedRequest);
+    }
+
+    // list_replay_dataset_versions_v2 | GET /api/v2/replay/datasets/{id}/versions
+    public function listReplayDatasetVersionsV2(array $request = []): mixed
+    {
+        $normalizedRequest = $this->normalizeCompatibilityRequest('list_replay_dataset_versions_v2', $request);
+        return $this->request('GET', '/api/v2/replay/datasets/{id}/versions', $normalizedRequest);
+    }
+
+    // create_replay_dataset_version_v2 | POST /api/v2/replay/datasets/{id}/versions
+    public function createReplayDatasetVersionV2(array $request = []): mixed
+    {
+        $normalizedRequest = $this->normalizeCompatibilityRequest('create_replay_dataset_version_v2', $request);
+        return $this->request('POST', '/api/v2/replay/datasets/{id}/versions', $normalizedRequest);
+    }
+
+    // list_replay_dataset_version_cases_v2 | GET /api/v2/replay/datasets/{id}/versions/{versionId}/cases
+    public function listReplayDatasetVersionCasesV2(array $request = []): mixed
+    {
+        $normalizedRequest = $this->normalizeCompatibilityRequest('list_replay_dataset_version_cases_v2', $request);
+        return $this->request('GET', '/api/v2/replay/datasets/{id}/versions/{versionId}/cases', $normalizedRequest);
+    }
+
+    // list_replay_experiments_v2 | GET /api/v2/replay/experiments
+    public function listReplayExperimentsV2(array $request = []): mixed
+    {
+        $normalizedRequest = $this->normalizeCompatibilityRequest('list_replay_experiments_v2', $request);
+        return $this->request('GET', '/api/v2/replay/experiments', $normalizedRequest);
+    }
+
+    // create_replay_experiment_v2 | POST /api/v2/replay/experiments
+    public function createReplayExperimentV2(array $request = []): mixed
+    {
+        $normalizedRequest = $this->normalizeCompatibilityRequest('create_replay_experiment_v2', $request);
+        return $this->request('POST', '/api/v2/replay/experiments', $normalizedRequest);
+    }
+
+    // get_replay_experiment_v2 | GET /api/v2/replay/experiments/{id}
+    public function getReplayExperimentV2(array $request = []): mixed
+    {
+        $normalizedRequest = $this->normalizeCompatibilityRequest('get_replay_experiment_v2', $request);
+        return $this->request('GET', '/api/v2/replay/experiments/{id}', $normalizedRequest);
+    }
+
+    // get_replay_experiment_artifacts_v2 | GET /api/v2/replay/experiments/{id}/artifacts
+    public function getReplayExperimentArtifactsV2(array $request = []): mixed
+    {
+        $normalizedRequest = $this->normalizeCompatibilityRequest('get_replay_experiment_artifacts_v2', $request);
+        return $this->request('GET', '/api/v2/replay/experiments/{id}/artifacts', $normalizedRequest);
+    }
+
+    // cancel_replay_experiment_v2 | POST /api/v2/replay/experiments/{id}/cancel
+    public function cancelReplayExperimentV2(array $request = []): mixed
+    {
+        $normalizedRequest = $this->normalizeCompatibilityRequest('cancel_replay_experiment_v2', $request);
+        return $this->request('POST', '/api/v2/replay/experiments/{id}/cancel', $normalizedRequest);
+    }
+
+    // get_replay_experiment_compare_v2 | GET /api/v2/replay/experiments/{id}/compare
+    public function getReplayExperimentCompareV2(array $request = []): mixed
+    {
+        $normalizedRequest = $this->normalizeCompatibilityRequest('get_replay_experiment_compare_v2', $request);
+        return $this->request('GET', '/api/v2/replay/experiments/{id}/compare', $normalizedRequest);
+    }
+
+    // get_replay_experiment_results_v2 | GET /api/v2/replay/experiments/{id}/results
+    public function getReplayExperimentResultsV2(array $request = []): mixed
+    {
+        $normalizedRequest = $this->normalizeCompatibilityRequest('get_replay_experiment_results_v2', $request);
+        return $this->request('GET', '/api/v2/replay/experiments/{id}/results', $normalizedRequest);
+    }
+
+    // run_replay_experiment_v2 | POST /api/v2/replay/experiments/{id}/run
+    public function runReplayExperimentV2(array $request = []): mixed
+    {
+        $normalizedRequest = $this->normalizeCompatibilityRequest('run_replay_experiment_v2', $request);
+        return $this->request('POST', '/api/v2/replay/experiments/{id}/run', $normalizedRequest);
+    }
+
+    // get_replay_experiment_workflow_v2 | GET /api/v2/replay/experiments/{id}/workflow
+    public function getReplayExperimentWorkflowV2(array $request = []): mixed
+    {
+        $normalizedRequest = $this->normalizeCompatibilityRequest('get_replay_experiment_workflow_v2', $request);
+        return $this->request('GET', '/api/v2/replay/experiments/{id}/workflow', $normalizedRequest);
+    }
+
+    // compare_replay_experiments_v2 | GET /api/v2/replay/experiments/compare
+    public function compareReplayExperimentsV2(array $request = []): mixed
+    {
+        $normalizedRequest = $this->normalizeCompatibilityRequest('compare_replay_experiments_v2', $request);
+        return $this->request('GET', '/api/v2/replay/experiments/compare', $normalizedRequest);
+    }
+
     // list_replay_runs_v2 | GET /api/v2/replay/runs
     public function listReplayRunsV2(array $request = []): mixed
     {
