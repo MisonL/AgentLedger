@@ -40,6 +40,8 @@ import {
   evaluateMcpTool,
   exportSessions,
   exportUsage,
+  exportAudits,
+  exportAuditEvidenceBundle,
   exchangeExternalAuthCode,
   fetchAlerts,
   fetchAuthProviders,
@@ -170,6 +172,7 @@ import type {
   CreateSourceInput,
   DataResidencyMode,
   ExportFormat,
+  AuditDlpMode,
   HeatmapCell,
   McpApprovalRequest,
   McpApprovalConfig,
@@ -487,6 +490,12 @@ const CONFLICT_FILTER_OPTIONS: Array<
 const EXPORT_FORMAT_OPTIONS: Array<{ value: ExportFormat; label: string }> = [
   { value: "json", label: "JSON" },
   { value: "csv", label: "CSV" },
+];
+
+const AUDIT_DLP_MODE_OPTIONS: Array<{ value: AuditDlpMode; label: string }> = [
+  { value: "off", label: "off(关闭)" },
+  { value: "redact", label: "redact(脱敏)" },
+  { value: "block", label: "block(阻止)" },
 ];
 
 const USAGE_EXPORT_DIMENSION_OPTIONS: Array<{
@@ -4549,6 +4558,12 @@ function GovernancePage() {
     useState<ExportFormat>("csv");
   const [usageExportDimension, setUsageExportDimension] =
     useState<UsageExportDimension>("daily");
+  const [auditExportFormat, setAuditExportFormat] =
+    useState<ExportFormat>("json");
+  const [auditExportDlpMode, setAuditExportDlpMode] =
+    useState<AuditDlpMode>("off");
+  const [evidenceBundleDlpMode, setEvidenceBundleDlpMode] =
+    useState<AuditDlpMode>("off");
   const [exportFeedback, setExportFeedback] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const hasInitializedResidencyForm = useRef(false);
@@ -7436,6 +7451,44 @@ function GovernancePage() {
     onError: (error) => {
       setExportFeedback(null);
       setExportError(`Usage 导出失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const exportAuditsMutation = useMutation({
+    mutationFn: (input: { format: ExportFormat; dlpMode: AuditDlpMode }) =>
+      exportAudits(input.format, {
+        limit: 200,
+        dlpMode: input.dlpMode,
+      }),
+    onSuccess: (file) => {
+      setExportError(null);
+      setExportFeedback(
+        `Audits 导出成功：${file.filename} (dlpMode=${file.dlpMode ?? "-"}, matched=${file.dlpMatched ? "true" : "false"})`,
+      );
+      triggerBrowserDownload(file);
+    },
+    onError: (error) => {
+      setExportFeedback(null);
+      setExportError(`Audits 导出失败：${toErrorMessage(error)}`);
+    },
+  });
+
+  const exportEvidenceBundleMutation = useMutation({
+    mutationFn: (dlpMode: AuditDlpMode) =>
+      exportAuditEvidenceBundle({
+        limit: 200,
+        dlpMode,
+      }),
+    onSuccess: (file) => {
+      setExportError(null);
+      setExportFeedback(
+        `Evidence Bundle 导出成功：${file.filename} (dlpMode=${file.dlpMode ?? "-"}, matched=${file.dlpMatched ? "true" : "false"})`,
+      );
+      triggerBrowserDownload(file);
+    },
+    onError: (error) => {
+      setExportFeedback(null);
+      setExportError(`Evidence Bundle 导出失败：${toErrorMessage(error)}`);
     },
   });
 
@@ -18788,6 +18841,92 @@ function GovernancePage() {
               disabled={exportUsageMutation.isPending}
             >
               {exportUsageMutation.isPending ? "导出中..." : "导出 Usage"}
+            </button>
+          </article>
+
+          <article className="governance-export-card">
+            <h3>Audits 导出</h3>
+            <div className="filters-row">
+              <label className="inline-field" htmlFor="audits-export-format">
+                格式
+                <select
+                  id="audits-export-format"
+                  value={auditExportFormat}
+                  onChange={(event) =>
+                    setAuditExportFormat(event.target.value as ExportFormat)
+                  }
+                >
+                  {EXPORT_FORMAT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="inline-field" htmlFor="audits-export-dlp-mode">
+                DLP
+                <select
+                  id="audits-export-dlp-mode"
+                  value={auditExportDlpMode}
+                  onChange={(event) =>
+                    setAuditExportDlpMode(event.target.value as AuditDlpMode)
+                  }
+                >
+                  {AUDIT_DLP_MODE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <button
+              type="button"
+              className="submit-button"
+              onClick={() => {
+                setExportFeedback(null);
+                setExportError(null);
+                exportAuditsMutation.mutate({
+                  format: auditExportFormat,
+                  dlpMode: auditExportDlpMode,
+                });
+              }}
+              disabled={exportAuditsMutation.isPending}
+            >
+              {exportAuditsMutation.isPending ? "导出中..." : "导出 Audits"}
+            </button>
+          </article>
+
+          <article className="governance-export-card">
+            <h3>Evidence Bundle 导出</h3>
+            <label className="inline-field" htmlFor="evidence-bundle-dlp-mode">
+              DLP
+              <select
+                id="evidence-bundle-dlp-mode"
+                value={evidenceBundleDlpMode}
+                onChange={(event) =>
+                  setEvidenceBundleDlpMode(event.target.value as AuditDlpMode)
+                }
+              >
+                {AUDIT_DLP_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="submit-button"
+              onClick={() => {
+                setExportFeedback(null);
+                setExportError(null);
+                exportEvidenceBundleMutation.mutate(evidenceBundleDlpMode);
+              }}
+              disabled={exportEvidenceBundleMutation.isPending}
+            >
+              {exportEvidenceBundleMutation.isPending ? "导出中..." : "导出 Evidence Bundle"}
             </button>
           </article>
         </div>
