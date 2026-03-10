@@ -21469,20 +21469,22 @@ describe("Control Plane API", () => {
           evaluationScoreThreshold: 75,
           triggerOnEvaluationFailure: true,
           triggerOnReplayRegression: false,
-          strategyMatrix: [
-            {
-              ruleId: "critical-replay",
-              metric: "accuracy",
-              severity: "critical",
-              trendDirection: "down",
-              provider: "github",
-              workflow: "ci-main",
-              projectPattern: "agentledger/*",
-              minConfidence: 0.6,
-              regressionProbabilityAtLeast: 0.5,
-              replayRegressionAtLeast: 1,
-              actionType: "scorecard_adjustment",
-              requiresApproval: true,
+	          strategyMatrix: [
+	            {
+	              ruleId: "critical-replay",
+	              metric: "accuracy",
+	              severity: "critical",
+	              trendDirection: "down",
+	              provider: "github",
+	              workflow: "ci-main",
+	              projectPattern: "agentledger/*",
+	              minSampleCount: 8,
+	              minPassRate: 0.6,
+	              minConfidence: 0.6,
+	              regressionProbabilityAtLeast: 0.5,
+	              replayRegressionAtLeast: 1,
+	              actionType: "scorecard_adjustment",
+	              requiresApproval: true,
               cooldownMinutes: 30,
             },
           ],
@@ -21502,22 +21504,26 @@ describe("Control Plane API", () => {
     expect(
       Array.isArray((updatedAutomationPolicy as { strategyMatrix?: unknown[] }).strategyMatrix),
     ).toBe(true);
-    expect(
-      ((updatedAutomationPolicy as {
-        strategyMatrix?: Array<{
-          ruleId?: string;
-          provider?: string;
-          workflow?: string;
-          projectPattern?: string;
-          reason?: string;
-        }>;
-      }).strategyMatrix ?? [])[0],
-    ).toMatchObject({
-      ruleId: "critical-replay",
-      provider: "github",
-      workflow: "ci-main",
-      projectPattern: "agentledger/*",
-    });
+	    expect(
+	      ((updatedAutomationPolicy as {
+	        strategyMatrix?: Array<{
+	          ruleId?: string;
+	          provider?: string;
+	          workflow?: string;
+	          projectPattern?: string;
+	          minSampleCount?: number;
+	          minPassRate?: number;
+	          reason?: string;
+	        }>;
+	      }).strategyMatrix ?? [])[0],
+	    ).toMatchObject({
+	      ruleId: "critical-replay",
+	      provider: "github",
+	      workflow: "ci-main",
+	      projectPattern: "agentledger/*",
+	      minSampleCount: 8,
+	      minPassRate: 0.6,
+	    });
 
     const invalidAutomationPolicyResponse = await app.request(
       "/api/v2/quality/automation-policy",
@@ -21547,14 +21553,46 @@ describe("Control Plane API", () => {
       },
     );
     expect(invalidAutomationPolicyResponse.status).toBe(400);
-    await expect(invalidAutomationPolicyResponse.json()).resolves.toEqual({
-      message: "strategyMatrix[0].minConfidence 必须小于等于 1。",
-    });
+	    await expect(invalidAutomationPolicyResponse.json()).resolves.toEqual({
+	      message: "strategyMatrix[0].minConfidence 必须小于等于 1。",
+	    });
 
-    const simulateAutomationPolicyResponse = await app.request(
-      "/api/v2/quality/automation-policy/simulate",
-      {
-        method: "POST",
+	    const invalidAutomationPolicyPassRateResponse = await app.request(
+	      "/api/v2/quality/automation-policy",
+	      {
+	        method: "PUT",
+	        headers: {
+	          "content-type": "application/json",
+	          ...tenantAHeaders,
+	        },
+	        body: JSON.stringify({
+	          riskLevel: "high",
+	          decision: "require_approval",
+	          reason: "非法矩阵 minPassRate 应被阻断",
+	          evaluationScoreThreshold: 75,
+	          triggerOnEvaluationFailure: true,
+	          triggerOnReplayRegression: false,
+	          strategyMatrix: [
+	            {
+	              ruleId: "invalid-pass-rate",
+	              metric: "accuracy",
+	              minPassRate: 1.2,
+	              actionType: "scorecard_adjustment",
+	              requiresApproval: true,
+	            },
+	          ],
+	        }),
+	      },
+	    );
+	    expect(invalidAutomationPolicyPassRateResponse.status).toBe(400);
+	    await expect(invalidAutomationPolicyPassRateResponse.json()).resolves.toEqual({
+	      message: "strategyMatrix[0].minPassRate 必须小于等于 1。",
+	    });
+
+	    const simulateAutomationPolicyResponse = await app.request(
+	      "/api/v2/quality/automation-policy/simulate",
+	      {
+	        method: "POST",
         headers: {
           "content-type": "application/json",
           ...tenantAHeaders,
@@ -21574,18 +21612,24 @@ describe("Control Plane API", () => {
       },
     );
     expect(simulateAutomationPolicyResponse.status).toBe(200);
-    const simulateAutomationPolicyBody =
-      (await simulateAutomationPolicyResponse.json()) as {
-        matchedRuleId?: string | null;
-        resolvedAction?: string | null;
-        recommendedActionType?: string | null;
-        requiresApproval?: boolean;
-      };
-    expect(simulateAutomationPolicyBody.matchedRuleId).toBe("critical-replay");
-    expect(simulateAutomationPolicyBody.resolvedAction).toBe("scorecard_adjustment");
-    expect(simulateAutomationPolicyBody.recommendedActionType).toBe(
-      "scorecard_adjustment",
-    );
+	    const simulateAutomationPolicyBody =
+	      (await simulateAutomationPolicyResponse.json()) as {
+	        matchedRuleId?: string | null;
+	        matchedRule?: {
+	          minSampleCount?: number | null;
+	          minPassRate?: number | null;
+	        } | null;
+	        resolvedAction?: string | null;
+	        recommendedActionType?: string | null;
+	        requiresApproval?: boolean;
+	      };
+	    expect(simulateAutomationPolicyBody.matchedRuleId).toBe("critical-replay");
+	    expect(simulateAutomationPolicyBody.matchedRule?.minSampleCount).toBe(8);
+	    expect(simulateAutomationPolicyBody.matchedRule?.minPassRate).toBe(0.6);
+	    expect(simulateAutomationPolicyBody.resolvedAction).toBe("scorecard_adjustment");
+	    expect(simulateAutomationPolicyBody.recommendedActionType).toBe(
+	      "scorecard_adjustment",
+	    );
     expect(simulateAutomationPolicyBody.requiresApproval).toBe(true);
 
     const simulateAutomationPolicyMismatchResponse = await app.request(

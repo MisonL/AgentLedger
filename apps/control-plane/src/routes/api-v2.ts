@@ -121,6 +121,8 @@ interface QualityAutomationStrategyRule {
   provider?: string;
   workflow?: string;
   projectPattern?: string;
+  minSampleCount?: number;
+  minPassRate?: number;
   minConfidence?: number;
   regressionProbabilityAtLeast?: number;
   replayRegressionAtLeast?: number;
@@ -448,6 +450,8 @@ function mapQualityAutomationPolicy(policy: {
     provider: rule.provider,
     workflow: rule.workflow,
     projectPattern: rule.projectPattern,
+    minSampleCount: rule.minSampleCount,
+    minPassRate: rule.minPassRate,
     minConfidence: rule.minConfidence,
     regressionProbabilityAtLeast: rule.regressionProbabilityAtLeast,
     replayRegressionAtLeast: rule.replayRegressionAtLeast,
@@ -525,6 +529,16 @@ function parseQualityAutomationStrategyMatrix(
         : Number.isFinite(Number(record.minConfidence))
           ? Number(Number(record.minConfidence).toFixed(4))
           : undefined;
+    const minSampleCount =
+      record.minSampleCount === undefined
+        ? undefined
+        : Math.max(0, toInteger(record.minSampleCount, 0));
+    const minPassRate =
+      record.minPassRate === undefined
+        ? undefined
+        : Number.isFinite(Number(record.minPassRate))
+          ? Number(Number(record.minPassRate).toFixed(6))
+          : undefined;
     const regressionProbabilityAtLeast =
       record.regressionProbabilityAtLeast === undefined
         ? undefined
@@ -547,6 +561,8 @@ function parseQualityAutomationStrategyMatrix(
       provider: firstNonEmptyString(record.provider)?.toLowerCase(),
       workflow: firstNonEmptyString(record.workflow),
       projectPattern: firstNonEmptyString(record.projectPattern),
+      minSampleCount,
+      minPassRate,
       minConfidence,
       regressionProbabilityAtLeast,
       replayRegressionAtLeast,
@@ -649,6 +665,28 @@ function validateQualityAutomationStrategyMatrix(
           error: `strategyMatrix[${index}] 的 ${field} 不能为空字符串。`,
         };
       }
+    }
+    const minSampleCountError = validateQualityAutomationStrategyMatrixNumber(
+      record.minSampleCount,
+      {
+        field: `strategyMatrix[${index}].minSampleCount`,
+        integer: true,
+        min: 0,
+      },
+    );
+    if (minSampleCountError) {
+      return { success: false, error: minSampleCountError };
+    }
+    const minPassRateError = validateQualityAutomationStrategyMatrixNumber(
+      record.minPassRate,
+      {
+        field: `strategyMatrix[${index}].minPassRate`,
+        min: 0,
+        max: 1,
+      },
+    );
+    if (minPassRateError) {
+      return { success: false, error: minPassRateError };
     }
     const minConfidenceError = validateQualityAutomationStrategyMatrixNumber(
       record.minConfidence,
@@ -798,6 +836,8 @@ function selectQualityAutomationStrategyRule(input: {
   provider?: string;
   workflow?: string;
   project?: string;
+  sampleCount: number;
+  passRate: number;
   confidence: number;
   regressionProbability: number;
   replayRegressionCount: number;
@@ -822,6 +862,12 @@ function selectQualityAutomationStrategyRule(input: {
       rule.projectPattern &&
       (!input.project || !matchQualityProjectPattern(rule.projectPattern, input.project))
     ) {
+      return false;
+    }
+    if (typeof rule.minSampleCount === "number" && input.sampleCount < rule.minSampleCount) {
+      return false;
+    }
+    if (typeof rule.minPassRate === "number" && input.passRate + Number.EPSILON < rule.minPassRate) {
       return false;
     }
     if (
@@ -859,7 +905,9 @@ function buildQualityStrategyMatrixSimulation(input: {
   replayRegressionCount: number;
   regressionProbability: number;
 }) {
-  const severity = deriveQualityAdviceSeverity(input.score, Math.max(0, Math.min(1, input.score / 100)));
+  const passRate = Math.max(0, Math.min(1, input.score / 100));
+  const sampleCount = Math.max(0, toInteger(input.sampleCount, 0));
+  const severity = deriveQualityAdviceSeverity(input.score, passRate);
   const matchedRule = selectQualityAutomationStrategyRule({
     policy: input.policy,
     metric: input.metric,
@@ -868,6 +916,8 @@ function buildQualityStrategyMatrixSimulation(input: {
     provider: input.provider,
     workflow: input.workflow,
     project: input.project,
+    sampleCount,
+    passRate,
     confidence: input.confidence,
     regressionProbability: input.regressionProbability,
     replayRegressionCount: input.replayRegressionCount,
@@ -898,6 +948,8 @@ function buildQualityStrategyMatrixSimulation(input: {
             provider: matchedRule.provider ?? null,
             workflow: matchedRule.workflow ?? null,
             projectPattern: matchedRule.projectPattern ?? null,
+            minSampleCount: matchedRule.minSampleCount ?? null,
+            minPassRate: matchedRule.minPassRate ?? null,
             minConfidence: matchedRule.minConfidence ?? null,
             regressionProbabilityAtLeast: matchedRule.regressionProbabilityAtLeast ?? null,
             replayRegressionAtLeast: matchedRule.replayRegressionAtLeast ?? null,
@@ -917,7 +969,8 @@ function buildQualityStrategyMatrixSimulation(input: {
     evaluatedContext: {
       metric: input.metric,
       score: input.score,
-      sampleCount: Math.max(0, toInteger(input.sampleCount, 0)),
+      sampleCount,
+      passRate,
       severity,
       trendDirection: input.trendDirection,
       confidence: input.confidence,
@@ -1018,13 +1071,15 @@ async function maybeExecuteQualityAutomationAdvice(input: {
   const policy = await resolveQualityAutomationPolicy(input.tenantId);
   const mappedPolicy = mapQualityAutomationPolicy(policy);
   const passed = input.score >= mappedPolicy.evaluationScoreThreshold;
-  const confidence = deriveQualityForecastConfidence(input.sampleCount ?? 0);
+  const sampleCount = Math.max(0, toInteger(input.sampleCount, 0));
+  const passRate = Math.max(0, Math.min(1, input.score / 100));
+  const confidence = deriveQualityForecastConfidence(sampleCount);
   const trendDirection: QualityTrendDirection = passed ? "flat" : "down";
   const regressionProbability = computeQualityRegressionProbability({
     avgScore: input.score,
-    passRate: Math.max(0, Math.min(1, input.score / 100)),
+    passRate,
     projectedDelta: passed ? 0 : Number((input.score - mappedPolicy.evaluationScoreThreshold).toFixed(4)),
-    totalEvents: input.sampleCount ?? 0,
+    totalEvents: sampleCount,
   });
   const shouldTrigger =
     (!passed && mappedPolicy.triggerOnEvaluationFailure) ||
@@ -1080,6 +1135,8 @@ async function maybeExecuteQualityAutomationAdvice(input: {
     provider,
     workflow,
     project,
+    sampleCount,
+    passRate,
     confidence,
     regressionProbability,
     replayRegressionCount: regressedCases,
@@ -3482,6 +3539,8 @@ apiV2Routes.get("/quality/reports/advice", async (c) => {
         provider,
         workflow,
         project: group.value,
+        sampleCount: group.total,
+        passRate,
         confidence: explanation.confidence,
         regressionProbability,
         replayRegressionCount: 0,
