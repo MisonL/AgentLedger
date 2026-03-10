@@ -63,6 +63,10 @@ const QUALITY_AUTOMATION_DEFAULT_POLICY = {
 };
 const QUALITY_AUTOMATION_SCORE_THRESHOLD = 0.8;
 const QUALITY_AUTOMATION_DEFAULT_ACTION_TYPE = "scorecard_adjustment" as const;
+const QUALITY_FORECAST_MODEL_VERSION_SET = new Set<QualityForecastModelVersion>([
+  "quality-heuristic-v2",
+  "quality-timeseries-v1",
+]);
 
 type QualityMetric = "accuracy" | "consistency" | "groundedness" | "safety" | "latency";
 type QualityExternalGroupBy = "provider" | "repo" | "workflow" | "runId";
@@ -70,6 +74,7 @@ type ReplayExperimentRecord = ReplayExperiment;
 type QualityAdviceExecutionRecord = QualityAdviceExecution;
 type QualityTrendDirection = "up" | "down" | "flat";
 type QualityAdviceAction = "scorecard_adjustment" | "replay_experiment";
+type QualityForecastModelVersion = "quality-heuristic-v2" | "quality-timeseries-v1";
 
 const replayExperimentSidecarStore = new Map<
   string,
@@ -254,6 +259,17 @@ function toQualityExternalGroupBy(value: unknown): QualityExternalGroupBy | unde
     return "runId";
   }
   return normalized as QualityExternalGroupBy;
+}
+
+function toQualityForecastModelVersion(value: unknown): QualityForecastModelVersion | undefined {
+  const normalized = firstNonEmptyString(value);
+  if (!normalized) {
+    return undefined;
+  }
+  if (!QUALITY_FORECAST_MODEL_VERSION_SET.has(normalized as QualityForecastModelVersion)) {
+    return undefined;
+  }
+  return normalized as QualityForecastModelVersion;
 }
 
 function normalizeQualityExternalFilter(
@@ -1810,6 +1826,175 @@ function buildQualityForecastRationale(input: {
   )}、通过率 ${passRatePercent}% ，${deltaLabel}（delta ${input.projectedDelta.toFixed(2)}）。`;
 }
 
+function buildQualityTimeseriesForecastItem(input: {
+  project: string;
+  metric: string;
+  series: QualityDailyMetric[];
+  forecastHorizonDays: number;
+  windowStart: string;
+  windowEnd: string;
+}): Record<string, unknown> | null {
+  const points = [...(input.series ?? [])]
+    .filter((item) => typeof item?.date === "string" && item.date.length >= 10 && item.total > 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const basisDays = points.length;
+  const totalEvents = points.reduce((sum, item) => sum + item.total, 0);
+  if (basisDays < 5 || totalEvents < 10) {
+    return null;
+  }
+
+  const passedEvents = points.reduce((sum, item) => sum + item.passed, 0);
+  const passRate = totalEvents > 0 ? Number((passedEvents / totalEvents).toFixed(6)) : 0;
+  const scoreSum = points.reduce(
+    (sum, item) => sum + fromRepositoryScore(item.averageScore) * item.total,
+    0,
+  );
+  const avgScore = totalEvents > 0 ? Number((scoreSum / totalEvents).toFixed(4)) : 0;
+
+  const sliceSize = Math.max(1, Math.min(3, Math.floor(basisDays / 2)));
+  const firstSlice = points.slice(0, sliceSize);
+  const lastSlice = points.slice(-sliceSize);
+  const firstTotal = firstSlice.reduce((sum, item) => sum + item.total, 0);
+  const lastTotal = lastSlice.reduce((sum, item) => sum + item.total, 0);
+  const firstPassed = firstSlice.reduce((sum, item) => sum + item.passed, 0);
+  const lastPassed = lastSlice.reduce((sum, item) => sum + item.passed, 0);
+  const firstScoreSum = firstSlice.reduce(
+    (sum, item) => sum + fromRepositoryScore(item.averageScore) * item.total,
+    0,
+  );
+  const lastScoreSum = lastSlice.reduce(
+    (sum, item) => sum + fromRepositoryScore(item.averageScore) * item.total,
+    0,
+  );
+  const firstAvgScore =
+    firstTotal > 0 ? Number((firstScoreSum / firstTotal).toFixed(4)) : avgScore;
+  const lastAvgScore = lastTotal > 0 ? Number((lastScoreSum / lastTotal).toFixed(4)) : avgScore;
+  const firstPassRate = firstTotal > 0 ? Number((firstPassed / firstTotal).toFixed(6)) : passRate;
+  const lastPassRate = lastTotal > 0 ? Number((lastPassed / lastTotal).toFixed(6)) : passRate;
+
+  const historicalSpan = Math.max(1, basisDays - 1);
+  const rawTrendDelta =
+    ((lastAvgScore - firstAvgScore) / historicalSpan) * Math.max(1, input.forecastHorizonDays);
+  const trendDelta = Math.max(-12, Math.min(12, rawTrendDelta));
+  const passRateAdjustment = Math.max(-6, Math.min(6, (passRate - 0.85) * 10));
+  const projectedDelta = Number((trendDelta + passRateAdjustment).toFixed(4));
+  const trendDirection =
+    projectedDelta > 0.5 ? "up" : projectedDelta < -0.5 ? "down" : "flat";
+
+  const dailyScores = points.map((item) => fromRepositoryScore(item.averageScore));
+  const meanScore = dailyScores.reduce((sum, value) => sum + value, 0) / dailyScores.length;
+  const scoreVariance =
+    dailyScores.reduce((sum, value) => sum + (value - meanScore) ** 2, 0) / dailyScores.length;
+  const scoreStdDev = Math.sqrt(scoreVariance);
+
+  let confidence = deriveQualityForecastConfidence(totalEvents);
+  if (basisDays < 7) {
+    confidence = Math.min(confidence, 0.45);
+  }
+  if (scoreStdDev > 8) {
+    confidence = Math.min(confidence, 0.45);
+  } else if (scoreStdDev > 5) {
+    confidence = Math.min(confidence, 0.65);
+  }
+  confidence = clampProbability(confidence);
+
+  const previousAverageScore = Number(firstAvgScore.toFixed(4));
+  const previousPassRate = clampProbability(firstPassRate);
+  const regressionProbability = computeQualityRegressionProbability({
+    avgScore,
+    passRate,
+    projectedDelta,
+    previousAverageScore,
+    previousPassRate,
+    totalEvents,
+  });
+  const scoreBand = Math.max(
+    1,
+    Number(((1 - confidence) * 10).toFixed(4)),
+    Number((scoreStdDev * 1.2).toFixed(4)),
+  );
+  const predictedScore = clampScore(avgScore + projectedDelta);
+
+  return {
+    project: input.project,
+    metric: input.metric,
+    modelVersion: "quality-timeseries-v1",
+    forecastHorizonDays: input.forecastHorizonDays,
+    predictedScore,
+    expectedScoreRange: {
+      lower: clampScore(predictedScore - scoreBand),
+      upper: clampScore(predictedScore + scoreBand),
+    },
+    confidence,
+    confidenceLabel: deriveConfidenceLabel(confidence),
+    trendDirection,
+    projectedDelta,
+    regressionProbability,
+    basisWindowCount: totalEvents,
+    rationale: buildQualityForecastRationale({
+      project: input.project,
+      avgScore,
+      passRate,
+      totalEvents,
+      trendDirection,
+      projectedDelta,
+    }),
+    explanation: {
+      summary:
+        trendDirection === "down"
+          ? "近期质量序列呈下行趋势，建议优先复盘低分日期与失败样本。"
+          : trendDirection === "up"
+            ? "近期质量序列呈上行趋势，可继续观察并巩固有效策略。"
+            : "近期质量序列整体平稳，建议继续按窗口观测。",
+      confidenceLabel: deriveConfidenceLabel(confidence),
+      primaryDriver: passRate < 0.85 ? "pass_rate" : "average_score",
+    },
+    featureContributions: Object.entries(
+      buildQualityFeatureContributions({
+        avgScore,
+        passRate,
+        projectedDelta,
+        previousAverageScore,
+        previousPassRate,
+      }),
+    ).map(([feature, impact]) => ({
+      feature,
+      impact,
+      direction: impact > 0 ? "positive" : impact < 0 ? "negative" : "neutral",
+    })),
+    windowComparisons: {
+      currentWindow: {
+        averageScore: lastAvgScore,
+        passRate: lastPassRate,
+        totalEvents: lastTotal,
+      },
+      previousWindow: {
+        averageScore: previousAverageScore,
+        passRate: previousPassRate,
+        totalEvents: firstTotal,
+      },
+    },
+    riskDrivers: [
+      passRate < 0.85 ? "pass_rate" : "average_score",
+      totalEvents < 10 ? "low_sample_size" : basisDays < 7 ? "short_timeseries" : "stable_timeseries",
+    ],
+    recommendedActions:
+      trendDirection === "down"
+        ? ["review_failed_samples", "run_replay_experiment"]
+        : trendDirection === "up"
+          ? ["observe_current_policy"]
+          : ["monitor_next_window"],
+    windowStart: input.windowStart,
+    windowEnd: input.windowEnd,
+    basis: {
+      totalEvents,
+      passRate,
+      averageScore: avgScore,
+      basisDays,
+    },
+  };
+}
+
 function buildQualityAdviceExecutionOptions(input: {
   severity: QualityAdviceSeverity;
   policy: ReturnType<typeof mapQualityAutomationPolicy>;
@@ -3065,6 +3250,17 @@ apiV2Routes.get("/quality/reports/forecast", async (c) => {
   }
   const provider = normalizeQualityExternalFilter(c.req.query("provider"), { lowerCase: true });
   const workflow = normalizeQualityExternalFilter(c.req.query("workflow"));
+  const requestedModelVersionRaw = firstNonEmptyString(c.req.query("modelVersion"));
+  const requestedModelVersion = requestedModelVersionRaw
+    ? toQualityForecastModelVersion(requestedModelVersionRaw)
+    : undefined;
+  if (requestedModelVersionRaw && !requestedModelVersion) {
+    return c.json(
+      { message: "modelVersion 必须是 quality-heuristic-v2/quality-timeseries-v1 之一。" },
+      400,
+    );
+  }
+  const modelVersion: QualityForecastModelVersion = requestedModelVersion ?? "quality-heuristic-v2";
 
   const groups = await repository.listQualityExternalMetricGroups(auth.tenantId, {
     from: range.from,
@@ -3077,10 +3273,38 @@ apiV2Routes.get("/quality/reports/forecast", async (c) => {
   });
   const forecastHorizonDays = deriveForecastHorizonDays(range.from, range.to);
 
+  const dailySeriesByProject =
+    modelVersion === "quality-timeseries-v1" && range.from && range.to && groups.length > 0
+      ? await repository.listQualityDailyMetricsSeriesByRepo(auth.tenantId, {
+          from: range.from,
+          to: range.to,
+          scorecardKey: metric,
+          provider,
+          workflow,
+          repos: Array.from(new Set(groups.map((group) => group.value))),
+        })
+      : {};
+
   const items = groups.map((group) => {
     const avgScore = fromRepositoryScore(group.averageScore);
     const passRate =
       group.total > 0 ? Number((group.passed / group.total).toFixed(6)) : 0;
+
+    if (modelVersion === "quality-timeseries-v1" && range.from && range.to) {
+      const series = dailySeriesByProject[group.value] ?? [];
+      const timeseriesItem = buildQualityTimeseriesForecastItem({
+        project: group.value,
+        metric: metric ?? "all",
+        series,
+        forecastHorizonDays,
+        windowStart: range.from,
+        windowEnd: range.to,
+      });
+      if (timeseriesItem) {
+        return timeseriesItem;
+      }
+    }
+
     const trendAdjustment = (passRate - 0.8) * 20;
     const projectedDelta = Number(trendAdjustment.toFixed(4));
     const trendDirection =
@@ -3127,7 +3351,7 @@ apiV2Routes.get("/quality/reports/forecast", async (c) => {
             ? "近期质量信号偏弱，建议优先查看失败样本与工作流漂移。"
             : trendDirection === "up"
               ? "近期质量趋势向好，可继续观察当前策略是否稳定。"
-            : "近期质量信号相对平稳，建议继续按窗口观测。",
+              : "近期质量信号相对平稳，建议继续按窗口观测。",
         confidenceLabel: deriveConfidenceLabel(confidence),
         primaryDriver: passRate < 0.85 ? "pass_rate" : "average_score",
       },
@@ -3186,6 +3410,7 @@ apiV2Routes.get("/quality/reports/forecast", async (c) => {
       provider: provider ?? null,
       workflow: workflow ?? null,
       limit,
+      modelVersion,
     },
   });
 });

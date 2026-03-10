@@ -727,6 +727,16 @@ interface NormalizedQualityDailyMetricsInput {
   limit: number;
 }
 
+interface NormalizedQualityDailyMetricsSeriesInput {
+  from?: string;
+  to?: string;
+  scorecardKey?: string;
+  provider?: string;
+  repos: string[];
+  workflow?: string;
+  runId?: string;
+}
+
 interface NormalizedQualityExternalMetricGroupsInput {
   from?: string;
   to?: string;
@@ -1336,6 +1346,16 @@ export interface ListQualityDailyMetricsInput {
   workflow?: string;
   runId?: string;
   limit?: number;
+}
+
+export interface ListQualityDailyMetricsSeriesInput {
+  from?: string;
+  to?: string;
+  scorecardKey?: string;
+  provider?: string;
+  repos: string[];
+  workflow?: string;
+  runId?: string;
 }
 
 export interface QualityDailyMetric {
@@ -5184,6 +5204,25 @@ function normalizeQualityDailyMetricsInput(
     runId: normalizeQualityExternalFilterValue(input.runId),
     groupBy,
     limit,
+  };
+}
+
+function normalizeQualityDailyMetricsSeriesInput(
+  input: ListQualityDailyMetricsSeriesInput
+): NormalizedQualityDailyMetricsSeriesInput {
+  const repos = Array.isArray(input.repos)
+    ? input.repos
+        .map((value) => firstNonEmptyString(value))
+        .filter((value): value is string => Boolean(value))
+    : [];
+  return {
+    from: toIsoString(input.from) ?? undefined,
+    to: toIsoString(input.to) ?? undefined,
+    scorecardKey: firstNonEmptyString(input.scorecardKey) ?? undefined,
+    provider: normalizeQualityExternalFilterValue(input.provider, { lowerCase: true }),
+    repos: Array.from(new Set(repos)),
+    workflow: normalizeQualityExternalFilterValue(input.workflow),
+    runId: normalizeQualityExternalFilterValue(input.runId),
   };
 }
 
@@ -16248,6 +16287,86 @@ class ControlPlaneRepository {
     }
   }
 
+  async listQualityDailyMetricsSeriesByRepo(
+    tenantId: string,
+    input: ListQualityDailyMetricsSeriesInput
+  ): Promise<Record<string, QualityDailyMetric[]>> {
+    const normalizedTenantId = normalizeScopedTenantId(tenantId);
+    const normalized = normalizeQualityDailyMetricsSeriesInput(input);
+    const pool = await this.getPool();
+    if (!pool) {
+      return this.listQualityDailyMetricsSeriesByRepoFromMemory(normalizedTenantId, normalized);
+    }
+
+    if (normalized.repos.length === 0) {
+      return {};
+    }
+
+    try {
+      const params: unknown[] = [normalizedTenantId];
+      const whereClauses: string[] = ["tenant_id = $1"];
+      if (normalized.from) {
+        params.push(normalized.from);
+        whereClauses.push(`created_at >= $${params.length}::timestamptz`);
+      }
+      if (normalized.to) {
+        params.push(normalized.to);
+        whereClauses.push(`created_at <= $${params.length}::timestamptz`);
+      }
+      if (normalized.scorecardKey) {
+        params.push(normalized.scorecardKey);
+        whereClauses.push(`scorecard_key = $${params.length}`);
+      }
+      if (normalized.provider) {
+        params.push(normalized.provider);
+        whereClauses.push(`LOWER(COALESCE(provider, '')) = $${params.length}`);
+      }
+      if (normalized.workflow) {
+        params.push(normalized.workflow);
+        whereClauses.push(`workflow = $${params.length}`);
+      }
+      if (normalized.runId) {
+        params.push(normalized.runId);
+        whereClauses.push(`run_id = $${params.length}`);
+      }
+      params.push(normalized.repos);
+      whereClauses.push(
+        `COALESCE(NULLIF(repository, ''), 'unknown') = ANY($${params.length}::text[])`,
+      );
+
+      const result = await pool.query(
+        `SELECT COALESCE(NULLIF(repository, ''), 'unknown') AS repo,
+                to_char((created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS metric_date,
+                COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE passed)::int AS passed,
+                COUNT(*) FILTER (WHERE NOT passed)::int AS failed,
+                AVG(score)::double precision AS average_score
+         FROM quality_events
+         WHERE ${whereClauses.join(" AND ")}
+         GROUP BY repo, metric_date
+         ORDER BY repo ASC, metric_date DESC`,
+        params,
+      );
+
+      const series: Record<string, QualityDailyMetric[]> = {};
+      for (const row of result.rows) {
+        const repo = firstNonEmptyString(row.repo) ?? "unknown";
+        const item: QualityDailyMetric = {
+          date: firstNonEmptyString(row.metric_date) ?? "1970-01-01",
+          total: Math.max(0, Math.trunc(toNumber(row.total, 0))),
+          passed: Math.max(0, Math.trunc(toNumber(row.passed, 0))),
+          failed: Math.max(0, Math.trunc(toNumber(row.failed, 0))),
+          averageScore: Number(normalizeQualityScore(row.average_score).toFixed(6)),
+        };
+        (series[repo] ??= []).push(item);
+      }
+      return series;
+    } catch (error) {
+      this.disableDb(error, "聚合 quality_events repo 日指标失败");
+      return this.listQualityDailyMetricsSeriesByRepoFromMemory(normalizedTenantId, normalized);
+    }
+  }
+
   async listQualityExternalMetricGroups(
     tenantId: string,
     input: ListQualityExternalMetricGroupsInput
@@ -24817,6 +24936,96 @@ class ControlPlaneRepository {
       }))
       .sort((a, b) => b.date.localeCompare(a.date))
       .slice(0, input.limit);
+  }
+
+  private listQualityDailyMetricsSeriesByRepoFromMemory(
+    tenantId: string,
+    input: NormalizedQualityDailyMetricsSeriesInput
+  ): Record<string, QualityDailyMetric[]> {
+    if (input.repos.length === 0) {
+      return {};
+    }
+    const repoSet = new Set(input.repos);
+    const fromTimestamp = input.from ? Date.parse(input.from) : undefined;
+    const toTimestamp = input.to ? Date.parse(input.to) : undefined;
+    const buckets = new Map<
+      string,
+      Map<
+        string,
+        {
+          total: number;
+          passed: number;
+          failed: number;
+          scoreSum: number;
+        }
+      >
+    >();
+
+    for (const qualityEvent of this.memoryQualityEvents) {
+      if (qualityEvent.tenantId !== tenantId) {
+        continue;
+      }
+      if (input.scorecardKey && qualityEvent.scorecardKey !== input.scorecardKey) {
+        continue;
+      }
+      const externalSource =
+        qualityEvent.externalSource ??
+        extractQualityExternalSourceFromMetadata(qualityEvent.metadata);
+      if (input.provider && externalSource?.provider !== input.provider) {
+        continue;
+      }
+      if (input.workflow && externalSource?.workflow !== input.workflow) {
+        continue;
+      }
+      if (input.runId && externalSource?.runId !== input.runId) {
+        continue;
+      }
+      const repo = externalSource?.repo ?? "unknown";
+      if (!repoSet.has(repo)) {
+        continue;
+      }
+
+      const createdAtTimestamp = Date.parse(qualityEvent.createdAt);
+      if (fromTimestamp !== undefined && createdAtTimestamp < fromTimestamp) {
+        continue;
+      }
+      if (toTimestamp !== undefined && createdAtTimestamp > toTimestamp) {
+        continue;
+      }
+
+      const dateKey = qualityEvent.createdAt.slice(0, 10);
+      const repoBuckets = buckets.get(repo) ?? new Map();
+      const bucket = repoBuckets.get(dateKey) ?? {
+        total: 0,
+        passed: 0,
+        failed: 0,
+        scoreSum: 0,
+      };
+      bucket.total += 1;
+      if (qualityEvent.passed) {
+        bucket.passed += 1;
+      } else {
+        bucket.failed += 1;
+      }
+      bucket.scoreSum += normalizeQualityScore(qualityEvent.score);
+      repoBuckets.set(dateKey, bucket);
+      buckets.set(repo, repoBuckets);
+    }
+
+    const series: Record<string, QualityDailyMetric[]> = {};
+    for (const [repo, repoBuckets] of buckets.entries()) {
+      series[repo] = [...repoBuckets.entries()]
+        .map(([date, bucket]) => ({
+          date,
+          total: bucket.total,
+          passed: bucket.passed,
+          failed: bucket.failed,
+          averageScore:
+            bucket.total > 0 ? Number((bucket.scoreSum / bucket.total).toFixed(6)) : 0,
+        }))
+        .sort((a, b) => b.date.localeCompare(a.date));
+    }
+    return series;
   }
 
   private listQualityExternalMetricGroupsFromMemory(
