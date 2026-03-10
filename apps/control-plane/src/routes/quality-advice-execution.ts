@@ -182,6 +182,8 @@ async function executeReplayExperimentAdviceExecution(
       resultSummary.baselineVersionId,
       resultSummary.baseline_version_id,
     ) ?? resolveReplayDatasetCurrentVersionId(dataset);
+  const plannedCaseCount = Math.max(0, Math.trunc(toNumber(dataset.caseCount, 0)));
+  const plannedTotalCases = Math.min(plannedCaseCount, 5000);
   const candidateLabels = [
     ...(execution.candidateLabels ?? []),
     ...normalizeDistinctStrings(executionPayload.candidateLabels),
@@ -221,7 +223,7 @@ async function executeReplayExperimentAdviceExecution(
         ...(baselineVersionId ? { baselineVersionId } : {}),
       },
       summary: {
-        totalCases: 12,
+        totalCases: plannedTotalCases,
         candidateLabel,
         ...(execution.metric ? { metric: execution.metric } : {}),
         ...(baselineVersionId ? { baselineVersionId } : {}),

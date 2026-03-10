@@ -22607,6 +22607,44 @@ describe("Control Plane API", () => {
       currentVersionId?: string | null;
     };
 
+    const replaceAdviceCasesResponse = await app.request(
+      `/api/v2/replay/datasets/${encodeURIComponent(replayDataset.id)}/cases`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({
+          items: [
+            {
+              caseId: `case-${nonce}-1`,
+              sortOrder: 1,
+              input: "请总结退款流程",
+              expectedOutput: "退款流程摘要",
+            },
+            {
+              caseId: `case-${nonce}-2`,
+              sortOrder: 2,
+              input: "请给出用户注册指引",
+              expectedOutput: "注册指引摘要",
+            },
+            {
+              caseId: `case-${nonce}-3`,
+              sortOrder: 3,
+              input: "请说明 SLA 的含义",
+              expectedOutput: "SLA 解释摘要",
+            },
+          ],
+        }),
+      },
+    );
+    expect(replaceAdviceCasesResponse.status).toBe(200);
+    const replaceAdviceCasesBody = (await replaceAdviceCasesResponse.json()) as {
+      total: number;
+    };
+    expect(replaceAdviceCasesBody.total).toBe(3);
+
     const executeResponse = await app.request(
       `/api/v2/quality/advice/${encodeURIComponent(advice.id)}/execute`,
       {
@@ -22678,6 +22716,15 @@ describe("Control Plane API", () => {
       "candidate-b",
     ]);
     expect(replayExecuteBody.resultSummary?.runIds?.length).toBe(2);
+    for (const runId of replayExecuteBody.resultSummary?.runIds ?? []) {
+      const runResponse = await app.request(
+        `/api/v2/replay/runs/${encodeURIComponent(runId)}`,
+        { headers },
+      );
+      expect(runResponse.status).toBe(200);
+      const runBody = (await runResponse.json()) as { totalCases: number };
+      expect(runBody.totalCases).toBe(3);
+    }
 
     const listResponse = await app.request(
       `/api/v2/quality/advice/executions?adviceId=${encodeURIComponent(advice.id)}&limit=10`,
