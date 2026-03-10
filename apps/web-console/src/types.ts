@@ -2361,6 +2361,7 @@ export interface UsageWeeklySummaryResponse {
 }
 
 export type ExportFormat = "json" | "csv";
+export type AuditDlpMode = "off" | "redact" | "block";
 export type UsageExportDimension =
   | "daily"
   | "weekly"

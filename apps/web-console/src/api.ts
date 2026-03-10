@@ -45,6 +45,7 @@ import type {
   DataResidencyMode,
   DownloadFile,
   ExportFormat,
+  AuditDlpMode,
   HeatmapCell,
   IntegrationDlqMessageListResponse,
   IntegrationDlqRecoveryJob,
@@ -6694,6 +6695,151 @@ export async function exportUsage(
     undefined,
     signal
   );
+}
+
+export type DlpDownloadFile = DownloadFile & {
+  dlpMode?: AuditDlpMode;
+  dlpMatched?: boolean;
+};
+
+function parseAuditDlpMode(value: string | null): AuditDlpMode | undefined {
+  const normalized = (value || "").trim().toLowerCase();
+  if (normalized === "off" || normalized === "redact" || normalized === "block") {
+    return normalized as AuditDlpMode;
+  }
+  return undefined;
+}
+
+function parseBooleanHeader(value: string | null): boolean | undefined {
+  const normalized = (value || "").trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on") {
+    return true;
+  }
+  if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off") {
+    return false;
+  }
+  return undefined;
+}
+
+function readAuditDlpHeaders(response: Response): Pick<DlpDownloadFile, "dlpMode" | "dlpMatched"> {
+  return {
+    dlpMode: parseAuditDlpMode(response.headers.get("x-agentledger-dlp-mode")),
+    dlpMatched: parseBooleanHeader(response.headers.get("x-agentledger-dlp-matched")),
+  };
+}
+
+function appendOptionalQueryParam(params: URLSearchParams, key: string, value: unknown) {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed) {
+      params.set(key, trimmed);
+    }
+    return;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    params.set(key, String(Math.trunc(value)));
+  }
+}
+
+export async function exportAudits(
+  format: ExportFormat,
+  input?: {
+    dlpMode?: AuditDlpMode;
+    level?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+    cursor?: string;
+    eventId?: string;
+    action?: string;
+    keyword?: string;
+    resourceId?: string;
+  },
+  signal?: AbortSignal
+): Promise<DlpDownloadFile> {
+  if (!isExportFormat(format)) {
+    throw new Error("format 必须是 json 或 csv。");
+  }
+
+  const params = new URLSearchParams();
+  params.set("format", format);
+  appendOptionalQueryParam(params, "dlpMode", input?.dlpMode);
+  appendOptionalQueryParam(params, "level", input?.level);
+  appendOptionalQueryParam(params, "from", input?.from);
+  appendOptionalQueryParam(params, "to", input?.to);
+  appendOptionalQueryParam(params, "limit", input?.limit);
+  appendOptionalQueryParam(params, "cursor", input?.cursor);
+  appendOptionalQueryParam(params, "eventId", input?.eventId);
+  appendOptionalQueryParam(params, "action", input?.action);
+  appendOptionalQueryParam(params, "keyword", input?.keyword);
+  appendOptionalQueryParam(params, "resourceId", input?.resourceId);
+
+  const response = await requestResponseInternal(
+    `/api/v1/audits/export${params.toString() ? `?${params.toString()}` : ""}`,
+    undefined,
+    signal,
+    undefined,
+    false
+  );
+  const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+  const filename =
+    parseContentDispositionFilename(response.headers.get("content-disposition")) ??
+    `audits-export.${format}`;
+  const blob = await response.blob();
+  return {
+    blob,
+    filename,
+    contentType,
+    ...readAuditDlpHeaders(response),
+  };
+}
+
+export async function exportAuditEvidenceBundle(
+  input?: {
+    dlpMode?: AuditDlpMode;
+    level?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+    cursor?: string;
+    eventId?: string;
+    action?: string;
+    keyword?: string;
+    resourceId?: string;
+  },
+  signal?: AbortSignal
+): Promise<DlpDownloadFile> {
+  const params = new URLSearchParams();
+  appendOptionalQueryParam(params, "dlpMode", input?.dlpMode);
+  appendOptionalQueryParam(params, "level", input?.level);
+  appendOptionalQueryParam(params, "from", input?.from);
+  appendOptionalQueryParam(params, "to", input?.to);
+  appendOptionalQueryParam(params, "limit", input?.limit);
+  appendOptionalQueryParam(params, "cursor", input?.cursor);
+  appendOptionalQueryParam(params, "eventId", input?.eventId);
+  appendOptionalQueryParam(params, "action", input?.action);
+  appendOptionalQueryParam(params, "keyword", input?.keyword);
+  appendOptionalQueryParam(params, "resourceId", input?.resourceId);
+
+  const response = await requestResponseInternal(
+    `/api/v1/audits/evidence-bundle${params.toString() ? `?${params.toString()}` : ""}`,
+    undefined,
+    signal,
+    undefined,
+    false
+  );
+  const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+  const filename =
+    parseContentDispositionFilename(response.headers.get("content-disposition")) ??
+    "audit-evidence-bundle.json";
+  const blob = await response.blob();
+  return {
+    blob,
+    filename,
+    contentType,
+    ...readAuditDlpHeaders(response),
+  };
 }
 
 export async function searchSessions(

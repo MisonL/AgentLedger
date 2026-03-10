@@ -27,6 +27,29 @@ const repository = getControlPlaneRepository();
 const EVIDENCE_EXPORT_MAX_PAGES = 1000;
 const EVIDENCE_EXPORT_MAX_RECORDS = 50_000;
 const AUDIT_DLP_MODE_ENV = "AUDIT_DLP_MODE";
+const AUDIT_DLP_EXTRA_PATTERNS_JSON_ENV = "AUDIT_DLP_EXTRA_PATTERNS_JSON";
+
+const AUDIT_DLP_EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+const AUDIT_DLP_BEARER_PATTERN = /Bearer\s+[A-Za-z0-9._\-+/=]+/gi;
+const AUDIT_DLP_BASIC_PATTERN = /\bBasic\s+[A-Za-z0-9+/=]{8,}\b/gi;
+const AUDIT_DLP_JWT_PATTERN =
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
+const AUDIT_DLP_KEY_PATTERN = /\b(?:sk|pk|ak)_[A-Za-z0-9]{6,}\b/g;
+const AUDIT_DLP_OPENAI_KEY_PATTERN =
+  /\bsk-(?:proj|svcacct)-[A-Za-z0-9_-]{10,}\b/g;
+const AUDIT_DLP_OPENAI_LEGACY_KEY_PATTERN = /\bsk-[A-Za-z0-9]{20,}\b/g;
+const AUDIT_DLP_ANTHROPIC_KEY_PATTERN =
+  /\bsk-ant-(?:api\d{2}-)?[A-Za-z0-9_-]{10,}\b/g;
+const AUDIT_DLP_AWS_ACCESS_KEY_ID_PATTERN =
+  /\bA(?:KIA|SIA|GPA|IDA|ROA|NPA)[0-9A-Z]{16}\b/g;
+const AUDIT_DLP_ALIYUN_ACCESS_KEY_ID_PATTERN = /\bLTAI[A-Za-z0-9]{12,}\b/g;
+const AUDIT_DLP_TENCENT_SECRET_ID_PATTERN = /\bAKID[A-Za-z0-9]{13,64}\b/g;
+const AUDIT_DLP_SECRET_KV_PATTERN =
+  /\b(?:secret|token|password|api[-_]?key|accesskeysecret|secretaccesskey|secretkey|access_key_secret|secret_access_key|secret_id|secretid)\b\s*[:=]\s*["']?[^"'\s,}]+["']?/gi;
+const AUDIT_DLP_EXTRA_REDACTED_PLACEHOLDER = "[REDACTED_DLP]";
+
+let cachedExtraDlpPatterns: { raw: string | undefined; patterns: RegExp[] } | null =
+  null;
 
 interface AuditQueryFilters extends AuditListInput {
   eventId?: string;
@@ -170,19 +193,107 @@ function resolveAuditDlpMode(raw: string | undefined): AuditDlpMode {
   return envMode === "redact" || envMode === "block" ? envMode : "off";
 }
 
-function redactSensitiveText(value: string): string {
-  return value
-    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[REDACTED_EMAIL]")
-    .replace(/Bearer\s+[A-Za-z0-9._\-+/=]+/gi, "Bearer [REDACTED_TOKEN]")
-    .replace(/\b(?:sk|pk|ak)_[A-Za-z0-9]{6,}\b/g, "[REDACTED_KEY]")
-    .replace(/\b(?:secret|token|password|api[-_]?key)\b\s*[:=]\s*["']?[^"'\s,}]+["']?/gi, "[REDACTED_SECRET]");
+function compileExtraDlpPattern(source: string): RegExp | null {
+  const trimmed = source.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    if (trimmed.startsWith("/") && trimmed.length > 2) {
+      const lastSlashIndex = trimmed.lastIndexOf("/");
+      if (lastSlashIndex > 0) {
+        const body = trimmed.slice(1, lastSlashIndex);
+        const rawFlags = trimmed.slice(lastSlashIndex + 1);
+        const flags = new Set<string>();
+        for (const flag of rawFlags) {
+          if (flag === "g" || flag === "i" || flag === "m" || flag === "s" || flag === "u" || flag === "y") {
+            flags.add(flag);
+          }
+        }
+        flags.add("g");
+        return new RegExp(body, Array.from(flags).join(""));
+      }
+    }
+    return new RegExp(trimmed, "gi");
+  } catch (error) {
+    console.warn(
+      "[control-plane] AUDIT_DLP_EXTRA_PATTERNS_JSON 存在非法正则，已忽略。",
+      error,
+    );
+    return null;
+  }
 }
 
-function containsSensitiveText(value: string): boolean {
-  return redactSensitiveText(value) !== value;
+function loadAuditDlpExtraPatterns(): RegExp[] {
+  const raw = normalizeOptionalQuery(Bun.env[AUDIT_DLP_EXTRA_PATTERNS_JSON_ENV]);
+  if (cachedExtraDlpPatterns && cachedExtraDlpPatterns.raw === raw) {
+    return cachedExtraDlpPatterns.patterns;
+  }
+
+  const patterns: RegExp[] = [];
+  if (!raw) {
+    cachedExtraDlpPatterns = { raw, patterns };
+    return patterns;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      console.warn(
+        "[control-plane] AUDIT_DLP_EXTRA_PATTERNS_JSON 必须是 JSON 数组，已忽略。",
+      );
+      cachedExtraDlpPatterns = { raw, patterns };
+      return patterns;
+    }
+
+    for (const item of parsed) {
+      if (typeof item !== "string") {
+        continue;
+      }
+      const compiled = compileExtraDlpPattern(item);
+      if (compiled) {
+        patterns.push(compiled);
+      }
+    }
+  } catch (error) {
+    console.warn(
+      "[control-plane] 解析 AUDIT_DLP_EXTRA_PATTERNS_JSON 失败，已忽略。",
+      error,
+    );
+  }
+
+  cachedExtraDlpPatterns = { raw, patterns };
+  return patterns;
 }
 
-function applyAuditDlp(items: AuditItem[], mode: AuditDlpMode): {
+function redactSensitiveText(value: string, extraPatterns: RegExp[]): string {
+  let redacted = value
+    .replace(AUDIT_DLP_EMAIL_PATTERN, "[REDACTED_EMAIL]")
+    .replace(AUDIT_DLP_BEARER_PATTERN, "Bearer [REDACTED_TOKEN]")
+    .replace(AUDIT_DLP_BASIC_PATTERN, "Basic [REDACTED_TOKEN]")
+    .replace(AUDIT_DLP_JWT_PATTERN, "[REDACTED_TOKEN]")
+    .replace(AUDIT_DLP_OPENAI_KEY_PATTERN, "[REDACTED_KEY]")
+    .replace(AUDIT_DLP_OPENAI_LEGACY_KEY_PATTERN, "[REDACTED_KEY]")
+    .replace(AUDIT_DLP_ANTHROPIC_KEY_PATTERN, "[REDACTED_KEY]")
+    .replace(AUDIT_DLP_AWS_ACCESS_KEY_ID_PATTERN, "[REDACTED_KEY]")
+    .replace(AUDIT_DLP_ALIYUN_ACCESS_KEY_ID_PATTERN, "[REDACTED_KEY]")
+    .replace(AUDIT_DLP_TENCENT_SECRET_ID_PATTERN, "[REDACTED_KEY]")
+    .replace(AUDIT_DLP_KEY_PATTERN, "[REDACTED_KEY]")
+    .replace(AUDIT_DLP_SECRET_KV_PATTERN, "[REDACTED_SECRET]");
+
+  for (const pattern of extraPatterns) {
+    redacted = redacted.replace(pattern, AUDIT_DLP_EXTRA_REDACTED_PLACEHOLDER);
+  }
+
+  return redacted;
+}
+
+function containsSensitiveText(value: string, extraPatterns: RegExp[]): boolean {
+  return redactSensitiveText(value, extraPatterns) !== value;
+}
+
+function applyAuditDlp(items: AuditItem[], mode: AuditDlpMode, extraPatterns: RegExp[]): {
   items: AuditItem[];
   matched: boolean;
   redacted: number;
@@ -190,10 +301,12 @@ function applyAuditDlp(items: AuditItem[], mode: AuditDlpMode): {
   let matched = false;
   let redacted = 0;
   const sanitized = items.map((item) => {
-    const detail = containsSensitiveText(item.detail) ? redactSensitiveText(item.detail) : item.detail;
+    const detail = containsSensitiveText(item.detail, extraPatterns)
+      ? redactSensitiveText(item.detail, extraPatterns)
+      : item.detail;
     const metadataJson = JSON.stringify(item.metadata);
-    const nextMetadataJson = containsSensitiveText(metadataJson)
-      ? redactSensitiveText(metadataJson)
+    const nextMetadataJson = containsSensitiveText(metadataJson, extraPatterns)
+      ? redactSensitiveText(metadataJson, extraPatterns)
       : metadataJson;
     const nextMetadata =
       nextMetadataJson === metadataJson
@@ -555,11 +668,6 @@ auditRoutes.get("/audits", async (c) => {
     cursor: cursorResult.cursor,
   };
   const payload = await repository.listAudits(filters, auth.tenantId);
-  const dlpMode = resolveAuditDlpMode(query.dlpMode);
-  const dlpResult = applyAuditDlp(payload.items, dlpMode);
-  if (dlpMode === "block" && dlpResult.matched) {
-    return c.json({ message: "审计导出命中 DLP 规则，已阻止导出。" }, 422);
-  }
   const requestId = c.get("requestId");
   await appendAuditLogSafely({
     tenantId: auth.tenantId,
@@ -637,7 +745,7 @@ auditRoutes.get("/audits/export", async (c) => {
   };
   const payload = await repository.listAudits(filters, auth.tenantId);
   const dlpMode = resolveAuditDlpMode(query.dlpMode);
-  const dlpResult = applyAuditDlp(payload.items, dlpMode);
+  const dlpResult = applyAuditDlp(payload.items, dlpMode, loadAuditDlpExtraPatterns());
   if (dlpMode === "block" && dlpResult.matched) {
     return c.json({ message: "审计导出命中 DLP 规则，已阻止导出。" }, 422);
   }
@@ -792,7 +900,7 @@ auditRoutes.get("/audits/evidence-bundle", async (c) => {
   }
   const exportedAt = new Date().toISOString();
   const dlpMode = resolveAuditDlpMode(query.dlpMode);
-  const dlpResult = applyAuditDlp(payload.items, dlpMode);
+  const dlpResult = applyAuditDlp(payload.items, dlpMode, loadAuditDlpExtraPatterns());
   if (dlpMode === "block" && dlpResult.matched) {
     return c.json({ message: "审计取证包命中 DLP 规则，已阻止导出。" }, 422);
   }
