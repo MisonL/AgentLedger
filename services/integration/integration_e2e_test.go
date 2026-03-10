@@ -519,6 +519,117 @@ func TestIntegrationE2EWeeklyOrchestrationDispatchesSelectedChannels(t *testing.
 	wecomProbe.assertNoRequest(t)
 }
 
+func TestIntegrationE2EWeeklyOrchestrationDispatchesDingTalkEmailWebhookTicketAndSMTPEmail(t *testing.T) {
+	env := newIntegrationE2EEnv(t)
+	dingTalkProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
+	emailWebhookProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
+	ticketProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
+	smtpServer := newFakeSMTPServer(t)
+	defer smtpServer.Close()
+
+	cfg := newIntegrationE2EConfig(
+		channelDingTalk,
+		channelEmail,
+		channelEmailWebhook,
+		channelTicket,
+	)
+	cfg.ChannelURLs[channelDingTalk] = dingTalkProbe.server.URL
+	cfg.ChannelURLs[channelEmailWebhook] = emailWebhookProbe.server.URL
+	cfg.ChannelURLs[channelTicket] = ticketProbe.server.URL
+	cfg.EmailFrom = "alerts@example.com"
+	cfg.EmailSMTPHost = smtpServer.Host()
+	cfg.EmailSMTPPort = smtpServer.Port()
+	cfg.EmailSMTPTLSMode = smtpTLSModeNone
+
+	env.ensureStream(t, cfg.WeeklyStream, cfg.WeeklySubject)
+	dispatcher := newAlertDispatcher(env.ctx, env.log, env.js, cfg, nil)
+	dispatcher.httpClient = &http.Client{Timeout: time.Second}
+	env.startConsumer(t, cfg, cfg.WeeklyStream, cfg.WeeklySubject, cfg.WeeklyDurable, dispatcher.handleWeeklyReportMessage)
+
+	payload := []byte(`{"report_id":"weekly-e2e-1","tenant_id":"tenant-e2e","week_start":"2026-03-02T00:00:00Z","week_end":"2026-03-09T00:00:00Z","tokens":3100,"cost":6.35,"peak_day_date":"2026-03-04","peak_day_tokens":1900,"peak_day_cost":4.245,"email_to":["ops@example.com"],"orchestration":{"channels":["dingtalk","email","email_webhook","ticket"],"fallback":false}}`)
+	env.publish(t, cfg.WeeklySubject, payload)
+
+	wantText := formatEventTextPayload(payload, eventTypeWeeklyReport)
+
+	dingTalkRequest := dingTalkProbe.waitForRequest(t)
+	var dingTalkBody weComDingTalkTextPayload
+	if err := json.Unmarshal(dingTalkRequest.Body, &dingTalkBody); err != nil {
+		t.Fatalf("unmarshal dingtalk payload failed: %v", err)
+	}
+	if dingTalkBody.MsgType != "text" {
+		t.Fatalf("dingtalk msgtype mismatch: got %q want %q", dingTalkBody.MsgType, "text")
+	}
+	if dingTalkBody.Text.Content != wantText {
+		t.Fatalf("dingtalk text mismatch:\ngot:  %s\nwant: %s", dingTalkBody.Text.Content, wantText)
+	}
+
+	message := smtpServer.WaitForMessage(t)
+	if message.mailFrom != "<alerts@example.com>" {
+		t.Fatalf("smtp mail from mismatch: got %q want %q", message.mailFrom, "<alerts@example.com>")
+	}
+	if strings.Join(message.rcptTo, ",") != "<ops@example.com>" {
+		t.Fatalf("smtp recipients mismatch: got %v want %v", message.rcptTo, []string{"<ops@example.com>"})
+	}
+	if !strings.Contains(message.data, "Subject: [agentledger][weekly_report]") {
+		t.Fatalf("smtp subject mismatch: %s", message.data)
+	}
+	if !strings.Contains(message.data, "[agentledger][weekly_report]") ||
+		!strings.Contains(message.data, "report_id=weekly-e2e-1") {
+		t.Fatalf("smtp body mismatch: %s", message.data)
+	}
+
+	emailWebhookRequest := emailWebhookProbe.waitForRequest(t)
+	var emailWebhookBody emailWebhookChannelPayload
+	if err := json.Unmarshal(emailWebhookRequest.Body, &emailWebhookBody); err != nil {
+		t.Fatalf("unmarshal email webhook payload failed: %v", err)
+	}
+	if emailWebhookBody.EventType != normalizeEventTypeLabel(eventTypeWeeklyReport) {
+		t.Fatalf("email webhook event type mismatch: got %q want %q", emailWebhookBody.EventType, normalizeEventTypeLabel(eventTypeWeeklyReport))
+	}
+	if emailWebhookBody.Subject != buildEmailSubject(payload, eventTypeWeeklyReport) {
+		t.Fatalf("email webhook subject mismatch: got %q want %q", emailWebhookBody.Subject, buildEmailSubject(payload, eventTypeWeeklyReport))
+	}
+	if emailWebhookBody.From != "alerts@example.com" {
+		t.Fatalf("email webhook from mismatch: got %q want %q", emailWebhookBody.From, "alerts@example.com")
+	}
+	if strings.Join(emailWebhookBody.To, ",") != "ops@example.com" {
+		t.Fatalf("email webhook recipients mismatch: got %v want %v", emailWebhookBody.To, []string{"ops@example.com"})
+	}
+	if emailWebhookBody.Body != wantText {
+		t.Fatalf("email webhook body mismatch:\ngot:  %s\nwant: %s", emailWebhookBody.Body, wantText)
+	}
+	if !bytes.Equal(bytes.TrimSpace(emailWebhookBody.Event), payload) {
+		t.Fatalf("email webhook raw event mismatch: got %s want %s", string(emailWebhookBody.Event), string(payload))
+	}
+
+	ticketRequest := ticketProbe.waitForRequest(t)
+	var ticketBody ticketWebhookChannelPayload
+	if err := json.Unmarshal(ticketRequest.Body, &ticketBody); err != nil {
+		t.Fatalf("unmarshal ticket payload failed: %v", err)
+	}
+	if ticketBody.EventType != normalizeEventTypeLabel(eventTypeWeeklyReport) {
+		t.Fatalf("ticket event type mismatch: got %q want %q", ticketBody.EventType, normalizeEventTypeLabel(eventTypeWeeklyReport))
+	}
+	if ticketBody.Title != buildEmailSubject(payload, eventTypeWeeklyReport) {
+		t.Fatalf("ticket title mismatch: got %q want %q", ticketBody.Title, buildEmailSubject(payload, eventTypeWeeklyReport))
+	}
+	if ticketBody.Summary != wantText {
+		t.Fatalf("ticket summary mismatch:\ngot:  %s\nwant: %s", ticketBody.Summary, wantText)
+	}
+	if ticketBody.Context.TenantID != "tenant-e2e" {
+		t.Fatalf("ticket tenant mismatch: got %q want %q", ticketBody.Context.TenantID, "tenant-e2e")
+	}
+	if ticketBody.Context.ReportID != "weekly-e2e-1" {
+		t.Fatalf("ticket report mismatch: got %q want %q", ticketBody.Context.ReportID, "weekly-e2e-1")
+	}
+	if ticketBody.OccurredAt.IsZero() {
+		t.Fatal("ticket occurred_at should not be zero")
+	}
+	if !bytes.Equal(bytes.TrimSpace(ticketBody.Event), payload) {
+		t.Fatalf("ticket raw event mismatch: got %s want %s", string(ticketBody.Event), string(payload))
+	}
+}
+
 func TestIntegrationE2EAlertOrchestrationDispatchesDingTalkEmailWebhookAndTicket(t *testing.T) {
 	env := newIntegrationE2EEnv(t)
 	dingTalkProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
