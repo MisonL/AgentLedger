@@ -3139,6 +3139,62 @@ describe("api mock fallback gate", () => {
     );
   });
 
+  test("runOpenPlatformReplayExperiment 支持 candidateLabels/skipIfRunning 入参序列化", async () => {
+    env.DEV = false;
+    setAuthTokens({
+      accessToken: "access-token-replay-exp-run",
+      refreshToken: "refresh-token-replay-exp-run",
+      expiresIn: 1800,
+      tokenType: "Bearer",
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = new URL(toUrl(input), "http://localhost");
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.pathname === "/api/v2/replay/experiments/exp-1/run" && method === "POST") {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+          candidateLabels: ["candidate-a", "candidate-b"],
+          skipIfRunning: false,
+        });
+        return mockJsonResponse({
+          id: "exp-1",
+          tenantId: "default",
+          name: "Experiment",
+          datasetId: "dataset-op-1",
+          baselineId: null,
+          baselineVersionId: null,
+          metadata: {},
+          status: "queued",
+          triggerSource: "manual",
+          executionMode: "automatic",
+          candidateLabels: ["candidate-a", "candidate-b"],
+          sourceAdviceId: null,
+          runIds: ["run-1"],
+          runStatusSummary: {},
+          aggregateSummary: {},
+          summary: {},
+          runs: [],
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-01T00:00:00.000Z",
+          startedAt: "2026-03-01T00:00:00.000Z",
+          finishedAt: null,
+          lastError: null,
+        });
+      }
+
+      throw new Error(`unexpected call: ${method} ${url.pathname}`);
+    });
+
+    await expect(
+      runOpenPlatformReplayExperiment("exp-1", {
+        candidateLabels: ["candidate-a", "candidate-b"],
+        skipIfRunning: false,
+      }),
+    ).resolves.toEqual(expect.objectContaining({ id: "exp-1", status: "queued" }));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
   test("exportSessions 与 exportUsage 支持 csv 下载", async () => {
     env.DEV = false;
     setAuthTokens({

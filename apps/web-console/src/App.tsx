@@ -7023,6 +7023,24 @@ function GovernancePage() {
     },
   });
 
+  const forceRunReplayExperimentMutation = useMutation({
+    mutationFn: (experimentId: string) =>
+      runOpenPlatformReplayExperiment(experimentId, { skipIfRunning: false }),
+    onSuccess: async (payload) => {
+      setReplayError(null);
+      setReplayFeedback(`回放实验 ${payload.name} 已启动（忽略运行中）。`);
+      setReplayExperimentDetailPayload(payload);
+      setReplayExperimentComparePayload(null);
+      setReplayExperimentBatchComparePayload(null);
+      setReplayExperimentWorkflowPayload(null);
+      await queryClient.invalidateQueries({ queryKey: ["replay", "experiments"] });
+    },
+    onError: (error) => {
+      setReplayFeedback(null);
+      setReplayError(`启动回放实验失败：${toErrorMessage(error)}`);
+    },
+  });
+
   const cancelReplayExperimentMutation = useMutation({
     mutationFn: (experimentId: string) => cancelOpenPlatformReplayExperiment(experimentId),
     onSuccess: async (payload) => {
@@ -18097,6 +18115,15 @@ function GovernancePage() {
                               onClick={() => runReplayExperimentMutation.mutate(item.id)}
                             >
                               启动
+                            </button>
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() =>
+                                forceRunReplayExperimentMutation.mutate(item.id)
+                              }
+                            >
+                              启动（忽略运行中）
                             </button>
                             <button
                               type="button"

@@ -9413,15 +9413,25 @@ export async function patchOpenPlatformReplayExperiment(
 
 export async function runOpenPlatformReplayExperiment(
   experimentId: string,
+  input?: {
+    candidateLabels?: string[];
+    skipIfRunning?: boolean;
+  },
   signal?: AbortSignal,
 ): Promise<OpenPlatformReplayExperiment> {
   const normalizedExperimentId = experimentId.trim();
   if (!normalizedExperimentId) {
     throw new Error("experimentId 不能为空。");
   }
+  const shouldSendBody =
+    input !== undefined &&
+    (input.candidateLabels !== undefined || input.skipIfRunning !== undefined);
   const result = await requestJson<unknown>(
     `/api/v2/replay/experiments/${encodeURIComponent(normalizedExperimentId)}/run`,
-    { method: "POST" },
+    {
+      method: "POST",
+      ...(shouldSendBody ? { body: JSON.stringify(input) } : {}),
+    },
     signal,
   );
   if (!isOpenPlatformReplayExperiment(result)) {

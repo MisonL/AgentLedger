@@ -2617,12 +2617,25 @@ async function mapReplayExperimentWithRuns(
 async function triggerReplayExperimentRuns(input: {
   tenantId: string;
   experiment: ReplayExperimentRecord;
+  candidateLabels?: string[];
+  skipIfRunning?: boolean;
 }): Promise<ReplayExperimentRecord> {
-  const candidateLabels =
-    input.experiment.candidateLabels.length > 0
-      ? input.experiment.candidateLabels
-      : ["candidate"];
+  const skipIfRunning = input.skipIfRunning ?? true;
+  const candidateLabelsSource =
+    input.candidateLabels && input.candidateLabels.length > 0
+      ? input.candidateLabels
+      : input.experiment.candidateLabels.length > 0
+        ? input.experiment.candidateLabels
+        : ["candidate"];
+  const candidateLabels = Array.from(
+    new Set(
+      candidateLabelsSource
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter(Boolean),
+    ),
+  );
   const existingRunIds = new Set(input.experiment.runIds);
+  const linkedRunIds: string[] = [];
   const createdRunIds: string[] = [];
   const dataset = await repository.getReplayDatasetById(
     input.tenantId,
@@ -2632,7 +2645,63 @@ async function triggerReplayExperimentRuns(input: {
     firstNonEmptyString(input.experiment.baselineVersionId) ??
     readReplayExperimentBaselineVersionId(input.tenantId, input.experiment.id) ??
     (dataset ? resolveReplayDatasetCurrentVersionId(dataset) : undefined);
-  for (const candidateLabel of candidateLabels) {
+  const activeRuns = skipIfRunning
+    ? (
+        await Promise.all([
+          repository.listReplayRuns(input.tenantId, {
+            datasetId: input.experiment.datasetId,
+            status: "pending",
+            limit: 500,
+          }),
+          repository.listReplayRuns(input.tenantId, {
+            datasetId: input.experiment.datasetId,
+            status: "running",
+            limit: 500,
+          }),
+        ])
+      )
+        .flat()
+        .filter((run) => {
+          const experimentId = firstNonEmptyString(
+            run.parameters.experimentId,
+            run.parameters.experiment_id,
+            run.summary.experimentId,
+            run.summary.experiment_id,
+          );
+          return experimentId === input.experiment.id;
+        })
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    : [];
+
+  for (const candidateLabel of candidateLabels.length > 0 ? candidateLabels : ["candidate"]) {
+    if (skipIfRunning) {
+      const existingActiveRun = activeRuns.find((run) => {
+        const runCandidateLabel = firstNonEmptyString(
+          run.parameters.candidateLabel,
+          run.parameters.candidate_label,
+          run.summary.candidateLabel,
+          run.summary.candidate_label,
+        );
+        if (runCandidateLabel !== candidateLabel) {
+          return false;
+        }
+        const runBaselineVersionId = firstNonEmptyString(
+          run.parameters.baselineVersionId,
+          run.parameters.baseline_version_id,
+          run.summary.baselineVersionId,
+          run.summary.baseline_version_id,
+        );
+        return runBaselineVersionId === baselineVersionId;
+      });
+      if (existingActiveRun) {
+        if (!existingRunIds.has(existingActiveRun.id)) {
+          existingRunIds.add(existingActiveRun.id);
+          linkedRunIds.push(existingActiveRun.id);
+        }
+        continue;
+      }
+    }
+
     const replayRun = await repository.createReplayRun(input.tenantId, {
       datasetId: input.experiment.datasetId,
       parameters: {
@@ -2659,7 +2728,7 @@ async function triggerReplayExperimentRuns(input: {
   }
   return await saveReplayExperiment({
     ...input.experiment,
-    runIds: [...input.experiment.runIds, ...createdRunIds],
+    runIds: [...input.experiment.runIds, ...linkedRunIds, ...createdRunIds],
     status: "queued",
     startedAt: input.experiment.startedAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -4362,6 +4431,27 @@ apiV2Routes.post("/replay/experiments/:id/run", async (c) => {
   if (!experimentId) {
     return c.json({ message: "id 必须为非空字符串。" }, 400);
   }
+  const body = normalizeRecord(await c.req.json().catch(() => undefined));
+  let skipIfRunning = true;
+  if (body.skipIfRunning !== undefined) {
+    if (typeof body.skipIfRunning !== "boolean") {
+      return c.json({ message: "skipIfRunning 必须为 boolean。" }, 400);
+    }
+    skipIfRunning = body.skipIfRunning;
+  }
+  let candidateLabels: string[] | undefined;
+  if (body.candidateLabels !== undefined) {
+    if (!Array.isArray(body.candidateLabels)) {
+      return c.json({ message: "candidateLabels 必须为 string[]。" }, 400);
+    }
+    if (!body.candidateLabels.every((item) => typeof item === "string")) {
+      return c.json({ message: "candidateLabels 必须为 string[]。" }, 400);
+    }
+    const resolved = Array.from(
+      new Set(body.candidateLabels.map((item) => item.trim()).filter(Boolean)),
+    );
+    candidateLabels = resolved.length > 0 ? resolved : undefined;
+  }
   const record = await getReplayExperimentById(auth.tenantId, experimentId);
   if (!record) {
     return c.json({ message: `未找到回放实验：${experimentId}` }, 404);
@@ -4374,6 +4464,8 @@ apiV2Routes.post("/replay/experiments/:id/run", async (c) => {
       triggerSource: record.triggerSource === "manual" ? "manual" : record.triggerSource,
       updatedAt: new Date().toISOString(),
     },
+    candidateLabels,
+    skipIfRunning,
   });
   return c.json(await mapReplayExperimentWithRuns(auth.tenantId, updated));
 });
