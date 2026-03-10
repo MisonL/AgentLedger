@@ -317,6 +317,33 @@ function resolveReplayDatasetCurrentVersionId(dataset: ReplayDataset): string | 
   );
 }
 
+function resolveReplayDatasetScenarioCountByVersionId(
+  dataset: ReplayDataset,
+  versionId: string | undefined,
+): number | undefined {
+  if (!versionId) {
+    return undefined;
+  }
+  const metadata = normalizeRecord(dataset.metadata);
+  const versions = Array.isArray(metadata.baselineVersions) ? metadata.baselineVersions : [];
+  for (const item of versions) {
+    const record = normalizeRecord(item);
+    const id = firstNonEmptyString(record.id);
+    if (!id || id !== versionId) {
+      continue;
+    }
+    const scenarioCount = toInteger(
+      record.scenarioCount,
+      toInteger(record.scenario_count, -1),
+    );
+    if (scenarioCount >= 0) {
+      return scenarioCount;
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
 function toRepositoryScore(value: number): number {
   if (!Number.isFinite(value)) {
     return 0;
@@ -2790,6 +2817,29 @@ async function triggerReplayExperimentRuns(input: {
     firstNonEmptyString(input.experiment.baselineVersionId) ??
     readReplayExperimentBaselineVersionId(input.tenantId, input.experiment.id) ??
     (dataset ? resolveReplayDatasetCurrentVersionId(dataset) : undefined);
+  const nextBaselineVersionId =
+    firstNonEmptyString(input.experiment.baselineVersionId) ?? baselineVersionId;
+  if (
+    !firstNonEmptyString(input.experiment.baselineVersionId) &&
+    nextBaselineVersionId
+  ) {
+    rememberReplayExperimentBaselineVersionId(
+      input.tenantId,
+      input.experiment.id,
+      nextBaselineVersionId,
+    );
+  }
+  const plannedCaseCountRaw = dataset ? Math.max(0, toInteger(dataset.caseCount, 0)) : 0;
+  const datasetCurrentVersionId = dataset ? resolveReplayDatasetCurrentVersionId(dataset) : undefined;
+  const plannedCaseCount =
+    dataset && nextBaselineVersionId
+      ? datasetCurrentVersionId && nextBaselineVersionId !== datasetCurrentVersionId
+        ? resolveReplayDatasetScenarioCountByVersionId(dataset, nextBaselineVersionId) ??
+          plannedCaseCountRaw
+        : plannedCaseCountRaw
+      : plannedCaseCountRaw;
+  // 与 repository 的 normalizeReplayDatasetCaseListInput 上限保持一致，避免 UI 预估与真实执行不一致。
+  const plannedTotalCases = Math.min(plannedCaseCount, 5000);
   const activeRuns = skipIfRunning
     ? (
         await Promise.all([
@@ -2853,15 +2903,15 @@ async function triggerReplayExperimentRuns(input: {
         experimentId: input.experiment.id,
         candidateLabel,
         triggerSource: input.experiment.triggerSource,
-        ...(baselineVersionId
-          ? { baselineVersionId }
+        ...(nextBaselineVersionId
+          ? { baselineVersionId: nextBaselineVersionId }
           : {}),
       },
       summary: {
-        totalCases: 12,
+        totalCases: plannedTotalCases,
         candidateLabel,
-        ...(baselineVersionId
-          ? { baselineVersionId }
+        ...(nextBaselineVersionId
+          ? { baselineVersionId: nextBaselineVersionId }
           : {}),
       },
     });
@@ -2873,6 +2923,7 @@ async function triggerReplayExperimentRuns(input: {
   }
   return await saveReplayExperiment({
     ...input.experiment,
+    baselineVersionId: nextBaselineVersionId,
     runIds: [...input.experiment.runIds, ...linkedRunIds, ...createdRunIds],
     status: "queued",
     startedAt: input.experiment.startedAt ?? new Date().toISOString(),

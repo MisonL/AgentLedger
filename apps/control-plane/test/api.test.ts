@@ -23806,6 +23806,44 @@ describe("Control Plane API", () => {
       };
       expect(dataset.currentVersionId).toEqual(expect.any(String));
 
+      const replaceCasesResponse = await app.request(
+        `/api/v2/replay/datasets/${encodeURIComponent(dataset.id)}/cases`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({
+            items: [
+              {
+                caseId: `case-${nonce}-1`,
+                sortOrder: 1,
+                input: "请总结退款流程",
+                expectedOutput: "退款流程摘要",
+              },
+              {
+                caseId: `case-${nonce}-2`,
+                sortOrder: 2,
+                input: "请给出用户注册指引",
+                expectedOutput: "注册指引摘要",
+              },
+              {
+                caseId: `case-${nonce}-3`,
+                sortOrder: 3,
+                input: "请说明 SLA 的含义",
+                expectedOutput: "SLA 解释摘要",
+              },
+            ],
+          }),
+        },
+      );
+      expect(replaceCasesResponse.status).toBe(200);
+      const replacedCasesBody = (await replaceCasesResponse.json()) as {
+        total: number;
+      };
+      expect(replacedCasesBody.total).toBe(3);
+
       const createExperimentResponse = await app.request(
         "/api/v2/replay/experiments",
         {
@@ -23828,12 +23866,14 @@ describe("Control Plane API", () => {
         status?: string;
         baselineVersionId?: string | null;
         runIds: string[];
+        runs?: Array<{ totalCases: number }>;
       };
       expect(["queued", "running", "completed"]).toContain(
         experiment.status ?? "queued",
       );
       expect(experiment.baselineVersionId ?? null).toBe(dataset.currentVersionId ?? null);
       expect(experiment.runIds.length).toBeGreaterThanOrEqual(2);
+      expect(experiment.runs?.every((run) => run.totalCases === 3)).toBe(true);
 
       const createCompareTargetResponse = await app.request(
         "/api/v2/replay/experiments",
