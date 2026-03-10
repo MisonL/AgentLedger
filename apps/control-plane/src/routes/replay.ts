@@ -590,7 +590,7 @@ function evaluateReplayCase(input: {
 type TokenPulseReplayRouteHeaders = {
   provider?: string;
   routePolicy?: string;
-  fallback?: boolean;
+  fallback?: string;
   accountId?: string;
 };
 
@@ -658,7 +658,8 @@ function computeTokenPulseReplayFailureLimit(input: {
   if (!Number.isFinite(threshold) || threshold <= 0) {
     return Number.POSITIVE_INFINITY;
   }
-  if (threshold > 0 && threshold <= 1) {
+  // (0, 1) 视为比例阈值；>=1 视为绝对失败样本数阈值。
+  if (threshold > 0 && threshold < 1) {
     return Math.max(1, Math.ceil(input.totalCases * threshold));
   }
   return Math.max(1, Math.floor(threshold));
@@ -666,24 +667,21 @@ function computeTokenPulseReplayFailureLimit(input: {
 
 function extractTokenPulseReplayRouteHeaders(headers: Headers): TokenPulseReplayExecutionTrace {
   const traceId =
-    firstNonEmptyString(headers.get("x-tokenpulse-trace-id"), headers.get("x-trace-id")) ??
-    undefined;
+    firstNonEmptyString(
+      headers.get("x-request-id"),
+      headers.get("x-tokenpulse-trace-id"),
+      headers.get("x-trace-id"),
+    ) ?? undefined;
   const provider = firstNonEmptyString(headers.get("x-tokenpulse-provider")) ?? undefined;
   const routePolicy = firstNonEmptyString(headers.get("x-tokenpulse-route-policy")) ?? undefined;
   const accountId = firstNonEmptyString(headers.get("x-tokenpulse-account-id")) ?? undefined;
   const fallbackRaw = firstNonEmptyString(headers.get("x-tokenpulse-fallback"));
-  const fallback =
-    fallbackRaw === undefined
-      ? undefined
-      : fallbackRaw.toLowerCase() === "true" ||
-          fallbackRaw === "1" ||
-          fallbackRaw.toLowerCase() === "yes" ||
-          fallbackRaw.toLowerCase() === "on";
+  const fallback = fallbackRaw ? fallbackRaw.trim().toLowerCase() : undefined;
 
   const route: TokenPulseReplayRouteHeaders = {
     ...(provider ? { provider } : {}),
     ...(routePolicy ? { routePolicy } : {}),
-    ...(fallbackRaw !== undefined ? { fallback } : {}),
+    ...(fallback ? { fallback } : {}),
     ...(accountId ? { accountId } : {}),
   };
   return {
@@ -816,7 +814,10 @@ async function callTokenPulseChatCompletion(input: {
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${apiSecret}`,
+        // TokenPulse 用 x-request-id 贯穿路由决策与审计；这里同时写 x-trace-id 便于兼容其他实现。
+        "x-request-id": requestTraceId,
         "x-trace-id": requestTraceId,
+        "x-tokenpulse-tenant": input.tenantId,
       },
       body: JSON.stringify(requestPayload),
       signal: controller.signal,
@@ -980,10 +981,7 @@ async function executeReplayCasesWithTokenPulse(input: {
         }
       }
 
-      const candidateModel = firstNonEmptyString(
-        input.candidateModel,
-        normalizeRecord(input.replayJob.parameters).candidateLabel,
-      );
+      const candidateModel = firstNonEmptyString(input.candidateModel);
       let candidateOutput: string | undefined;
       if (candidateModel) {
         const candidateCall = await callTokenPulseChatCompletion({
@@ -1231,20 +1229,38 @@ async function defaultReplayJobExecutionHandler(input: {
         processedCases: 0,
       }
     );
+    const emptyDiff = {
+      items: [],
+      metric,
+      datasetId: input.replayJob.baselineId,
+      runId: input.replayJob.id,
+    };
+    const emptyCases = {
+      datasetId: input.replayJob.baselineId,
+      runId: input.replayJob.id,
+      total: 0,
+      sourceSummary: {},
+      items: [],
+    };
     return {
       status: "failed",
       summary: emptySummary,
-      diff: {
-        items: [],
-        metric,
-        datasetId: input.replayJob.baselineId,
-        runId: input.replayJob.id,
-      },
+      diff: emptyDiff,
       artifacts: [
         {
           artifactType: "summary",
           description: "Replay run summary payload.",
           payload: emptySummary,
+        },
+        {
+          artifactType: "diff",
+          description: "Replay run diff payload.",
+          payload: emptyDiff,
+        },
+        {
+          artifactType: "cases",
+          description: "Replay dataset cases snapshot.",
+          payload: emptyCases,
         },
       ],
       error: "回放数据集缺少可执行样本，请先录入样本或从历史会话物化样本。",
@@ -1576,12 +1592,70 @@ async function runReplayJobExecutionTask(task: ReplayJobExecutionTask): Promise<
     const errorMessage =
       firstNonEmptyString(execution.error) ??
       (terminalStatus === "cancelled" ? "回放任务已取消。" : "回放任务执行失败。");
-    await repository.updateReplayJob(task.tenantId, task.replayJobId, {
+    const metric = toQualityMetric(
+      normalizeRecord(execution.summary).metric ??
+        normalizeRecord(runningJob.summary).metric ??
+        normalizeRecord(runningJob.parameters).metric
+    );
+    const summary = buildReplaySummaryPayload(
+      {
+        ...normalizeRecord(runningJob.summary),
+        ...normalizeRecord(execution.summary),
+        metric,
+      },
+      {
+        metric,
+        totalCases: Math.max(0, toInteger(normalizeRecord(execution.summary).totalCases, 0)),
+        processedCases: Math.max(0, toInteger(normalizeRecord(execution.summary).processedCases, 0)),
+      }
+    );
+    const diffPayload =
+      Object.keys(normalizeRecord(execution.diff)).length > 0
+        ? normalizeRecord(execution.diff)
+        : {
+            items: [],
+            metric,
+            datasetId: runningJob.baselineId,
+            runId: runningJob.id,
+          };
+    const casesPayload = normalizeRecord(
+      execution.artifacts?.find((item) => item.artifactType === "cases")?.payload
+    );
+    const casesArtifactPayload =
+      Object.keys(casesPayload).length > 0
+        ? casesPayload
+        : {
+            datasetId: runningJob.baselineId,
+            runId: runningJob.id,
+            total: 0,
+            items: [],
+          };
+
+    if (terminalStatus !== "cancelled") {
+      try {
+        await persistReplayArtifacts({
+          tenantId: task.tenantId,
+          replayJob: runningJob,
+          summary,
+          diff: diffPayload,
+          cases: normalizeRecord(casesArtifactPayload),
+        });
+      } catch (error) {
+        console.warn("[control-plane] 写入 replay artifacts 失败（failed/cancelled）。", error);
+      }
+    }
+
+    const updateInput: Parameters<typeof repository.updateReplayJob>[2] = {
       fromStatuses: ["running"],
       status: terminalStatus,
       error: terminalStatus === "cancelled" ? null : errorMessage,
       finishedAt,
-    });
+    };
+    if (terminalStatus !== "cancelled") {
+      updateInput.summary = summary;
+      updateInput.diff = diffPayload;
+    }
+    await repository.updateReplayJob(task.tenantId, task.replayJobId, updateInput);
     await appendAuditLogSafely({
       tenantId: task.tenantId,
       eventId: `cp:replay-run-terminal:${runningJob.id}:${finishedAt}`,
