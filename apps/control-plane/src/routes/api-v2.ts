@@ -188,6 +188,26 @@ function deriveUtcDayRange(value: string | undefined): { from?: string; to?: str
   };
 }
 
+function deriveUtcRollingDayRange(
+  value: string | undefined,
+  days: number,
+): { from?: string; to?: string } {
+  const resolvedDays = Number.isFinite(days) ? Math.max(1, Math.floor(days)) : 14;
+  const timestamp = value ? Date.parse(value) : Date.now();
+  if (!Number.isFinite(timestamp)) {
+    return {};
+  }
+  const end = new Date(timestamp);
+  end.setUTCHours(23, 59, 59, 999);
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - Math.max(0, resolvedDays - 1));
+  start.setUTCHours(0, 0, 0, 0);
+  return {
+    from: start.toISOString(),
+    to: end.toISOString(),
+  };
+}
+
 function normalizeRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
@@ -473,7 +493,7 @@ function mapQualityAutomationPolicy(policy: {
     defaultActionType,
     strategyMatrix,
     modelVersion:
-      firstNonEmptyString(metadata.modelVersion) ?? "quality-heuristic-v2",
+      toQualityForecastModelVersion(metadata.modelVersion) ?? "quality-heuristic-v2",
     updatedAt: policy.updatedAt,
   };
 }
@@ -1051,6 +1071,86 @@ function buildQualityAutomationAdvice(input: {
   };
 }
 
+async function resolveQualityAutomationTimeseriesSignals(input: {
+  tenantId: string;
+  metric: QualityMetric;
+  project: string;
+  provider?: string;
+  workflow?: string;
+  occurredAt?: string;
+}): Promise<{
+  confidence: number;
+  trendDirection: QualityTrendDirection;
+  projectedDelta: number;
+  basisWindowCount: number;
+  previousAverageScore?: number;
+  previousPassRate?: number;
+  windowStart: string;
+  windowEnd: string;
+} | null> {
+  const project = firstNonEmptyString(input.project);
+  if (!project) {
+    return null;
+  }
+  const window = deriveUtcRollingDayRange(input.occurredAt, 14);
+  if (!window.from || !window.to) {
+    return null;
+  }
+  const seriesByProject = await repository.listQualityDailyMetricsSeriesByRepo(input.tenantId, {
+    from: window.from,
+    to: window.to,
+    scorecardKey: input.metric,
+    provider: input.provider,
+    workflow: input.workflow,
+    repos: [project],
+  });
+  const series = seriesByProject[project] ?? [];
+  const forecastHorizonDays = deriveForecastHorizonDays(window.from, window.to);
+  const timeseriesItem = buildQualityTimeseriesForecastItem({
+    project,
+    metric: input.metric,
+    series,
+    forecastHorizonDays,
+    windowStart: window.from,
+    windowEnd: window.to,
+  });
+  if (!timeseriesItem) {
+    return null;
+  }
+  const record = normalizeRecord(timeseriesItem);
+  const rawConfidence = toNumber(record.confidence, Number.NaN);
+  if (!Number.isFinite(rawConfidence)) {
+    return null;
+  }
+  const confidence = clampProbability(rawConfidence);
+  const trendDirection = normalizeQualityTrendDirection(record.trendDirection);
+  const projectedDelta = toNumber(record.projectedDelta, Number.NaN);
+  const basisWindowCount = Math.max(0, toInteger(record.basisWindowCount, 0));
+  if (!trendDirection || !Number.isFinite(projectedDelta) || basisWindowCount <= 0) {
+    return null;
+  }
+  const windowComparisons = normalizeRecord(record.windowComparisons);
+  const previousWindow = normalizeRecord(windowComparisons.previousWindow);
+  const previousAverageScoreValue = toNumber(previousWindow.averageScore, Number.NaN);
+  const previousPassRateValue = toNumber(previousWindow.passRate, Number.NaN);
+  const previousAverageScore = Number.isFinite(previousAverageScoreValue)
+    ? Number(previousAverageScoreValue.toFixed(4))
+    : undefined;
+  const previousPassRate = Number.isFinite(previousPassRateValue)
+    ? clampProbability(previousPassRateValue)
+    : undefined;
+  return {
+    confidence,
+    trendDirection,
+    projectedDelta: Number(projectedDelta.toFixed(4)),
+    basisWindowCount,
+    previousAverageScore,
+    previousPassRate,
+    windowStart: window.from,
+    windowEnd: window.to,
+  };
+}
+
 async function maybeExecuteQualityAutomationAdvice(input: {
   tenantId: string;
   userId: string;
@@ -1068,18 +1168,53 @@ async function maybeExecuteQualityAutomationAdvice(input: {
     : null;
   const replaySummary = normalizeRecord(replayRun?.summary);
   const regressedCases = Math.max(0, toInteger(replaySummary.regressedCases, 0));
+  const source = normalizeRecord(input.externalSource);
+  const project = firstNonEmptyString(source.repo) ?? "unknown";
+  const provider = firstNonEmptyString(source.provider)?.toLowerCase();
+  const workflow = firstNonEmptyString(source.workflow);
   const policy = await resolveQualityAutomationPolicy(input.tenantId);
   const mappedPolicy = mapQualityAutomationPolicy(policy);
   const passed = input.score >= mappedPolicy.evaluationScoreThreshold;
   const sampleCount = Math.max(0, toInteger(input.sampleCount, 0));
-  const passRate = Math.max(0, Math.min(1, input.score / 100));
-  const confidence = deriveQualityForecastConfidence(sampleCount);
-  const trendDirection: QualityTrendDirection = passed ? "flat" : "down";
+  const modelVersion =
+    toQualityForecastModelVersion(mappedPolicy.modelVersion) ?? "quality-heuristic-v2";
+  const passRate = clampProbability(input.score / 100);
+  const scoreDeltaToThreshold = Number((input.score - mappedPolicy.evaluationScoreThreshold).toFixed(4));
+  let confidence = deriveQualityForecastConfidence(sampleCount);
+  let trendDirection: QualityTrendDirection = passed ? "flat" : "down";
+  let projectedDelta = passed ? 0 : scoreDeltaToThreshold;
+  let basisWindowCount: number | null = null;
+  let forecastWindowStart: string | null = null;
+  let forecastWindowEnd: string | null = null;
+  let previousAverageScore: number | null = null;
+  let previousPassRate: number | null = null;
+  if (modelVersion === "quality-timeseries-v1" && project !== "unknown") {
+    const candidateSignals = await resolveQualityAutomationTimeseriesSignals({
+      tenantId: input.tenantId,
+      metric: input.metric,
+      project,
+      provider,
+      workflow,
+      occurredAt: input.occurredAt,
+    });
+    if (candidateSignals) {
+      confidence = candidateSignals.confidence;
+      trendDirection = candidateSignals.trendDirection;
+      projectedDelta = candidateSignals.projectedDelta;
+      basisWindowCount = candidateSignals.basisWindowCount;
+      forecastWindowStart = candidateSignals.windowStart;
+      forecastWindowEnd = candidateSignals.windowEnd;
+      previousAverageScore = candidateSignals.previousAverageScore ?? null;
+      previousPassRate = candidateSignals.previousPassRate ?? null;
+    }
+  }
   const regressionProbability = computeQualityRegressionProbability({
     avgScore: input.score,
     passRate,
-    projectedDelta: passed ? 0 : Number((input.score - mappedPolicy.evaluationScoreThreshold).toFixed(4)),
-    totalEvents: sampleCount,
+    projectedDelta,
+    ...(previousAverageScore !== null ? { previousAverageScore } : {}),
+    ...(previousPassRate !== null ? { previousPassRate } : {}),
+    totalEvents: Math.max(sampleCount, basisWindowCount ?? 0),
   });
   const shouldTrigger =
     (!passed && mappedPolicy.triggerOnEvaluationFailure) ||
@@ -1109,10 +1244,6 @@ async function maybeExecuteQualityAutomationAdvice(input: {
     regressedCases,
     externalSource: input.externalSource,
   });
-  const source = normalizeRecord(input.externalSource);
-  const project = firstNonEmptyString(source.repo) ?? "unknown";
-  const provider = firstNonEmptyString(source.provider)?.toLowerCase();
-  const workflow = firstNonEmptyString(source.workflow);
   const adviceRange = deriveUtcDayRange(input.occurredAt);
   const adviceId = buildQualityAdviceId({
     project,
@@ -1203,6 +1334,15 @@ async function maybeExecuteQualityAutomationAdvice(input: {
       selectedActionType,
       regressionProbability,
       confidence,
+      modelVersion,
+      trendDirection,
+      projectedDelta,
+      basisWindowCount,
+      scoreDeltaToThreshold,
+      forecastWindowStart,
+      forecastWindowEnd,
+      previousAverageScore,
+      previousPassRate,
       advice,
     },
     createdAt: evaluatedAt,
@@ -1229,6 +1369,11 @@ async function maybeExecuteQualityAutomationAdvice(input: {
       selectedActionType,
       confidence,
       regressionProbability,
+      modelVersion,
+      trendDirection,
+      projectedDelta,
+      basisWindowCount,
+      scoreDeltaToThreshold,
       decision: policy.decision,
       result,
       approvalRequestId: approvalRequestId ?? null,
@@ -2911,6 +3056,16 @@ apiV2Routes.put("/quality/automation-policy", async (c) => {
 
   const body = await c.req.json().catch(() => undefined);
   const bodyRecord = normalizeRecord(body);
+  const requestedModelVersionRaw = firstNonEmptyString(bodyRecord.modelVersion);
+  const requestedModelVersion = requestedModelVersionRaw
+    ? toQualityForecastModelVersion(requestedModelVersionRaw)
+    : undefined;
+  if (requestedModelVersionRaw && !requestedModelVersion) {
+    return c.json(
+      { message: "modelVersion 必须是 quality-heuristic-v2/quality-timeseries-v1 之一。" },
+      400,
+    );
+  }
   const validation = validateMcpToolPolicyUpsertInput({
     ...bodyRecord,
     toolId: QUALITY_AUTOMATION_TOOL_ID,
@@ -2978,7 +3133,10 @@ apiV2Routes.put("/quality/automation-policy", async (c) => {
       bodyRecord.strategyMatrix !== undefined
         ? strategyMatrixValidation.data
         : currentMetadata.strategyMatrix ?? [],
-    modelVersion: firstNonEmptyString(bodyRecord.modelVersion) ?? currentMetadata.modelVersion ?? "quality-heuristic-v2",
+    modelVersion:
+      requestedModelVersion ??
+      toQualityForecastModelVersion(currentMetadata.modelVersion) ??
+      "quality-heuristic-v2",
   };
 
   const policy = await repository.upsertMcpToolPolicy(auth.tenantId, {
