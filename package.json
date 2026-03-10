@@ -27,7 +27,7 @@
     "sdk:test": "bun run ./scripts/sdk-test.ts",
     "sdk:bundle": "bun run ./scripts/sdk-bundle.ts",
     "sdk:build": "bun run ./scripts/sdk-build.ts",
-    "test:scripts": "bun test ./scripts/check-support-matrix.test.ts ./scripts/verify-evidence-bundle.test.ts ./scripts/backfill-source-region.test.ts ./scripts/sdk-common.test.ts",
+    "test:scripts": "bun test ./scripts/check-support-matrix.test.ts ./scripts/verify-evidence-bundle.test.ts ./scripts/backfill-source-region.test.ts ./scripts/sdk-common.test.ts ./scripts/check-deployment-baseline.test.ts ./scripts/write-agent-distribution-manifest.test.ts",
     "check:callback-stream-binding": "bash ./scripts/check-callback-stream-binding.sh",
     "test:e2e-governance-routing": "bash ./scripts/check-governance-e2e.sh",
     "test:e2e-integration-routing": "bash ./scripts/e2e-integration-routing.sh",
@@ -42,6 +42,8 @@
     "proto:breaking": "bash ./scripts/proto-breaking.sh",
     "build:agent-cross": "bash ./scripts/build-agent-cross.sh",
     "verify:agent-cross": "bash ./scripts/verify-agent-cross-artifacts.sh",
+    "package:agent-distribution": "bash ./scripts/package-agent-distribution.sh",
+    "verify:agent-distribution": "bash ./scripts/verify-agent-distribution.sh",
     "evidence:verify": "bun run ./scripts/verify-evidence-bundle.ts",
     "smoke:fr505": "bash ./scripts/smoke-fr505-cross-platform.sh"
   },
@@ -50,5 +52,8 @@
     "@types/pg": "^8.15.6",
     "@types/node": "latest",
     "typescript": "^5"
+  },
+  "dependencies": {
+    "nats": "^2.29.3"
   }
 }

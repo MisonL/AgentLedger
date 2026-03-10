@@ -45,6 +45,11 @@ jobs:
       - name: 安装依赖
         run: bun install --frozen-lockfile
 
+      - name: 部署基线预检
+        env:
+          GOV_E2E_DATABASE_URL: ${{ secrets.GOV_E2E_DATABASE_URL }}
+        run: bun run ./scripts/check-deployment-baseline.ts --profile release-gate
+
       - name: 发布前严格门禁（失败即中止）
         run: |
           set -euo pipefail
@@ -108,11 +113,11 @@ jobs:
       - name: 生成 Proto 代码
         run: bun run proto:gen
 
-      - name: 跨平台构建与产物校验门禁
-        run: |
-          set -euo pipefail
-          bun run build:agent-cross
-          bun run verify:agent-cross
+      - name: 打包 Agent 分发产物（跨平台构建 + SHA256SUMS）
+        run: bash ./scripts/package-agent-distribution.sh
+
+      - name: 校验 Agent 分发产物（产物 + SHA256SUMS）
+        run: bash ./scripts/verify-agent-distribution.sh
 
       - name: 生成 SHA256 校验文件
         run: |
@@ -127,9 +132,20 @@ jobs:
           path: dist/agent/
           if-no-files-found: error
 
+      - name: 上传分发产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-distribution-${{ github.ref_name }}
+          path: dist/agent-distribution/
+          if-no-files-found: error
+
       - name: 发布 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/agent/*
+            dist/agent-distribution/**/*.tar.gz
+            dist/agent-distribution/**/release-manifest.json
+            dist/agent-distribution/**/SHA256SUMS.txt
+            dist/agent-distribution/SHA256SUMS.txt
           generate_release_notes: true
