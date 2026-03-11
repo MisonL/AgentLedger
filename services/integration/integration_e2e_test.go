@@ -254,6 +254,7 @@ func TestIntegrationE2EAlertFallbackUsesLegacySeverityRouting(t *testing.T) {
 	feishuProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
 	emailWebhookProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
 	ticketProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
+	incidentProbe := newIntegrationE2EProbe(t, http.StatusNoContent)
 	smtpServer := newFakeSMTPServer(t)
 	defer smtpServer.Close()
 
@@ -264,6 +265,7 @@ func TestIntegrationE2EAlertFallbackUsesLegacySeverityRouting(t *testing.T) {
 		channelFeishu,
 		channelEmail,
 		channelEmailWebhook,
+		channelIncident,
 		channelTicket,
 	)
 	cfg.ChannelURLs[channelWebhook] = webhookProbe.server.URL
@@ -271,6 +273,7 @@ func TestIntegrationE2EAlertFallbackUsesLegacySeverityRouting(t *testing.T) {
 	cfg.ChannelURLs[channelDingTalk] = dingTalkProbe.server.URL
 	cfg.ChannelURLs[channelFeishu] = feishuProbe.server.URL
 	cfg.ChannelURLs[channelEmailWebhook] = emailWebhookProbe.server.URL
+	cfg.ChannelURLs[channelIncident] = incidentProbe.server.URL
 	cfg.ChannelURLs[channelTicket] = ticketProbe.server.URL
 	cfg.EmailFrom = "alerts@example.com"
 	cfg.EmailSMTPHost = smtpServer.Host()
@@ -363,6 +366,29 @@ func TestIntegrationE2EAlertFallbackUsesLegacySeverityRouting(t *testing.T) {
 	}
 	if !bytes.Equal(bytes.TrimSpace(ticketBody.Event), warningPayload) {
 		t.Fatalf("ticket raw event mismatch: got %s want %s", string(ticketBody.Event), string(warningPayload))
+	}
+	incidentRequest := incidentProbe.waitForRequest(t)
+	var incidentBody ticketWebhookChannelPayload
+	if err := json.Unmarshal(incidentRequest.Body, &incidentBody); err != nil {
+		t.Fatalf("unmarshal incident payload failed: %v", err)
+	}
+	if incidentBody.EventType != normalizeEventTypeLabel(eventTypeAlert) {
+		t.Fatalf("incident event type mismatch: got %q want %q", incidentBody.EventType, normalizeEventTypeLabel(eventTypeAlert))
+	}
+	if incidentBody.Title != buildEmailSubject(warningPayload, eventTypeAlert) {
+		t.Fatalf("incident title mismatch: got %q want %q", incidentBody.Title, buildEmailSubject(warningPayload, eventTypeAlert))
+	}
+	if incidentBody.Summary != wantWarningText {
+		t.Fatalf("incident summary mismatch:\ngot:  %s\nwant: %s", incidentBody.Summary, wantWarningText)
+	}
+	if incidentBody.Severity != "warning" {
+		t.Fatalf("incident severity mismatch: got %q want %q", incidentBody.Severity, "warning")
+	}
+	if incidentBody.Status != "open" {
+		t.Fatalf("incident status mismatch: got %q want %q", incidentBody.Status, "open")
+	}
+	if !bytes.Equal(bytes.TrimSpace(incidentBody.Event), warningPayload) {
+		t.Fatalf("incident raw event mismatch: got %s want %s", string(incidentBody.Event), string(warningPayload))
 	}
 
 	dingTalkProbe.assertNoRequest(t)
@@ -471,6 +497,28 @@ func TestIntegrationE2EAlertFallbackUsesLegacySeverityRouting(t *testing.T) {
 	}
 	if !bytes.Equal(bytes.TrimSpace(ticketBody.Event), criticalPayload) {
 		t.Fatalf("ticket raw event mismatch: got %s want %s", string(ticketBody.Event), string(criticalPayload))
+	}
+	incidentRequest = incidentProbe.waitForRequest(t)
+	if err := json.Unmarshal(incidentRequest.Body, &incidentBody); err != nil {
+		t.Fatalf("unmarshal incident payload failed: %v", err)
+	}
+	if incidentBody.EventType != normalizeEventTypeLabel(eventTypeAlert) {
+		t.Fatalf("incident event type mismatch: got %q want %q", incidentBody.EventType, normalizeEventTypeLabel(eventTypeAlert))
+	}
+	if incidentBody.Title != buildEmailSubject(criticalPayload, eventTypeAlert) {
+		t.Fatalf("incident title mismatch: got %q want %q", incidentBody.Title, buildEmailSubject(criticalPayload, eventTypeAlert))
+	}
+	if incidentBody.Summary != wantCriticalText {
+		t.Fatalf("incident summary mismatch:\ngot:  %s\nwant: %s", incidentBody.Summary, wantCriticalText)
+	}
+	if incidentBody.Severity != "critical" {
+		t.Fatalf("incident severity mismatch: got %q want %q", incidentBody.Severity, "critical")
+	}
+	if incidentBody.Status != "open" {
+		t.Fatalf("incident status mismatch: got %q want %q", incidentBody.Status, "open")
+	}
+	if !bytes.Equal(bytes.TrimSpace(incidentBody.Event), criticalPayload) {
+		t.Fatalf("incident raw event mismatch: got %s want %s", string(incidentBody.Event), string(criticalPayload))
 	}
 }
 
