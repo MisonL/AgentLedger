@@ -1663,19 +1663,30 @@ export interface OpenPlatformAutomationPolicyUpsertInput {
 
 export interface OpenPlatformAutomationStrategyRule {
   id: string;
+  enabled?: boolean;
+  priority?: number;
   metric?: string;
   severity?: "info" | "warn" | "critical";
   trendDirection?: "up" | "down" | "flat";
   provider?: string;
+  providerPattern?: string;
   workflow?: string;
+  workflowPattern?: string;
   projectPattern?: string;
+  modelVersionIn?: Array<"quality-heuristic-v2" | "quality-timeseries-v1">;
+  triggerReasonIn?: Array<"evaluation_failure" | "replay_regression">;
   minSampleCount?: number;
+  maxSampleCount?: number;
   minPassRate?: number;
+  maxPassRate?: number;
   minConfidence?: number;
+  maxConfidence?: number;
   regressionProbabilityAtLeast?: number;
+  regressionProbabilityAtMost?: number;
   replayRegressionAtLeast?: number;
+  replayRegressionAtMost?: number;
   actionType: "scorecard_adjustment" | "replay_experiment";
-  requiresApproval: boolean;
+  requiresApproval?: boolean;
   cooldownMinutes?: number;
   reason?: string;
 }
@@ -2131,6 +2142,9 @@ export interface OpenPlatformReplayExperimentCompareItem {
 export interface OpenPlatformReplayExperimentCompareResponse {
   experimentId: string;
   datasetId: string;
+  baselineVersionId?: string | null;
+  baselineVersionIds?: string[];
+  baselineComparable?: boolean;
   items: OpenPlatformReplayExperimentCompareItem[];
   total: number;
   summary: {
@@ -2156,6 +2170,9 @@ export interface OpenPlatformReplayExperimentBatchCompareItem {
   triggerSource: NonNullable<OpenPlatformReplayExperiment["triggerSource"]>;
   sourceAdviceId?: string | null;
   candidateLabels: string[];
+  baselineVersionId?: string | null;
+  baselineVersionIds?: string[];
+  baselineComparable?: boolean;
   totalRuns: number;
   completedRuns: number;
   failedRuns: number;
@@ -2181,6 +2198,9 @@ export interface OpenPlatformReplayExperimentBatchCompareResponse {
     comparedExperimentCount: number;
     comparedAt: string;
     datasets: string[];
+    baselineVersionId?: string | null;
+    baselineVersionIds?: string[];
+    baselineComparable?: boolean;
     totalRuns: number;
     completedRuns: number;
     failedRuns: number;
@@ -2218,6 +2238,9 @@ export interface OpenPlatformReplayExperimentWorkflowEdge {
 export interface OpenPlatformReplayExperimentWorkflowResponse {
   experimentId: string;
   status: string;
+  baselineVersionId?: string | null;
+  baselineVersionIds?: string[];
+  baselineComparable?: boolean;
   nodes: OpenPlatformReplayExperimentWorkflowNode[];
   edges: OpenPlatformReplayExperimentWorkflowEdge[];
   summary: {

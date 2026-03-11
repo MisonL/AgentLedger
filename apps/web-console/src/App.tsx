@@ -1512,32 +1512,60 @@ function parseQualityAutomationStrategyMatrixJson(
   const metricSet = new Set(["accuracy", "consistency", "groundedness", "safety", "latency"]);
   const severitySet = new Set(["info", "warn", "critical"]);
   const trendDirectionSet = new Set(["up", "down", "flat"]);
+  const modelVersionSet = new Set(["quality-heuristic-v2", "quality-timeseries-v1"]);
+  const triggerReasonSet = new Set(["evaluation_failure", "replay_regression"]);
   const rules: OpenPlatformAutomationStrategyRule[] = [];
   for (const [index, item] of parsed.entries()) {
     if (typeof item !== "object" || item === null || Array.isArray(item)) {
       return { success: false, message: `strategyMatrix[${index}] 必须是对象。` };
     }
     const record = item as Record<string, unknown>;
-    const id =
-      typeof record.id === "string" && record.id.trim().length > 0
+    const idCandidate =
+      (typeof record.ruleId === "string" && record.ruleId.trim().length > 0
+        ? record.ruleId.trim()
+        : undefined) ??
+      (typeof record.id === "string" && record.id.trim().length > 0
         ? record.id.trim()
-        : `rule-${index + 1}`;
+        : undefined);
+    const id = idCandidate ?? `rule-${index + 1}`;
     const actionType =
       record.actionType === "scorecard_adjustment" ||
       record.actionType === "replay_experiment"
         ? record.actionType
         : null;
-    const requiresApproval =
-      typeof record.requiresApproval === "boolean" ? record.requiresApproval : null;
-    const reason =
-      typeof record.reason === "string" && record.reason.trim().length > 0
-        ? record.reason.trim()
-        : null;
-    if (!actionType || requiresApproval === null || !reason) {
+    if (!actionType) {
       return {
         success: false,
-        message: `strategyMatrix[${index}] 的 actionType/requiresApproval/reason 非法。`,
+        message: `strategyMatrix[${index}] 的 actionType 非法。`,
       };
+    }
+    const enabled =
+      record.enabled === undefined
+        ? undefined
+        : typeof record.enabled === "boolean"
+          ? record.enabled
+          : null;
+    if (enabled === null) {
+      return { success: false, message: `strategyMatrix[${index}] 的 enabled 必须是布尔值。` };
+    }
+    const requiresApproval =
+      record.requiresApproval === undefined
+        ? undefined
+        : typeof record.requiresApproval === "boolean"
+          ? record.requiresApproval
+          : null;
+    if (requiresApproval === null) {
+      return {
+        success: false,
+        message: `strategyMatrix[${index}] 的 requiresApproval 必须是布尔值。`,
+      };
+    }
+    let reason: string | undefined;
+    if (record.reason !== undefined) {
+      if (typeof record.reason !== "string" || record.reason.trim().length === 0) {
+        return { success: false, message: `strategyMatrix[${index}] 的 reason 不能为空字符串。` };
+      }
+      reason = record.reason.trim();
     }
     const metric =
       record.metric === undefined
@@ -1588,9 +1616,23 @@ function parseQualityAutomationStrategyMatrixJson(
     if (!providerResult.ok) {
       return { success: false, message: providerResult.message };
     }
+    const providerPatternResult = stringFieldOrUndefined(
+      record.providerPattern,
+      "providerPattern",
+    );
+    if (!providerPatternResult.ok) {
+      return { success: false, message: providerPatternResult.message };
+    }
     const workflowResult = stringFieldOrUndefined(record.workflow, "workflow");
     if (!workflowResult.ok) {
       return { success: false, message: workflowResult.message };
+    }
+    const workflowPatternResult = stringFieldOrUndefined(
+      record.workflowPattern,
+      "workflowPattern",
+    );
+    if (!workflowPatternResult.ok) {
+      return { success: false, message: workflowPatternResult.message };
     }
     const projectPatternResult = stringFieldOrUndefined(record.projectPattern, "projectPattern");
     if (!projectPatternResult.ok) {
@@ -1626,6 +1668,14 @@ function parseQualityAutomationStrategyMatrixJson(
     if (!minSampleCountResult.ok) {
       return { success: false, message: minSampleCountResult.message };
     }
+    const maxSampleCountResult = numericOrUndefined(record.maxSampleCount, {
+      field: "maxSampleCount",
+      integer: true,
+      min: 0,
+    });
+    if (!maxSampleCountResult.ok) {
+      return { success: false, message: maxSampleCountResult.message };
+    }
     const minPassRateResult = numericOrUndefined(record.minPassRate, {
       field: "minPassRate",
       min: 0,
@@ -1634,6 +1684,14 @@ function parseQualityAutomationStrategyMatrixJson(
     if (!minPassRateResult.ok) {
       return { success: false, message: minPassRateResult.message };
     }
+    const maxPassRateResult = numericOrUndefined(record.maxPassRate, {
+      field: "maxPassRate",
+      min: 0,
+      max: 1,
+    });
+    if (!maxPassRateResult.ok) {
+      return { success: false, message: maxPassRateResult.message };
+    }
     const minConfidenceResult = numericOrUndefined(record.minConfidence, {
       field: "minConfidence",
       min: 0,
@@ -1641,6 +1699,22 @@ function parseQualityAutomationStrategyMatrixJson(
     });
     if (!minConfidenceResult.ok) {
       return { success: false, message: minConfidenceResult.message };
+    }
+    const maxConfidenceResult = numericOrUndefined(record.maxConfidence, {
+      field: "maxConfidence",
+      min: 0,
+      max: 1,
+    });
+    if (!maxConfidenceResult.ok) {
+      return { success: false, message: maxConfidenceResult.message };
+    }
+    const priorityResult = numericOrUndefined(record.priority, {
+      field: "priority",
+      integer: true,
+      min: 0,
+    });
+    if (!priorityResult.ok) {
+      return { success: false, message: priorityResult.message };
     }
     const regressionProbabilityResult = numericOrUndefined(
       record.regressionProbabilityAtLeast,
@@ -1653,6 +1727,17 @@ function parseQualityAutomationStrategyMatrixJson(
     if (!regressionProbabilityResult.ok) {
       return { success: false, message: regressionProbabilityResult.message };
     }
+    const regressionProbabilityAtMostResult = numericOrUndefined(
+      record.regressionProbabilityAtMost,
+      {
+        field: "regressionProbabilityAtMost",
+        min: 0,
+        max: 1,
+      },
+    );
+    if (!regressionProbabilityAtMostResult.ok) {
+      return { success: false, message: regressionProbabilityAtMostResult.message };
+    }
     const replayRegressionResult = numericOrUndefined(record.replayRegressionAtLeast, {
       field: "replayRegressionAtLeast",
       integer: true,
@@ -1660,6 +1745,14 @@ function parseQualityAutomationStrategyMatrixJson(
     });
     if (!replayRegressionResult.ok) {
       return { success: false, message: replayRegressionResult.message };
+    }
+    const replayRegressionAtMostResult = numericOrUndefined(record.replayRegressionAtMost, {
+      field: "replayRegressionAtMost",
+      integer: true,
+      min: 0,
+    });
+    if (!replayRegressionAtMostResult.ok) {
+      return { success: false, message: replayRegressionAtMostResult.message };
     }
     const cooldownResult = numericOrUndefined(record.cooldownMinutes, {
       field: "cooldownMinutes",
@@ -1669,23 +1762,157 @@ function parseQualityAutomationStrategyMatrixJson(
     if (!cooldownResult.ok) {
       return { success: false, message: cooldownResult.message };
     }
+    if (
+      minSampleCountResult.value !== undefined &&
+      maxSampleCountResult.value !== undefined &&
+      maxSampleCountResult.value < minSampleCountResult.value
+    ) {
+      return {
+        success: false,
+        message: `strategyMatrix[${index}].maxSampleCount 不能小于 minSampleCount。`,
+      };
+    }
+    if (
+      minPassRateResult.value !== undefined &&
+      maxPassRateResult.value !== undefined &&
+      maxPassRateResult.value < minPassRateResult.value
+    ) {
+      return {
+        success: false,
+        message: `strategyMatrix[${index}].maxPassRate 不能小于 minPassRate。`,
+      };
+    }
+    if (
+      minConfidenceResult.value !== undefined &&
+      maxConfidenceResult.value !== undefined &&
+      maxConfidenceResult.value < minConfidenceResult.value
+    ) {
+      return {
+        success: false,
+        message: `strategyMatrix[${index}].maxConfidence 不能小于 minConfidence。`,
+      };
+    }
+    if (
+      regressionProbabilityResult.value !== undefined &&
+      regressionProbabilityAtMostResult.value !== undefined &&
+      regressionProbabilityAtMostResult.value < regressionProbabilityResult.value
+    ) {
+      return {
+        success: false,
+        message: `strategyMatrix[${index}].regressionProbabilityAtMost 不能小于 regressionProbabilityAtLeast。`,
+      };
+    }
+    if (
+      replayRegressionResult.value !== undefined &&
+      replayRegressionAtMostResult.value !== undefined &&
+      replayRegressionAtMostResult.value < replayRegressionResult.value
+    ) {
+      return {
+        success: false,
+        message: `strategyMatrix[${index}].replayRegressionAtMost 不能小于 replayRegressionAtLeast。`,
+      };
+    }
+
+    const modelVersionIn =
+      record.modelVersionIn === undefined
+        ? undefined
+        : Array.isArray(record.modelVersionIn)
+          ? record.modelVersionIn
+              .map((value) => (typeof value === "string" ? value.trim() : ""))
+              .filter(Boolean)
+          : null;
+    if (modelVersionIn === null || (modelVersionIn !== undefined && modelVersionIn.length === 0)) {
+      return {
+        success: false,
+        message: `strategyMatrix[${index}].modelVersionIn 必须是非空数组。`,
+      };
+    }
+    if (modelVersionIn && modelVersionIn.some((value) => !modelVersionSet.has(value))) {
+      return {
+        success: false,
+        message: `strategyMatrix[${index}].modelVersionIn 仅支持 quality-heuristic-v2/quality-timeseries-v1。`,
+      };
+    }
+    const triggerReasonIn =
+      record.triggerReasonIn === undefined
+        ? undefined
+        : Array.isArray(record.triggerReasonIn)
+          ? record.triggerReasonIn
+              .map((value) => (typeof value === "string" ? value.trim() : ""))
+              .filter(Boolean)
+          : null;
+    if (
+      triggerReasonIn === null ||
+      (triggerReasonIn !== undefined && triggerReasonIn.length === 0)
+    ) {
+      return {
+        success: false,
+        message: `strategyMatrix[${index}].triggerReasonIn 必须是非空数组。`,
+      };
+    }
+    if (triggerReasonIn && triggerReasonIn.some((value) => !triggerReasonSet.has(value))) {
+      return {
+        success: false,
+        message: `strategyMatrix[${index}].triggerReasonIn 仅支持 evaluation_failure/replay_regression。`,
+      };
+    }
+
     rules.push({
       id,
-      metric,
-      severity,
-      trendDirection,
-      provider: providerResult.value,
-      workflow: workflowResult.value,
-      projectPattern: projectPatternResult.value,
-      minSampleCount: minSampleCountResult.value,
-      minPassRate: minPassRateResult.value,
-      minConfidence: minConfidenceResult.value,
-      regressionProbabilityAtLeast: regressionProbabilityResult.value,
-      replayRegressionAtLeast: replayRegressionResult.value,
+      ...(enabled !== undefined ? { enabled } : {}),
+      ...(priorityResult.value !== undefined ? { priority: priorityResult.value } : {}),
+      ...(metric !== undefined ? { metric } : {}),
+      ...(severity !== undefined ? { severity } : {}),
+      ...(trendDirection !== undefined ? { trendDirection } : {}),
+      ...(providerResult.value ? { provider: providerResult.value } : {}),
+      ...(providerPatternResult.value ? { providerPattern: providerPatternResult.value } : {}),
+      ...(workflowResult.value ? { workflow: workflowResult.value } : {}),
+      ...(workflowPatternResult.value ? { workflowPattern: workflowPatternResult.value } : {}),
+      ...(projectPatternResult.value ? { projectPattern: projectPatternResult.value } : {}),
+      ...(modelVersionIn
+        ? {
+            modelVersionIn: modelVersionIn as Array<
+              "quality-heuristic-v2" | "quality-timeseries-v1"
+            >,
+          }
+        : {}),
+      ...(triggerReasonIn
+        ? {
+            triggerReasonIn: triggerReasonIn as Array<
+              "evaluation_failure" | "replay_regression"
+            >,
+          }
+        : {}),
+      ...(minSampleCountResult.value !== undefined
+        ? { minSampleCount: minSampleCountResult.value }
+        : {}),
+      ...(maxSampleCountResult.value !== undefined
+        ? { maxSampleCount: maxSampleCountResult.value }
+        : {}),
+      ...(minPassRateResult.value !== undefined ? { minPassRate: minPassRateResult.value } : {}),
+      ...(maxPassRateResult.value !== undefined ? { maxPassRate: maxPassRateResult.value } : {}),
+      ...(minConfidenceResult.value !== undefined
+        ? { minConfidence: minConfidenceResult.value }
+        : {}),
+      ...(maxConfidenceResult.value !== undefined
+        ? { maxConfidence: maxConfidenceResult.value }
+        : {}),
+      ...(regressionProbabilityResult.value !== undefined
+        ? { regressionProbabilityAtLeast: regressionProbabilityResult.value }
+        : {}),
+      ...(regressionProbabilityAtMostResult.value !== undefined
+        ? { regressionProbabilityAtMost: regressionProbabilityAtMostResult.value }
+        : {}),
+      ...(replayRegressionResult.value !== undefined
+        ? { replayRegressionAtLeast: replayRegressionResult.value }
+        : {}),
+      ...(replayRegressionAtMostResult.value !== undefined
+        ? { replayRegressionAtMost: replayRegressionAtMostResult.value }
+        : {}),
       actionType,
-      requiresApproval,
-      cooldownMinutes: cooldownResult.value,
-      reason,
+      ...(requiresApproval !== undefined ? { requiresApproval } : {}),
+      ...(cooldownResult.value !== undefined ? { cooldownMinutes: cooldownResult.value } : {}),
+      ...(reason !== undefined ? { reason } : {}),
     });
   }
   return { success: true, data: rules };
@@ -18513,9 +18740,32 @@ function GovernancePage() {
                         {replayExperimentComparePayload.summary.failedRuns}
                       </td>
                     </tr>
+                    <tr>
+                      <th>baselineVersionId</th>
+                      <td>{replayExperimentComparePayload.baselineVersionId ?? "--"}</td>
+                      <th>baselineComparable</th>
+                      <td>
+                        {replayExperimentComparePayload.baselineComparable === false
+                          ? "no"
+                          : "yes"}
+                      </td>
+                    </tr>
+                    <tr>
+                      <th>baselineVersionIds</th>
+                      <td colSpan={3}>
+                        {replayExperimentComparePayload.baselineVersionIds?.join(", ") ||
+                          "--"}
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
+            ) : null}
+
+            {replayExperimentComparePayload?.baselineComparable === false ? (
+              <p className="feedback info">
+                提示：本次对比命中的 baselineVersionId 不一致，结果可能不可比，请先固化并统一基线版本。
+              </p>
             ) : null}
 
             {replayExperimentBatchComparePayload ? (
@@ -18547,9 +18797,35 @@ function GovernancePage() {
                         {" failed"}
                       </td>
                     </tr>
+                    <tr>
+                      <th>baselineVersionId</th>
+                      <td>
+                        {replayExperimentBatchComparePayload.summary.baselineVersionId ?? "--"}
+                      </td>
+                      <th>baselineComparable</th>
+                      <td>
+                        {replayExperimentBatchComparePayload.summary.baselineComparable === false
+                          ? "no"
+                          : "yes"}
+                      </td>
+                    </tr>
+                    <tr>
+                      <th>baselineVersionIds</th>
+                      <td colSpan={3}>
+                        {replayExperimentBatchComparePayload.summary.baselineVersionIds?.join(
+                          ", ",
+                        ) || "--"}
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
+            ) : null}
+
+            {replayExperimentBatchComparePayload?.summary.baselineComparable === false ? (
+              <p className="feedback info">
+                提示：批量对比实验的 baselineVersionId 不一致，结果可能不可比，请先统一基线版本。
+              </p>
             ) : null}
 
             {replayExperimentComparePayload ? (
@@ -18596,6 +18872,8 @@ function GovernancePage() {
                       <th>name</th>
                       <th>datasetId</th>
                       <th>workflow</th>
+                      <th>baseline</th>
+                      <th>comparable</th>
                       <th>bestRun</th>
                       <th>netDelta</th>
                       <th>rates</th>
@@ -18609,6 +18887,8 @@ function GovernancePage() {
                         <td>{item.name}</td>
                         <td>{item.datasetId}</td>
                         <td>{item.workflowStage}</td>
+                        <td>{item.baselineVersionId ?? "--"}</td>
+                        <td>{item.baselineComparable === false ? "no" : "yes"}</td>
                         <td>{item.bestRunId ?? "--"}</td>
                         <td>{item.netDelta}</td>
                         <td>
@@ -18643,9 +18923,32 @@ function GovernancePage() {
                       <th>runs</th>
                       <td>{replayExperimentWorkflowPayload.summary.totalRuns}</td>
                     </tr>
+                    <tr>
+                      <th>baselineVersionId</th>
+                      <td>{replayExperimentWorkflowPayload.baselineVersionId ?? "--"}</td>
+                      <th>baselineComparable</th>
+                      <td>
+                        {replayExperimentWorkflowPayload.baselineComparable === false
+                          ? "no"
+                          : "yes"}
+                      </td>
+                    </tr>
+                    <tr>
+                      <th>baselineVersionIds</th>
+                      <td colSpan={3}>
+                        {replayExperimentWorkflowPayload.baselineVersionIds?.join(", ") ||
+                          "--"}
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
+            ) : null}
+
+            {replayExperimentWorkflowPayload?.baselineComparable === false ? (
+              <p className="feedback info">
+                提示：该实验下的 runs baselineVersionId 不一致，工作流统计可能不可比，请先统一基线版本。
+              </p>
             ) : null}
 
             {replayExperimentWorkflowPayload ? (

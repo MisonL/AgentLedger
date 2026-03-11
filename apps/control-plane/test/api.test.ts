@@ -3050,6 +3050,51 @@ describe("Control Plane API", () => {
     }
   });
 
+  test("本地 MFA 启用但缺少静态码时返回 403 且错误可辨", async () => {
+    const nonce = createNonce("auth-local-mfa-static-missing");
+    const originalLocalMfaRequired = Bun.env.AUTH_LOCAL_MFA_REQUIRED;
+    const originalLocalMfaCode = Bun.env.AUTH_LOCAL_MFA_STATIC_CODE;
+    Bun.env.AUTH_LOCAL_MFA_REQUIRED = "true";
+    delete Bun.env.AUTH_LOCAL_MFA_STATIC_CODE;
+
+    try {
+      const registerResult = await registerLocalUser({
+        email: `local-mfa-static-missing-${nonce}@example.com`,
+        password: `unit-test-pw-${nonce}`,
+        displayName: `本地MFA静态码缺失-${nonce}`,
+      });
+      expect(registerResult.response.status).toBe(201);
+
+      const response = await app.request("/api/v1/auth/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          email: `local-mfa-static-missing-${nonce}@example.com`,
+          password: `unit-test-pw-${nonce}`,
+          otpCode: "000000",
+        }),
+      });
+      expect(response.status).toBe(403);
+      const body = await readResponseAsUnknown(response);
+      if (isRecord(body)) {
+        expect(pickString(body, ["message"])).toContain("未配置静态验证码");
+      }
+    } finally {
+      if (originalLocalMfaRequired === undefined) {
+        delete Bun.env.AUTH_LOCAL_MFA_REQUIRED;
+      } else {
+        Bun.env.AUTH_LOCAL_MFA_REQUIRED = originalLocalMfaRequired;
+      }
+      if (originalLocalMfaCode === undefined) {
+        delete Bun.env.AUTH_LOCAL_MFA_STATIC_CODE;
+      } else {
+        Bun.env.AUTH_LOCAL_MFA_STATIC_CODE = originalLocalMfaCode;
+      }
+    }
+  });
+
   test("POST /api/v1/auth/external/login 支持 SAML provider 断言登录", async () => {
     const nonce = createNonce("auth-external-login-saml");
     const secret = `external-secret-${nonce}`;
@@ -3670,6 +3715,128 @@ describe("Control Plane API", () => {
           item.metadata.providerType === "unknown",
       );
       expect(missingProviderAudit).toBeDefined();
+    } finally {
+      if (originalProviders === undefined) {
+        delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+      } else {
+        Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = originalProviders;
+      }
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("external exchange 在 requireMfa 缺少 mfaVerified 时返回 401 并阻断", async () => {
+    const nonce = createNonce("auth-external-exchange-mfa-missing");
+    const providerId = `corp-oidc-${nonce}`;
+    const clientIp = "203.0.113.77";
+    const userAgent = "external-exchange-mfa-missing-test/1.0";
+    const tokenEndpoint = `https://idp.example.com/oauth/token/${nonce}`;
+    const userinfoEndpoint = `https://idp.example.com/oidc/userinfo/${nonce}`;
+    const idpAccessToken = `idp-access-token-${nonce}`;
+    const originalProviders = Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
+    const originalFetch = globalThis.fetch;
+    Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON = JSON.stringify([
+      {
+        id: providerId,
+        type: "oidc",
+        displayName: "企业 OIDC",
+        enabled: true,
+        requireMfa: true,
+        tokenEndpoint,
+        userinfoEndpoint,
+        clientId: `client-${nonce}`,
+        clientSecret: `secret-${nonce}`,
+      },
+    ]);
+
+    try {
+      globalThis.fetch = (async (
+        input: Parameters<typeof fetch>[0],
+        init?: Parameters<typeof fetch>[1],
+      ) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        if (url.startsWith(tokenEndpoint)) {
+          return new Response(
+            JSON.stringify({
+              access_token: idpAccessToken,
+              token_type: "Bearer",
+              expires_in: 3600,
+            }),
+            {
+              status: 200,
+              headers: {
+                "content-type": "application/json",
+              },
+            },
+          );
+        }
+        if (url.startsWith(userinfoEndpoint)) {
+          const authorization = new Headers(init?.headers).get("authorization");
+          expect(authorization).toBe(`Bearer ${idpAccessToken}`);
+          return new Response(
+            JSON.stringify({
+              sub: `oidc-user-${nonce}`,
+              email: `exchange-mfa-${nonce}@example.com`,
+              name: `换会话MFA用户-${nonce}`,
+            }),
+            {
+              status: 200,
+              headers: {
+                "content-type": "application/json",
+              },
+            },
+          );
+        }
+        throw new Error(`unexpected fetch url in external/exchange mfa test: ${url}`);
+      }) as unknown as typeof fetch;
+
+      const response = await app.request("/api/v1/auth/external/exchange", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": clientIp,
+          "user-agent": userAgent,
+        },
+        body: JSON.stringify({
+          providerId,
+          code: `authorization-code-${nonce}`,
+          redirectUri: `https://console.example.com/callback/${nonce}`,
+          codeVerifier: `code-verifier-${nonce}`,
+        }),
+      });
+      expect(response.status).toBe(401);
+      const body = await readResponseAsUnknown(response);
+      if (isRecord(body)) {
+        expect(pickBoolean(body, ["mfaRequired"])).toBe(true);
+        expect(pickString(body, ["riskDecision"])).toBe("allow_with_risk");
+        expect(pickString(body, ["message"])).toContain("上游 MFA 验证");
+      }
+
+      const auth = await getDefaultAuthContext();
+      const audits = await queryAuditByAction(
+        "auth.external_exchange_failed",
+        "/api/v1/auth/external/exchange",
+        auth.accessToken,
+        auth.userId,
+      );
+      const mfaAudit = audits.items.find(
+        (item) =>
+          item.metadata.reason === "外部授权码登录需要上游 MFA 验证。" &&
+          item.metadata.providerId === providerId &&
+          item.metadata.providerType === "oidc" &&
+          item.metadata.clientIp === clientIp &&
+          item.metadata.userAgent === userAgent &&
+          item.metadata.riskLevel === "medium" &&
+          item.metadata.failureStage === "mfa_validation" &&
+          Array.isArray(item.metadata.riskSignals) &&
+          item.metadata.riskSignals.includes("mfa_required"),
+      );
+      expect(mfaAudit).toBeDefined();
     } finally {
       if (originalProviders === undefined) {
         delete Bun.env.AUTH_EXTERNAL_PROVIDERS_JSON;
@@ -4493,6 +4660,78 @@ describe("Control Plane API", () => {
         expect(pickString(scimMemberAfter, ["tenantRole"])).toBe("readonly");
         expect(pickString(scimMemberAfter, ["organizationId"])).toBeUndefined();
         expect(pickString(scimMemberAfter, ["orgRole"])).toBeUndefined();
+      }
+    } finally {
+      if (originalScimToken === undefined) {
+        delete Bun.env.SCIM_BEARER_TOKEN;
+      } else {
+        Bun.env.SCIM_BEARER_TOKEN = originalScimToken;
+      }
+    }
+  });
+
+  test("SCIM token 缺失/未配置返回 401/503（契约稳定）", async () => {
+    const nonce = createNonce("identity-scim-auth-errors");
+    const originalScimToken = Bun.env.SCIM_BEARER_TOKEN;
+
+    const owner = await registerAndLoginUser(`${nonce}-owner`);
+    if (!owner.userId) {
+      throw new Error("无法解析 SCIM auth-errors owner userId。");
+    }
+    const createTenantResult = await createTenantByAuth(
+      owner.accessToken,
+      {
+        name: `租户-${nonce}`,
+        slug: `tenant-${nonce}`,
+      },
+      owner.userId,
+    );
+    assertApiStatus(createTenantResult, [201]);
+    const tenantId = extractEntityId(createTenantResult.payload);
+    if (!tenantId) {
+      throw new Error("SCIM auth-errors 测试租户创建失败。");
+    }
+
+    const usersPath = `/api/v1/tenants/${encodeURIComponent(tenantId)}/scim/users`;
+    const groupsPath = `/api/v1/tenants/${encodeURIComponent(tenantId)}/scim/groups`;
+
+    try {
+      Bun.env.SCIM_BEARER_TOKEN = `scim-token-${nonce}`;
+
+      const missingHeaderResponse = await app.request(usersPath);
+      expect(missingHeaderResponse.status).toBe(401);
+      const missingHeaderBody = await readResponseAsUnknown(missingHeaderResponse);
+      if (isRecord(missingHeaderBody)) {
+        expect(pickString(missingHeaderBody, ["message"])).toBe(
+          "SCIM 未认证：缺少或无效的 Bearer Token。",
+        );
+      }
+
+      const wrongTokenResponse = await app.request(groupsPath, {
+        headers: {
+          authorization: `Bearer wrong-${nonce}`,
+        },
+      });
+      expect(wrongTokenResponse.status).toBe(401);
+      const wrongTokenBody = await readResponseAsUnknown(wrongTokenResponse);
+      if (isRecord(wrongTokenBody)) {
+        expect(pickString(wrongTokenBody, ["message"])).toBe(
+          "SCIM 未认证：缺少或无效的 Bearer Token。",
+        );
+      }
+
+      delete Bun.env.SCIM_BEARER_TOKEN;
+      const notConfiguredResponse = await app.request(usersPath, {
+        headers: {
+          authorization: `Bearer whatever-${nonce}`,
+        },
+      });
+      expect(notConfiguredResponse.status).toBe(503);
+      const notConfiguredBody = await readResponseAsUnknown(notConfiguredResponse);
+      if (isRecord(notConfiguredBody)) {
+        expect(pickString(notConfiguredBody, ["message"])).toBe(
+          "服务端未配置 SCIM_BEARER_TOKEN。",
+        );
       }
     } finally {
       if (originalScimToken === undefined) {
@@ -16595,6 +16834,181 @@ describe("Control Plane API", () => {
     expect(redactBody.items[0]?.detail).toContain("[REDACTED_SECRET]");
   });
 
+  test("AUDIT_DLP_EXTRA_PATTERNS_JSON 非法输入会被忽略，DLP block 不误杀", async () => {
+    const auth = await getDefaultAuthContext();
+    const headers = await resolveAuthHeaders(auth.accessToken, auth.userId);
+    const tenantId = resolveTenantIdFromAuthHeaders(headers);
+    const repositoryWithAudit = repository as {
+      appendAuditLog?: (input: {
+        tenantId: string;
+        eventId: string;
+        action: string;
+        level: string;
+        detail: string;
+        metadata: Record<string, unknown>;
+      }) => Promise<unknown>;
+    };
+    if (typeof repositoryWithAudit.appendAuditLog !== "function") {
+      throw new Error("repository.appendAuditLog 不可用，无法验证 DLP extra patterns。");
+    }
+
+    const nonce = createNonce("audit-export-dlp-extra-invalid");
+    const needle = `custom-sensitive-${nonce}`;
+    const keyword = `dlp-extra-invalid-${nonce}`;
+    const action = "test.audit.export_dlp_extra_invalid";
+    await repositoryWithAudit.appendAuditLog({
+      tenantId,
+      eventId: `cp:${nonce}`,
+      action,
+      level: "info",
+      detail: `this audit contains ${needle} but should not be blocked when extra patterns invalid`,
+      metadata: {
+        keyword,
+      },
+    });
+
+    const originalExtraPatterns = Bun.env.AUDIT_DLP_EXTRA_PATTERNS_JSON;
+    try {
+      const scenarios = [
+        {
+          name: "invalid_json",
+          raw: "not-json",
+        },
+        {
+          name: "not_array",
+          raw: JSON.stringify({ pattern: needle }),
+        },
+        {
+          name: "invalid_regex",
+          raw: JSON.stringify(["["]),
+        },
+      ] as const;
+
+      for (const scenario of scenarios) {
+        Bun.env.AUDIT_DLP_EXTRA_PATTERNS_JSON = scenario.raw;
+        const exportResponse = await app.request(
+          `/api/v1/audits/export?format=json&action=${encodeURIComponent(action)}&keyword=${encodeURIComponent(keyword)}&dlpMode=block`,
+          { headers },
+        );
+        expect(exportResponse.status).toBe(200);
+        expect(exportResponse.headers.get("x-agentledger-dlp-mode")).toBe("block");
+        expect(exportResponse.headers.get("x-agentledger-dlp-matched")).toBe("false");
+        const exportBody = (await exportResponse.json()) as {
+          format?: string;
+          items?: Array<{ detail?: string }>;
+        };
+        expect(exportBody.format).toBe("json");
+        const matchedItem = exportBody.items?.find(
+          (item) => typeof item.detail === "string" && item.detail.includes(needle),
+        );
+        expect(matchedItem).toBeDefined();
+      }
+    } finally {
+      if (originalExtraPatterns === undefined) {
+        delete Bun.env.AUDIT_DLP_EXTRA_PATTERNS_JSON;
+      } else {
+        Bun.env.AUDIT_DLP_EXTRA_PATTERNS_JSON = originalExtraPatterns;
+      }
+    }
+  });
+
+  test("AUDIT_DLP_EXTRA_PATTERNS_JSON 命中时 block=422/redact=200，审计与返回结构稳定", async () => {
+    const auth = await getDefaultAuthContext();
+    const headers = await resolveAuthHeaders(auth.accessToken, auth.userId);
+    const tenantId = resolveTenantIdFromAuthHeaders(headers);
+    const repositoryWithAudit = repository as {
+      appendAuditLog?: (input: {
+        tenantId: string;
+        eventId: string;
+        action: string;
+        level: string;
+        detail: string;
+        metadata: Record<string, unknown>;
+      }) => Promise<unknown>;
+    };
+    if (typeof repositoryWithAudit.appendAuditLog !== "function") {
+      throw new Error("repository.appendAuditLog 不可用，无法验证 DLP extra patterns。");
+    }
+
+    const nonce = createNonce("audit-export-dlp-extra-hit");
+    const needle = `custom-sensitive-${nonce}`;
+    const keyword = `dlp-extra-hit-${nonce}`;
+    const action = "test.audit.export_dlp_extra_hit";
+    await repositoryWithAudit.appendAuditLog({
+      tenantId,
+      eventId: `cp:${nonce}`,
+      action,
+      level: "warning",
+      detail: `audit detail contains ${needle} and should be redacted by extra patterns`,
+      metadata: {
+        keyword,
+      },
+    });
+
+    const originalExtraPatterns = Bun.env.AUDIT_DLP_EXTRA_PATTERNS_JSON;
+    Bun.env.AUDIT_DLP_EXTRA_PATTERNS_JSON = JSON.stringify([needle]);
+    try {
+      const blockResponse = await app.request(
+        `/api/v1/audits/export?format=json&action=${encodeURIComponent(action)}&keyword=${encodeURIComponent(keyword)}&dlpMode=block`,
+        { headers },
+      );
+      expect(blockResponse.status).toBe(422);
+      const blockBody = await readResponseAsUnknown(blockResponse);
+      if (isRecord(blockBody)) {
+        expect(pickString(blockBody, ["message"])).toBe(
+          "审计导出命中 DLP 规则，已阻止导出。",
+        );
+      }
+
+      const redactResponse = await app.request(
+        `/api/v1/audits/export?format=json&action=${encodeURIComponent(action)}&keyword=${encodeURIComponent(keyword)}&dlpMode=redact`,
+        { headers },
+      );
+      expect(redactResponse.status).toBe(200);
+      expect(redactResponse.headers.get("x-agentledger-dlp-mode")).toBe("redact");
+      expect(redactResponse.headers.get("x-agentledger-dlp-matched")).toBe("true");
+      const redactBody = (await redactResponse.json()) as {
+        format?: string;
+        exportedAt?: string;
+        items?: Array<{ detail?: string; action?: string }>;
+        filters?: { action?: string; keyword?: string };
+        targetResource?: { resourceType?: string };
+      };
+      expect(redactBody.format).toBe("json");
+      expect(typeof redactBody.exportedAt).toBe("string");
+      expect(redactBody.filters?.action).toBe(action);
+      expect(redactBody.filters?.keyword).toBe(keyword);
+      expect(redactBody.targetResource?.resourceType).toBe("audit_export");
+      const redactedItem = redactBody.items?.find(
+        (item) => item.action === action,
+      );
+      expect(redactedItem).toBeDefined();
+      expect(redactedItem?.detail).toContain("[REDACTED_DLP]");
+      expect(redactedItem?.detail).not.toContain(needle);
+
+      const exportAudits = await queryAuditByAction(
+        "audit.export",
+        keyword,
+        auth.accessToken,
+        auth.userId,
+      );
+      const exportAudit = exportAudits.items.find(
+        (item) =>
+          item.metadata.route === "/api/v1/audits/export" &&
+          item.metadata.dlpMode === "redact" &&
+          item.metadata.dlpMatched === true &&
+          item.metadata.dlpRedacted === 1,
+      );
+      expect(exportAudit).toBeDefined();
+    } finally {
+      if (originalExtraPatterns === undefined) {
+        delete Bun.env.AUDIT_DLP_EXTRA_PATTERNS_JSON;
+      } else {
+        Bun.env.AUDIT_DLP_EXTRA_PATTERNS_JSON = originalExtraPatterns;
+      }
+    }
+  });
+
   test("GET /api/v1/audits/evidence-bundle 在 evidence_bundle Legal Hold 生效时返回 409，释放后返回目标元信息", async () => {
     const nonce = createNonce("audit-evidence-legal-hold");
     const authHeaders = await resolveAuthHeaders();
@@ -24243,6 +24657,58 @@ describe("Control Plane API", () => {
       ).toBe(true);
     } finally {
       resetReplayJobExecutionWorkerForTests();
+    }
+  });
+
+  test("api-v2 residency kms-key-mappings 非法输入返回 400（错误码一致）", async () => {
+    const nonce = createNonce("residency-v2-kms-invalid");
+    const auth = await getDefaultAuthContext();
+    if (!auth.userId) {
+      throw new Error("无法解析 auth userId，无法执行 residency kms invalid 测试。");
+    }
+
+    const tenantResult = await createTenantByAuth(
+      auth.accessToken,
+      {
+        name: `ResidencyV2 KMS Invalid ${nonce}`,
+        slug: `residency-v2-kms-invalid-${nonce}`,
+      },
+      auth.userId,
+    );
+    assertApiStatus(tenantResult, [201]);
+    const tenantId = extractEntityId(tenantResult.payload);
+    if (!tenantId) {
+      throw new Error("租户创建失败，缺少 tenantId。");
+    }
+
+    const headers = await issueTenantScopedAuthHeaders(
+      tenantId,
+      auth.accessToken,
+      auth.userId,
+    );
+    const response = await app.request("/api/v2/residency/kms-key-mappings", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...headers,
+      },
+      body: JSON.stringify({
+        items: [
+          {
+            regionId: "",
+            keyProvider: "kms",
+            keyRef: "kms://invalid",
+            enabled: true,
+          },
+        ],
+      }),
+    });
+    expect(response.status).toBe(400);
+    const body = await readResponseAsUnknown(response);
+    if (isRecord(body)) {
+      expect(pickString(body, ["message"])).toBe(
+        "items[0].regionId 必填且必须为非空字符串。",
+      );
     }
   });
 

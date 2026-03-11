@@ -6,7 +6,7 @@
     "title": "AgentLedger Control Plane API",
     "version": "1.2.0",
     "specVersion": "3.0.3",
-    "digest": "04e9313f86380e4b3e14746ecfe402011e96975ceba420a762cb85b7dc8b4eb4"
+    "digest": "b990acd8407c87d163bb509ab23649e0017ad8713f5d4cae3901171463f402be"
   },
   "operations": [
     {

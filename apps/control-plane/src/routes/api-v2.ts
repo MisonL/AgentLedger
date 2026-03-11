@@ -115,17 +115,28 @@ function readReplayExperimentBaselineVersionId(
 
 interface QualityAutomationStrategyRule {
   ruleId: string;
+  enabled?: boolean;
+  priority?: number;
   metric?: QualityMetric;
   severity?: QualityAdviceSeverity;
   trendDirection?: QualityTrendDirection;
   provider?: string;
+  providerPattern?: string;
   workflow?: string;
+  workflowPattern?: string;
   projectPattern?: string;
+  modelVersionIn?: Array<"quality-heuristic-v2" | "quality-timeseries-v1">;
+  triggerReasonIn?: Array<"evaluation_failure" | "replay_regression">;
   minSampleCount?: number;
+  maxSampleCount?: number;
   minPassRate?: number;
+  maxPassRate?: number;
   minConfidence?: number;
+  maxConfidence?: number;
   regressionProbabilityAtLeast?: number;
+  regressionProbabilityAtMost?: number;
   replayRegressionAtLeast?: number;
+  replayRegressionAtMost?: number;
   actionType: QualityAdviceAction;
   requiresApproval?: boolean;
   cooldownMinutes?: number;
@@ -491,17 +502,28 @@ function mapQualityAutomationPolicy(policy: {
   ).map((rule) => ({
     id: rule.ruleId,
     ruleId: rule.ruleId,
+    enabled: rule.enabled ?? true,
+    priority: rule.priority,
     metric: rule.metric,
     severity: rule.severity,
     trendDirection: rule.trendDirection,
     provider: rule.provider,
+    providerPattern: rule.providerPattern,
     workflow: rule.workflow,
+    workflowPattern: rule.workflowPattern,
     projectPattern: rule.projectPattern,
+    modelVersionIn: rule.modelVersionIn,
+    triggerReasonIn: rule.triggerReasonIn,
     minSampleCount: rule.minSampleCount,
+    maxSampleCount: rule.maxSampleCount,
     minPassRate: rule.minPassRate,
+    maxPassRate: rule.maxPassRate,
     minConfidence: rule.minConfidence,
+    maxConfidence: rule.maxConfidence,
     regressionProbabilityAtLeast: rule.regressionProbabilityAtLeast,
+    regressionProbabilityAtMost: rule.regressionProbabilityAtMost,
     replayRegressionAtLeast: rule.replayRegressionAtLeast,
+    replayRegressionAtMost: rule.replayRegressionAtMost,
     actionType: rule.actionType,
     requiresApproval: rule.requiresApproval ?? false,
     cooldownMinutes: rule.cooldownMinutes,
@@ -570,21 +592,44 @@ function parseQualityAutomationStrategyMatrix(
     if (!actionType) {
       continue;
     }
+    const enabled = typeof record.enabled === "boolean" ? record.enabled : undefined;
+    const priority =
+      record.priority === undefined
+        ? undefined
+        : Number.isFinite(Number(record.priority))
+          ? Math.max(0, toInteger(record.priority, 0))
+          : undefined;
     const minConfidence =
       record.minConfidence === undefined
         ? undefined
         : Number.isFinite(Number(record.minConfidence))
           ? Number(Number(record.minConfidence).toFixed(4))
           : undefined;
+    const maxConfidence =
+      record.maxConfidence === undefined
+        ? undefined
+        : Number.isFinite(Number(record.maxConfidence))
+          ? Number(Number(record.maxConfidence).toFixed(4))
+          : undefined;
     const minSampleCount =
       record.minSampleCount === undefined
         ? undefined
         : Math.max(0, toInteger(record.minSampleCount, 0));
+    const maxSampleCount =
+      record.maxSampleCount === undefined
+        ? undefined
+        : Math.max(0, toInteger(record.maxSampleCount, 0));
     const minPassRate =
       record.minPassRate === undefined
         ? undefined
         : Number.isFinite(Number(record.minPassRate))
           ? Number(Number(record.minPassRate).toFixed(6))
+          : undefined;
+    const maxPassRate =
+      record.maxPassRate === undefined
+        ? undefined
+        : Number.isFinite(Number(record.maxPassRate))
+          ? Number(Number(record.maxPassRate).toFixed(6))
           : undefined;
     const regressionProbabilityAtLeast =
       record.regressionProbabilityAtLeast === undefined
@@ -592,27 +637,62 @@ function parseQualityAutomationStrategyMatrix(
         : Number.isFinite(Number(record.regressionProbabilityAtLeast))
           ? Number(Number(record.regressionProbabilityAtLeast).toFixed(4))
           : undefined;
+    const regressionProbabilityAtMost =
+      record.regressionProbabilityAtMost === undefined
+        ? undefined
+        : Number.isFinite(Number(record.regressionProbabilityAtMost))
+          ? Number(Number(record.regressionProbabilityAtMost).toFixed(4))
+          : undefined;
     const replayRegressionAtLeast =
       record.replayRegressionAtLeast === undefined
         ? undefined
         : Math.max(0, toInteger(record.replayRegressionAtLeast, 0));
+    const replayRegressionAtMost =
+      record.replayRegressionAtMost === undefined
+        ? undefined
+        : Math.max(0, toInteger(record.replayRegressionAtMost, 0));
     const cooldownMinutes =
       record.cooldownMinutes === undefined
         ? undefined
         : Math.max(0, toInteger(record.cooldownMinutes, 0));
+    const modelVersionIn = Array.isArray(record.modelVersionIn)
+      ? record.modelVersionIn
+          .map((item) => firstNonEmptyString(item))
+          .map((item) => (item ? toQualityForecastModelVersion(item) : undefined))
+          .filter((item): item is "quality-heuristic-v2" | "quality-timeseries-v1" => Boolean(item))
+      : undefined;
+    const triggerReasonIn = Array.isArray(record.triggerReasonIn)
+      ? record.triggerReasonIn
+          .map((item) => firstNonEmptyString(item)?.toLowerCase())
+          .filter(
+            (item): item is "evaluation_failure" | "replay_regression" =>
+              item === "evaluation_failure" || item === "replay_regression",
+          )
+      : undefined;
     rules.push({
       ruleId: firstNonEmptyString(record.ruleId, record.id) ?? `rule-${index + 1}`,
+      enabled,
+      priority,
       metric: normalizeQualityMetric(record.metric),
       severity: normalizeQualitySeverity(record.severity),
       trendDirection: normalizeQualityTrendDirection(record.trendDirection),
       provider: firstNonEmptyString(record.provider)?.toLowerCase(),
+      providerPattern: firstNonEmptyString(record.providerPattern),
       workflow: firstNonEmptyString(record.workflow),
+      workflowPattern: firstNonEmptyString(record.workflowPattern),
       projectPattern: firstNonEmptyString(record.projectPattern),
+      modelVersionIn: modelVersionIn && modelVersionIn.length > 0 ? modelVersionIn : undefined,
+      triggerReasonIn: triggerReasonIn && triggerReasonIn.length > 0 ? triggerReasonIn : undefined,
       minSampleCount,
+      maxSampleCount,
       minPassRate,
+      maxPassRate,
       minConfidence,
+      maxConfidence,
       regressionProbabilityAtLeast,
+      regressionProbabilityAtMost,
       replayRegressionAtLeast,
+      replayRegressionAtMost,
       actionType,
       requiresApproval:
         typeof record.requiresApproval === "boolean" ? record.requiresApproval : undefined,
@@ -695,6 +775,12 @@ function validateQualityAutomationStrategyMatrix(
         error: `strategyMatrix[${index}] 的 trendDirection 非法。`,
       };
     }
+    if (record.enabled !== undefined && typeof record.enabled !== "boolean") {
+      return {
+        success: false,
+        error: `strategyMatrix[${index}] 的 enabled 必须是布尔值。`,
+      };
+    }
     if (
       record.requiresApproval !== undefined &&
       typeof record.requiresApproval !== "boolean"
@@ -704,13 +790,63 @@ function validateQualityAutomationStrategyMatrix(
         error: `strategyMatrix[${index}] 的 requiresApproval 必须是布尔值。`,
       };
     }
-    for (const field of ["provider", "workflow", "projectPattern", "reason"] as const) {
+    for (const field of [
+      "provider",
+      "providerPattern",
+      "workflow",
+      "workflowPattern",
+      "projectPattern",
+      "reason",
+    ] as const) {
       const rawValue = record[field];
       if (rawValue !== undefined && !firstNonEmptyString(rawValue)) {
         return {
           success: false,
           error: `strategyMatrix[${index}] 的 ${field} 不能为空字符串。`,
         };
+      }
+    }
+    const priorityError = validateQualityAutomationStrategyMatrixNumber(record.priority, {
+      field: `strategyMatrix[${index}].priority`,
+      integer: true,
+      min: 0,
+    });
+    if (priorityError) {
+      return { success: false, error: priorityError };
+    }
+    if (record.modelVersionIn !== undefined) {
+      if (!Array.isArray(record.modelVersionIn) || record.modelVersionIn.length === 0) {
+        return {
+          success: false,
+          error: `strategyMatrix[${index}].modelVersionIn 必须是非空数组。`,
+        };
+      }
+      for (const item of record.modelVersionIn) {
+        const normalized = firstNonEmptyString(item);
+        const parsed = normalized ? toQualityForecastModelVersion(normalized) : undefined;
+        if (!parsed) {
+          return {
+            success: false,
+            error: `strategyMatrix[${index}].modelVersionIn 仅支持 quality-heuristic-v2/quality-timeseries-v1。`,
+          };
+        }
+      }
+    }
+    if (record.triggerReasonIn !== undefined) {
+      if (!Array.isArray(record.triggerReasonIn) || record.triggerReasonIn.length === 0) {
+        return {
+          success: false,
+          error: `strategyMatrix[${index}].triggerReasonIn 必须是非空数组。`,
+        };
+      }
+      for (const item of record.triggerReasonIn) {
+        const normalized = firstNonEmptyString(item)?.toLowerCase();
+        if (normalized !== "evaluation_failure" && normalized !== "replay_regression") {
+          return {
+            success: false,
+            error: `strategyMatrix[${index}].triggerReasonIn 仅支持 evaluation_failure/replay_regression。`,
+          };
+        }
       }
     }
     const minSampleCountError = validateQualityAutomationStrategyMatrixNumber(
@@ -724,6 +860,17 @@ function validateQualityAutomationStrategyMatrix(
     if (minSampleCountError) {
       return { success: false, error: minSampleCountError };
     }
+    const maxSampleCountError = validateQualityAutomationStrategyMatrixNumber(
+      record.maxSampleCount,
+      {
+        field: `strategyMatrix[${index}].maxSampleCount`,
+        integer: true,
+        min: 0,
+      },
+    );
+    if (maxSampleCountError) {
+      return { success: false, error: maxSampleCountError };
+    }
     const minPassRateError = validateQualityAutomationStrategyMatrixNumber(
       record.minPassRate,
       {
@@ -734,6 +881,17 @@ function validateQualityAutomationStrategyMatrix(
     );
     if (minPassRateError) {
       return { success: false, error: minPassRateError };
+    }
+    const maxPassRateError = validateQualityAutomationStrategyMatrixNumber(
+      record.maxPassRate,
+      {
+        field: `strategyMatrix[${index}].maxPassRate`,
+        min: 0,
+        max: 1,
+      },
+    );
+    if (maxPassRateError) {
+      return { success: false, error: maxPassRateError };
     }
     const minConfidenceError = validateQualityAutomationStrategyMatrixNumber(
       record.minConfidence,
@@ -746,6 +904,17 @@ function validateQualityAutomationStrategyMatrix(
     if (minConfidenceError) {
       return { success: false, error: minConfidenceError };
     }
+    const maxConfidenceError = validateQualityAutomationStrategyMatrixNumber(
+      record.maxConfidence,
+      {
+        field: `strategyMatrix[${index}].maxConfidence`,
+        min: 0,
+        max: 1,
+      },
+    );
+    if (maxConfidenceError) {
+      return { success: false, error: maxConfidenceError };
+    }
     const regressionProbabilityError = validateQualityAutomationStrategyMatrixNumber(
       record.regressionProbabilityAtLeast,
       {
@@ -756,6 +925,17 @@ function validateQualityAutomationStrategyMatrix(
     );
     if (regressionProbabilityError) {
       return { success: false, error: regressionProbabilityError };
+    }
+    const regressionProbabilityAtMostError = validateQualityAutomationStrategyMatrixNumber(
+      record.regressionProbabilityAtMost,
+      {
+        field: `strategyMatrix[${index}].regressionProbabilityAtMost`,
+        min: 0,
+        max: 1,
+      },
+    );
+    if (regressionProbabilityAtMostError) {
+      return { success: false, error: regressionProbabilityAtMostError };
     }
     const replayRegressionError = validateQualityAutomationStrategyMatrixNumber(
       record.replayRegressionAtLeast,
@@ -768,6 +948,17 @@ function validateQualityAutomationStrategyMatrix(
     if (replayRegressionError) {
       return { success: false, error: replayRegressionError };
     }
+    const replayRegressionAtMostError = validateQualityAutomationStrategyMatrixNumber(
+      record.replayRegressionAtMost,
+      {
+        field: `strategyMatrix[${index}].replayRegressionAtMost`,
+        integer: true,
+        min: 0,
+      },
+    );
+    if (replayRegressionAtMostError) {
+      return { success: false, error: replayRegressionAtMostError };
+    }
     const cooldownError = validateQualityAutomationStrategyMatrixNumber(
       record.cooldownMinutes,
       {
@@ -778,6 +969,109 @@ function validateQualityAutomationStrategyMatrix(
     );
     if (cooldownError) {
       return { success: false, error: cooldownError };
+    }
+
+    const minSampleCountValue = record.minSampleCount === undefined || record.minSampleCount === null || record.minSampleCount === ""
+      ? undefined
+      : Number(record.minSampleCount);
+    const maxSampleCountValue = record.maxSampleCount === undefined || record.maxSampleCount === null || record.maxSampleCount === ""
+      ? undefined
+      : Number(record.maxSampleCount);
+    if (
+      minSampleCountValue !== undefined &&
+      maxSampleCountValue !== undefined &&
+      Number.isFinite(minSampleCountValue) &&
+      Number.isFinite(maxSampleCountValue) &&
+      maxSampleCountValue < minSampleCountValue
+    ) {
+      return {
+        success: false,
+        error: `strategyMatrix[${index}].maxSampleCount 不能小于 minSampleCount。`,
+      };
+    }
+    const minPassRateValue = record.minPassRate === undefined || record.minPassRate === null || record.minPassRate === ""
+      ? undefined
+      : Number(record.minPassRate);
+    const maxPassRateValue = record.maxPassRate === undefined || record.maxPassRate === null || record.maxPassRate === ""
+      ? undefined
+      : Number(record.maxPassRate);
+    if (
+      minPassRateValue !== undefined &&
+      maxPassRateValue !== undefined &&
+      Number.isFinite(minPassRateValue) &&
+      Number.isFinite(maxPassRateValue) &&
+      maxPassRateValue + Number.EPSILON < minPassRateValue
+    ) {
+      return {
+        success: false,
+        error: `strategyMatrix[${index}].maxPassRate 不能小于 minPassRate。`,
+      };
+    }
+    const minConfidenceValue = record.minConfidence === undefined || record.minConfidence === null || record.minConfidence === ""
+      ? undefined
+      : Number(record.minConfidence);
+    const maxConfidenceValue = record.maxConfidence === undefined || record.maxConfidence === null || record.maxConfidence === ""
+      ? undefined
+      : Number(record.maxConfidence);
+    if (
+      minConfidenceValue !== undefined &&
+      maxConfidenceValue !== undefined &&
+      Number.isFinite(minConfidenceValue) &&
+      Number.isFinite(maxConfidenceValue) &&
+      maxConfidenceValue + Number.EPSILON < minConfidenceValue
+    ) {
+      return {
+        success: false,
+        error: `strategyMatrix[${index}].maxConfidence 不能小于 minConfidence。`,
+      };
+    }
+    const regressionProbabilityAtLeastValue =
+      record.regressionProbabilityAtLeast === undefined ||
+      record.regressionProbabilityAtLeast === null ||
+      record.regressionProbabilityAtLeast === ""
+        ? undefined
+        : Number(record.regressionProbabilityAtLeast);
+    const regressionProbabilityAtMostValue =
+      record.regressionProbabilityAtMost === undefined ||
+      record.regressionProbabilityAtMost === null ||
+      record.regressionProbabilityAtMost === ""
+        ? undefined
+        : Number(record.regressionProbabilityAtMost);
+    if (
+      regressionProbabilityAtLeastValue !== undefined &&
+      regressionProbabilityAtMostValue !== undefined &&
+      Number.isFinite(regressionProbabilityAtLeastValue) &&
+      Number.isFinite(regressionProbabilityAtMostValue) &&
+      regressionProbabilityAtMostValue + Number.EPSILON < regressionProbabilityAtLeastValue
+    ) {
+      return {
+        success: false,
+        error: `strategyMatrix[${index}].regressionProbabilityAtMost 不能小于 regressionProbabilityAtLeast。`,
+      };
+    }
+    const replayRegressionAtLeastValue =
+      record.replayRegressionAtLeast === undefined ||
+      record.replayRegressionAtLeast === null ||
+      record.replayRegressionAtLeast === ""
+        ? undefined
+        : Number(record.replayRegressionAtLeast);
+    const replayRegressionAtMostValue =
+      record.replayRegressionAtMost === undefined ||
+      record.replayRegressionAtMost === null ||
+      record.replayRegressionAtMost === ""
+        ? undefined
+        : Number(record.replayRegressionAtMost);
+    if (
+      replayRegressionAtLeastValue !== undefined &&
+      replayRegressionAtMostValue !== undefined &&
+      Number.isFinite(replayRegressionAtLeastValue) &&
+      Number.isFinite(replayRegressionAtMostValue) &&
+      replayRegressionAtMostValue < replayRegressionAtLeastValue
+    ) {
+      return {
+        success: false,
+        error: `strategyMatrix[${index}].replayRegressionAtMost 不能小于 replayRegressionAtLeast。`,
+      };
     }
   }
   const rules = parseQualityAutomationStrategyMatrix(value);
@@ -868,11 +1162,15 @@ function buildQualityFeatureContributions(input: {
   };
 }
 
-function matchQualityProjectPattern(pattern: string, project: string): boolean {
+function matchQualityWildcardPattern(pattern: string, value: string): boolean {
   const escaped = pattern
     .replace(/[|\{}()[\]^$+?.]/g, "\$&")
     .replace(/\*/g, ".*");
-  return new RegExp(`^${escaped}$`, "i").test(project);
+  return new RegExp(`^${escaped}$`, "i").test(value);
+}
+
+function matchQualityProjectPattern(pattern: string, project: string): boolean {
+  return matchQualityWildcardPattern(pattern, project);
 }
 
 function selectQualityAutomationStrategyRule(input: {
@@ -880,6 +1178,8 @@ function selectQualityAutomationStrategyRule(input: {
   metric: QualityMetric;
   severity: QualityAdviceSeverity;
   trendDirection: QualityTrendDirection;
+  modelVersion: "quality-heuristic-v2" | "quality-timeseries-v1";
+  triggerReasons: Array<"evaluation_failure" | "replay_regression">;
   provider?: string;
   workflow?: string;
   project?: string;
@@ -889,54 +1189,117 @@ function selectQualityAutomationStrategyRule(input: {
   regressionProbability: number;
   replayRegressionCount: number;
 }) {
-  return input.policy.strategyMatrix.find((rule) => {
+  let selectedRule: (typeof input.policy.strategyMatrix)[number] | undefined;
+  let selectedPriority = -1;
+  for (const rule of input.policy.strategyMatrix) {
+    if (rule.enabled === false) {
+      continue;
+    }
     if (rule.metric && rule.metric !== input.metric) {
-      return false;
+      continue;
     }
     if (rule.severity && rule.severity !== input.severity) {
-      return false;
+      continue;
     }
     if (rule.trendDirection && rule.trendDirection !== input.trendDirection) {
-      return false;
+      continue;
     }
     if (rule.provider && rule.provider !== (input.provider ?? "").toLowerCase()) {
-      return false;
+      continue;
+    }
+    if (
+      rule.providerPattern &&
+      (!input.provider || !matchQualityWildcardPattern(rule.providerPattern, input.provider))
+    ) {
+      continue;
     }
     if (rule.workflow && rule.workflow !== (input.workflow ?? "")) {
-      return false;
+      continue;
+    }
+    if (
+      rule.workflowPattern &&
+      (!input.workflow || !matchQualityWildcardPattern(rule.workflowPattern, input.workflow))
+    ) {
+      continue;
     }
     if (
       rule.projectPattern &&
       (!input.project || !matchQualityProjectPattern(rule.projectPattern, input.project))
     ) {
-      return false;
+      continue;
+    }
+    if (
+      Array.isArray(rule.modelVersionIn) &&
+      rule.modelVersionIn.length > 0 &&
+      !rule.modelVersionIn.includes(input.modelVersion)
+    ) {
+      continue;
+    }
+    if (
+      Array.isArray(rule.triggerReasonIn) &&
+      rule.triggerReasonIn.length > 0 &&
+      !rule.triggerReasonIn.some((reason) => input.triggerReasons.includes(reason))
+    ) {
+      continue;
     }
     if (typeof rule.minSampleCount === "number" && input.sampleCount < rule.minSampleCount) {
-      return false;
+      continue;
+    }
+    if (typeof rule.maxSampleCount === "number" && input.sampleCount > rule.maxSampleCount) {
+      continue;
     }
     if (typeof rule.minPassRate === "number" && input.passRate + Number.EPSILON < rule.minPassRate) {
-      return false;
+      continue;
+    }
+    if (typeof rule.maxPassRate === "number" && input.passRate > rule.maxPassRate + Number.EPSILON) {
+      continue;
     }
     if (
       typeof rule.minConfidence === "number" &&
       input.confidence + Number.EPSILON < rule.minConfidence
     ) {
-      return false;
+      continue;
+    }
+    if (
+      typeof rule.maxConfidence === "number" &&
+      input.confidence > rule.maxConfidence + Number.EPSILON
+    ) {
+      continue;
     }
     if (
       typeof rule.regressionProbabilityAtLeast === "number" &&
       input.regressionProbability + Number.EPSILON < rule.regressionProbabilityAtLeast
     ) {
-      return false;
+      continue;
+    }
+    if (
+      typeof rule.regressionProbabilityAtMost === "number" &&
+      input.regressionProbability > rule.regressionProbabilityAtMost + Number.EPSILON
+    ) {
+      continue;
     }
     if (
       typeof rule.replayRegressionAtLeast === "number" &&
       input.replayRegressionCount < rule.replayRegressionAtLeast
     ) {
-      return false;
+      continue;
     }
-    return true;
-  });
+    if (
+      typeof rule.replayRegressionAtMost === "number" &&
+      input.replayRegressionCount > rule.replayRegressionAtMost
+    ) {
+      continue;
+    }
+    const priority =
+      typeof rule.priority === "number" && Number.isFinite(rule.priority)
+        ? Math.max(0, Math.trunc(rule.priority))
+        : 0;
+    if (!selectedRule || priority > selectedPriority) {
+      selectedRule = rule;
+      selectedPriority = priority;
+    }
+  }
+  return selectedRule;
 }
 
 function buildQualityStrategyMatrixSimulation(input: {
@@ -951,15 +1314,32 @@ function buildQualityStrategyMatrixSimulation(input: {
   trendDirection: QualityTrendDirection;
   replayRegressionCount: number;
   regressionProbability: number;
+  projectedDelta: number;
+  basisWindowCount: number;
 }) {
   const passRate = Math.max(0, Math.min(1, input.score / 100));
   const sampleCount = Math.max(0, toInteger(input.sampleCount, 0));
+  const modelVersion =
+    toQualityForecastModelVersion(input.policy.modelVersion) ?? "quality-heuristic-v2";
   const severity = deriveQualityAdviceSeverity(input.score, passRate);
+  const passed = input.score >= input.policy.evaluationScoreThreshold;
+  const triggerReasons: Array<"evaluation_failure" | "replay_regression"> = [];
+  if (!passed) {
+    triggerReasons.push("evaluation_failure");
+  }
+  if (input.replayRegressionCount > 0) {
+    triggerReasons.push("replay_regression");
+  }
+  if (triggerReasons.length === 0) {
+    triggerReasons.push("evaluation_failure");
+  }
   const matchedRule = selectQualityAutomationStrategyRule({
     policy: input.policy,
     metric: input.metric,
     severity,
     trendDirection: input.trendDirection,
+    modelVersion,
+    triggerReasons,
     provider: input.provider,
     workflow: input.workflow,
     project: input.project,
@@ -979,6 +1359,10 @@ function buildQualityStrategyMatrixSimulation(input: {
     reason,
     metric: input.metric,
     severity,
+    modelVersion,
+    triggerReasons,
+    passed,
+    evaluationScoreThreshold: input.policy.evaluationScoreThreshold,
     confidence: input.confidence,
     trendDirection: input.trendDirection,
     regressionProbability: input.regressionProbability,
@@ -993,13 +1377,24 @@ function buildQualityStrategyMatrixSimulation(input: {
             severity: matchedRule.severity ?? null,
             trendDirection: matchedRule.trendDirection ?? null,
             provider: matchedRule.provider ?? null,
+            providerPattern: matchedRule.providerPattern ?? null,
             workflow: matchedRule.workflow ?? null,
+            workflowPattern: matchedRule.workflowPattern ?? null,
             projectPattern: matchedRule.projectPattern ?? null,
+            modelVersionIn: matchedRule.modelVersionIn ?? null,
+            triggerReasonIn: matchedRule.triggerReasonIn ?? null,
+            enabled: matchedRule.enabled ?? true,
+            priority: matchedRule.priority ?? null,
             minSampleCount: matchedRule.minSampleCount ?? null,
+            maxSampleCount: matchedRule.maxSampleCount ?? null,
             minPassRate: matchedRule.minPassRate ?? null,
+            maxPassRate: matchedRule.maxPassRate ?? null,
             minConfidence: matchedRule.minConfidence ?? null,
+            maxConfidence: matchedRule.maxConfidence ?? null,
             regressionProbabilityAtLeast: matchedRule.regressionProbabilityAtLeast ?? null,
+            regressionProbabilityAtMost: matchedRule.regressionProbabilityAtMost ?? null,
             replayRegressionAtLeast: matchedRule.replayRegressionAtLeast ?? null,
+            replayRegressionAtMost: matchedRule.replayRegressionAtMost ?? null,
             actionType: matchedRule.actionType,
             requiresApproval: matchedRule.requiresApproval ?? false,
             cooldownMinutes: matchedRule.cooldownMinutes ?? null,
@@ -1023,6 +1418,8 @@ function buildQualityStrategyMatrixSimulation(input: {
       confidence: input.confidence,
       regressionProbability: input.regressionProbability,
       replayRegressionCount: input.replayRegressionCount,
+      projectedDelta: input.projectedDelta,
+      basisWindowCount: input.basisWindowCount,
       provider: input.provider ?? null,
       workflow: input.workflow ?? null,
       project: input.project ?? null,
@@ -1279,17 +1676,21 @@ async function maybeExecuteQualityAutomationAdvice(input: {
     from: adviceRange.from ?? null,
     to: adviceRange.to ?? null,
   });
-  const severity: QualityAdviceSeverity =
-    advice.priority === "high"
-      ? "critical"
-      : advice.priority === "medium"
-        ? "warn"
-        : "info";
+  const severity = deriveQualityAdviceSeverity(input.score, passRate);
+  const triggerReasons: Array<"evaluation_failure" | "replay_regression"> = [];
+  if (!passed && mappedPolicy.triggerOnEvaluationFailure) {
+    triggerReasons.push("evaluation_failure");
+  }
+  if (regressedCases > 0 && mappedPolicy.triggerOnReplayRegression) {
+    triggerReasons.push("replay_regression");
+  }
   const matchedRule = selectQualityAutomationStrategyRule({
     policy: mappedPolicy,
     metric: input.metric,
     severity,
     trendDirection,
+    modelVersion,
+    triggerReasons,
     provider,
     workflow,
     project,
@@ -1371,6 +1772,21 @@ async function maybeExecuteQualityAutomationAdvice(input: {
       previousAverageScore,
       previousPassRate,
       advice,
+      strategyDecision: buildQualityStrategyMatrixSimulation({
+        policy: mappedPolicy,
+        metric: input.metric,
+        score: input.score,
+        sampleCount: input.sampleCount,
+        provider,
+        workflow,
+        project,
+        confidence,
+        trendDirection,
+        replayRegressionCount: regressedCases,
+        regressionProbability,
+        projectedDelta,
+        basisWindowCount: Math.max(sampleCount, basisWindowCount ?? 0),
+      }),
     },
     createdAt: evaluatedAt,
   });
@@ -1408,6 +1824,21 @@ async function maybeExecuteQualityAutomationAdvice(input: {
       replayRunId: input.replayRunId ?? null,
       currentScore: input.score,
       cooldownActive,
+      strategyDecision: buildQualityStrategyMatrixSimulation({
+        policy: mappedPolicy,
+        metric: input.metric,
+        score: input.score,
+        sampleCount: input.sampleCount,
+        provider,
+        workflow,
+        project,
+        confidence,
+        trendDirection,
+        replayRegressionCount: regressedCases,
+        regressionProbability,
+        projectedDelta,
+        basisWindowCount: Math.max(sampleCount, basisWindowCount ?? 0),
+      }),
       executionPayload: {
         metric: input.metric,
         currentScore: input.score,
@@ -1936,6 +2367,7 @@ function mapReplayRun(run: ReplayRun) {
   const summary = normalizeRecord(run.summary);
   const diff = normalizeRecord(run.diff);
   const diffs = parseReplayDiffItems(diff);
+  const baselineVersionId = extractReplayExperimentBaselineVersionIdFromRun(run) ?? null;
 
   const totalCases = Math.max(0, toInteger(summary.totalCases, 0));
   const processedCases = Math.max(0, toInteger(summary.processedCases, 0));
@@ -1948,6 +2380,7 @@ function mapReplayRun(run: ReplayRun) {
     tenantId: run.tenantId,
     datasetId: run.datasetId,
     baselineId: run.datasetId,
+    baselineVersionId,
     candidateLabel: firstNonEmptyString(parameters.candidateLabel) ?? "candidate",
     status: run.status,
     totalCases,
@@ -2349,6 +2782,22 @@ function buildReplayExperimentComparison(input: {
   experiment: ReplayExperimentRecord;
   runs: ReplayRun[];
 }) {
+  const baselineVersionId = resolveReplayExperimentBaselineVersionId(
+    input.experiment,
+    input.runs,
+  ) ?? null;
+  const runBaselineVersionIds = input.runs
+    .map((run) => extractReplayExperimentBaselineVersionIdFromRun(run))
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  const baselineVersionIds = Array.from(new Set(runBaselineVersionIds)).sort((left, right) =>
+    left.localeCompare(right),
+  );
+  const baselineComparable =
+    Boolean(baselineVersionId) &&
+    runBaselineVersionIds.length === input.runs.length &&
+    baselineVersionIds.length === 1 &&
+    baselineVersionIds[0] === baselineVersionId;
+
   const items = input.runs
     .map((run) => {
       const mapped = mapReplayRun(run);
@@ -2396,6 +2845,9 @@ function buildReplayExperimentComparison(input: {
   return {
     experimentId: input.experiment.id,
     datasetId: input.experiment.datasetId,
+    baselineVersionId,
+    baselineVersionIds,
+    baselineComparable,
     items,
     total: items.length,
     summary: {
@@ -2417,6 +2869,22 @@ function buildReplayExperimentWorkflow(input: {
   experiment: ReplayExperimentRecord;
   runs: ReplayRun[];
 }) {
+  const baselineVersionId = resolveReplayExperimentBaselineVersionId(
+    input.experiment,
+    input.runs,
+  ) ?? null;
+  const runBaselineVersionIds = input.runs
+    .map((run) => extractReplayExperimentBaselineVersionIdFromRun(run))
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  const baselineVersionIds = Array.from(new Set(runBaselineVersionIds)).sort((left, right) =>
+    left.localeCompare(right),
+  );
+  const baselineComparable =
+    Boolean(baselineVersionId) &&
+    runBaselineVersionIds.length === input.runs.length &&
+    baselineVersionIds.length === 1 &&
+    baselineVersionIds[0] === baselineVersionId;
+
   const runNodes = input.runs
     .map((run) => {
       const mapped = mapReplayRun(run);
@@ -2430,6 +2898,7 @@ function buildReplayExperimentWorkflow(input: {
         metadata: {
           runId: mapped.id,
           candidateLabel: mapped.candidateLabel,
+          baselineVersionId: mapped.baselineVersionId,
           processedCases: mapped.processedCases,
           totalCases: mapped.totalCases,
           improvedCases: mapped.improvedCases,
@@ -2453,6 +2922,9 @@ function buildReplayExperimentWorkflow(input: {
   return {
     experimentId: input.experiment.id,
     status: finalStatus,
+    baselineVersionId,
+    baselineVersionIds,
+    baselineComparable,
     nodes: [
       {
         id: `experiment:${input.experiment.id}`,
@@ -2465,6 +2937,7 @@ function buildReplayExperimentWorkflow(input: {
           datasetId: input.experiment.datasetId,
           sourceAdviceId: input.experiment.sourceAdviceId ?? null,
           triggerSource: input.experiment.triggerSource,
+          baselineVersionId,
         },
       },
       ...runNodes,
@@ -2618,6 +3091,19 @@ function mapReplayExperiment(
 function mapReplayExperimentComparisonItem(
   experiment: ReturnType<typeof mapReplayExperiment>,
 ) {
+  const experimentBaselineVersionId = firstNonEmptyString(experiment.baselineVersionId) ?? null;
+  const runBaselineVersionIds = (experiment.runs ?? [])
+    .map((run) => firstNonEmptyString(run.baselineVersionId))
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  const baselineVersionIds = Array.from(new Set(runBaselineVersionIds)).sort((left, right) =>
+    left.localeCompare(right),
+  );
+  const baselineComparable =
+    Boolean(experimentBaselineVersionId) &&
+    runBaselineVersionIds.length === experiment.runs.length &&
+    baselineVersionIds.length === 1 &&
+    baselineVersionIds[0] === experimentBaselineVersionId;
+
   const runBreakdown = experiment.runs
     .map((run) => {
       const totalCases = Math.max(0, run.totalCases);
@@ -2635,6 +3121,7 @@ function mapReplayExperimentComparisonItem(
         runId: run.id,
         candidateLabel: run.candidateLabel,
         status: run.status,
+        baselineVersionId: run.baselineVersionId ?? null,
         totalCases,
         processedCases,
         improvedCases: run.improvedCases,
@@ -2697,6 +3184,9 @@ function mapReplayExperimentComparisonItem(
     triggerSource: experiment.triggerSource ?? "manual",
     sourceAdviceId: experiment.sourceAdviceId ?? null,
     candidateLabels: [...(experiment.candidateLabels ?? [])],
+    baselineVersionId: experimentBaselineVersionId,
+    baselineVersionIds,
+    baselineComparable,
     totalRuns,
     completedRuns,
     failedRuns,
@@ -2739,6 +3229,18 @@ function buildReplayExperimentComparisonResponse(input: {
     }
     return left.regressionRate - right.regressionRate;
   });
+  const baselineVersionIds = Array.from(
+    new Set(
+      input.items
+        .map((item) => firstNonEmptyString(item.baselineVersionId))
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
+  const baselineComparable =
+    input.items.length > 0 &&
+    input.items.every((item) => Boolean(firstNonEmptyString(item.baselineVersionId))) &&
+    baselineVersionIds.length === 1;
+  const baselineVersionId = baselineComparable ? baselineVersionIds[0] : null;
 
   return {
     items: input.items,
@@ -2747,6 +3249,9 @@ function buildReplayExperimentComparisonResponse(input: {
       comparedExperimentCount: input.items.length,
       comparedAt: new Date().toISOString(),
       datasets: Array.from(new Set(input.items.map((item) => item.datasetId))),
+      baselineVersionId,
+      baselineVersionIds,
+      baselineComparable,
       totalRuns,
       completedRuns,
       failedRuns,
@@ -3238,18 +3743,44 @@ apiV2Routes.post("/quality/automation-policy/simulate", async (c) => {
   const confidence = clampProbability(toNumber(body.confidence, 0.65));
   const trendDirection = normalizeQualityTrendDirection(body.trendDirection) ?? "flat";
   const replayRegressionCount = Math.max(0, toInteger(body.replayRegressionCount, 0));
+  const policy = mapQualityAutomationPolicy(await resolveQualityAutomationPolicy(auth.tenantId));
+  const sampleCount = Math.max(0, toInteger(body.sampleCount, 0));
+  const basisWindowCountRaw = body.basisWindowCount;
+  if (
+    basisWindowCountRaw !== undefined &&
+    (!Number.isFinite(Number(basisWindowCountRaw)) ||
+      !Number.isInteger(Number(basisWindowCountRaw)) ||
+      Number(basisWindowCountRaw) < 0)
+  ) {
+    return c.json({ message: "basisWindowCount 必须是非负整数。" }, 400);
+  }
+  const basisWindowCount =
+    basisWindowCountRaw === undefined
+      ? Math.max(1, sampleCount)
+      : Math.max(0, Math.trunc(Number(basisWindowCountRaw)));
+  const projectedDeltaRaw = body.projectedDelta;
+  if (projectedDeltaRaw !== undefined && !Number.isFinite(Number(projectedDeltaRaw))) {
+    return c.json({ message: "projectedDelta 必须是数字。" }, 400);
+  }
+  const projectedDelta =
+    projectedDeltaRaw === undefined
+      ? trendDirection === "down"
+        ? -5
+        : trendDirection === "up"
+          ? 5
+          : 0
+      : Number(Number(projectedDeltaRaw).toFixed(4));
   const regressionProbability = clampProbability(
     toNumber(
       body.regressionProbability,
       computeQualityRegressionProbability({
         avgScore: score,
         passRate: Math.max(0, Math.min(1, score / 100)),
-        projectedDelta: trendDirection === "down" ? -5 : trendDirection === "up" ? 5 : 0,
-        totalEvents: Math.max(1, toInteger(body.sampleCount, 1)),
+        projectedDelta,
+        totalEvents: Math.max(1, Math.max(sampleCount, basisWindowCount)),
       }),
     ),
   );
-  const policy = mapQualityAutomationPolicy(await resolveQualityAutomationPolicy(auth.tenantId));
   const provider = firstNonEmptyString(body.provider)?.toLowerCase();
   const workflow = firstNonEmptyString(body.workflow);
   const project = firstNonEmptyString(body.project);
@@ -3258,7 +3789,7 @@ apiV2Routes.post("/quality/automation-policy/simulate", async (c) => {
       policy,
       metric,
       score,
-      sampleCount: toInteger(body.sampleCount, 0),
+      sampleCount,
       provider,
       workflow,
       project,
@@ -3266,6 +3797,8 @@ apiV2Routes.post("/quality/automation-policy/simulate", async (c) => {
       trendDirection,
       replayRegressionCount,
       regressionProbability,
+      projectedDelta,
+      basisWindowCount,
     }),
   );
 });
@@ -3808,12 +4341,20 @@ apiV2Routes.get("/quality/reports/advice", async (c) => {
         projectedDelta: avgScore - mappedPolicy.evaluationScoreThreshold,
         totalEvents: group.total,
       });
+      const policyModelVersion =
+        toQualityForecastModelVersion(mappedPolicy.modelVersion) ?? "quality-heuristic-v2";
+      const triggerReasons: Array<"evaluation_failure" | "replay_regression"> = [];
+      if (avgScore < mappedPolicy.evaluationScoreThreshold) {
+        triggerReasons.push("evaluation_failure");
+      }
       const strategyRule = selectQualityAutomationStrategyRule({
         policy: mappedPolicy,
         metric: "accuracy",
         severity,
         trendDirection:
           avgScore < mappedPolicy.evaluationScoreThreshold ? "down" : "flat",
+        modelVersion: policyModelVersion,
+        triggerReasons,
         provider,
         workflow,
         project: group.value,

@@ -4297,6 +4297,12 @@ export function buildOpenApiDocument() {
               type: "string",
               description: "兼容别名：等价于 datasetId。",
             },
+            baselineVersionId: {
+              type: "string",
+              nullable: true,
+              description:
+                "可选：回放运行使用的基线版本快照 ID。为空表示未固化基线版本或旧数据未回填。",
+            },
             candidateLabel: { type: "string" },
             status: {
               type: "string",
@@ -4628,6 +4634,7 @@ export function buildOpenApiDocument() {
               type: "string",
               enum: ["pending", "running", "completed", "failed", "cancelled"],
             },
+            baselineVersionId: { type: "string", nullable: true },
             totalCases: { type: "integer", minimum: 0 },
             processedCases: { type: "integer", minimum: 0 },
             improvedCases: { type: "integer", minimum: 0 },
@@ -4670,6 +4677,9 @@ export function buildOpenApiDocument() {
           properties: {
             experimentId: { type: "string" },
             datasetId: { type: "string" },
+            baselineVersionId: { type: "string", nullable: true },
+            baselineVersionIds: { type: "array", items: { type: "string" } },
+            baselineComparable: { type: "boolean" },
             items: {
               type: "array",
               items: { $ref: "#/components/schemas/ReplayExperimentCompareItemV2" },
@@ -4721,6 +4731,9 @@ export function buildOpenApiDocument() {
             },
             sourceAdviceId: { type: "string", nullable: true },
             candidateLabels: { type: "array", items: { type: "string" } },
+            baselineVersionId: { type: "string", nullable: true },
+            baselineVersionIds: { type: "array", items: { type: "string" } },
+            baselineComparable: { type: "boolean" },
             totalRuns: { type: "integer", minimum: 0 },
             completedRuns: { type: "integer", minimum: 0 },
             failedRuns: { type: "integer", minimum: 0 },
@@ -4762,6 +4775,9 @@ export function buildOpenApiDocument() {
             comparedExperimentCount: { type: "integer", minimum: 0 },
             comparedAt: { type: "string", format: "date-time" },
             datasets: { type: "array", items: { type: "string" } },
+            baselineVersionId: { type: "string", nullable: true },
+            baselineVersionIds: { type: "array", items: { type: "string" } },
+            baselineComparable: { type: "boolean" },
             totalRuns: { type: "integer", minimum: 0 },
             completedRuns: { type: "integer", minimum: 0 },
             failedRuns: { type: "integer", minimum: 0 },
@@ -4824,6 +4840,9 @@ export function buildOpenApiDocument() {
           properties: {
             experimentId: { type: "string" },
             status: { type: "string" },
+            baselineVersionId: { type: "string", nullable: true },
+            baselineVersionIds: { type: "array", items: { type: "string" } },
+            baselineComparable: { type: "boolean" },
             nodes: {
               type: "array",
               items: { $ref: "#/components/schemas/ReplayExperimentWorkflowNodeV2" },
