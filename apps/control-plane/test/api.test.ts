@@ -1317,15 +1317,14 @@ describe("Control Plane API", () => {
         startedAt: String(payload.startedAt ?? ""),
       });
     const body = JSON.stringify(payload);
-    const signature =
-      options.signature ??
-      computeTokenPulseRuntimeSignature(secret, {
+    const signatureHex = computeTokenPulseRuntimeSignature(secret, {
         specVersion,
         keyId,
         timestamp,
         idempotencyKey,
         rawBody: body,
       });
+    const signature = options.signature ?? `sha256=${signatureHex}`;
 
     return {
       init: {

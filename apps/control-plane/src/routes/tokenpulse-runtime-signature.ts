@@ -89,17 +89,23 @@ export function isTokenPulseRuntimeSignatureValid(
   expected: string,
   provided: string | undefined,
 ): boolean {
-  const normalized = provided?.trim().toLowerCase() ?? "";
+  const normalizedExpected = expected.trim().toLowerCase();
+  let normalizedProvided = provided?.trim().toLowerCase() ?? "";
+  if (normalizedProvided.startsWith("sha256=")) {
+    normalizedProvided = normalizedProvided.slice("sha256=".length);
+  } else if (normalizedProvided.startsWith("sha256:")) {
+    normalizedProvided = normalizedProvided.slice("sha256:".length);
+  }
   if (
-    expected.length !== normalized.length ||
-    !isLowercaseHex(expected) ||
-    !isLowercaseHex(normalized)
+    normalizedExpected.length !== normalizedProvided.length ||
+    !isLowercaseHex(normalizedExpected) ||
+    !isLowercaseHex(normalizedProvided)
   ) {
     return false;
   }
   return timingSafeEqual(
-    Buffer.from(expected, "hex"),
-    Buffer.from(normalized, "hex"),
+    Buffer.from(normalizedExpected, "hex"),
+    Buffer.from(normalizedProvided, "hex"),
   );
 }
 
