@@ -8913,6 +8913,48 @@ describe("Web Console", () => {
   );
 
   test(
+    "治理页 TokenPulse 运行时摘要可从 query 预填 traceId",
+    async () => {
+      const originalHref = window.location.href;
+      const originalHash = window.location.hash;
+      window.history.replaceState(
+        {},
+        "",
+        "/?traceId=trace-from-deeplink-001#/governance",
+      );
+      setAuthTokens({
+        accessToken: "access-token-governance-tokenpulse-runtime-prefill",
+        refreshToken: "refresh-token-governance-tokenpulse-runtime-prefill",
+        expiresIn: 1800,
+        tokenType: "Bearer",
+      });
+
+      mockGovernancePageFetch();
+
+      render(<App />);
+
+      const heading = await screen.findByRole("heading", {
+        name: "TokenPulse Runtime Events",
+        level: 2,
+      });
+      const section = heading.closest("section");
+      if (!(section instanceof HTMLElement)) {
+        throw new Error("未找到 TokenPulse Runtime Events 所在 section。");
+      }
+      const sectionScreen = within(section);
+      const traceInput = sectionScreen.getByLabelText("Trace ID");
+
+      expect((traceInput as HTMLInputElement).value).toBe(
+        "trace-from-deeplink-001",
+      );
+
+      window.history.replaceState({}, "", originalHref);
+      window.location.hash = originalHash;
+    },
+    GOVERNANCE_HEAVY_TEST_TIMEOUT_MS,
+  );
+
+  test(
     "治理页 TokenPulse 运行时摘要在 traceId 为空时阻止请求",
     async () => {
       window.location.hash = "#/governance";

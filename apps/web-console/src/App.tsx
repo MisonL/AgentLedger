@@ -694,6 +694,14 @@ function readRouteFromHash(): ConsoleRoute {
   return isConsoleRoute(normalized) ? normalized : DEFAULT_ROUTE;
 }
 
+function readSearchParamValue(key: string): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  const value = new URLSearchParams(window.location.search).get(key);
+  return value?.trim() || "";
+}
+
 function writeRouteToHash(route: ConsoleRoute) {
   if (typeof window === "undefined") {
     return;
@@ -4364,7 +4372,9 @@ function GovernancePage() {
   const [ruleFeedback, setRuleFeedback] = useState<string | null>(null);
   const [ruleError, setRuleError] = useState<string | null>(null);
 
-  const [tokenPulseRuntimeTraceId, setTokenPulseRuntimeTraceId] = useState("");
+  const [tokenPulseRuntimeTraceId, setTokenPulseRuntimeTraceId] = useState(() =>
+    readSearchParamValue("traceId"),
+  );
   const [tokenPulseRuntimeProviderFilter, setTokenPulseRuntimeProviderFilter] =
     useState("");
   const [tokenPulseRuntimeStatusFilter, setTokenPulseRuntimeStatusFilter] =
