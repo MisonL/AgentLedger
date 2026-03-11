@@ -1,0 +1,63 @@
+version: "3.8"
+
+services:
+  agentledger-postgres:
+    image: postgres:16-alpine
+    container_name: agentledger-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=agentledger
+      - POSTGRES_USER=agentledger
+      - POSTGRES_PASSWORD=agentledger
+    ports:
+      - "55432:5432"
+    volumes:
+      - agentledger_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentledger -d agentledger"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  agentledger-nats:
+    image: nats:2.11-alpine
+    container_name: agentledger-nats
+    restart: unless-stopped
+    ports:
+      - "54222:4222"
+
+  agentledger-control-plane:
+    build:
+      context: ..
+      dockerfile: apps/control-plane/Dockerfile
+    container_name: agentledger-control-plane
+    restart: unless-stopped
+    ports:
+      - "18080:8080"
+    depends_on:
+      agentledger-postgres:
+        condition: service_healthy
+      agentledger-nats:
+        condition: service_started
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgresql://agentledger:agentledger@agentledger-postgres:5432/agentledger
+      - NATS_URL=nats://agentledger-nats:4222
+      - AGENTLEDGER_TOKENPULSE_WEBHOOK_SECRET=tp_agl_v1_shared_secret
+      - AGENTLEDGER_TOKENPULSE_WEBHOOK_KEY_ID=tokenpulse-runtime-v1
+
+  agentledger-web-console:
+    build:
+      context: ..
+      dockerfile: apps/web-console/Dockerfile
+      args:
+        - VITE_API_BASE_URL=http://localhost:18080
+    container_name: agentledger-web-console
+    restart: unless-stopped
+    ports:
+      - "15173:5173"
+    depends_on:
+      - agentledger-control-plane
+
+volumes:
+  agentledger_pg_data:
