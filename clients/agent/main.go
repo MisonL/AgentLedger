@@ -1459,6 +1459,8 @@ func configCommand(args []string) int {
 		return configRollbackCommand(args[1:])
 	case "watch":
 		return configWatchCommand(args[1:])
+	case "watch-latest":
+		return configWatchLatestCommand(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "未知 config 子命令: %s\n", args[0])
 		printConfigUsage()
@@ -1588,6 +1590,127 @@ func configRollbackCommand(args []string) int {
 	return 0
 }
 
+type syncLatestWatchedConfigPackageOptions struct {
+	BaseURL       string
+	AuthHeader    string
+	ConfigDir     string
+	Timeout       time.Duration
+	AutoActivate  bool
+	AgentID       string
+	DeviceID      string
+	Channel       string
+	Hostname      string
+	CommandSource string
+}
+
+type syncLatestWatchedConfigPackageResult struct {
+	Hit       bool
+	Updated   bool
+	PackageID string
+	Version   string
+}
+
+func syncLatestWatchedConfigPackage(options syncLatestWatchedConfigPackageOptions) (syncLatestWatchedConfigPackageResult, error) {
+	pkg, err := fetchWatchedLatestConfigPackage(
+		options.BaseURL,
+		options.AuthHeader,
+		options.AgentID,
+		options.DeviceID,
+		options.Channel,
+		options.Hostname,
+		options.Timeout,
+	)
+	if err != nil {
+		if strings.TrimSpace(options.ConfigDir) != "" {
+			currentState, stateErr := readConfigRuntimeState(options.ConfigDir)
+			if stateErr != nil && !errors.Is(stateErr, os.ErrNotExist) {
+				_, _ = writeConfigRuntimeState(options.ConfigDir, localConfigRuntimeState{
+					LastPullError: err.Error(),
+				})
+			} else {
+				currentState.LastPullError = err.Error()
+				_, _ = writeConfigRuntimeState(options.ConfigDir, currentState)
+			}
+		}
+		return syncLatestWatchedConfigPackageResult{}, err
+	}
+	if pkg == nil {
+		return syncLatestWatchedConfigPackageResult{Hit: false}, nil
+	}
+
+	currentState := localConfigRuntimeState{}
+	state, stateErr := readConfigRuntimeState(options.ConfigDir)
+	if stateErr == nil {
+		currentState = state
+	} else if !errors.Is(stateErr, os.ErrNotExist) {
+		return syncLatestWatchedConfigPackageResult{}, fmt.Errorf("读取配置状态失败: %w", stateErr)
+	}
+
+	shouldWritePackage := true
+	if strings.TrimSpace(currentState.LastPulledPackageID) == strings.TrimSpace(pkg.PackageID) {
+		if _, err := os.Stat(configPackageFilePath(options.ConfigDir, pkg.PackageID)); err == nil {
+			shouldWritePackage = false
+		}
+	}
+
+	updated := false
+	nextState := currentState
+	if shouldWritePackage {
+		if _, err := writeLocalConfigPackage(options.ConfigDir, *pkg); err != nil {
+			nextState.LastPullError = err.Error()
+			_, _ = writeConfigRuntimeState(options.ConfigDir, nextState)
+			return syncLatestWatchedConfigPackageResult{}, err
+		}
+		nextState.LastPulledPackageID = pkg.PackageID
+		nextState.LastPulledVersion = pkg.Version
+		nextState.LastPullAt = time.Now().UTC().Format(time.RFC3339)
+		nextState.LastPullError = ""
+		updated = true
+	}
+
+	if options.AutoActivate {
+		oldActivePackageID := strings.TrimSpace(nextState.ActivePackageID)
+		activationSnapshot, err := readActiveConfigSelection(options.ConfigDir)
+		if err == nil {
+			oldActivePackageID = strings.TrimSpace(activationSnapshot.PackageID)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return syncLatestWatchedConfigPackageResult{}, fmt.Errorf("读取激活状态失败: %w", err)
+		}
+
+		if strings.TrimSpace(oldActivePackageID) != strings.TrimSpace(pkg.PackageID) {
+			activation, err := writeActiveConfigSelection(options.ConfigDir, localConfigActivation{
+				PackageID:   pkg.PackageID,
+				ActivatedAt: time.Now().UTC().Format(time.RFC3339),
+			})
+			if err != nil {
+				return syncLatestWatchedConfigPackageResult{}, err
+			}
+			previousPackageID := strings.TrimSpace(nextState.PreviousPackageID)
+			if strings.TrimSpace(oldActivePackageID) != "" && strings.TrimSpace(oldActivePackageID) != strings.TrimSpace(pkg.PackageID) {
+				previousPackageID = strings.TrimSpace(oldActivePackageID)
+			}
+			nextState.PreviousPackageID = previousPackageID
+			nextState.ActivePackageID = strings.TrimSpace(pkg.PackageID)
+			nextState.ActivatedAt = activation.ActivatedAt
+			nextState.RollbackAvailable = strings.TrimSpace(previousPackageID) != ""
+			updated = true
+		}
+	}
+
+	if updated {
+		if _, err := writeConfigRuntimeState(options.ConfigDir, nextState); err != nil {
+			return syncLatestWatchedConfigPackageResult{}, err
+		}
+	}
+
+	return syncLatestWatchedConfigPackageResult{
+		Hit:       true,
+		Updated:   updated,
+		PackageID: pkg.PackageID,
+		Version:   pkg.Version,
+	}, nil
+}
+
 func configWatchCommand(args []string) int {
 	fs := flag.NewFlagSet("config watch", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -1598,11 +1721,31 @@ func configWatchCommand(args []string) int {
 	interval := fs.Duration("interval", defaultConfigWatchInterval, "轮询间隔")
 	iterations := fs.Int("iterations", 1, "轮询次数，0 表示持续运行")
 	autoActivate := fs.Bool("auto-activate", false, "拉取后自动激活")
+	agentID := fs.String("agent-id", defaultLifecycleAgentID(), "watch/latest selector：agentId（默认本机 hostname + -agent）")
+	deviceID := fs.String("device-id", "", "watch/latest selector：deviceId（可选）")
+	channel := fs.String("channel", "", "watch/latest selector：channel（可选；会自动转小写）")
+	hostname := fs.String("hostname", currentHostname(), "watch/latest selector：hostname（默认取本机 hostname；会自动转小写）")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if *timeout <= 0 || *interval <= 0 || *iterations < 0 {
 		fmt.Fprintln(os.Stderr, "timeout/interval 必须 > 0，iterations 必须 >= 0")
+		return 2
+	}
+	if isFlagProvided(fs, "agent-id") && strings.TrimSpace(*agentID) == "" {
+		fmt.Fprintln(os.Stderr, "agent-id 不能为空")
+		return 2
+	}
+	if isFlagProvided(fs, "device-id") && strings.TrimSpace(*deviceID) == "" {
+		fmt.Fprintln(os.Stderr, "device-id 不能为空")
+		return 2
+	}
+	if isFlagProvided(fs, "channel") && strings.TrimSpace(*channel) == "" {
+		fmt.Fprintln(os.Stderr, "channel 不能为空")
+		return 2
+	}
+	if strings.TrimSpace(*hostname) == "" {
+		fmt.Fprintln(os.Stderr, "hostname 不能为空")
 		return 2
 	}
 	baseURL, err := resolveControlPlaneBaseURL(*gateway, isFlagProvided(fs, "gateway"))
@@ -1621,47 +1764,30 @@ func configWatchCommand(args []string) int {
 		return 1
 	}
 	runOnce := func() error {
-		pkg, err := fetchLatestConfigPackage(baseURL, authHeader, *timeout)
+		result, err := syncLatestWatchedConfigPackage(syncLatestWatchedConfigPackageOptions{
+			BaseURL:       baseURL,
+			AuthHeader:    authHeader,
+			ConfigDir:     resolvedConfigDir,
+			Timeout:       *timeout,
+			AutoActivate:  *autoActivate,
+			AgentID:       strings.TrimSpace(*agentID),
+			DeviceID:      strings.TrimSpace(*deviceID),
+			Channel:       strings.ToLower(strings.TrimSpace(*channel)),
+			Hostname:      strings.ToLower(strings.TrimSpace(*hostname)),
+			CommandSource: "watch",
+		})
 		if err != nil {
-			_, _ = writeConfigRuntimeState(resolvedConfigDir, localConfigRuntimeState{
-				LastPullError: err.Error(),
-			})
 			return err
 		}
-		currentState, _ := readConfigRuntimeState(resolvedConfigDir)
-		if currentState.LastPulledPackageID == pkg.PackageID {
-			fmt.Printf("未发现新配置包: package_id=%s version=%s\n", pkg.PackageID, pkg.Version)
+		if !result.Hit {
+			fmt.Println("watch/latest 未命中任何已发布配置包。")
 			return nil
 		}
-		if _, err := writeLocalConfigPackage(resolvedConfigDir, *pkg); err != nil {
-			return err
+		if !result.Updated {
+			fmt.Printf("未发现新配置包: package_id=%s version=%s\n", result.PackageID, result.Version)
+			return nil
 		}
-		nextState := localConfigRuntimeState{
-			ActivePackageID:     currentState.ActivePackageID,
-			PreviousPackageID:   currentState.PreviousPackageID,
-			ActivatedAt:         currentState.ActivatedAt,
-			LastPulledPackageID: pkg.PackageID,
-			LastPulledVersion:   pkg.Version,
-			LastPullAt:          time.Now().UTC().Format(time.RFC3339),
-			RollbackAvailable:   currentState.RollbackAvailable,
-		}
-		if *autoActivate {
-			activation, err := writeActiveConfigSelection(resolvedConfigDir, localConfigActivation{
-				PackageID:   pkg.PackageID,
-				ActivatedAt: time.Now().UTC().Format(time.RFC3339),
-			})
-			if err != nil {
-				return err
-			}
-			nextState.PreviousPackageID = currentState.ActivePackageID
-			nextState.ActivePackageID = pkg.PackageID
-			nextState.ActivatedAt = activation.ActivatedAt
-			nextState.RollbackAvailable = strings.TrimSpace(currentState.ActivePackageID) != ""
-		}
-		if _, err := writeConfigRuntimeState(resolvedConfigDir, nextState); err != nil {
-			return err
-		}
-		fmt.Printf("配置包已同步: package_id=%s version=%s auto_activate=%t\n", pkg.PackageID, pkg.Version, *autoActivate)
+		fmt.Printf("配置包已同步: package_id=%s version=%s auto_activate=%t\n", result.PackageID, result.Version, *autoActivate)
 		return nil
 	}
 	if *iterations == 0 {
@@ -1681,6 +1807,87 @@ func configWatchCommand(args []string) int {
 			time.Sleep(*interval)
 		}
 	}
+	return 0
+}
+
+func configWatchLatestCommand(args []string) int {
+	fs := flag.NewFlagSet("config watch-latest", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	gateway := fs.String("gateway", "", "control-plane 地址（默认取 AGENT_GATEWAY_URL 或内置默认值）")
+	tokenFile := fs.String("token-file", defaultTokenFilePath(), "本地 token 文件路径")
+	configDir := fs.String("config-dir", "", "本地配置目录")
+	timeout := fs.Duration("timeout", 10*time.Second, "请求超时时间")
+	autoActivate := fs.Bool("auto-activate", false, "拉取后自动激活")
+	agentID := fs.String("agent-id", defaultLifecycleAgentID(), "watch/latest selector：agentId（默认本机 hostname + -agent）")
+	deviceID := fs.String("device-id", "", "watch/latest selector：deviceId（可选）")
+	channel := fs.String("channel", "", "watch/latest selector：channel（可选；会自动转小写）")
+	hostname := fs.String("hostname", currentHostname(), "watch/latest selector：hostname（默认取本机 hostname；会自动转小写）")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *timeout <= 0 {
+		fmt.Fprintln(os.Stderr, "timeout 必须 > 0")
+		return 2
+	}
+	if isFlagProvided(fs, "agent-id") && strings.TrimSpace(*agentID) == "" {
+		fmt.Fprintln(os.Stderr, "agent-id 不能为空")
+		return 2
+	}
+	if isFlagProvided(fs, "device-id") && strings.TrimSpace(*deviceID) == "" {
+		fmt.Fprintln(os.Stderr, "device-id 不能为空")
+		return 2
+	}
+	if isFlagProvided(fs, "channel") && strings.TrimSpace(*channel) == "" {
+		fmt.Fprintln(os.Stderr, "channel 不能为空")
+		return 2
+	}
+	if strings.TrimSpace(*hostname) == "" {
+		fmt.Fprintln(os.Stderr, "hostname 不能为空")
+		return 2
+	}
+
+	baseURL, err := resolveControlPlaneBaseURL(*gateway, isFlagProvided(fs, "gateway"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gateway 参数错误: %v\n", err)
+		return 2
+	}
+	resolvedConfigDir, err := resolveAgentConfigDir(*configDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config-dir 参数错误: %v\n", err)
+		return 2
+	}
+	authHeader, err := loadStatusAuthHeader(*tokenFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "读取本地 token 失败: %v\n", err)
+		return 1
+	}
+
+	result, err := syncLatestWatchedConfigPackage(syncLatestWatchedConfigPackageOptions{
+		BaseURL:       baseURL,
+		AuthHeader:    authHeader,
+		ConfigDir:     resolvedConfigDir,
+		Timeout:       *timeout,
+		AutoActivate:  *autoActivate,
+		AgentID:       strings.TrimSpace(*agentID),
+		DeviceID:      strings.TrimSpace(*deviceID),
+		Channel:       strings.ToLower(strings.TrimSpace(*channel)),
+		Hostname:      strings.ToLower(strings.TrimSpace(*hostname)),
+		CommandSource: "watch-latest",
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "watch/latest 拉取失败: %v\n", err)
+		return 1
+	}
+	if !result.Hit {
+		fmt.Println("watch/latest 未命中任何已发布配置包。")
+		return 0
+	}
+	fmt.Printf(
+		"watch/latest 已命中: package_id=%s version=%s auto_activate=%t\n",
+		result.PackageID,
+		result.Version,
+		*autoActivate,
+	)
 	return 0
 }
 
@@ -2334,6 +2541,23 @@ func configActivateCommand(args []string) int {
 		return 2
 	}
 
+	currentState := localConfigRuntimeState{}
+	state, err := readConfigRuntimeState(resolvedConfigDir)
+	if err == nil {
+		currentState = state
+	} else if !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "读取配置状态失败: %v\n", err)
+		return 1
+	}
+	oldActivePackageID := strings.TrimSpace(currentState.ActivePackageID)
+	activationSnapshot, err := readActiveConfigSelection(resolvedConfigDir)
+	if err == nil {
+		oldActivePackageID = strings.TrimSpace(activationSnapshot.PackageID)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "读取激活状态失败: %v\n", err)
+		return 1
+	}
+
 	pkg, err := loadLocalConfigPackageByID(resolvedConfigDir, strings.TrimSpace(*packageID))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "激活配置包失败: %v\n", err)
@@ -2348,6 +2572,25 @@ func configActivateCommand(args []string) int {
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "激活配置包失败: %v\n", err)
+		return 1
+	}
+
+	previousPackageID := strings.TrimSpace(currentState.PreviousPackageID)
+	if strings.TrimSpace(oldActivePackageID) != "" && strings.TrimSpace(oldActivePackageID) != strings.TrimSpace(pkg.PackageID) {
+		previousPackageID = strings.TrimSpace(oldActivePackageID)
+	}
+	nextState := localConfigRuntimeState{
+		ActivePackageID:     strings.TrimSpace(pkg.PackageID),
+		PreviousPackageID:   previousPackageID,
+		ActivatedAt:         activation.ActivatedAt,
+		LastPulledPackageID: currentState.LastPulledPackageID,
+		LastPulledVersion:   currentState.LastPulledVersion,
+		LastPullAt:          currentState.LastPullAt,
+		LastPullError:       currentState.LastPullError,
+		RollbackAvailable:   strings.TrimSpace(previousPackageID) != "",
+	}
+	if _, err := writeConfigRuntimeState(resolvedConfigDir, nextState); err != nil {
+		fmt.Fprintf(os.Stderr, "写入配置状态失败: %v\n", err)
 		return 1
 	}
 
@@ -3292,6 +3535,101 @@ func fetchLatestConfigPackage(
 	}, nil
 }
 
+func fetchWatchedLatestConfigPackage(
+	baseURL string,
+	authHeader string,
+	agentID string,
+	deviceID string,
+	channel string,
+	hostname string,
+	timeout time.Duration,
+) (*localConfigPackage, error) {
+	query := url.Values{}
+	if strings.TrimSpace(agentID) != "" {
+		query.Set("agentId", strings.TrimSpace(agentID))
+	}
+	if strings.TrimSpace(deviceID) != "" {
+		query.Set("deviceId", strings.TrimSpace(deviceID))
+	}
+	if strings.TrimSpace(channel) != "" {
+		query.Set("channel", strings.TrimSpace(channel))
+	}
+	if strings.TrimSpace(hostname) != "" {
+		query.Set("hostname", strings.TrimSpace(hostname))
+	}
+	endpoint := strings.TrimRight(baseURL, "/") + "/api/v1/system/config/packages/watch/latest"
+	if encoded := query.Encode(); strings.TrimSpace(encoded) != "" {
+		endpoint += "?" + encoded
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("构建请求失败: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	if strings.TrimSpace(authHeader) != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
+
+	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("服务端返回错误（HTTP %d）: %s", resp.StatusCode, summarizeResponseBody(body))
+	}
+
+	var response struct {
+		PackageID       string         `json:"packageId"`
+		TenantID        string         `json:"tenantId"`
+		Version         string         `json:"version"`
+		IssuedAt        string         `json:"issuedAt"`
+		SignatureStatus string         `json:"signatureStatus"`
+		Payload         map[string]any `json:"payload"`
+		CreatedAt       string         `json:"createdAt"`
+		UpdatedAt       string         `json:"updatedAt"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("解析 watch/latest 响应失败: %w", err)
+	}
+	if strings.TrimSpace(response.PackageID) == "" {
+		return nil, fmt.Errorf("watch/latest 响应缺少 package_id")
+	}
+	if strings.TrimSpace(response.Version) == "" {
+		return nil, fmt.Errorf("watch/latest 响应缺少 version")
+	}
+	signatureStatus, err := normalizeSignatureStatus(response.SignatureStatus)
+	if err != nil {
+		return nil, err
+	}
+	pkg := &localConfigPackage{
+		PackageID:       strings.TrimSpace(response.PackageID),
+		TenantID:        strings.TrimSpace(response.TenantID),
+		Version:         strings.TrimSpace(response.Version),
+		IssuedAt:        strings.TrimSpace(response.IssuedAt),
+		SignatureStatus: signatureStatus,
+		Payload:         response.Payload,
+		CreatedAt:       strings.TrimSpace(response.CreatedAt),
+		UpdatedAt:       strings.TrimSpace(response.UpdatedAt),
+	}
+	if pkg.Payload == nil {
+		pkg.Payload = map[string]any{}
+	}
+	return pkg, nil
+}
+
 func writeLocalConfigPackage(
 	configDir string,
 	pkg localConfigPackage,
@@ -4139,7 +4477,8 @@ func printConfigUsage() {
 	fmt.Fprintln(os.Stderr, "  agent config pull --package-id <id> [--gateway <url>] [--config-dir <dir>] [--token-file <path>]")
 	fmt.Fprintln(os.Stderr, "  agent config activate --package-id <id> [--config-dir <dir>]")
 	fmt.Fprintln(os.Stderr, "  agent config rollback [--config-dir <dir>]")
-	fmt.Fprintln(os.Stderr, "  agent config watch [--gateway <url>] [--config-dir <dir>] [--token-file <path>] [--interval <dur>] [--iterations <n>] [--auto-activate]")
+	fmt.Fprintln(os.Stderr, "  agent config watch [--gateway <url>] [--config-dir <dir>] [--token-file <path>] [--agent-id <id>] [--device-id <id>] [--channel <name>] [--hostname <name>] [--interval <dur>] [--iterations <n>] [--auto-activate]")
+	fmt.Fprintln(os.Stderr, "  agent config watch-latest [--gateway <url>] [--config-dir <dir>] [--token-file <path>] [--agent-id <id>] [--device-id <id>] [--channel <name>] [--hostname <name>] [--auto-activate]")
 }
 
 func printUpdateUsage() {

@@ -687,6 +687,80 @@ func TestConfigActivateCommand_StatusShowsCurrentPackage(t *testing.T) {
 	}
 }
 
+func TestConfigActivateCommand_WritesRuntimeStateAndPreservesLastPulled(t *testing.T) {
+	configDir := filepath.Join(t.TempDir(), "config")
+	if _, err := writeLocalConfigPackage(configDir, localConfigPackage{
+		PackageID:       "pkg-active-new",
+		TenantID:        "tenant-a",
+		Version:         "cfg-active-new",
+		IssuedAt:        "2026-03-08T12:00:00Z",
+		SignatureStatus: "verified",
+		Payload:         map[string]any{"mode": "new"},
+		CreatedAt:       "2026-03-08T12:00:00Z",
+		UpdatedAt:       "2026-03-08T12:00:00Z",
+	}); err != nil {
+		t.Fatalf("writeLocalConfigPackage(new) error: %v", err)
+	}
+	if _, err := writeActiveConfigSelection(configDir, localConfigActivation{
+		PackageID:   "pkg-active-old",
+		ActivatedAt: "2026-03-08T10:00:00Z",
+	}); err != nil {
+		t.Fatalf("writeActiveConfigSelection(old) error: %v", err)
+	}
+	if _, err := writeConfigRuntimeState(configDir, localConfigRuntimeState{
+		ActivePackageID:     "pkg-active-old",
+		PreviousPackageID:   "pkg-older",
+		ActivatedAt:         "2026-03-08T10:00:00Z",
+		LastPulledPackageID: "pkg-last-pulled",
+		LastPulledVersion:   "cfg-last-pulled",
+		LastPullAt:          "2026-03-08T11:00:00Z",
+		LastPullError:       "last pull failed",
+		RollbackAvailable:   true,
+	}); err != nil {
+		t.Fatalf("writeConfigRuntimeState() error: %v", err)
+	}
+
+	exitCode, _, stderr := captureOutput(t, func() int {
+		return configCommand([]string{
+			"activate",
+			"--package-id=pkg-active-new",
+			"--config-dir=" + configDir,
+		})
+	})
+	if exitCode != 0 {
+		t.Fatalf("configCommand(activate)=%d, want=0, stderr=%s", exitCode, stderr)
+	}
+
+	state, err := readConfigRuntimeState(configDir)
+	if err != nil {
+		t.Fatalf("readConfigRuntimeState() error: %v", err)
+	}
+	if state.ActivePackageID != "pkg-active-new" {
+		t.Fatalf("active_package_id=%q, want=pkg-active-new", state.ActivePackageID)
+	}
+	if state.PreviousPackageID != "pkg-active-old" {
+		t.Fatalf("previous_package_id=%q, want=pkg-active-old", state.PreviousPackageID)
+	}
+	if state.ActivatedAt == "" {
+		t.Fatal("activated_at empty, want non-empty")
+	}
+	if !state.RollbackAvailable {
+		t.Fatal("rollback_available=false, want true")
+	}
+	if state.LastPulledPackageID != "pkg-last-pulled" {
+		t.Fatalf("last_pulled_package_id=%q, want=pkg-last-pulled", state.LastPulledPackageID)
+	}
+	if state.LastPulledVersion != "cfg-last-pulled" {
+		t.Fatalf("last_pulled_version=%q, want=cfg-last-pulled", state.LastPulledVersion)
+	}
+	if state.LastPullAt != "2026-03-08T11:00:00Z" {
+		t.Fatalf("last_pull_at=%q, want=2026-03-08T11:00:00Z", state.LastPullAt)
+	}
+	if state.LastPullError != "last pull failed" {
+		t.Fatalf("last_pull_error=%q, want=last pull failed", state.LastPullError)
+	}
+}
+
 func TestConfigRollbackCommand_RestoresPreviousPackage(t *testing.T) {
 	configDir := filepath.Join(t.TempDir(), "config")
 	if _, err := writeLocalConfigPackage(configDir, localConfigPackage{
@@ -746,26 +820,20 @@ func TestConfigWatchCommand_PullsLatestPackageAndOptionallyActivates(t *testing.
 	})
 	configDir := filepath.Join(t.TempDir(), "config")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/system/config/packages" {
+		if r.URL.Path != "/api/v1/system/config/packages/watch/latest" {
 			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"items": []map[string]any{
-				{
-					"packageId":       "pkg-watch-1",
-					"tenantId":        "tenant-a",
-					"version":         "cfg-watch-1",
-					"issuedAt":        "2026-03-08T10:00:00Z",
-					"signatureStatus": "verified",
-					"payload":         map[string]any{"mode": "observe"},
-					"createdAt":       "2026-03-08T10:00:00Z",
-					"updatedAt":       "2026-03-08T10:00:00Z",
-				},
-			},
-			"total":   1,
-			"filters": map[string]any{"limit": 1},
+			"packageId":       "pkg-watch-1",
+			"tenantId":        "tenant-a",
+			"version":         "cfg-watch-1",
+			"issuedAt":        "2026-03-08T10:00:00Z",
+			"signatureStatus": "verified",
+			"payload":         map[string]any{"mode": "observe"},
+			"createdAt":       "2026-03-08T10:00:00Z",
+			"updatedAt":       "2026-03-08T10:00:00Z",
 		})
 	}))
 	defer server.Close()
@@ -793,6 +861,111 @@ func TestConfigWatchCommand_PullsLatestPackageAndOptionallyActivates(t *testing.
 	}
 	if status.ActivePackageID != "pkg-watch-1" {
 		t.Fatalf("active package=%q, want=pkg-watch-1", status.ActivePackageID)
+	}
+}
+
+func TestConfigWatchLatestCommand_404NoHitIsNotFatal(t *testing.T) {
+	now := time.Now().UTC()
+	tokenPath := writeTokenFileForTest(t, localToken{
+		AccessToken: "token-config-watch-latest",
+		TokenType:   "Bearer",
+		ExpiresAt:   now.Add(1 * time.Hour).Format(time.RFC3339),
+	})
+	configDir := filepath.Join(t.TempDir(), "config")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/system/config/packages/watch/latest" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"message": "当前没有命中的已发布配置包。",
+		})
+	}))
+	defer server.Close()
+
+	exitCode, stdout, stderr := captureOutput(t, func() int {
+		return configCommand([]string{
+			"watch-latest",
+			"--gateway=" + server.URL,
+			"--token-file=" + tokenPath,
+			"--config-dir=" + configDir,
+		})
+	})
+	if exitCode != 0 {
+		t.Fatalf("configCommand(watch-latest)=%d, want=0, stdout=%s stderr=%s", exitCode, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "未命中") {
+		t.Fatalf("stdout=%q, want contains 未命中", stdout)
+	}
+}
+
+func TestConfigWatchLatestCommand_SendsSelectorsAndAutoActivates(t *testing.T) {
+	now := time.Now().UTC()
+	tokenPath := writeTokenFileForTest(t, localToken{
+		AccessToken: "token-config-watch-latest-2",
+		TokenType:   "Bearer",
+		ExpiresAt:   now.Add(1 * time.Hour).Format(time.RFC3339),
+	})
+	configDir := filepath.Join(t.TempDir(), "config")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/system/config/packages/watch/latest" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.URL.Query().Get("agentId"); got != "agent-sel-1" {
+			t.Fatalf("agentId=%q, want=agent-sel-1", got)
+		}
+		if got := r.URL.Query().Get("deviceId"); got != "device-sel-1" {
+			t.Fatalf("deviceId=%q, want=device-sel-1", got)
+		}
+		if got := r.URL.Query().Get("channel"); got != "prod" {
+			t.Fatalf("channel=%q, want=prod", got)
+		}
+		if got := r.URL.Query().Get("hostname"); got != "host-sel-1" {
+			t.Fatalf("hostname=%q, want=host-sel-1", got)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"packageId":       "pkg-watch-latest-1",
+			"tenantId":        "tenant-a",
+			"version":         "cfg-watch-latest-1",
+			"issuedAt":        "2026-03-08T10:00:00Z",
+			"signatureStatus": "verified",
+			"payload":         map[string]any{"mode": "observe"},
+			"createdAt":       "2026-03-08T10:00:00Z",
+			"updatedAt":       "2026-03-08T10:00:00Z",
+		})
+	}))
+	defer server.Close()
+
+	exitCode, stdout, stderr := captureOutput(t, func() int {
+		return configCommand([]string{
+			"watch-latest",
+			"--gateway=" + server.URL,
+			"--token-file=" + tokenPath,
+			"--config-dir=" + configDir,
+			"--agent-id=agent-sel-1",
+			"--device-id=device-sel-1",
+			"--channel=prod",
+			"--hostname=HOST-SEL-1",
+			"--auto-activate",
+		})
+	})
+	if exitCode != 0 {
+		t.Fatalf("configCommand(watch-latest)=%d, want=0, stdout=%s stderr=%s", exitCode, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "watch/latest 已命中") {
+		t.Fatalf("stdout=%q, want contains watch/latest 已命中", stdout)
+	}
+	status, err := readStatusManagedConfig(configDir)
+	if err != nil {
+		t.Fatalf("readStatusManagedConfig() error: %v", err)
+	}
+	if status.ActivePackageID != "pkg-watch-latest-1" {
+		t.Fatalf("active package=%q, want=pkg-watch-latest-1", status.ActivePackageID)
 	}
 }
 
