@@ -393,7 +393,7 @@ AGENTLEDGER_E2E=1 GOV_E2E_DATABASE_URL=... bun run test:e2e-governance-integrati
 #### DONE-TP-01 TokenPulse × AgentLedger v1 运行时摘要事件对接（里程碑：M4）
 
 - 目标：按冻结基线接收 TokenPulse 单向终态运行时摘要事件，完成验签、幂等登记与 traceId 联查。
-- 验收标准：对接契约遵循 `docs/integration/TOKENPULSE_AGENTLEDGER_V1.md`；相关路由回归通过（见 `docs/17`）。
+- 验收标准：对接契约遵循 `docs/integration/TOKENPULSE_AGENTLEDGER_V1.md`；联调操作以 `docs/integration/TOKENPULSE_AGENTLEDGER_V1_RUNBOOK.md` 为准；相关路由回归通过（见 `docs/17`）。
 - 风险/依赖：依赖 shared secret、时间窗（±300s）与幂等键策略一致；风险为对外字段语义漂移（v1 frozen 下禁止破坏性变更）。
 - 验证命令：
 
@@ -619,4 +619,3 @@ bun run smoke:fr505
 - 新增能力或改语义：先代码与测试，再同步 `docs/15` 与 `docs/16`，最后在 `docs/17` 增加可复现命令与结果。
 - 对外契约变更：不得在 `v1 frozen` 上做破坏性修改；必须升版本并重新评审（见 `docs/integration/TOKENPULSE_AGENTLEDGER_V1.md`）。
 - 任意 Backlog 条目完成：按 `docs/21` 的 DoD 回写矩阵状态与回归证据，避免“文档胜出但代码不可复现”。
-
