@@ -253,13 +253,13 @@ type auditLogEntry struct {
 }
 
 type slaEscalationPlan struct {
-	DueRules          []alertOrchestrationRule
-	MatchedRuleIDs    []string
-	TargetChannels    []string
-	ConflictRuleIDs   map[string][]string
-	EscalationDue     bool
-	NormalizedAlertID string
-	NormalizedSource  string
+	DueRules           []alertOrchestrationRule
+	MatchedRuleIDs     []string
+	TargetChannels     []string
+	ConflictRuleIDs    map[string][]string
+	EscalationDue      bool
+	NormalizedAlertID  string
+	NormalizedSource   string
 	NormalizedMatchKey string
 }
 

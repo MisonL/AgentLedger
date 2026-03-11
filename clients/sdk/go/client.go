@@ -238,7 +238,7 @@ func normalizeCompatibilityBody(body any, rule operationCompatibilityRule) any {
 
 // ApiError 表示 HTTP 失败响应。
 type ApiError struct {
-	Status int
+	Status  int
 	Message string
 	Payload json.RawMessage
 }
